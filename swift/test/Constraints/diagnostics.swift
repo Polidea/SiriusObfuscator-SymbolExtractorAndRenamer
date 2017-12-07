@@ -97,7 +97,7 @@ func f8<T:P2>(_ n: T, _ f: @escaping (T) -> T) {}
 f8(3, f4) // expected-error {{in argument type '(Int) -> Int', 'Int' does not conform to expected type 'P2'}}
 typealias Tup = (Int, Double)
 func f9(_ x: Tup) -> Tup { return x }
-f8((1,2.0), f9) // expected-error {{in argument type '(Tup) -> Tup' (aka '((Int, Double)) -> (Int, Double)'), 'Tup' (aka '(Int, Double)') does not conform to expected type 'P2'}}
+f8((1,2.0), f9) // expected-error {{in argument type '(Tup) -> Tup' (aka '(Int, Double) -> (Int, Double)'), 'Tup' (aka '(Int, Double)') does not conform to expected type 'P2'}}
 
 // <rdar://problem/19658691> QoI: Incorrect diagnostic for calling nonexistent members on literals
 1.doesntExist(0)  // expected-error {{value of type 'Int' has no member 'doesntExist'}}
@@ -139,7 +139,7 @@ func ***~(_: Int, _: String) { }
 i ***~ i // expected-error{{cannot convert value of type 'Int' to expected argument type 'String'}}
 
 @available(*, unavailable, message: "call the 'map()' method on the sequence")
-public func myMap<C : Collection, T>( // expected-note {{'myMap' has been explicitly marked unavailable here}}
+public func myMap<C : Collection, T>(
   _ source: C, _ transform: (C.Iterator.Element) -> T
 ) -> [T] {
   fatalError("unavailable function can't be called")
@@ -151,8 +151,10 @@ public func myMap<T, U>(_ x: T?, _ f: (T) -> U) -> U? {
 }
 
 // <rdar://problem/20142523>
+// FIXME: poor diagnostic, to be fixed in 20142462. For now, we just want to
+// make sure that it doesn't crash.
 func rdar20142523() {
-  myMap(0..<10, { x in // expected-error{{'myMap' is unavailable: call the 'map()' method on the sequence}}
+  myMap(0..<10, { x in // expected-error{{ambiguous reference to member '..<'}}
     ()
     return x
   })
@@ -161,11 +163,11 @@ func rdar20142523() {
 // <rdar://problem/21080030> Bad diagnostic for invalid method call in boolean expression: (_, ExpressibleByIntegerLiteral)' is not convertible to 'ExpressibleByIntegerLiteral
 func rdar21080030() {
   var s = "Hello"
-  if s.count() == 0 {} // expected-error{{cannot call value of non-function type 'String.IndexDistance' (aka 'Int')}}{{13-15=}}
+  if s.characters.count() == 0 {} // expected-error{{cannot call value of non-function type 'String.CharacterView.IndexDistance'}}{{24-26=}}
 }
 
 // <rdar://problem/21248136> QoI: problem with return type inference mis-diagnosed as invalid arguments
-func r21248136<T>() -> T { preconditionFailure() } // expected-note 2 {{in call to function 'r21248136()'}}
+func r21248136<T>() -> T { preconditionFailure() } // expected-note 2 {{in call to function 'r21248136'}}
 
 r21248136()            // expected-error {{generic parameter 'T' could not be inferred}}
 let _ = r21248136()    // expected-error {{generic parameter 'T' could not be inferred}}
@@ -196,7 +198,7 @@ func r17020197(_ x : Int?, y : Int) {
 
 // <rdar://problem/20714480> QoI: Boolean expr not treated as Bool type when function return type is different
 func validateSaveButton(_ text: String) {
-  return (text.count > 0) ? true : false  // expected-error {{unexpected non-void return value in void function}}
+  return (text.characters.count > 0) ? true : false  // expected-error {{unexpected non-void return value in void function}}
 }
 
 // <rdar://problem/20201968> QoI: poor diagnostic when calling a class method via a metatype
@@ -279,7 +281,7 @@ func r18800223(_ i : Int) {
 
   
   var buttonTextColor: String?
-  _ = (buttonTextColor != nil) ? 42 : {$0}; // expected-error {{type of expression is ambiguous without more context}}
+  _ = (buttonTextColor != nil) ? 42 : {$0}; // expected-error {{result values in '? :' expression have mismatching types 'Int' and '(_) -> _'}}
 }
 
 // <rdar://problem/21883806> Bogus "'_' can only appear in a pattern or on the left side of an assignment" is back
@@ -758,7 +760,7 @@ func read<T : BinaryInteger>() -> T? {
 
 func f23213302() {
   var s = Set<Int>()
-  s.subtract(1) // expected-error {{cannot convert value of type 'Int' to expected argument type 'Set<Int>'}}
+  s.subtractInPlace(1) // expected-error {{cannot convert value of type 'Int' to expected argument type 'Set<Int>'}}
 }
 
 // <rdar://problem/24202058> QoI: Return of call to overloaded function in void-return context
@@ -977,11 +979,6 @@ let _: KeyPath<R32101765, Float> = \.prop32101765.unknown
 let _: KeyPath<R32101765, Float> = \R32101765.prop32101765.unknown
 // expected-error@-1 {{type 'Int' has no member 'unknown'}}
 
-// rdar://problem/32390726 - Bad Diagnostic: Don't suggest `var` to `let` when binding inside for-statement
-for var i in 0..<10 { // expected-warning {{variable 'i' was never mutated; consider changing to 'let' constant}} {{5-9=}}
-  _ = i + 1
-}
-
 // rdar://problem/32726044 - shrink reduced domains too far
 
 public protocol P_32726044 {}
@@ -1084,23 +1081,6 @@ fun_31849281(a: { !$0 }, c: [nil, 42], b: { "\($0)" })
 func f_31849281(x: Int, y: Int, z: Int) {}
 f_31849281(42, y: 10, x: 20) // expected-error {{argument 'x' must precede unnamed argument #1}} {{12-12=x: 20, }} {{21-28=}}
 
-func sr5081() {
-  var a = ["1", "2", "3", "4", "5"]
-  var b = [String]()
-  b = a[2...4] // expected-error {{cannot assign value of type 'ArraySlice<String>' to type '[String]'}}
-}
-
-func rdar17170728() {
-  var i: Int? = 1
-  var j: Int?
-  var k: Int? = 2
-
-  let _ = [i, j, k].reduce(0 as Int?) {
-    $0 && $1 ? $0! + $1! : ($0 ? $0! : ($1 ? $1! : nil))
-    // expected-error@-1 {{type of expression is ambiguous without more context}}
-  }
-}
-
 // https://bugs.swift.org/browse/SR-5934 - failure to emit diagnostic for bad
 // generic constraints
 func elephant<T, U>(_: T) where T : Collection, T.Element == U, T.Element : Hashable {}
@@ -1108,12 +1088,4 @@ func elephant<T, U>(_: T) where T : Collection, T.Element == U, T.Element : Hash
 
 func platypus<T>(a: [T]) {
     _ = elephant(a) // expected-error {{generic parameter 'U' could not be inferred}}
-}
-
-// Another case of the above.
-func badTypes() {
-  let sequence:AnySequence<[Int]> = AnySequence() { AnyIterator() { [3] }}
-  let array = [Int](sequence)
-  // expected-error@-1 {{type of expression is ambiguous without more context}}
-  // FIXME: terrible diagnostic
 }

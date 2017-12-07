@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 
 // RUN: not %target-swift-frontend -typecheck %s -I %S/Inputs/custom-modules/ -show-diagnostics-after-fatal -D MISSING_FROM_MODULE 2> %t/err.txt
 // RUN: %FileCheck -check-prefix CHECK-MODULE-MAP %s < %t/err.txt

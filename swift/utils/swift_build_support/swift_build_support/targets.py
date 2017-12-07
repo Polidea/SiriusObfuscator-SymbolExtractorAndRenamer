@@ -128,8 +128,6 @@ class StdlibDeploymentTarget(object):
 
     Windows = Platform("windows", archs=["x86_64"])
 
-    Haiku = Platform("haiku", archs=["x86_64"])
-
     # The list of known platforms.
     known_platforms = [
         OSX,
@@ -140,8 +138,7 @@ class StdlibDeploymentTarget(object):
         FreeBSD,
         Cygwin,
         Android,
-        Windows,
-        Haiku]
+        Windows]
 
     # Cache of targets by name.
     _targets_by_name = dict((target.name, target)
@@ -190,10 +187,6 @@ class StdlibDeploymentTarget(object):
         elif system == 'Windows':
             if machine == "AMD64":
                 return StdlibDeploymentTarget.Windows.x86_64
-
-        elif system == 'Haiku':
-            if machine == 'x86_64':
-                return StdlibDeploymentTarget.Haiku.x86_64
 
         raise NotImplementedError('System "%s" with architecture "%s" is not '
                                   'supported' % (system, machine))

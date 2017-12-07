@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -typecheck -verify %s -DIMPORT_TOP_LEVEL
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -typecheck -verify %s

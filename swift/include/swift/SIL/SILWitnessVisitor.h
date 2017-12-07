@@ -21,7 +21,6 @@
 
 #include "swift/AST/ASTVisitor.h"
 #include "swift/AST/Decl.h"
-#include "swift/AST/ProtocolAssociations.h"
 #include "swift/AST/Types.h"
 #include "swift/SIL/TypeLowering.h"
 #include "llvm/ADT/SmallVector.h"
@@ -60,7 +59,7 @@ public:
       for (Decl *member : protocol->getMembers()) {
         if (auto associatedType = dyn_cast<AssociatedTypeDecl>(member)) {
           // TODO: only add associated types when they're new?
-          asDerived().addAssociatedType(AssociatedType(associatedType));
+          asDerived().addAssociatedType(associatedType);
         }
       }
     };
@@ -101,8 +100,7 @@ public:
         addAssociatedTypes();
 
         // Otherwise, add an associated requirement.
-        AssociatedConformance assocConf(protocol, type, requirement);
-        asDerived().addAssociatedConformance(assocConf);
+        asDerived().addAssociatedConformance(type, requirement);
         continue;
       }
       }
@@ -126,26 +124,23 @@ public:
   }
 
   void visitAbstractStorageDecl(AbstractStorageDecl *sd) {
-    asDerived().addMethod(SILDeclRef(sd->getGetter(),
-                                     SILDeclRef::Kind::Func));
+    asDerived().addMethod(sd->getGetter());
     if (sd->isSettable(sd->getDeclContext())) {
-      asDerived().addMethod(SILDeclRef(sd->getSetter(),
-                                       SILDeclRef::Kind::Func));
+      asDerived().addMethod(sd->getSetter());
       if (sd->getMaterializeForSetFunc())
-        asDerived().addMethod(SILDeclRef(sd->getMaterializeForSetFunc(),
-                                         SILDeclRef::Kind::Func));
+        asDerived().addMethod(sd->getMaterializeForSetFunc());
     }
   }
 
   void visitConstructorDecl(ConstructorDecl *cd) {
-    asDerived().addMethod(SILDeclRef(cd, SILDeclRef::Kind::Allocator));
+    asDerived().addConstructor(cd);
   }
 
   void visitFuncDecl(FuncDecl *func) {
-    // Accessors are emitted by visitAbstractStorageDecl, above.
+    // Accessors are emitted by their var/subscript declaration.
     if (func->isAccessor())
       return;
-    asDerived().addMethod(SILDeclRef(func, SILDeclRef::Kind::Func));
+    asDerived().addMethod(func);
   }
 
   void visitMissingMemberDecl(MissingMemberDecl *placeholder) {

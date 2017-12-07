@@ -18,51 +18,37 @@
 //===----------------------------------------------------------------------===//
 
 /// An iterator that never produces an element.
-@_fixed_layout // FIXME(sil-serialize-all)
-public struct EmptyIterator<Element> {
-  // no properties
-  
+public struct EmptyIterator<Element> : IteratorProtocol, Sequence {
   /// Creates an instance.
-  @_inlineable // FIXME(sil-serialize-all)
   public init() {}
-}
 
-extension EmptyIterator: IteratorProtocol, Sequence {
   /// Returns `nil`, indicating that there are no more elements.
-  @_inlineable // FIXME(sil-serialize-all)
   public mutating func next() -> Element? {
     return nil
   }
 }
 
 /// A collection whose element type is `Element` but that is always empty.
-@_fixed_layout // FIXME(sil-serialize-all)
-public struct EmptyCollection<Element> {
-  // no properties
-
-  /// Creates an instance.
-  @_inlineable // FIXME(sil-serialize-all)
-  public init() {}
-}
-
-extension EmptyCollection: RandomAccessCollection, MutableCollection {
+public struct EmptyCollection<Element> :
+  RandomAccessCollection, MutableCollection
+{
   /// A type that represents a valid position in the collection.
   ///
   /// Valid indices consist of the position of every element and a
   /// "past the end" position that's not valid for use as a subscript.
   public typealias Index = Int
   public typealias IndexDistance = Int
-  public typealias Indices = CountableRange<Int>
   public typealias SubSequence = EmptyCollection<Element>
 
+  /// Creates an instance.
+  public init() {}
+
   /// Always zero, just like `endIndex`.
-  @_inlineable // FIXME(sil-serialize-all)
   public var startIndex: Index {
     return 0
   }
 
   /// Always zero, just like `startIndex`.
-  @_inlineable // FIXME(sil-serialize-all)
   public var endIndex: Index {
     return 0
   }
@@ -71,7 +57,6 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
   ///
   /// `EmptyCollection` does not have any element indices, so it is not
   /// possible to advance indices.
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(after i: Index) -> Index {
     _preconditionFailure("EmptyCollection can't advance indices")
   }
@@ -80,13 +65,11 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
   ///
   /// `EmptyCollection` does not have any element indices, so it is not
   /// possible to advance indices.
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(before i: Index) -> Index {
     _preconditionFailure("EmptyCollection can't advance indices")
   }
 
   /// Returns an empty iterator.
-  @_inlineable // FIXME(sil-serialize-all)
   public func makeIterator() -> EmptyIterator<Element> {
     return EmptyIterator()
   }
@@ -94,7 +77,6 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
   /// Accesses the element at the given position.
   ///
   /// Must never be called, since this collection is always empty.
-  @_inlineable // FIXME(sil-serialize-all)
   public subscript(position: Index) -> Element {
     get {
       _preconditionFailure("Index out of range")
@@ -104,7 +86,6 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
     }
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public subscript(bounds: Range<Index>) -> EmptyCollection<Element> {
     get {
       _debugPrecondition(bounds.lowerBound == 0 && bounds.upperBound == 0,
@@ -118,18 +99,15 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
   }
 
   /// The number of elements (always zero).
-  @_inlineable // FIXME(sil-serialize-all)
   public var count: Int {
     return 0
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(_ i: Index, offsetBy n: IndexDistance) -> Index {
     _debugPrecondition(i == startIndex && n == 0, "Index out of range")
     return i
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(
     _ i: Index, offsetBy n: IndexDistance, limitedBy limit: Index
   ) -> Index? {
@@ -139,21 +117,18 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
   }
 
   /// The distance between two indexes (always zero).
-  @_inlineable // FIXME(sil-serialize-all)
   public func distance(from start: Index, to end: Index) -> IndexDistance {
     _debugPrecondition(start == 0, "From must be startIndex (or endIndex)")
     _debugPrecondition(end == 0, "To must be endIndex (or startIndex)")
     return 0
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func _failEarlyRangeCheck(_ index: Index, bounds: Range<Index>) {
     _debugPrecondition(index == 0, "out of bounds")
     _debugPrecondition(bounds == Range(indices),
       "invalid bounds for an empty collection")
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func _failEarlyRangeCheck(
     _ range: Range<Index>, bounds: Range<Index>
   ) {
@@ -162,13 +137,24 @@ extension EmptyCollection: RandomAccessCollection, MutableCollection {
     _debugPrecondition(bounds == Range(indices),
       "invalid bounds for an empty collection")
   }
+
+  public typealias Indices = CountableRange<Int>
 }
 
 extension EmptyCollection : Equatable {
-  @_inlineable // FIXME(sil-serialize-all)
   public static func == (
     lhs: EmptyCollection<Element>, rhs: EmptyCollection<Element>
   ) -> Bool {
     return true
+  }
+}
+
+@available(*, unavailable, renamed: "EmptyIterator")
+public struct EmptyGenerator<Element> {}
+
+extension EmptyIterator {
+  @available(*, unavailable, renamed: "makeIterator()")
+  public func generate() -> EmptyIterator<Element> {
+    Builtin.unreachable()
   }
 }

@@ -1,5 +1,6 @@
-// RUN: %empty-directory(%t)
-// RUN: %target-build-swift %s -o %t/a.out_Debug -Onone
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
+// RUN: %target-build-swift %s -o %t/a.out_Debug
 // RUN: %target-build-swift %s -o %t/a.out_Release -O
 //
 // RUN: %target-run %t/a.out_Debug

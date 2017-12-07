@@ -187,11 +187,6 @@ class Windows(Toolchain):
         return None
 
 
-class Haiku(GenericUnix):
-    def __init__(self):
-        super(Haiku, self)
-
-
 def host_toolchain(**kwargs):
     sys = platform.system()
     if sys == 'Darwin':
@@ -204,8 +199,6 @@ def host_toolchain(**kwargs):
         return Cygwin()
     elif sys == 'Windows':
         return Windows()
-    elif sys == 'Haiku':
-        return Haiku()
     else:
         raise NotImplementedError('The platform "%s" does not have a defined '
                                   'toolchain.' % sys)

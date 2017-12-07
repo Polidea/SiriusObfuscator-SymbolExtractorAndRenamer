@@ -21,7 +21,6 @@
 #include "swift/Basic/UUID.h"
 #include "swift/Basic/STLExtras.h"
 #include "swift/Basic/Range.h"
-#include "swift/Basic/OptimizationMode.h"
 #include "swift/Basic/Version.h"
 #include "swift/AST/Identifier.h"
 #include "swift/AST/AttrKind.h"
@@ -45,7 +44,6 @@ struct PrintOptions;
 class Decl;
 class ClassDecl;
 class GenericFunctionType;
-class LazyConformanceLoader;
 class TrailingWhereClause;
 
 /// TypeAttributes - These are attributes that may be applied to types.
@@ -58,7 +56,6 @@ public:
   /// If this is an empty attribute specifier, then this will be an invalid loc.
   SourceLoc AtLoc;
   Optional<StringRef> convention = None;
-  Optional<StringRef> conventionWitnessMethodProtocol = None;
 
   // For an opened existential type, the known ID.
   Optional<UUID> OpenedID;
@@ -209,19 +206,29 @@ protected:
   enum { NumObjCAttrBits = NumDeclAttrBits + 3 };
   static_assert(NumObjCAttrBits <= 32, "fits in an unsigned");
 
-  class AccessControlAttrBitFields {
-    friend class AbstractAccessControlAttr;
+  class AccessibilityAttrBitFields {
+    friend class AbstractAccessibilityAttr;
     unsigned : NumDeclAttrBits;
 
     unsigned AccessLevel : 3;
   };
-  enum { NumAccessControlAttrBits = NumDeclAttrBits + 3 };
-  static_assert(NumAccessControlAttrBits <= 32, "fits in an unsigned");
+  enum { NumAccessibilityAttrBits = NumDeclAttrBits + 3 };
+  static_assert(NumAccessibilityAttrBits <= 32, "fits in an unsigned");
+
+  class AutoClosureAttrBitFields {
+    friend class AutoClosureAttr;
+    unsigned : NumDeclAttrBits;
+
+    unsigned Escaping : 1;
+  };
+  enum { NumAutoClosureAttrBits = NumDeclAttrBits + 1 };
+  static_assert(NumAutoClosureAttrBits <= 32, "fits in an unsigned");
 
   union {
     DeclAttrBitFields DeclAttrBits;
     ObjCAttrBitFields ObjCAttrBits;
-    AccessControlAttrBitFields AccessControlAttrBits;
+    AccessibilityAttrBitFields AccessibilityAttrBits;
+    AutoClosureAttrBitFields AutoClosureAttrBits;
   };
 
   DeclAttribute *Next = nullptr;
@@ -861,51 +868,69 @@ public:
   }
 };
 
-/// Represents any sort of access control modifier.
-class AbstractAccessControlAttr : public DeclAttribute {
+/// Represents any sort of accessibility modifier.
+class AbstractAccessibilityAttr : public DeclAttribute {
 protected:
-  AbstractAccessControlAttr(DeclAttrKind DK, SourceLoc atLoc, SourceRange range,
-                            AccessLevel access, bool implicit)
+  AbstractAccessibilityAttr(DeclAttrKind DK, SourceLoc atLoc, SourceRange range,
+                            Accessibility access, bool implicit)
       : DeclAttribute(DK, atLoc, range, implicit) {
-    AccessControlAttrBits.AccessLevel = static_cast<unsigned>(access);
-    assert(getAccess() == access && "not enough bits for access control");
+    AccessibilityAttrBits.AccessLevel = static_cast<unsigned>(access);
+    assert(getAccess() == access && "not enough bits for accessibility");
   }
 
 public:
-  AccessLevel getAccess() const {
-    return static_cast<AccessLevel>(AccessControlAttrBits.AccessLevel);
+  Accessibility getAccess() const {
+    return static_cast<Accessibility>(AccessibilityAttrBits.AccessLevel);
   }
 
   static bool classof(const DeclAttribute *DA) {
-    return DA->getKind() == DAK_AccessControl ||
-           DA->getKind() == DAK_SetterAccess;
+    return DA->getKind() == DAK_Accessibility ||
+           DA->getKind() == DAK_SetterAccessibility;
   }
 };
 
 /// Represents a 'private', 'internal', or 'public' marker on a declaration.
-class AccessControlAttr : public AbstractAccessControlAttr {
+class AccessibilityAttr : public AbstractAccessibilityAttr {
 public:
-  AccessControlAttr(SourceLoc atLoc, SourceRange range, AccessLevel access,
+  AccessibilityAttr(SourceLoc atLoc, SourceRange range, Accessibility access,
                     bool implicit = false)
-      : AbstractAccessControlAttr(DAK_AccessControl, atLoc, range, access,
+      : AbstractAccessibilityAttr(DAK_Accessibility, atLoc, range, access,
                                   implicit) {}
 
   static bool classof(const DeclAttribute *DA) {
-    return DA->getKind() == DAK_AccessControl;
+    return DA->getKind() == DAK_Accessibility;
   }
 };
 
 /// Represents a 'private', 'internal', or 'public' marker for a setter on a
 /// declaration.
-class SetterAccessAttr : public AbstractAccessControlAttr {
+class SetterAccessibilityAttr : public AbstractAccessibilityAttr {
 public:
-  SetterAccessAttr(SourceLoc atLoc, SourceRange range,
-                          AccessLevel access, bool implicit = false)
-      : AbstractAccessControlAttr(DAK_SetterAccess, atLoc, range, access,
+  SetterAccessibilityAttr(SourceLoc atLoc, SourceRange range,
+                          Accessibility access, bool implicit = false)
+      : AbstractAccessibilityAttr(DAK_SetterAccessibility, atLoc, range, access,
                                   implicit) {}
 
   static bool classof(const DeclAttribute *DA) {
-    return DA->getKind() == DAK_SetterAccess;
+    return DA->getKind() == DAK_SetterAccessibility;
+  }
+};
+
+/// Represents the autoclosure attribute.
+class AutoClosureAttr : public DeclAttribute {
+public:
+  AutoClosureAttr(SourceLoc atLoc, SourceRange range, bool escaping,
+                  bool implicit = false)
+    : DeclAttribute(DAK_AutoClosure, atLoc, range, implicit)
+  {
+    AutoClosureAttrBits.Escaping = escaping;
+  }
+
+  /// Determine whether this autoclosure is escaping.
+  bool isEscaping() const { return AutoClosureAttrBits.Escaping; }
+
+  static bool classof(const DeclAttribute *DA) {
+    return DA->getKind() == DAK_AutoClosure;
   }
 };
 
@@ -923,23 +948,6 @@ public:
   InlineKind getKind() const { return Kind; }
   static bool classof(const DeclAttribute *DA) {
     return DA->getKind() == DAK_Inline;
-  }
-};
-
-/// Represents the optimize attribute.
-class OptimizeAttr : public DeclAttribute {
-  OptimizationMode Mode;
-public:
-  OptimizeAttr(SourceLoc atLoc, SourceRange range, OptimizationMode mode)
-    : DeclAttribute(DAK_Optimize, atLoc, range, /*Implicit=*/false),
-      Mode(mode) {}
-
-  OptimizeAttr(OptimizationMode mode)
-    : OptimizeAttr(SourceLoc(), SourceRange(), mode) {}
-
-  OptimizationMode getMode() const { return Mode; }
-  static bool classof(const DeclAttribute *DA) {
-    return DA->getKind() == DAK_Optimize;
   }
 };
 
@@ -1036,24 +1044,18 @@ public:
 /// synthesized conformances.
 class SynthesizedProtocolAttr : public DeclAttribute {
   KnownProtocolKind ProtocolKind;
-  LazyConformanceLoader *Loader;
 
 public:
-  SynthesizedProtocolAttr(KnownProtocolKind protocolKind,
-                          LazyConformanceLoader *Loader)
+  SynthesizedProtocolAttr(KnownProtocolKind protocolKind)
     : DeclAttribute(DAK_SynthesizedProtocol, SourceLoc(), SourceRange(),
                     /*Implicit=*/true),
-      ProtocolKind(protocolKind), Loader(Loader)
+      ProtocolKind(protocolKind)
   {
   }
 
   /// Retrieve the known protocol kind naming the protocol to be
   /// synthesized.
   KnownProtocolKind getProtocolKind() const { return ProtocolKind; }
-
-  /// Retrieve the lazy loader that will be used to populate the
-  /// synthesized conformance.
-  LazyConformanceLoader *getLazyLoader() const { return Loader; }
 
   static bool classof(const DeclAttribute *DA) {
     return DA->getKind() == DAK_SynthesizedProtocol;

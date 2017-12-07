@@ -26,7 +26,6 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/GenericEnvironment.h"
-#include "swift/AST/LazyResolver.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/AST/Types.h"
@@ -107,8 +106,9 @@ Type SubstitutionMap::lookupSubstitution(CanSubstitutableType type) const {
         archetype->getParent() != nullptr)
       return Type();
 
+    auto *genericEnv = archetype->getGenericEnvironment();
     type = cast<GenericTypeParamType>(
-      archetype->getInterfaceType()->getCanonicalType());
+      genericEnv->mapTypeOutOfContext(archetype)->getCanonicalType());
   }
 
   // Find the index of the replacement type based on the generic parameter we
@@ -134,7 +134,8 @@ Type SubstitutionMap::lookupSubstitution(CanSubstitutableType type) const {
 
   // The generic parameter may have been made concrete by the generic signature,
   // substitute into the concrete type.
-  if (auto concreteType = genericSig->getConcreteType(genericParam)){
+  ModuleDecl &anyModule = *genericParam->getASTContext().getStdlibModule();
+  if (auto concreteType = genericSig->getConcreteType(genericParam, anyModule)){
     // Set the replacement type to an error, to block infinite recursion.
     replacementType = ErrorType::get(concreteType);
 
@@ -167,7 +168,8 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
   // If we have an archetype, map out of the context so we can compute a
   // conformance access path.
   if (auto archetype = dyn_cast<ArchetypeType>(type)) {
-    type = archetype->getInterfaceType()->getCanonicalType();
+    auto *genericEnv = archetype->getGenericEnvironment();
+    type = genericEnv->mapTypeOutOfContext(type)->getCanonicalType();
   }
 
   // Error path: if we don't have a type parameter, there is no conformance.
@@ -191,13 +193,14 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
     };
 
   auto genericSig = getGenericSignature();
+  auto &mod = *proto->getModuleContext();
 
   // If the type doesn't conform to this protocol, fail.
-  if (!genericSig->conformsToProtocol(type, proto))
+  if (!genericSig->conformsToProtocol(type, proto, mod))
     return None;
 
   auto accessPath =
-    genericSig->getConformanceAccessPath(type, proto);
+    genericSig->getConformanceAccessPath(type, proto, mod);
 
   // Fall through because we cannot yet evaluate an access path.
   Optional<ProtocolConformanceRef> conformance;
@@ -224,7 +227,8 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
            substType->castTo<ArchetypeType>()->getSuperclass()) &&
           !substType->isTypeParameter() &&
           !substType->isExistentialType()) {
-        return M->lookupConformance(substType, proto);
+        auto lazyResolver = M->getASTContext().getLazyResolver();
+        return *M->lookupConformance(substType, proto, lazyResolver);
       }
 
       return ProtocolConformanceRef(proto);
@@ -237,17 +241,7 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
 
     // If we haven't set the signature conformances yet, force the issue now.
     if (normal->getSignatureConformances().empty()) {
-      // If we're in the process of checking the type witnesses, fail
-      // gracefully.
-      // FIXME: Seems like we should be able to get at the intermediate state
-      // to use that.
-      if (normal->getState() == ProtocolConformanceState::CheckingTypeWitnesses)
-        return None;
-
       auto lazyResolver = type->getASTContext().getLazyResolver();
-      if (lazyResolver == nullptr)
-        return None;
-
       lazyResolver->resolveTypeWitness(normal, nullptr);
 
       // Error case: the conformance is broken, so we cannot handle this

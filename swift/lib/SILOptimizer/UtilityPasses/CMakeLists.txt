@@ -21,7 +21,6 @@ set(UTILITYPASSES_SOURCES
   UtilityPasses/LoopRegionPrinter.cpp
   UtilityPasses/MemBehaviorDumper.cpp
   UtilityPasses/RCIdentityDumper.cpp
-  UtilityPasses/SerializeSILPass.cpp
   UtilityPasses/SILDebugInfoGenerator.cpp
   UtilityPasses/SideEffectsDumper.cpp
   UtilityPasses/SimplifyUnreachableContainingBlocks.cpp

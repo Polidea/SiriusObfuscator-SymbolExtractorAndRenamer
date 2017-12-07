@@ -206,18 +206,8 @@ extension NSError : Error {
   public var _code: Int { return code }
 }
 
-public enum _GenericObjCError : Error {
-  case nilError
-}
+@_silgen_name("swift_convertNSErrorToError")
+public func _convertNSErrorToError(_ string: NSError?) -> Error
 
-public func _convertNSErrorToError(_ error: NSError?) -> Error {
-  if let error = error {
-    return error
-  }
-  return _GenericObjCError.nilError
-}
-
-public func _convertErrorToNSError(_ error: Error) -> NSError {
-  return error as NSError
-}
-
+@_silgen_name("swift_convertErrorToNSError")
+public func _convertErrorToNSError(_ string: Error) -> NSError

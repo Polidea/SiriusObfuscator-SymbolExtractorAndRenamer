@@ -10,11 +10,3 @@ func foo(widget: Widget) {
     context.operate()
   }
 }
-
-func allowClassAndInstance(widget: Widget) {
-  widget.doClassAndInstanceThing()
-  Widget.doClassAndInstanceThing()
-
-  _ = widget.classAndInstanceProp
-  _ = Widget.classAndInstanceProp
-}

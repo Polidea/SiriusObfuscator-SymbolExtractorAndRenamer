@@ -95,7 +95,7 @@ public func checkSequence<
       "_copyContents failed to use entire buffer")
     expectEqualSequence(expected, buf, ${trace}, sameValue: sameValue)
     ptr.deinitialize(count: count)
-    ptr.deallocate()
+    ptr.deallocate(capacity: count)
   }
 
   // Test `_copyToContiguousArray()` if we can do so
@@ -124,3 +124,4 @@ public func checkSequence<
 }
 
 % end
+

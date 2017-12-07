@@ -123,22 +123,16 @@ const Metadata *swift::hashable_support::findHashableBaseType(
   return findHashableBaseTypeImpl</*KnownToConformToHashable=*/ false>(type);
 }
 
-// internal func _makeAnyHashableUsingDefaultRepresentation<H : Hashable>(
-//   of value: H,
-//   storingResultInto result: UnsafeMutablePointer<AnyHashable>)
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERNAL
-void _swift_makeAnyHashableUsingDefaultRepresentation(
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
+void _swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
   const OpaqueValue *value,
   const void *anyHashableResultPointer,
   const Metadata *T,
   const WitnessTable *hashableWT
 );
 
-// public func _makeAnyHashableUpcastingToHashableBaseType<H : Hashable>(
-//   _ value: H,
-//   storingResultInto result: UnsafeMutablePointer<AnyHashable>)
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERNAL
-void _swift_makeAnyHashableUpcastingToHashableBaseType(
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
+void _swift_stdlib_makeAnyHashableUpcastingToHashableBaseType(
   OpaqueValue *value,
   const void *anyHashableResultPointer,
   const Metadata *type,
@@ -161,6 +155,7 @@ void _swift_makeAnyHashableUpcastingToHashableBaseType(
 
       if (auto unboxedHashableWT =
               swift_conformsToProtocol(type, &HashableProtocolDescriptor)) {
+#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
         ValueBuffer unboxedCopyBuf;
         // Allocate buffer.
         OpaqueValue *unboxedValueCopy =
@@ -169,18 +164,28 @@ void _swift_makeAnyHashableUpcastingToHashableBaseType(
         unboxedType->vw_initializeWithCopy(
             unboxedValueCopy, const_cast<OpaqueValue *>(unboxedValue));
 
-        _swift_makeAnyHashableUpcastingToHashableBaseType(
+        _swift_stdlib_makeAnyHashableUpcastingToHashableBaseType(
             unboxedValueCopy, anyHashableResultPointer, unboxedType,
             unboxedHashableWT);
         // Deallocate buffer.
         unboxedType->deallocateBufferIn(&unboxedCopyBuf);
         type->vw_destroy(value);
+#else
+        ValueBuffer unboxedCopyBuf;
+        auto unboxedValueCopy = unboxedType->vw_initializeBufferWithCopy(
+            &unboxedCopyBuf, const_cast<OpaqueValue *>(unboxedValue));
+        _swift_stdlib_makeAnyHashableUpcastingToHashableBaseType(
+            unboxedValueCopy, anyHashableResultPointer, unboxedType,
+            unboxedHashableWT);
+        unboxedType->vw_deallocateBuffer(&unboxedCopyBuf);
+        type->vw_destroy(value);
+#endif
         return;
       }
     }
 #endif
 
-    _swift_makeAnyHashableUsingDefaultRepresentation(
+    _swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
         value, anyHashableResultPointer,
         findHashableBaseTypeOfHashableType(type),
         hashableWT);
@@ -190,7 +195,7 @@ void _swift_makeAnyHashableUpcastingToHashableBaseType(
   case MetadataKind::Struct:
   case MetadataKind::Enum:
   case MetadataKind::Optional:
-    _swift_makeAnyHashableUsingDefaultRepresentation(
+    _swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
         value, anyHashableResultPointer, type, hashableWT);
     return;
 

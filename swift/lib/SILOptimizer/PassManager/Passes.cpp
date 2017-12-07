@@ -51,7 +51,7 @@ bool swift::runSILDiagnosticPasses(SILModule &Module) {
 
   auto &Ctx = Module.getASTContext();
 
-  SILPassManager PM(&Module, "", /*isMandatoryPipeline=*/ true);
+  SILPassManager PM(&Module);
   PM.executePassPipelinePlan(
       SILPassPipelinePlan::getDiagnosticPassPipeline(Module.getOptions()));
 
@@ -119,9 +119,7 @@ void swift::runSILPassesForOnone(SILModule &Module) {
   if (Module.getOptions().VerifyAll)
     Module.verify();
 
-  // We want to run the Onone passes also for function which have an explicit
-  // Onone attribute.
-  SILPassManager PM(&Module, "Onone", /*isMandatoryPipeline=*/ true);
+  SILPassManager PM(&Module, "Onone");
   PM.executePassPipelinePlan(SILPassPipelinePlan::getOnonePassPipeline());
 
   // Verify the module, if required.
@@ -169,7 +167,7 @@ StringRef swift::PassKindTag(PassKind Kind) {
   switch (Kind) {
 #define PASS(ID, TAG, NAME)                                                    \
   case PassKind::ID:                                                           \
-    return TAG;
+    return #TAG;
 #include "swift/SILOptimizer/PassManager/Passes.def"
   case PassKind::invalidPassKind:
     llvm_unreachable("Invalid pass kind?!");
@@ -184,7 +182,7 @@ StringRef swift::PassKindName(PassKind Kind) {
   switch (Kind) {
 #define PASS(ID, TAG, NAME)                                                    \
   case PassKind::ID:                                                           \
-    return NAME;
+    return #NAME;
 #include "swift/SILOptimizer/PassManager/Passes.def"
   case PassKind::invalidPassKind:
     llvm_unreachable("Invalid pass kind?!");
@@ -201,7 +199,7 @@ StringRef swift::PassKindName(PassKind Kind) {
 // convert it to a module pass to ensure that the SIL input is always at the
 // same stage of lowering.
 void swift::runSILLoweringPasses(SILModule &Module) {
-  SILPassManager PM(&Module, "LoweringPasses", /*isMandatoryPipeline=*/ true);
+  SILPassManager PM(&Module, "LoweringPasses");
   PM.executePassPipelinePlan(SILPassPipelinePlan::getLoweringPassPipeline());
 
   assert(Module.getStage() == SILStage::Lowered);

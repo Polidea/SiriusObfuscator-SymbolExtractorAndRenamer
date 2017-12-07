@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t  &&  mkdir -p %t
 // 
 // RUN: %target-clang %S/Inputs/SwiftObjectNSObject/SwiftObjectNSObject.m -c -o %t/SwiftObjectNSObject.o -g
 // RUN: %target-build-swift %s -I %S/Inputs/SwiftObjectNSObject/ -Xlinker %t/SwiftObjectNSObject.o -o %t/SwiftObjectNSObject
@@ -22,16 +22,13 @@
 import Foundation
 
 class C { 
-  @objc func cInstanceMethod() -> Int { return 1 }
-  @objc class func cClassMethod() -> Int { return 2 }
-  @objc func cInstanceOverride() -> Int { return 3 }
-  @objc class func cClassOverride() -> Int { return 4 }
+  @objc func cInstanceMethod() { }
+  @objc class func cClassMethod() { }
 }
 class D : C {
-  @objc func dInstanceMethod() -> Int { return 5 }
-  @objc class func dClassMethod() -> Int { return 6 }
-  @objc override func cInstanceOverride() -> Int { return 7 }
-  @objc override class func cClassOverride() -> Int { return 8 }
+  @objc func dInstanceMethod() { }
+  @objc class func dClassMethod() { }
+
 }
 
 @_silgen_name("TestSwiftObjectNSObject") 

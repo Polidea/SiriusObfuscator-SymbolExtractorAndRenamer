@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift

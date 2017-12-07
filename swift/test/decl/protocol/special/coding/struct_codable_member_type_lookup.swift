@@ -645,7 +645,3 @@ extension C.Inner {
     case value
   }
 }
-
-struct GenericCodableStruct<T : Codable> : Codable {}
-
-func foo(_: GenericCodableStruct<Int>.CodingKeys) // expected-error {{'CodingKeys' is inaccessible due to 'private' protection level}}

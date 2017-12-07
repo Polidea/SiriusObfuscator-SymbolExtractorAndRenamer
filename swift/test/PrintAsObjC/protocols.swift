@@ -1,6 +1,7 @@
 // Please keep this file in alphabetical order!
 
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t  %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -55,7 +56,6 @@ protocol CustomNameType2 {}
 // CHECK-LABEL: @interface MyObject : NSObject <NSCoding, Fungible>
 // CHECK-NEXT: initWithCoder
 // CHECK-NEXT: init SWIFT_UNAVAILABLE
-// CHECK-NEXT: new SWIFT_UNAVAILABLE
 // CHECK-NEXT: @end
 // NEGATIVE-NOT: @protocol NSCoding
 class MyObject : NSObject, NSCoding, Fungible {

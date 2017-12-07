@@ -29,7 +29,6 @@ namespace RuntimeConstants {
   const auto NoReturn = llvm::Attribute::NoReturn;
   const auto NoUnwind = llvm::Attribute::NoUnwind;
   const auto ZExt = llvm::Attribute::ZExt;
-  const auto FirstParamReturned = llvm::Attribute::Returned;
 }
 
 using namespace RuntimeConstants;
@@ -46,7 +45,7 @@ class ARCEntryPointBuilder {
   using CallInst = llvm::CallInst;
   using Value = llvm::Value;
   using Module = llvm::Module;
-  using AttributeList = llvm::AttributeList;
+  using AttributeSet = llvm::AttributeSet;
   using Attribute = llvm::Attribute;
   using APInt = llvm::APInt;
   
@@ -230,6 +229,7 @@ private:
     if (Retain)
       return Retain.get();
     auto *ObjectPtrTy = getObjectPtrTy();
+    auto *VoidTy = Type::getVoidTy(getModule().getContext());
 
     llvm::Constant *cache = nullptr;
     Retain = getWrapperFn(
@@ -237,8 +237,7 @@ private:
         isNonAtomic(OrigI) ? "swift_nonatomic_retain" : "swift_retain",
         isNonAtomic(OrigI) ? SWIFT_RT_ENTRY_REF_AS_STR(swift_nonatomic_retain)
                            : SWIFT_RT_ENTRY_REF_AS_STR(swift_retain),
-        RegisterPreservingCC, {ObjectPtrTy}, {ObjectPtrTy},
-        {NoUnwind, FirstParamReturned});
+        RegisterPreservingCC, {VoidTy}, {ObjectPtrTy}, {NoUnwind});
 
     return Retain.get();
   }
@@ -267,12 +266,12 @@ private:
     
     auto *ObjectPtrTy = getObjectPtrTy();
     auto &M = getModule();
-    auto AttrList = AttributeList::get(M.getContext(), 1, Attribute::NoCapture);
+    auto AttrList = AttributeSet::get(M.getContext(), 1, Attribute::NoCapture);
     AttrList = AttrList.addAttribute(
-        M.getContext(), AttributeList::FunctionIndex, Attribute::NoUnwind);
+        M.getContext(), AttributeSet::FunctionIndex, Attribute::NoUnwind);
     CheckUnowned = M.getOrInsertFunction("swift_checkUnowned", AttrList,
                                          Type::getVoidTy(M.getContext()),
-                                         ObjectPtrTy);
+                                         ObjectPtrTy, nullptr);
     if (llvm::Triple(M.getTargetTriple()).isOSBinFormatCOFF() &&
         !llvm::Triple(M.getTargetTriple()).isOSCygMing())
       if (auto *F = llvm::dyn_cast<llvm::Function>(CheckUnowned.get()))
@@ -286,6 +285,7 @@ private:
       return RetainN.get();
     auto *ObjectPtrTy = getObjectPtrTy();
     auto *Int32Ty = Type::getInt32Ty(getModule().getContext());
+    auto *VoidTy = Type::getVoidTy(getModule().getContext());
 
     llvm::Constant *cache = nullptr;
     RetainN = getWrapperFn(
@@ -293,8 +293,7 @@ private:
         isNonAtomic(OrigI) ? "swift_nonatomic_retain_n" : "swift_retain_n",
         isNonAtomic(OrigI) ? SWIFT_RT_ENTRY_REF_AS_STR(swift_nonatomic_retain_n)
                            : SWIFT_RT_ENTRY_REF_AS_STR(swift_retain_n),
-        RegisterPreservingCC, {ObjectPtrTy}, {ObjectPtrTy, Int32Ty},
-        {NoUnwind, FirstParamReturned});
+        RegisterPreservingCC, {VoidTy}, {ObjectPtrTy, Int32Ty}, {NoUnwind});
 
     return RetainN.get();
   }
@@ -325,14 +324,14 @@ private:
       return UnknownRetainN.get();
     auto *ObjectPtrTy = getObjectPtrTy();
     auto *Int32Ty = Type::getInt32Ty(getModule().getContext());
+    auto *VoidTy = Type::getVoidTy(getModule().getContext());
 
     llvm::Constant *cache = nullptr;
     UnknownRetainN =
         getRuntimeFn(getModule(), cache,
                      isNonAtomic(OrigI) ? "swift_nonatomic_unknownRetain_n"
                                         : "swift_unknownRetain_n",
-                     DefaultCC, {ObjectPtrTy}, {ObjectPtrTy, Int32Ty},
-                     {NoUnwind, FirstParamReturned});
+                     DefaultCC, {VoidTy}, {ObjectPtrTy, Int32Ty}, {NoUnwind});
 
     return UnknownRetainN.get();
   }

@@ -15,17 +15,19 @@
 #include "Visibility.h"
 #include "SwiftStdint.h"
 
-// This definition is a placeholder for importing into Swift.
-// It provides size and alignment but cannot be manipulated safely there.
-typedef struct {
-  __swift_uintptr_t refCounts SWIFT_ATTRIBUTE_UNAVAILABLE;
-} InlineRefCountsPlaceholder;
-
 #if !defined(__cplusplus)
 
-typedef InlineRefCountsPlaceholder InlineRefCounts;
+// These definitions are placeholders for importing into Swift.
+// They provide size and alignment but cannot be manipulated safely there.
 
+typedef struct {
+  _Alignas(__swift_uintptr_t) __swift_uint32_t refCounts1 SWIFT_ATTRIBUTE_UNAVAILABLE;
+  __swift_uint32_t refCounts2 SWIFT_ATTRIBUTE_UNAVAILABLE;
+} InlineRefCounts;
+
+// not __cplusplus
 #else
+// __cplusplus
 
 #include <type_traits>
 #include <atomic>
@@ -731,11 +733,16 @@ class SideTableRefCountBits : public RefCountBitsT<RefCountNotInline>
 template <typename RefCountBits>
 class RefCounts {
   std::atomic<RefCountBits> refCounts;
+#if !__LP64__
+  // FIXME: hack - something somewhere is assuming a 3-word header on 32-bit
+  // See also other fixmes marked "small header for 32-bit"
+  uintptr_t unused SWIFT_ATTRIBUTE_UNAVAILABLE;
+#endif
 
   // Out-of-line slow paths.
-
+  
   LLVM_ATTRIBUTE_NOINLINE
-  void incrementSlow(RefCountBits oldbits, uint32_t inc) SWIFT_CC(PreserveMost);
+  void incrementSlow(RefCountBits oldbits, uint32_t inc);
 
   LLVM_ATTRIBUTE_NOINLINE
   void incrementNonAtomicSlow(RefCountBits oldbits, uint32_t inc);
@@ -765,7 +772,11 @@ class RefCounts {
   
   // Refcount of a new object is 1.
   constexpr RefCounts(Initialized_t)
-    : refCounts(RefCountBits(0, 1)) {}
+    : refCounts(RefCountBits(0, 1))
+#if !__LP64__ && !__has_attribute(unavailable)
+      , unused(0)
+#endif
+  { }
 
   void init() {
     refCounts.store(RefCountBits(0, 1), std::memory_order_relaxed);
@@ -950,7 +961,7 @@ class RefCounts {
   bool isUniquelyReferenced() const {
     auto bits = refCounts.load(SWIFT_MEMORY_ORDER_CONSUME);
     if (bits.hasSideTable())
-      return bits.getSideTable()->isUniquelyReferenced();
+      return false;  // FIXME: implement side table path if useful
     
     assert(!bits.getIsDeiniting());
     return bits.isUniquelyReferenced();
@@ -1156,6 +1167,7 @@ class RefCounts {
     if (newbits.getUnownedRefCount() != oldValue + inc)
       return incrementUnownedSlow(inc);
 
+    // FIXME: overflow check?
     refCounts.store(newbits, std::memory_order_relaxed);
   }
 
@@ -1282,7 +1294,7 @@ class RefCounts {
 
 
   private:
-  HeapObject *getHeapObject();
+  HeapObject *getHeapObject() const;
   
   HeapObjectSideTableEntry* allocateSideTable();
 };
@@ -1371,10 +1383,6 @@ class HeapObjectSideTableEntry {
   // Note that this is not equal to the number of outstanding weak pointers.
   uint32_t getCount() const {
     return refCounts.getCount();
-  }
-
-  bool isUniquelyReferenced() const {
-    return refCounts.isUniquelyReferenced();
   }
 
   bool isUniquelyReferencedOrPinned() const {
@@ -1541,14 +1549,14 @@ doDecrementNonAtomicSideTable(SideTableRefCountBits oldbits, uint32_t dec) {
 
 
 template <> inline
-HeapObject* RefCounts<InlineRefCountBits>::getHeapObject() {
+HeapObject* RefCounts<InlineRefCountBits>::getHeapObject() const {
   auto offset = sizeof(void *);
   auto prefix = ((char *)this - offset);
   return (HeapObject *)prefix;
 }
 
 template <> inline
-HeapObject* RefCounts<SideTableRefCountBits>::getHeapObject() {
+HeapObject* RefCounts<SideTableRefCountBits>::getHeapObject() const {
   auto offset = HeapObjectSideTableEntry::refCountsOffset();
   auto prefix = ((char *)this - offset);
   return *(HeapObject **)prefix;
@@ -1565,11 +1573,15 @@ typedef swift::InlineRefCounts InlineRefCounts;
 #endif
 
 // These assertions apply to both the C and the C++ declarations.
-_Static_assert(sizeof(InlineRefCounts) == sizeof(InlineRefCountsPlaceholder),
-  "InlineRefCounts and InlineRefCountsPlaceholder must match");
-_Static_assert(sizeof(InlineRefCounts) == sizeof(__swift_uintptr_t),
-  "InlineRefCounts must be pointer-sized");
 _Static_assert(_Alignof(InlineRefCounts) == _Alignof(__swift_uintptr_t),
   "InlineRefCounts must be pointer-aligned");
+// FIXME: small header for 32-bit
+#if 0
+_Static_assert(sizeof(InlineRefCounts) == sizeof(__swift_uintptr_t),
+  "InlineRefCounts must be pointer-sized");
+#else
+_Static_assert(sizeof(InlineRefCounts) == 2*sizeof(__swift_uint32_t),
+  "InlineRefCounts must be 8 bytes");
+#endif
 
 #endif

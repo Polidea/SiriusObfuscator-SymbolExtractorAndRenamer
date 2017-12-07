@@ -54,15 +54,10 @@ class Canary {
 
 print("")
 
-@inline(never)
-func return_array() -> [Canary] {
-  return [Canary(), Canary(), Canary()]
-}
-
 // CHECK: dead
 // CHECK: dead
 // CHECK: dead
-return_array()
+_ = { [Canary(), Canary(), Canary()] }()
 
 // Create an array of (String, Bool) pairs. <rdar://problem/16916422>
 repeat {

@@ -26,7 +26,7 @@ namespace swift {
   ///
   /// Returns true on error.
   bool printAsObjC(raw_ostream &out, ModuleDecl *M, StringRef bridgingHeader,
-                   AccessLevel minRequiredAccess);
+                   Accessibility minRequiredAccess);
 }
 
 #endif

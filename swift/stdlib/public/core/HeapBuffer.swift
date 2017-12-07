@@ -13,22 +13,16 @@
 import SwiftShims
 typealias _HeapObject = SwiftShims.HeapObject
 
-@_versioned
 internal protocol _HeapBufferHeader_ {
   associatedtype Value
   init(_ value: Value)
   var value: Value { get set }
 }
 
-@_fixed_layout // FIXME(sil-serialize-all)
-@_versioned
 internal struct _HeapBufferHeader<T> : _HeapBufferHeader_ {
-  internal typealias Value = T
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal init(_ value: T) { self.value = value }
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: T
+  typealias Value = T
+  init(_ value: T) { self.value = value }
+  var value: T
 }
 
 internal typealias _HeapBuffer<Value,Element>
@@ -38,9 +32,8 @@ internal typealias _HeapBufferStorage<Value,Element>
   = ManagedBuffer<_HeapBufferHeader<Value>, Element>
 
 extension ManagedBufferPointer where Header : _HeapBufferHeader_ {
-  internal typealias Value = Header.Value
+  typealias Value = Header.Value
 
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal init(
     _ storageClass: AnyClass,
@@ -54,7 +47,6 @@ extension ManagedBufferPointer where Header : _HeapBufferHeader_ {
     }
   }
   
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var value: Value {
     @inline(__always)
@@ -67,7 +59,6 @@ extension ManagedBufferPointer where Header : _HeapBufferHeader_ {
     }
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal subscript(i: Int) -> Element {
     @inline(__always)
@@ -76,7 +67,6 @@ extension ManagedBufferPointer where Header : _HeapBufferHeader_ {
     }
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var baseAddress: UnsafeMutablePointer<Element> {
     @inline(__always)
@@ -85,7 +75,6 @@ extension ManagedBufferPointer where Header : _HeapBufferHeader_ {
     }
   }
   
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var storage: AnyObject? {
     @inline(__always)

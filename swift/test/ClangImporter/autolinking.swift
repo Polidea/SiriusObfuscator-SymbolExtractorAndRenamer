@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend %s -sdk %S/Inputs -I %S/Inputs/custom-modules -emit-ir -o %t/without-adapter.ll
 // RUN: %FileCheck %s < %t/without-adapter.ll
 
@@ -26,7 +27,8 @@ import UsesSubmodule
 _ = LinkFramework.IComeFromLinkFramework
 UsesSubmodule.useSomethingFromSubmodule()
 
-// CHECK: !llvm.linker.options = !{
+// CHECK: !{{[0-9]+}} = !{i32 6, !"Linker Options", ![[LINK_LIST:[0-9]+]]}
+// CHECK: ![[LINK_LIST]] = !{
 
 // CHECK-DAG: !{{[0-9]+}} = !{!"-lLock"}
 // CHECK-DAG: !{{[0-9]+}} = !{!"-lStock"}

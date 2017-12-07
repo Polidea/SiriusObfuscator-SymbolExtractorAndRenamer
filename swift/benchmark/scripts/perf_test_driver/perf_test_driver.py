@@ -21,9 +21,6 @@ import re
 import subprocess
 
 
-BENCHMARK_OUTPUT_RE = re.compile('([^,]+),')
-
-
 class Result(object):
 
     def __init__(self, name, status, output, xfail_list):
@@ -61,7 +58,7 @@ def _unwrap_self(args):
     return type(args[0]).process_input(*args)
 
 
-BenchmarkDriver_OptLevels = ['Onone', 'O', 'Osize']
+BenchmarkDriver_OptLevels = ['Onone', 'O', 'Ounchecked']
 
 
 class BenchmarkDriver(object):
@@ -86,12 +83,8 @@ class BenchmarkDriver(object):
 
     def run_for_opt_level(self, binary, opt_level, test_filter):
         print("testing driver at path: %s" % binary)
-        names = []
-        for l in subprocess.check_output([binary, "--list"]).split("\n")[1:]:
-            m = BENCHMARK_OUTPUT_RE.match(l)
-            if m is None:
-                continue
-            names.append(m.group(1))
+        names = [n.strip() for n in subprocess.check_output(
+            [binary, "--list"]).split()[2:]]
         if test_filter:
             regex = re.compile(test_filter)
             names = [n for n in names if regex.match(n)]

@@ -41,7 +41,6 @@
 ///   - sequence2: The second sequence or collection to zip.
 /// - Returns: A sequence of tuple pairs, where the elements of each pair are
 ///   corresponding elements of `sequence1` and `sequence2`.
-@_inlineable // FIXME(sil-serialize-all)
 public func zip<Sequence1, Sequence2>(
   _ sequence1: Sequence1, _ sequence2: Sequence2
 ) -> Zip2Sequence<Sequence1, Sequence2> {
@@ -49,32 +48,21 @@ public func zip<Sequence1, Sequence2>(
 }
 
 /// An iterator for `Zip2Sequence`.
-@_fixed_layout // FIXME(sil-serialize-all)
-public struct Zip2Iterator<Iterator1: IteratorProtocol, Iterator2: IteratorProtocol> {
+public struct Zip2Iterator<
+  Iterator1 : IteratorProtocol, Iterator2 : IteratorProtocol
+> : IteratorProtocol {
   /// The type of element returned by `next()`.
   public typealias Element = (Iterator1.Element, Iterator2.Element)
 
-  @_versioned // FIXME(sil-serialize-all)
-  internal var _baseStream1: Iterator1
-  @_versioned // FIXME(sil-serialize-all)
-  internal var _baseStream2: Iterator2
-  @_versioned // FIXME(sil-serialize-all)
-  internal var _reachedEnd: Bool = false
-
   /// Creates an instance around a pair of underlying iterators.
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init(_ iterator1: Iterator1, _ iterator2: Iterator2) {
     (_baseStream1, _baseStream2) = (iterator1, iterator2)
   }
-}
 
-extension Zip2Iterator: IteratorProtocol {
   /// Advances to the next element and returns it, or `nil` if no next element
   /// exists.
   ///
   /// Once `nil` has been returned, all subsequent calls return `nil`.
-  @_inlineable // FIXME(sil-serialize-all)
   public mutating func next() -> Element? {
     // The next() function needs to track if it has reached the end.  If we
     // didn't, and the first sequence is longer than the second, then when we
@@ -94,6 +82,10 @@ extension Zip2Iterator: IteratorProtocol {
 
     return (element1, element2)
   }
+
+  internal var _baseStream1: Iterator1
+  internal var _baseStream2: Iterator2
+  internal var _reachedEnd: Bool = false
 }
 
 /// A sequence of pairs built out of two underlying sequences.
@@ -115,37 +107,43 @@ extension Zip2Iterator: IteratorProtocol {
 ///     // Prints "two: 2
 ///     // Prints "three: 3"
 ///     // Prints "four: 4"
-@_fixed_layout // FIXME(sil-serialize-all)
-public struct Zip2Sequence<Sequence1 : Sequence, Sequence2 : Sequence> {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let _sequence1: Sequence1
-  @_versioned // FIXME(sil-serialize-all)
-  internal let _sequence2: Sequence2
+public struct Zip2Sequence<Sequence1 : Sequence, Sequence2 : Sequence>
+  : Sequence {
 
+    
   @available(*, deprecated, renamed: "Sequence1.Iterator")
   public typealias Stream1 = Sequence1.Iterator
   @available(*, deprecated, renamed: "Sequence2.Iterator")
   public typealias Stream2 = Sequence2.Iterator
 
-  /// Creates an instance that makes pairs of elements from `sequence1` and
-  /// `sequence2`.
-  @_inlineable // FIXME(sil-serialize-all)
-  public // @testable
-  init(_sequence1 sequence1: Sequence1, _sequence2 sequence2: Sequence2) {
-    (_sequence1, _sequence2) = (sequence1, sequence2)
-  }
-}
-
-extension Zip2Sequence: Sequence {
   /// A type whose instances can produce the elements of this
   /// sequence, in order.
   public typealias Iterator = Zip2Iterator<Sequence1.Iterator, Sequence2.Iterator>
 
+  @available(*, unavailable, renamed: "Iterator")
+  public typealias Generator = Iterator
+
+  /// Creates an instance that makes pairs of elements from `sequence1` and
+  /// `sequence2`.
+  public // @testable
+  init(_sequence1 sequence1: Sequence1, _sequence2 sequence2: Sequence2) {
+    (_sequence1, _sequence2) = (sequence1, sequence2)
+  }
+
   /// Returns an iterator over the elements of this sequence.
-  @_inlineable // FIXME(sil-serialize-all)
   public func makeIterator() -> Iterator {
     return Iterator(
       _sequence1.makeIterator(),
       _sequence2.makeIterator())
+  }
+
+  internal let _sequence1: Sequence1
+  internal let _sequence2: Sequence2
+}
+
+extension Zip2Sequence {
+  @available(*, unavailable, message: "use zip(_:_:) free function instead")
+  public init(_ sequence1: Sequence1, _ sequence2: Sequence2) {
+    Builtin.unreachable()
   }
 }

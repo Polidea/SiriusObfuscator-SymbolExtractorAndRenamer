@@ -109,51 +109,48 @@ static int _swift_dl_iterate_phdr(int (*Callback)(struct _swift_dl_phdr_info *in
   return lastRet;
 }
 
-static uint8_t *_swift_getSectionDataPE(const void *handle,
-                                        const char *sectionName,
+static uint8_t *_swift_getSectionDataPE(const void *handle, const char *sectionName,
                                         unsigned long *sectionSize) {
   // In Cygwin, dlopen() returns PE/COFF image pointer.
   // This is relying on undocumented feature of Windows API LoadLibrary().
-  const unsigned char *peStart = static_cast<const unsigned char *>(handle);
-
+  unsigned char *peStart = (unsigned char *)handle;
+  
   const int kLocationOfNtHeaderOffset = 0x3C;
   int ntHeadersOffset =
-      *reinterpret_cast<const int32_t *>(peStart + kLocationOfNtHeaderOffset);
-
+  *reinterpret_cast<int32_t *>(peStart + kLocationOfNtHeaderOffset);
+  
   bool assert1 =
   peStart[ntHeadersOffset] == 'P' && peStart[ntHeadersOffset + 1] == 'E';
   if (!assert1) {
     swift::fatalError(/* flags = */ 0, "_swift_getSectionDataPE()'s finding PE failed");
   }
-
-  const unsigned char *coff = peStart + ntHeadersOffset + 4;
-
-  int16_t numberOfSections = *reinterpret_cast<const int16_t *>(coff + 2);
-
+  
+  unsigned char *coff = peStart + ntHeadersOffset + 4;
+  
+  int16_t numberOfSections = *(int16_t *)(coff + 2);
+  
   // SizeOfOptionalHeader
-  int16_t sizeOfOptionalHeader = *reinterpret_cast<const int16_t *>(coff + 16);
-
+  int16_t sizeOfOptionalHeader = *(int16_t *)(coff + 16);
+  
   const int kCoffFileHeaderSize = 20;
-  const unsigned char *sectionTableBase =
-      coff + kCoffFileHeaderSize + sizeOfOptionalHeader;
-
+  unsigned char *sectionTableBase =
+  coff + kCoffFileHeaderSize + sizeOfOptionalHeader;
+  
   // Section Header Record
   const int kSectionRecordSize = 40;
-
-  const unsigned char *sectionHeader = sectionTableBase;
+  
+  unsigned char *sectionHeader = sectionTableBase;
   for (int i = 0; i < numberOfSections; i++) {
-    uint32_t virtualSize =
-        *reinterpret_cast<const uint32_t *>(&sectionHeader[8]);
-    uint32_t virtualAddress =
-        *reinterpret_cast<const uint32_t *>(&sectionHeader[12]);
-
+    uint32_t virtualSize = *(uint32_t *)&sectionHeader[8];
+    uint32_t virtualAddress = *(uint32_t *)&sectionHeader[12];
+    
     char nameOfThisSection[9];
     memcpy(nameOfThisSection, sectionHeader, 8);
     nameOfThisSection[8] = '\0';
     
     if (strcmp(sectionName, nameOfThisSection) == 0) {
       *sectionSize = virtualSize;
-      return const_cast<uint8_t *>(peStart + virtualAddress);
+      return (uint8_t *)handle + virtualAddress;
     }
     sectionHeader += kSectionRecordSize;
   }
@@ -163,7 +160,7 @@ static uint8_t *_swift_getSectionDataPE(const void *handle,
 
 static int _addImageCallback(struct _swift_dl_phdr_info *info,
                              size_t size, const void *data) {
-  const InspectArgs *inspectArgs = static_cast<const InspectArgs *>(data);
+  const InspectArgs *inspectArgs = (InspectArgs *)data;
   // inspectArgs contains addImage*Block function and the section name
 #if defined(_WIN32)
   HMODULE handle;
@@ -188,10 +185,9 @@ static int _addImageCallback(struct _swift_dl_phdr_info *info,
   if (conformances)
     inspectArgs->fnAddImageBlock(conformances, conformancesSize);
 
-  // There is no close function or free function for GetModuleHandle(),
-  // especially we should not pass a handle returned by GetModuleHandle to the 
-  // FreeLibrary function.
-#if defined(__CYGWIN__)
+#if defined(_WIN32)
+  FreeLibrary(handle);
+#else
   dlclose(handle);
 #endif
   return 0;

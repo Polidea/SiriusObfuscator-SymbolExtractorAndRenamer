@@ -68,15 +68,18 @@ class GlobalPropertyOpt {
 
 #ifndef NDEBUG
     friend raw_ostream &operator<<(raw_ostream &os, const Entry &entry) {
-      if (entry.Field)
-        return os << "field " << entry.Field->getName() << '\n';
-      if (!entry.Value)
-        return os << "unknown-address\n";
-      if (auto *Inst = entry.Value->getDefiningInstruction())
-        return os << Inst->getFunction()->getName() << ": " << entry.Value;
-      if (auto *Arg = dyn_cast<SILArgument>(entry.Value))
-        return os << Arg->getFunction()->getName() << ": " << entry.Value;
-      return os << entry.Value;
+      if (entry.Field) {
+        os << "field " << entry.Field->getName() << '\n';
+      } else if (!entry.Value) {
+        os << "unknown-address\n";
+      } else if (auto *Inst = dyn_cast<SILInstruction>(entry.Value)) {
+        os << Inst->getParent()->getParent()->getName() << ": " << entry.Value;
+      } else if (auto *Arg = dyn_cast<SILArgument>(entry.Value)) {
+        os << Arg->getParent()->getParent()->getName() << ": " << entry.Value;
+      } else {
+        os << entry.Value;
+      }
+      return os;
     }
 #endif
   };
@@ -129,18 +132,18 @@ class GlobalPropertyOpt {
   }
 
   bool isVisibleExternally(VarDecl *decl) {
-    AccessLevel access = decl->getEffectiveAccess();
+    Accessibility accessibility = decl->getEffectiveAccess();
     SILLinkage linkage;
-    switch (access) {
-      case AccessLevel::Private:
-      case AccessLevel::FilePrivate:
+    switch (accessibility) {
+      case Accessibility::Private:
+      case Accessibility::FilePrivate:
         linkage = SILLinkage::Private;
         break;
-      case AccessLevel::Internal:
+      case Accessibility::Internal:
         linkage = SILLinkage::Hidden;
         break;
-      case AccessLevel::Public:
-      case AccessLevel::Open:
+      case Accessibility::Public:
+      case Accessibility::Open:
         linkage = SILLinkage::Public;
         break;
     }
@@ -260,14 +263,13 @@ bool GlobalPropertyOpt::canAddressEscape(SILValue V, bool acceptStore) {
       // We don't handle these instructions if we see them in store addresses.
       // So going through them lets stores be as bad as if the address would
       // escape.
-      auto value = cast<SingleValueInstruction>(User);
-      if (canAddressEscape(value, false))
+      if (canAddressEscape(User, false))
         return true;
       continue;
     }
-    if (auto markDependence = dyn_cast<MarkDependenceInst>(User)) {
+    if (isa<MarkDependenceInst>(User)) {
       unsigned opNum = UI->getOperandNumber();
-      if (opNum == 0 && canAddressEscape(markDependence, acceptStore))
+      if (opNum == 0 && canAddressEscape(User, acceptStore))
         return true;
       continue;
     }
@@ -322,12 +324,11 @@ void GlobalPropertyOpt::scanInstruction(swift::SILInstruction *Inst) {
       return;
     }
   } else if (isa<RefElementAddrInst>(Inst) || isa<StructElementAddrInst>(Inst)) {
-    auto projection = cast<SingleValueInstruction>(Inst);
-    if (isArrayAddressType(projection->getType())) {
+    if (isArrayAddressType(Inst->getType())) {
       // If the address of an array-field escapes, we give up for that field.
-      if (canAddressEscape(projection, true)) {
-        setAddressEscapes(getAddrEntry(projection));
-        DEBUG(llvm::dbgs() << "      field address escapes: " << *projection);
+      if (canAddressEscape(Inst, true)) {
+        setAddressEscapes(getAddrEntry(Inst));
+        DEBUG(llvm::dbgs() << "      field address escapes: " << *Inst);
       }
       return;
     }
@@ -377,12 +378,10 @@ void GlobalPropertyOpt::scanInstruction(swift::SILInstruction *Inst) {
 
   // For everything else which we didn't handle above: we set the property of
   // the instruction value to false.
-  for (auto result : Inst->getResults()) {
-    SILType Type = result->getType();
+  if (SILType Type = Inst->getType()) {
     if (isArrayType(Type) || isTupleWithArray(Type.getSwiftRValueType())) {
-      DEBUG(llvm::dbgs() << "      value could be non-native array: "
-                         << *result);
-      setNotNative(getValueEntry(result));
+      DEBUG(llvm::dbgs() << "      value could be non-native array: " << *Inst);
+      setNotNative(getValueEntry(Inst));
     }
   }
 }

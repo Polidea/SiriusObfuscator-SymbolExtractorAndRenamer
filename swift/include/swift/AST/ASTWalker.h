@@ -63,7 +63,7 @@ public:
     ParentTy(Expr *E) : Kind(ParentKind::Expr), Ptr(E) {}
     ParentTy(Pattern *P) : Kind(ParentKind::Pattern), Ptr(P) {}
     ParentTy(TypeRepr *T) : Kind(ParentKind::TypeRepr), Ptr(T) {}
-    ParentTy() : Kind(ParentKind::Module), Ptr(nullptr) { }
+    ParentTy() = default;
 
     bool isNull() const { return Ptr == nullptr; }
     ParentKind getKind() const {

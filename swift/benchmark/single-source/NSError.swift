@@ -13,11 +13,6 @@
 import TestsUtils
 import Foundation
 
-public let NSErrorTest = BenchmarkInfo(
-  name: "NSError",
-  runFunction: run_NSError,
-  tags: [.validation, .exceptions, .bridging])
-
 protocol P {
   func buzz() throws -> Int
 }

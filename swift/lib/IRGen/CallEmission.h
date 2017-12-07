@@ -26,8 +26,6 @@ namespace llvm {
 namespace swift {
 namespace irgen {
 
-class Address;
-class Explosion;
 class LoadableTypeInfo;
 struct WitnessMetadata;
 
@@ -37,6 +35,9 @@ public:
   IRGenFunction &IGF;
 
 private:
+  /// The function attributes for the call.
+  llvm::AttributeSet Attrs;
+  
   /// The builtin/special arguments to pass to the call.
   SmallVector<llvm::Value*, 8> Args;
 
@@ -55,10 +56,13 @@ private:
   void emitToUnmappedMemory(Address addr);
   void emitToUnmappedExplosion(Explosion &out);
   llvm::CallSite emitCallSite();
+  llvm::CallSite emitInvoke(llvm::CallingConv::ID cc, llvm::Value *fn,
+                            ArrayRef<llvm::Value*> args,
+                            const llvm::AttributeSet &attrs);
 
 public:
-  CallEmission(IRGenFunction &IGF, Callee &&callee)
-      : IGF(IGF), CurCallee(std::move(callee)) {
+  CallEmission(IRGenFunction &IGF, const Callee &callee)
+      : IGF(IGF), CurCallee(callee) {
     setFromCallee();
   }
   CallEmission(const CallEmission &other) = delete;
@@ -66,6 +70,7 @@ public:
   CallEmission &operator=(const CallEmission &other) = delete;
   ~CallEmission();
 
+  Callee &getMutableCallee() { return CurCallee; }
   const Callee &getCallee() const { return CurCallee; }
 
   SubstitutionList getSubstitutions() const {
@@ -73,14 +78,14 @@ public:
   }
 
   /// Set the arguments to the function from an explosion.
-  void setArgs(Explosion &arg, bool isOutlined,
-               WitnessMetadata *witnessMetadata = nullptr);
-
+  void setArgs(Explosion &arg, WitnessMetadata *witnessMetadata = nullptr);
+  
   void addAttribute(unsigned Index, llvm::Attribute::AttrKind Attr);
 
-  void emitToMemory(Address addr, const LoadableTypeInfo &substResultTI,
-                    bool isOutlined);
-  void emitToExplosion(Explosion &out, bool isOutlined);
+  void emitToMemory(Address addr, const LoadableTypeInfo &substResultTI);
+  void emitToExplosion(Explosion &out);
+   
+  void invalidate();
 };
 
 

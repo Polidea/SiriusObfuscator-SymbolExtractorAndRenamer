@@ -48,9 +48,6 @@ extension Array where Element == A {
   var property: Prop { fatalError() }
 }
 
-protocol P { var member: String { get } }
-extension B : P { var member : String { return "Member Value" } }
-
 struct Exactly<T> {}
 
 func expect<T>(_ x: inout T, toHaveType _: Exactly<T>.Type) {}
@@ -269,10 +266,7 @@ struct ZwithSubscript {
   subscript(keyPath kp: PartialKeyPath<ZwithSubscript>) -> Any { return 0 }
 }
 
-struct NotZ {}
-
 func testKeyPathSubscript(readonly: ZwithSubscript, writable: inout ZwithSubscript,
-                          wrongType: inout NotZ,
                           kp: KeyPath<ZwithSubscript, Int>,
                           wkp: WritableKeyPath<ZwithSubscript, Int>,
                           rkp: ReferenceWritableKeyPath<ZwithSubscript, Int>) {
@@ -315,12 +309,6 @@ func testKeyPathSubscript(readonly: ZwithSubscript, writable: inout ZwithSubscri
   readonly[keyPath: akp] = anyqSink1 // expected-error{{cannot assign to immutable}}
   // FIXME: silently falls back to keypath application, which seems inconsistent
   writable[keyPath: akp] = anyqSink2 // expected-error{{cannot assign to immutable}}
-
-  _ = wrongType[keyPath: kp] // expected-error{{cannot be applied}}
-  _ = wrongType[keyPath: wkp] // expected-error{{cannot be applied}}
-  _ = wrongType[keyPath: rkp] // expected-error{{cannot be applied}}
-  _ = wrongType[keyPath: pkp] // expected-error{{cannot be applied}}
-  _ = wrongType[keyPath: akp]
 }
 
 func testKeyPathSubscriptMetatype(readonly: Z.Type, writable: inout Z.Type,
@@ -367,34 +355,6 @@ func testKeyPathSubscriptLValue(base: Z, kp: inout KeyPath<Z, Z>) {
   _ = base[keyPath: kp]
 }
 
-func testKeyPathSubscriptExistentialBase(concreteBase: inout B,
-                                     existentialBase: inout P,
-                                     kp: KeyPath<P, String>,
-                                     wkp: WritableKeyPath<P, String>,
-                                     rkp: ReferenceWritableKeyPath<P, String>,
-                                     pkp: PartialKeyPath<P>,
-                                     s: String) {
-  _ = concreteBase[keyPath: kp]
-  _ = concreteBase[keyPath: wkp]
-  _ = concreteBase[keyPath: rkp]
-  _ = concreteBase[keyPath: pkp]
-
-  concreteBase[keyPath: kp] = s // expected-error{{}}
-  concreteBase[keyPath: wkp] = s // expected-error{{}}
-  concreteBase[keyPath: rkp] = s
-  concreteBase[keyPath: pkp] = s // expected-error{{}}
-
-  _ = existentialBase[keyPath: kp]
-  _ = existentialBase[keyPath: wkp]
-  _ = existentialBase[keyPath: rkp]
-  _ = existentialBase[keyPath: pkp]
-
-  existentialBase[keyPath: kp] = s // expected-error{{}}
-  existentialBase[keyPath: wkp] = s
-  existentialBase[keyPath: rkp] = s
-  existentialBase[keyPath: pkp] = s // expected-error{{}}
-}
-
 struct AA {
   subscript(x: Int) -> Int { return x }
   subscript(labeled x: Int) -> Int { return x }
@@ -408,11 +368,6 @@ class CC {
 func testKeyPathOptional() {
   _ = \AA.c?.i
   _ = \AA.c!.i
-
-  // SR-6198
-  let path: KeyPath<CC,Int>! = \CC.i
-  let cc = CC()
-  _ = cc[keyPath: path]
 }
 
 func testLiteralInAnyContext() {
@@ -469,20 +424,6 @@ struct BassSubscript {
 func testImplicitConversionInSubscriptIndex() {
   _ = \BassSubscript.[Treble()]
   _ = \BassSubscript.["hello"] // expected-error{{must be Hashable}}
-}
-
-// SR-6106
-func sr6106() {
-  class B {}
-  class A {
-    var b: B? = nil
-  }
-  class C {
-    var a: A?
-    func myFunc() {
-      let _ = \C.a?.b
-    }
-  }
 }
 
 func testSyntaxErrors() { // expected-note{{}}

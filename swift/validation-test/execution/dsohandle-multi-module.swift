@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 
 // RUN: (cd %t && %target-build-swift %S/Inputs/dsohandle-first.swift -emit-library -emit-module -module-name first)
 // RUN: (cd %t && %target-build-swift %S/Inputs/dsohandle-second.swift -emit-library -emit-module -module-name second)

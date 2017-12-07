@@ -41,16 +41,15 @@ void StackNesting::setup(SILFunction *F) {
     BlockInfo *BI = WorkList.pop_back_val();
     for (SILInstruction &I : *BI->Block) {
       if (I.isAllocatingStack()) {
-        auto Alloc = cast<AllocationInst>(&I);
         // Register this stack location.
         unsigned CurrentBitNumber = StackLocs.size();
-        StackLoc2BitNumbers[Alloc] = CurrentBitNumber;
-        StackLocs.push_back(StackLoc(Alloc));
+        StackLoc2BitNumbers[&I] = CurrentBitNumber;
+        StackLocs.push_back(StackLoc(&I));
 
-        BI->StackInsts.push_back(Alloc);
+        BI->StackInsts.push_back(&I);
 
       } else if (I.isDeallocatingStack()) {
-        auto *AllocInst = cast<SingleValueInstruction>(I.getOperand(0));
+        auto *AllocInst = cast<SILInstruction>(I.getOperand(0));
         if (!BI->StackInsts.empty() && BI->StackInsts.back() == AllocInst) {
           // As an optimization, we ignore perfectly nested alloc-dealloc pairs
           // inside a basic block.
@@ -115,8 +114,7 @@ bool StackNesting::solve() {
       }
       for (SILInstruction *StackInst : reversed(BI.StackInsts)) {
         if (StackInst->isAllocatingStack()) {
-          auto AllocInst = cast<SingleValueInstruction>(StackInst);
-          int BitNr = StackLoc2BitNumbers[AllocInst];
+          int BitNr = StackLoc2BitNumbers[StackInst];
           if (Bits != StackLocs[BitNr].AliveLocs) {
             // More locations are alive around the StackInst's location.
             // Update the AlivaLocs bitset, which contains all those alive
@@ -134,8 +132,7 @@ bool StackNesting::solve() {
           // A stack deallocation begins the lifetime of its location (in
           // reverse order). And it also begins the lifetime of all other
           // locations which are alive at the allocation point.
-          auto *AllocInst =
-            cast<SingleValueInstruction>(StackInst->getOperand(0));
+          auto *AllocInst = cast<SILInstruction>(StackInst->getOperand(0));
           int BitNr = StackLoc2BitNumbers[AllocInst];
           Bits |= StackLocs[BitNr].AliveLocs;
         }
@@ -150,14 +147,14 @@ bool StackNesting::solve() {
   return isNested;
 }
 
-static SILInstruction *createDealloc(AllocationInst *Alloc,
+static SILInstruction *createDealloc(SILInstruction *Alloc,
                                      SILInstruction *InsertionPoint,
                                      SILLocation Location) {
   SILBuilder B(InsertionPoint);
   switch (Alloc->getKind()) {
-    case SILInstructionKind::AllocStackInst:
+    case ValueKind::AllocStackInst:
       return B.createDeallocStack(Location, Alloc);
-    case SILInstructionKind::AllocRefInst:
+    case ValueKind::AllocRefInst:
       assert(cast<AllocRefInst>(Alloc)->canAllocOnStack());
       return B.createDeallocRef(Location, Alloc, /*canBeOnStack*/true);
     default:
@@ -179,7 +176,7 @@ bool StackNesting::insertDeallocs(const BitVector &AliveBefore,
   for (int LocNr = AliveBefore.find_first(); LocNr >= 0;
        LocNr = AliveBefore.find_next(LocNr)) {
     if (!AliveAfter.test(LocNr)) {
-      AllocationInst *Alloc = StackLocs[LocNr].Alloc;
+      SILInstruction *Alloc = StackLocs[LocNr].Alloc;
       InsertionPoint = createDealloc(Alloc, InsertionPoint,
                    Location.hasValue() ? Location.getValue() : Alloc->getLoc());
       changesMade = true;
@@ -247,14 +244,13 @@ StackNesting::Changes StackNesting::adaptDeallocs() {
     for (SILInstruction *StackInst : reversed(BI.StackInsts)) {
       if (StackInst->isAllocatingStack()) {
         // For allocations we just update the bit-set.
-        auto AllocInst = cast<SingleValueInstruction>(StackInst);
-        int BitNr = StackLoc2BitNumbers.lookup(AllocInst);
+        int BitNr = StackLoc2BitNumbers.lookup(StackInst);
         assert(Bits == StackLocs[BitNr].AliveLocs &&
                "dataflow didn't converge");
         Bits.reset(BitNr);
       } else if (StackInst->isDeallocatingStack()) {
         // Handle deallocations.
-        auto *AllocInst = cast<SingleValueInstruction>(StackInst->getOperand(0));
+        auto *AllocInst = cast<SILInstruction>(StackInst->getOperand(0));
         SILLocation Loc = StackInst->getLoc();
         int BitNr = StackLoc2BitNumbers.lookup(AllocInst);
         SILInstruction *InsertionPoint = &*std::next(StackInst->getIterator());
@@ -305,13 +301,12 @@ void StackNesting::dump() const {
     dumpBits(BI.AliveStackLocsAtEntry);
     for (SILInstruction *StackInst : BI.StackInsts) {
       if (StackInst->isAllocatingStack()) {
-        auto AllocInst = cast<AllocationInst>(StackInst);
-        int BitNr = StackLoc2BitNumbers.lookup(AllocInst);
+        int BitNr = StackLoc2BitNumbers.lookup(StackInst);
         llvm::dbgs() << "  alloc #" << BitNr << ": alive=";
         dumpBits(StackLocs[BitNr].AliveLocs);
         llvm::dbgs() << "    " << *StackInst;
       } else if (StackInst->isDeallocatingStack()) {
-        auto *AllocInst = cast<AllocationInst>(StackInst->getOperand(0));
+        auto *AllocInst = cast<SILInstruction>(StackInst->getOperand(0));
         int BitNr = StackLoc2BitNumbers.lookup(AllocInst);
         llvm::dbgs() << "  dealloc for #" << BitNr << "\n"
                         "    " << *StackInst;

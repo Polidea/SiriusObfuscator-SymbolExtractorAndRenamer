@@ -17,18 +17,13 @@
 #include "swift/SIL/SILValue.h"
 
 namespace swift {
-class SILArgument;
-class SILInstruction;
-class SILModule;
+  class SILModule;
 
 class SILUndef : public ValueBase {
   void operator=(const SILArgument &) = delete;
+  void operator delete(void *Ptr, size_t) SWIFT_DELETE_OPERATOR_DELETED
 
-  void operator delete(void *Ptr, size_t) SWIFT_DELETE_OPERATOR_DELETED;
-
-  SILUndef(SILType Ty)
-      : ValueBase(ValueKind::SILUndef, Ty, IsRepresentative::Yes) {}
-
+  SILUndef(SILType Ty) : ValueBase(ValueKind::SILUndef, Ty) {}
 public:
 
   static SILUndef *get(SILType Ty, SILModule *M);
@@ -37,10 +32,8 @@ public:
   template<class OwnerTy>
   static SILUndef *getSentinelValue(SILType Ty, OwnerTy Owner) { return new (*Owner) SILUndef(Ty); }
 
-  static bool classof(const SILArgument *) = delete;
-  static bool classof(const SILInstruction *) = delete;
-  static bool classof(const SILNode *node) {
-    return node->getKind() == SILNodeKind::SILUndef;
+  static bool classof(const ValueBase *V) {
+    return V->getKind() == ValueKind::SILUndef;
   }
 };
 

@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // Build swift modules this test depends on.
 // RUN: %target-swift-frontend -emit-module %S/Inputs/foo_swift_module.swift -emit-module-path %t/foo_swift_module.swiftmodule -emit-module-doc-path %t/foo_swift_module.swiftdoc

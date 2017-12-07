@@ -2,13 +2,13 @@
 
 fileprivate class Outer<T> {
   class Inner<U> : Base<T, U> {
-    @_optimize(none)
+    @_semantics("optimize.sil.never")
     override func method<V>(v: V) {}
   }
 }
 
 fileprivate class Base<T, U> {
-  @_optimize(none)
+  @_semantics("optimize.sil.never")
   func method<V>(v: V) {}
 }
 

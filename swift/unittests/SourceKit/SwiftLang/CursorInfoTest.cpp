@@ -52,14 +52,12 @@ class NullEditorConsumer : public EditorConsumer {
                                  unsigned NameLength,
                                  unsigned BodyOffset,
                                  unsigned BodyLength,
-                                 unsigned DocOffset,
-                                 unsigned DocLength,
                                  StringRef DisplayName,
                                  StringRef TypeName,
                                  StringRef RuntimeName,
                                  StringRef SelectorName,
                                  ArrayRef<StringRef> InheritedTypes,
-                                 ArrayRef<std::tuple<UIdent, unsigned, unsigned>> Attrs) override {
+                                 ArrayRef<UIdent> Attrs) override {
     return false;
   }
 
@@ -137,7 +135,7 @@ public:
 
     TestCursorInfo TestInfo;
     getLang().getCursorInfo(DocName, Offset, 0, false, false, Args,
-      [&](const CursorInfoData &Info) {
+      [&](const CursorInfo &Info) {
         TestInfo.Name = Info.Name;
         TestInfo.Typename = Info.TypeName;
         TestInfo.Filename = Info.Filename;

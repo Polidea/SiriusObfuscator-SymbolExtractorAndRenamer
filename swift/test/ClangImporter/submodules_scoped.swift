@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -typecheck -verify %s -DCHECK_SCOPING
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -emit-module -o %t %s -module-name submodules
 // RUN: echo 'import submodules; let s = "\(x), \(y)"' | %target-swift-frontend(mock-sdk: %clang-importer-sdk) -typecheck - -I %t

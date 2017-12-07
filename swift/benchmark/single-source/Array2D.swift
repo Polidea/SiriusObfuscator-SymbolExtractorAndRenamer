@@ -10,13 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import TestsUtils
-
-public let Array2D = BenchmarkInfo(
-  name: "Array2D",
-  runFunction: run_Array2D,
-  tags: [.validation, .api, .Array])
-
 @inline(never)
 public func run_Array2D(_ N: Int) {
   var A: [[Int]] = []

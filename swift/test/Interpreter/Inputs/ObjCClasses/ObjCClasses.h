@@ -116,7 +116,6 @@ __attribute__((swift_name("OuterType.InnerType")))
 @interface OuterTypeInnerType : NSObject
 @property NSArray<OuterType *> *things;
 @end
-
 NS_ASSUME_NONNULL_END
 
 #endif

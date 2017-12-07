@@ -34,11 +34,6 @@ static bool isSafeNonExitTerminator(TermInst *TI) {
   case TermKind::UnreachableInst:
   case TermKind::ReturnInst:
   case TermKind::ThrowInst:
-  case TermKind::UnwindInst:
-    return false;
-  // yield and try_apply are special because they can do arbitrary,
-  // potentially-process-terminating things.
-  case TermKind::YieldInst:
   case TermKind::TryApplyInst:
     return false;
   }

@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: %target-build-swift -module-name a %s -o %t.out -O
 // RUN: %target-run %t.out

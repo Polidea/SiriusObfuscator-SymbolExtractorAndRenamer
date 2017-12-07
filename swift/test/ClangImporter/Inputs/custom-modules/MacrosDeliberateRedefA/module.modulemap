@@ -1,8 +1,0 @@
-module MacrosDeliberateRedefA {
-  module Old {
-    header "Old.h"
-  }
-  module New {
-    header "New.h"
-  }
-}

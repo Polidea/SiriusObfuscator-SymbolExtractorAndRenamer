@@ -53,7 +53,7 @@ COWViewCFGFunction("view-cfg-before-cow-for", llvm::cl::init(""),
 static SILValue getAccessPath(SILValue V, SmallVectorImpl<unsigned>& Path) {
   V = stripCasts(V);
   ProjectionIndex PI(V);
-  if (!PI.isValid() || isa<IndexAddrInst>(V))
+  if (!PI.isValid() || V->getKind() == ValueKind::IndexAddrInst)
     return V;
 
   SILValue UnderlyingObject = getAccessPath(PI.Aggregate, Path);
@@ -100,10 +100,10 @@ public:
 
   UserList AggregateAddressUsers;
   UserList StructAddressUsers;
-  SmallVector<LoadInst*, 16> StructLoads;
+  UserList StructLoads;
   UserList StructValueUsers;
   UserOperList ElementAddressUsers;
-  SmallVector<std::pair<LoadInst*, Operand*>, 16> ElementLoads;
+  UserOperList ElementLoads;
   UserOperList ElementValueUsers;
   VisitedSet Visited;
 
@@ -140,7 +140,11 @@ public:
 protected:
 
   static bool definesSingleObjectType(ValueBase *V) {
-    return V->getType().isObject();
+    if (auto *Arg = dyn_cast<SILArgument>(V))
+      return Arg->getType().isObject();
+    if (auto *Inst = dyn_cast<SILInstruction>(V))
+      return Inst->hasValue() && Inst->getType().isObject();
+    return false;
   }
 
   /// If AccessPathSuffix is non-empty, then the value is the address of an
@@ -166,8 +170,8 @@ protected:
           continue;
         }
 
-        if (auto proj = dyn_cast<StructElementAddrInst>(UseInst)) {
-          collectAddressUses(proj, AccessPathSuffix, StructVal);
+        if (isa<StructElementAddrInst>(UseInst)) {
+          collectAddressUses(UseInst, AccessPathSuffix, StructVal);
           continue;
         }
 
@@ -182,8 +186,8 @@ protected:
           continue;
         }
 
-        if (auto proj = dyn_cast<StructElementAddrInst>(UseInst)) {
-          collectAddressUses(proj, AccessPathSuffix, &*UI);
+        if (isa<StructElementAddrInst>(UseInst)) {
+          collectAddressUses(UseInst, AccessPathSuffix, &*UI);
           continue;
         }
 
@@ -197,18 +201,10 @@ protected:
         continue;
       }
 
-      // Check for uses of projections.
-
-      // These are all single-value instructions.
-      auto ProjInst = dyn_cast<SingleValueInstruction>(UseInst);
-      if (!ProjInst) {
-        AggregateAddressUsers.push_back(UseInst);
-        continue;
-      }
-      ProjectionIndex PI(ProjInst);
+      ProjectionIndex PI(UseInst);
       // Do not form a path from an IndexAddrInst without otherwise
       // distinguishing it from subelement addressing.
-      if (!PI.isValid() || isa<IndexAddrInst>(V)) {
+      if (!PI.isValid() || V->getKind() == ValueKind::IndexAddrInst) {
         // Found a use of an aggregate containing the given element.
         AggregateAddressUsers.push_back(UseInst);
         continue;
@@ -224,7 +220,7 @@ protected:
 
       // Recursively check for users after stripping this component from the
       // access path.
-      collectAddressUses(ProjInst, AccessPathSuffix.slice(1), nullptr);
+      collectAddressUses(UseInst, AccessPathSuffix.slice(1), nullptr);
     }
   }
 };
@@ -635,19 +631,20 @@ bool COWArrayOpt::checkSafeArrayAddressUses(UserList &AddressUsers) {
 
 /// Returns true if this instruction is a safe array use if all of its users are
 /// also safe array users.
-static SILValue isTransitiveSafeUser(SILInstruction *I) {
+static bool isTransitiveSafeUser(SILInstruction *I) {
   switch (I->getKind()) {
-  case SILInstructionKind::StructExtractInst:
-  case SILInstructionKind::TupleExtractInst:
-  case SILInstructionKind::UncheckedEnumDataInst:
-  case SILInstructionKind::StructInst:
-  case SILInstructionKind::TupleInst:
-  case SILInstructionKind::EnumInst:
-  case SILInstructionKind::UncheckedRefCastInst:
-  case SILInstructionKind::UncheckedBitwiseCastInst:
-    return cast<SingleValueInstruction>(I);
+  case ValueKind::StructExtractInst:
+  case ValueKind::TupleExtractInst:
+  case ValueKind::UncheckedEnumDataInst:
+  case ValueKind::StructInst:
+  case ValueKind::TupleInst:
+  case ValueKind::EnumInst:
+  case ValueKind::UncheckedRefCastInst:
+  case ValueKind::UncheckedBitwiseCastInst:
+    assert(I->hasValue() && "We assume these are unary");
+    return true;
   default:
-    return nullptr;
+    return false;
   }
 }
 
@@ -670,8 +667,8 @@ bool COWArrayOpt::checkSafeArrayValueUses(UserList &ArrayValueUsers) {
     /// Is this a unary transitive safe user instruction. This means that the
     /// instruction is safe only if all of its users are safe. Check this
     /// recursively.
-    if (auto inst = isTransitiveSafeUser(UseInst)) {
-      if (std::all_of(inst->use_begin(), inst->use_end(),
+    if (isTransitiveSafeUser(UseInst)) {
+      if (std::all_of(UseInst->use_begin(), UseInst->use_end(),
                       [this](Operand *Op) -> bool {
                         return checkSafeArrayElementUse(Op->getUser(),
                                                         Op->get());
@@ -768,8 +765,8 @@ bool COWArrayOpt::checkSafeArrayElementUse(SILInstruction *UseInst,
   // all of its users are safe array element uses, recursively check its uses
   // and return false if any of them are not transitive escape array element
   // uses.
-  if (auto result = isTransitiveSafeUser(UseInst)) {
-    return std::all_of(result->use_begin(), result->use_end(),
+  if (isTransitiveSafeUser(UseInst)) {
+    return std::all_of(UseInst->use_begin(), UseInst->use_end(),
                        [this, &ArrayVal](Operand *UI) -> bool {
                          return checkSafeArrayElementUse(UI->getUser(),
                                                          ArrayVal);
@@ -877,8 +874,7 @@ bool COWArrayOpt::isArrayValueReleasedBeforeMutate(
       return false;
     StartInst = ASI;
   } else {
-    // True because of the caller.
-    StartInst = V->getDefiningInstruction();
+    StartInst = cast<SILInstruction>(V);
   }
   for (auto II = std::next(SILBasicBlock::iterator(StartInst)),
             IE = StartInst->getParent()->end();
@@ -940,9 +936,9 @@ static SILInstruction *getInstAfter(SILInstruction *I) {
 static SILValue
 stripValueProjections(SILValue V,
                       SmallVectorImpl<SILInstruction *> &ValuePrjs) {
-  while (auto SEI = dyn_cast<StructExtractInst>(V)) {
-    ValuePrjs.push_back(SEI);
-    V = SEI->getOperand();
+  while (V->getKind() == ValueKind::StructExtractInst) {
+    ValuePrjs.push_back(cast<SILInstruction>(V));
+    V = cast<SILInstruction>(V)->getOperand(0);
   }
   return V;
 }
@@ -1236,9 +1232,8 @@ bool COWArrayOpt::hoistInLoopWithOnlyNonArrayValueMutatingOperations() {
         // are release before we hit a make_unique instruction.
         ApplyInst *SemCall = Sem;
         if (Sem.getKind() == ArrayCallKind::kGetElement) {
-          SILValue Elem = (Sem.hasGetElementDirectResult()
-                            ? Sem.getCallResult()
-                            : SemCall->getArgument(0));
+          SILValue Elem = (Sem.hasGetElementDirectResult() ? Inst :
+                           SemCall->getArgument(0));
           if (!Elem->getType().isTrivial(Module))
             CreatedNonTrivialValues.insert(Elem);
         } else if (Sem.getKind() == ArrayCallKind::kMakeMutable) {
@@ -1938,7 +1933,7 @@ class RegionCloner : public SILCloner<RegionCloner> {
   SILBasicBlock *StartBB;
   SmallPtrSet<SILBasicBlock *, 16> OutsideBBs;
 
-  friend class SILInstructionVisitor<RegionCloner>;
+  friend class SILVisitor<RegionCloner>;
   friend class SILCloner<RegionCloner>;
 
 public:
@@ -2091,8 +2086,7 @@ protected:
 
       // Update outside used instruction values.
       for (auto &Inst : *OrigBB) {
-        for (auto result : Inst.getResults())
-          updateSSAForValue(OrigBB, result, SSAUp);
+        updateSSAForValue(OrigBB, &Inst, SSAUp);
       }
     }
   }
@@ -2316,7 +2310,8 @@ class SwiftArrayOptPass : public SILFunctionTransform {
     auto *Fn = getFunction();
 
     // Don't hoist array property calls at Osize.
-    if (Fn->optimizeForSize())
+    auto OptMode = Fn->getModule().getOptions().Optimization;
+    if (OptMode == SILOptions::SILOptMode::OptimizeForSize)
       return;
 
     DominanceAnalysis *DA = PM->getAnalysis<DominanceAnalysis>();

@@ -120,7 +120,7 @@ public:
 
   ~FormalEvaluationContext() {
     assert(stack.empty() &&
-           "entries remaining on formal evaluation cleanup stack at end of function!");
+           "entries remaining on writeback stack at end of function!");
   }
 
   iterator begin() { return stack.begin(); }
@@ -176,7 +176,7 @@ public:
 class FormalEvaluationScope {
   SILGenFunction &SGF;
   llvm::Optional<FormalEvaluationContext::stable_iterator> savedDepth;
-  bool wasInFormalEvaluationScope;
+  bool wasInWritebackScope;
   bool wasInInOutConversionScope;
 
 public:
@@ -193,7 +193,7 @@ public:
     if (wasInInOutConversionScope)
       return;
 
-    assert(!isPopped() && "popping an already-popped scope!");
+    assert(!isPopped() && "popping an already-popped writeback scope!");
     popImpl();
     savedDepth.reset();
   }

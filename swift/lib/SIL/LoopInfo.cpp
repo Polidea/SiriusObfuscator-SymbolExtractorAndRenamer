@@ -39,7 +39,7 @@ bool SILLoop::canDuplicate(SILInstruction *I) const {
   // The deallocation of a stack allocation must be in the loop, otherwise the
   // deallocation will be fed by a phi node of two allocations.
   if (I->isAllocatingStack()) {
-    for (auto *UI : cast<SingleValueInstruction>(I)->getUses()) {
+    for (auto *UI : I->getUses()) {
       if (UI->getUser()->isDeallocatingStack()) {
         if (!contains(UI->getUser()->getParent()))
           return false;
@@ -60,12 +60,10 @@ bool SILLoop::canDuplicate(SILInstruction *I) const {
   }
 
   // We can't have a phi of two openexistential instructions of different UUID.
-  if (isa<OpenExistentialAddrInst>(I) || isa<OpenExistentialRefInst>(I) ||
-      isa<OpenExistentialMetatypeInst>(I) ||
-      isa<OpenExistentialValueInst>(I) || isa<OpenExistentialBoxInst>(I) ||
-      isa<OpenExistentialBoxValueInst>(I)) {
-    SingleValueInstruction *OI = cast<SingleValueInstruction>(I);
-    for (auto *UI : OI->getUses())
+  SILInstruction *OEI = dyn_cast<OpenExistentialAddrInst>(I);
+  if (OEI || (OEI = dyn_cast<OpenExistentialRefInst>(I)) ||
+      (OEI = dyn_cast<OpenExistentialMetatypeInst>(I))) {
+    for (auto *UI : OEI->getUses())
       if (!contains(UI->getUser()))
         return false;
     return true;

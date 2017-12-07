@@ -10,13 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import TestsUtils
-
-public let CaptureProp = BenchmarkInfo(
-  name: "CaptureProp",
-  runFunction: run_CaptureProp,
-  tags: [.validation, .api, .refcount])
-
 func sum(_ x:Int, y:Int) -> Int {
   return x + y
 }

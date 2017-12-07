@@ -2,7 +2,7 @@
 protocol EmptyProtocol { }
 
 protocol DefinitionsInProtocols {
-  init() {} // expected-error {{protocol initializers must not have bodies}}
+  init() {} // expected-error {{protocol initializers may not have bodies}}
   deinit {} // expected-error {{deinitializers may only be declared within a class}}
 }
 
@@ -207,12 +207,6 @@ protocol GetATuple {
 struct IntStringGetter : GetATuple {
   typealias Tuple = (i: Int, s: String)
   func getATuple() -> Tuple {}
-}
-
-protocol ClassConstrainedAssocType {
-  associatedtype T : class
-  // expected-error@-1 {{'class' constraint can only appear on protocol declarations}}
-  // expected-note@-2 {{did you mean to write an 'AnyObject' constraint?}}{{22-27=AnyObject}}
 }
 
 //===----------------------------------------------------------------------===//
@@ -454,7 +448,7 @@ struct X4 : P1 { // expected-error{{type 'X4' does not conform to protocol 'P1'}
 
 protocol ShouldntCrash {
   // rdar://16109996
-  let fullName: String { get }  // expected-error {{'let' declarations cannot be computed properties}} {{3-6=var}}
+  let fullName: String { get }  // expected-error {{'let' declarations cannot be computed properties}}
   
   // <rdar://problem/17200672> Let in protocol causes unclear errors and crashes
   let fullName2: String  // expected-error {{immutable property requirement must be declared as 'var' with a '{ get }' specifier}}
@@ -466,7 +460,7 @@ protocol ShouldntCrash {
 
 // rdar://problem/18168866
 protocol FirstProtocol {
-    weak var delegate : SecondProtocol? { get } // expected-error{{'weak' must not be applied to non-class-bound 'SecondProtocol'; consider adding a protocol conformance that has a class bound}}
+    weak var delegate : SecondProtocol? { get } // expected-error{{'weak' may only be applied to class and class-bound protocol types, not 'SecondProtocol'}}
 }
 
 protocol SecondProtocol {
@@ -497,16 +491,4 @@ protocol P4 {
 
 class C4 : P4 { // expected-error {{type 'C4' does not conform to protocol 'P4'}}
   associatedtype T = Int  // expected-error {{associated types can only be defined in a protocol; define a type or introduce a 'typealias' to satisfy an associated type requirement}} {{3-17=typealias}}
-}
-
-// <rdar://problem/25185722> Crash with invalid 'let' property in protocol
-protocol LetThereBeCrash {
-  let x: Int
-  // expected-error@-1 {{immutable property requirement must be declared as 'var' with a '{ get }' specifier}}
-  // expected-note@-2 {{declared here}}
-}
-
-extension LetThereBeCrash {
-  init() { x = 1 }
-  // expected-error@-1 {{'let' property 'x' may not be initialized directly; use "self.init(...)" or "self = ..." instead}}
 }

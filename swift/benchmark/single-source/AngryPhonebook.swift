@@ -15,11 +15,6 @@
 import TestsUtils
 import Foundation
 
-public let AngryPhonebook = BenchmarkInfo(
-  name: "AngryPhonebook",
-  runFunction: run_AngryPhonebook,
-  tags: [.validation, .api, .String])
-
 var words = [
   "James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph",
   "Charles", "Thomas", "Christopher", "Daniel", "Matthew", "Donald", "Anthony",

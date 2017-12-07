@@ -2,7 +2,8 @@
 
 // REQUIRES: objc_interop
 
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -173,15 +174,6 @@ class DiscardableResult : NSObject {
   }
 
   @objc init(evenMoreFun: ()) { super.init() }
-}
-
-// CHECK-LABEL: @interface InheritedInitializersRequired
-// CHECK-NEXT: - (nonnull instancetype)initWithEvenMoreFun OBJC_DESIGNATED_INITIALIZER;
-// CHECK-NEXT: - (nonnull instancetype)init SWIFT_UNAVAILABLE;
-// CHECK-NEXT: + (nonnull instancetype)new SWIFT_UNAVAILABLE;
-// CHECK-NEXT: @end
-@objc class InheritedInitializersRequired : InheritedInitializers {
-  @objc required init(evenMoreFun: ()) { super.init() }
 }
 
 // NEGATIVE-NOT: NotObjC

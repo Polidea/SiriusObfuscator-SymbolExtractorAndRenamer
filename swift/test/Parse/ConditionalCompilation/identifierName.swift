@@ -6,11 +6,9 @@ func f2(
   FOO: Int,
   swift: Int, _compiler_version: Int,
   os: Int, arch: Int, _endian: Int, _runtime: Int,
-  targetEnvironment: Int,
   arm: Int, i386: Int, macOS: Int, OSX: Int, Linux: Int,
   big: Int, little: Int,
-  _ObjC: Int, _Native: Int,
-  simulator: Int
+  _ObjC: Int, _Native: Int
 ) {
 
 #if FOO
@@ -25,8 +23,6 @@ func f2(
   _ = _runtime + _ObjC + _Native
 #elseif swift(>=1.0) && _compiler_version("3.*.0")
   _ = swift + _compiler_version
-#elseif targetEnvironment(simulator)
-  _ = targetEnvironment + simulator
 #endif
 
 }
@@ -35,11 +31,9 @@ func f2() {
   let
     FOO = 1, swift = 1, _compiler_version = 1,
     os = 1, arch = 1, _endian = 1, _runtime = 1,
-    targetEnvironment = 1,
     arm = 1, i386 = 1, macOS = 1, OSX = 1, Linux = 1,
     big = 1, little = 1,
-    _ObjC = 1, _Native = 1,
-    simulator = 1
+    _ObjC = 1, _Native = 1
 
 #if FOO
   _ = FOO
@@ -53,8 +47,6 @@ func f2() {
   _ = _runtime + _ObjC + _Native
 #elseif swift(>=1.0) && _compiler_version("3.*.0")
   _ = swift + _compiler_version
-#elseif targetEnvironment(simulator)
-  _ = targetEnvironment + simulator
 #endif
 
 }
@@ -63,11 +55,9 @@ struct S {
   let
     FOO = 1, swift = 1, _compiler_version = 1,
     os = 1, arch = 1, _endian = 1, _runtime = 1,
-    targetEnvironment = 1,
     arm = 1, i386 = 1, macOS = 1, OSX = 1, Linux = 1,
     big = 1, little = 1,
-    _ObjC = 1, _Native = 1,
-    simulator = 1
+    _ObjC = 1, _Native = 1
 
 #if FOO
 #elseif os(macOS) && os(OSX) && os(Linux)
@@ -75,7 +65,6 @@ struct S {
 #elseif _endian(big) && _endian(little)
 #elseif _runtime(_ObjC) && _runtime(_Native)
 #elseif swift(>=1.0) && _compiler_version("3.*.0")
-#elseif targetEnvironment(simulator)
 #endif
 
 }

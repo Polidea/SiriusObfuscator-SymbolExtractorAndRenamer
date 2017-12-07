@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "swift/Basic/Range.h"
 #include "swift/Demangling/Demangle.h"
 #include "swift/Reflection/TypeRef.h"
 #include "swift/Reflection/TypeRefBuilder.h"
@@ -125,45 +124,11 @@ public:
       break;
     }
 
-    OS << '\n';
-    Indent += 2;
-    printHeader("parameters");
-
-    auto &parameters = F->getParameters();
-    for (const auto &param : parameters) {
-      auto flags = param.getFlags();
-
-      if (!flags.isNone()) {
-        Indent += 2;
-        OS << '\n';
-      }
-
-      if (flags.isInOut())
-        printHeader("inout");
-
-      if (flags.isVariadic())
-        printHeader("variadic");
-
-      if (flags.isShared())
-        printHeader("shared");
-
-      printRec(param.getType());
-
-      if (!flags.isNone()) {
-        Indent -= 2;
-        OS << ')';
-      }
-    }
-
-    if (parameters.empty())
-      OS << ')';
-
-    OS << '\n';
-    printHeader("result");
+    for (auto Arg : F->getArguments())
+      printRec(Arg);
     printRec(F->getResult());
-    OS << ')';
 
-    Indent -= 2;
+    OS << ')';
   }
 
   void visitProtocolTypeRef(const ProtocolTypeRef *P) {
@@ -290,8 +255,8 @@ struct TypeRefIsConcrete
   }
 
   bool visitFunctionTypeRef(const FunctionTypeRef *F) {
-    for (const auto &Param : F->getParameters())
-      if (!visit(Param.getType()))
+    for (auto Argument : F->getArguments())
+      if (!visit(Argument))
         return false;
     return visit(F->getResult());
   }
@@ -509,15 +474,13 @@ public:
   }
 
   const TypeRef *visitFunctionTypeRef(const FunctionTypeRef *F) {
-    std::vector<remote::FunctionParam<const TypeRef *>> SubstitutedParams;
-    for (const auto &Param : F->getParameters()) {
-      auto typeRef = Param.getType();
-      SubstitutedParams.push_back(Param.withType(visit(typeRef)));
-    }
+    std::vector<const TypeRef *> SubstitutedArguments;
+    for (auto Argument : F->getArguments())
+      SubstitutedArguments.push_back(visit(Argument));
 
     auto SubstitutedResult = visit(F->getResult());
 
-    return FunctionTypeRef::create(Builder, SubstitutedParams,
+    return FunctionTypeRef::create(Builder, SubstitutedArguments,
                                    SubstitutedResult, F->getFlags());
   }
 
@@ -624,15 +587,13 @@ public:
   }
 
   const TypeRef *visitFunctionTypeRef(const FunctionTypeRef *F) {
-    std::vector<remote::FunctionParam<const TypeRef *>> SubstitutedParams;
-    for (const auto &Param : F->getParameters()) {
-      auto typeRef = Param.getType();
-      SubstitutedParams.push_back(Param.withType(visit(typeRef)));
-    }
+    std::vector<const TypeRef *> SubstitutedArguments;
+    for (auto Argument : F->getArguments())
+      SubstitutedArguments.push_back(visit(Argument));
 
     auto SubstitutedResult = visit(F->getResult());
 
-    return FunctionTypeRef::create(Builder, SubstitutedParams,
+    return FunctionTypeRef::create(Builder, SubstitutedArguments,
                                    SubstitutedResult, F->getFlags());
   }
 
@@ -826,18 +787,17 @@ bool TypeRef::deriveSubstitutions(GenericArgumentMap &Subs,
     }
   }
 
-  // Decompose parameter and result types in parallel.
+  // Decompose argument and result types in parallel.
   if (auto *O = dyn_cast<FunctionTypeRef>(OrigTR)) {
     if (auto *S = dyn_cast<FunctionTypeRef>(SubstTR)) {
-      auto oParams = O->getParameters();
-      auto sParams = S->getParameters();
 
-      if (oParams.size() != sParams.size())
+      if (O->getArguments().size() != S->getArguments().size())
         return false;
 
-      for (auto index : indices(oParams)) {
-        if (!deriveSubstitutions(Subs, oParams[index].getType(),
-                                 sParams[index].getType()))
+      for (unsigned i = 0, e = O->getArguments().size(); i < e; i++) {
+        if (!deriveSubstitutions(Subs,
+                                 O->getArguments()[i],
+                                 S->getArguments()[i]))
           return false;
       }
 

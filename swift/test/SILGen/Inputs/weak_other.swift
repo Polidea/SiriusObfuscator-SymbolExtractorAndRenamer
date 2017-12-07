@@ -11,7 +11,7 @@ extension Router {
 }
 
 public protocol Environment : class {
-  var router: Router { get }
+  unowned var router: Router { get }
 }
 
 open class UI {

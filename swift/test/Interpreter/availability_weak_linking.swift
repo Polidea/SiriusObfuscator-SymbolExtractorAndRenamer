@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 // RUN: cp -R %S/Inputs/FakeUnavailableObjCFramework.framework %t
 // RUN: %target-clang -dynamiclib %S/Inputs/FakeUnavailableObjCFramework.m -fmodules -F %t -framework Foundation -o %t/FakeUnavailableObjCFramework.framework/FakeUnavailableObjCFramework
 

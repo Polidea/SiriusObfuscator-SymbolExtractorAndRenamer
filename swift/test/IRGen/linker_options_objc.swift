@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swiftc_driver -emit-module -o %t -module-name Empty -module-link-name swiftEmpty %S/../Inputs/empty.swift
 // RUN: %target-swiftc_driver %s -I %t -emit-ir | %FileCheck %s
 
@@ -9,6 +10,6 @@ import Empty
 // Check that libobjc is always autolinked together with libswiftCore on
 // platforms that support Objective-C.
 
-// CHECK: !llvm.linker.options =
+// CHECK: !{{.*}} = !{i32 6, !"Linker Options", !{{.*}}}
 // CHECK-DAG: !{{.*}} = !{!"-lswiftCore"}
 // CHECK-DAG: !{{.*}} = !{!"-lobjc"}

@@ -176,8 +176,10 @@
 using namespace swift;
 using namespace Lowering;
 
+namespace {
+
 static std::string
-getMaterializeForSetCallbackName(Optional<ProtocolConformanceRef> conformance,
+getMaterializeForSetCallbackName(ProtocolConformance *conformance,
                                  FuncDecl *requirement) {
 
   DeclContext *dc = requirement;
@@ -193,13 +195,12 @@ getMaterializeForSetCallbackName(Optional<ProtocolConformanceRef> conformance,
 
   Mangle::ASTMangler Mangler;
   std::string New;
-  if (conformance && conformance->isConcrete()) {
+  if (conformance) {
     // Concrete witness thunk for a conformance:
     //
     // Mangle this as if it were a conformance thunk for a closure
     // within the requirement.
-    return Mangler.mangleClosureWitnessThunk(conformance->getConcrete(),
-                                             &closure);
+    return Mangler.mangleClosureWitnessThunk(conformance, &closure);
   }
   // Default witness thunk or concrete implementation:
   //
@@ -207,8 +208,6 @@ getMaterializeForSetCallbackName(Optional<ProtocolConformanceRef> conformance,
   return Mangler.mangleClosureEntity(&closure,
                                  Mangle::ASTMangler::SymbolKind::Default);
 }
-
-namespace {
 
 /// A helper class for emitting materializeForSet.
 ///
@@ -256,25 +255,28 @@ struct MaterializeForSetEmitter {
   SILType WitnessStorageType;
 
   SILFunctionTypeRepresentation CallbackRepresentation;
-  Optional<ProtocolConformanceRef> WitnessMethodConformance;
 
 private:
-  MaterializeForSetEmitter(
-      SILGenModule &SGM, SILLinkage linkage, FuncDecl *witness,
-      SubstitutionList subs, GenericEnvironment *genericEnv,
-      Type selfInterfaceType, Type selfType,
-      SILFunctionTypeRepresentation callbackRepresentation,
-      Optional<ProtocolConformanceRef> witnessMethodConformance)
-      : SGM(SGM), Linkage(linkage), RequirementStorage(nullptr),
-        RequirementStoragePattern(AbstractionPattern::getInvalid()),
-        Witness(witness), WitnessStorage(witness->getAccessorStorageDecl()),
-        WitnessStoragePattern(AbstractionPattern::getInvalid()),
-        WitnessSubs(subs), GenericEnv(genericEnv),
-        SelfInterfaceType(selfInterfaceType->getCanonicalType()),
-        SubstSelfType(selfType->getCanonicalType()),
-        TheAccessSemantics(AccessSemantics::Ordinary), IsSuper(false),
-        CallbackRepresentation(callbackRepresentation),
-        WitnessMethodConformance(witnessMethodConformance) {
+
+  MaterializeForSetEmitter(SILGenModule &SGM, SILLinkage linkage,
+                           FuncDecl *witness, SubstitutionList subs,
+                           GenericEnvironment *genericEnv,
+                           Type selfInterfaceType, Type selfType,
+                           SILFunctionTypeRepresentation callbackRepresentation)
+    : SGM(SGM),
+      Linkage(linkage),
+      RequirementStorage(nullptr),
+      RequirementStoragePattern(AbstractionPattern::getInvalid()),
+      Witness(witness),
+      WitnessStorage(witness->getAccessorStorageDecl()),
+      WitnessStoragePattern(AbstractionPattern::getInvalid()),
+      WitnessSubs(subs),
+      GenericEnv(genericEnv),
+      SelfInterfaceType(selfInterfaceType->getCanonicalType()),
+      SubstSelfType(selfType->getCanonicalType()),
+      TheAccessSemantics(AccessSemantics::Ordinary),
+      IsSuper(false),
+      CallbackRepresentation(callbackRepresentation) {
 
     // Determine the formal type of the 'self' parameter.
     if (WitnessStorage->isStatic()) {
@@ -302,14 +304,17 @@ private:
   }
 
 public:
+
   static MaterializeForSetEmitter
-  forWitnessThunk(SILGenModule &SGM, ProtocolConformanceRef conformance,
-                  SILLinkage linkage, Type selfInterfaceType, Type selfType,
-                  GenericEnvironment *genericEnv, FuncDecl *requirement,
-                  FuncDecl *witness, SubstitutionList witnessSubs) {
-    MaterializeForSetEmitter emitter(
-        SGM, linkage, witness, witnessSubs, genericEnv, selfInterfaceType,
-        selfType, SILFunctionTypeRepresentation::WitnessMethod, conformance);
+  forWitnessThunk(SILGenModule &SGM,
+                  ProtocolConformance *conformance, SILLinkage linkage,
+                  Type selfInterfaceType, Type selfType,
+                  GenericEnvironment *genericEnv,
+                  FuncDecl *requirement, FuncDecl *witness,
+                  SubstitutionList witnessSubs) {
+    MaterializeForSetEmitter emitter(SGM, linkage, witness, witnessSubs,
+                                     genericEnv, selfInterfaceType, selfType,
+                                     SILFunctionTypeRepresentation::WitnessMethod);
     emitter.RequirementStorage = requirement->getAccessorStorageDecl();
 
     // Determine the desired abstraction pattern of the storage type
@@ -336,10 +341,11 @@ public:
     Type selfType = witness->mapTypeIntoContext(selfInterfaceType);
 
     SILDeclRef constant(witness);
-    MaterializeForSetEmitter emitter(
-        SGM, constant.getLinkage(ForDefinition), witness, witnessSubs,
-        witness->getGenericEnvironment(), selfInterfaceType, selfType,
-        SILFunctionTypeRepresentation::Method, None);
+    MaterializeForSetEmitter emitter(SGM, constant.getLinkage(ForDefinition),
+                                     witness, witnessSubs,
+                                     witness->getGenericEnvironment(),
+                                     selfInterfaceType, selfType,
+                                     SILFunctionTypeRepresentation::Method);
 
     emitter.RequirementStorage = emitter.WitnessStorage;
     emitter.RequirementStoragePattern = emitter.WitnessStoragePattern;
@@ -359,7 +365,7 @@ public:
       emitter.TheAccessSemantics = AccessSemantics::DirectToAccessor;
 
     emitter.CallbackName = getMaterializeForSetCallbackName(
-        /*conformance=*/None, witness);
+        /*conformance=*/nullptr, witness);
     return emitter;
   }
 
@@ -379,22 +385,22 @@ public:
     return false;
   }
 
-  void emit(SILGenFunction &SGF);
+  void emit(SILGenFunction &gen);
 
-  SILValue emitUsingStorage(SILGenFunction &SGF, SILLocation loc,
+  SILValue emitUsingStorage(SILGenFunction &gen, SILLocation loc,
                             ManagedValue self, RValue &&indices,
                             SILValue callbackBuffer, SILFunction *&callback);
   SILFunction *createEndUnpairedAccessesCallback(SILFunction &F,
                              const SILGenFunction::UnpairedAccesses &accesses);
 
-  SILValue emitUsingAddressor(SILGenFunction &SGF, SILLocation loc,
+  SILValue emitUsingAddressor(SILGenFunction &gen, SILLocation loc,
                               ManagedValue self, RValue &&indices,
                               SILValue callbackBuffer, SILFunction *&callback);
   SILFunction *createAddressorCallback(SILFunction &F,
                                        SILType ownerType,
                                        AddressorKind addressorKind);
 
-  SILValue emitUsingGetterSetter(SILGenFunction &SGF, SILLocation loc,
+  SILValue emitUsingGetterSetter(SILGenFunction &gen, SILLocation loc,
                                  ManagedValue self, RValue &&indices,
                                  SILValue resultBuffer,
                                  SILValue callbackBuffer,
@@ -403,7 +409,7 @@ public:
                                     const TypeLowering *indicesTL,
                                     CanType indicesFormalType);
 
-  using GeneratorFn = llvm::function_ref<void(SILGenFunction &SGF,
+  using GeneratorFn = llvm::function_ref<void(SILGenFunction &gen,
                                               SILLocation loc,
                                               SILValue valueBuffer,
                                               SILValue callbackBuffer,
@@ -411,15 +417,16 @@ public:
 
   SILFunction *createCallback(SILFunction &F, GeneratorFn generator);
 
-  RValue collectIndicesFromParameters(SILGenFunction &SGF, SILLocation loc,
+  RValue collectIndicesFromParameters(SILGenFunction &gen, SILLocation loc,
                                       ArrayRef<ManagedValue> sourceIndices);
 
-  LValue buildSelfLValue(SILGenFunction &SGF, SILLocation loc,
+  LValue buildSelfLValue(SILGenFunction &gen, SILLocation loc,
                          ManagedValue self) {
     // All of the complexity here is tied up with class types.  If the
     // substituted type isn't a reference type, then we can't have a
     // class-bounded protocol or inheritance, and the simple case just
     // works.
+    AbstractionPattern selfPattern(SubstSelfType);
 
     // Metatypes and bases of non-mutating setters on value types
     //  are always rvalues.
@@ -427,50 +434,40 @@ public:
       return LValue::forValue(self, SubstSelfType);
     }
 
-    auto selfParam = computeSelfParam(Witness);
     CanType witnessSelfType =
-      selfParam.getPlainType()->getCanonicalType(GenericSig);
+      Witness->computeInterfaceSelfType()->getCanonicalType(
+        GenericSig, *SGM.M.getSwiftModule());
     witnessSelfType = getSubstWitnessInterfaceType(witnessSelfType);
+    witnessSelfType = witnessSelfType->getInOutObjectType()
+      ->getCanonicalType();
 
-    // If the witness wants an inout and the types match, just use
-    // this value.
-    if (selfParam.isInOut() && witnessSelfType == SubstSelfType) {
-      return LValue::forValue(self, witnessSelfType);
-    }
-
-    // Otherwise, load and do a derived-to-base conversion.
-    // It's possible that this could cause an unnecessary
+    // Eagerly loading here could cause an unnecessary
     // load+materialize in some cases, but it's not really important.
     if (self.getType().isAddress()) {
-      self = SGF.B.createLoadBorrow(loc, self);
+      self = gen.B.createLoadBorrow(loc, self);
     }
 
     // Do a derived-to-base conversion if necessary.
     if (witnessSelfType != SubstSelfType) {
-      auto selfSILType = SGF.getLoweredType(witnessSelfType);
-      self = SGF.B.createUpcast(loc, self, selfSILType);
-    }
-
-    // Put the object back in memory if necessary.
-    if (selfParam.isInOut()) {
-      self = self.materialize(SGF, loc);
+      auto selfSILType = gen.getLoweredType(witnessSelfType);
+      self = gen.B.createUpcast(loc, self, selfSILType);
     }
 
     // Recreate as a borrowed value.
     return LValue::forValue(self, witnessSelfType);
   }
 
-  LValue buildLValue(SILGenFunction &SGF, SILLocation loc,
+  LValue buildLValue(SILGenFunction &gen, SILLocation loc,
                      ManagedValue self, RValue &&indices,
                      AccessKind accessKind) {
     // Begin with the 'self' value.
-    LValue lv = buildSelfLValue(SGF, loc, self);
+    LValue lv = buildSelfLValue(gen, loc, self);
 
     auto strategy =
       WitnessStorage->getAccessStrategy(TheAccessSemantics, accessKind);
 
     // Drill down to the member storage.
-    lv.addMemberComponent(SGF, loc, WitnessStorage, WitnessSubs,
+    lv.addMemberComponent(gen, loc, WitnessStorage, WitnessSubs,
                           LValueOptions(), IsSuper,
                           accessKind, TheAccessSemantics, strategy,
                           SubstStorageType, std::move(indices));
@@ -517,14 +514,14 @@ public:
 
 } // end anonymous namespace
 
-void MaterializeForSetEmitter::emit(SILGenFunction &SGF) {
+void MaterializeForSetEmitter::emit(SILGenFunction &gen) {
   SILLocation loc = Witness;
   loc.markAutoGenerated();
 
-  SGF.F.setBare(IsBare);
+  gen.F.setBare(IsBare);
 
   SmallVector<ManagedValue, 4> params;
-  SGF.collectThunkParams(loc, params);
+  gen.collectThunkParams(loc, params, /*allowPlusZero*/ true);
 
   ManagedValue self = params.back();
   SILValue resultBuffer = params[0].getUnmanagedValue();
@@ -545,7 +542,7 @@ void MaterializeForSetEmitter::emit(SILGenFunction &SGF) {
   // Handle the indices.
   RValue indicesRV;
   if (isa<SubscriptDecl>(WitnessStorage)) {
-    indicesRV = collectIndicesFromParameters(SGF, loc, indices);
+    indicesRV = collectIndicesFromParameters(gen, loc, indices);
   } else {
     assert(indices.empty() && "indices for a non-subscript?");
   }
@@ -560,51 +557,51 @@ void MaterializeForSetEmitter::emit(SILGenFunction &SGF) {
     llvm_unreachable("materializeForSet should never engage in behavior init");
   
   case AccessStrategy::Storage:
-    address = emitUsingStorage(SGF, loc, self, std::move(indicesRV),
+    address = emitUsingStorage(gen, loc, self, std::move(indicesRV),
                                callbackBuffer, callbackFn);
     break;
 
   case AccessStrategy::Addressor:
-    address = emitUsingAddressor(SGF, loc, self, std::move(indicesRV),
+    address = emitUsingAddressor(gen, loc, self, std::move(indicesRV),
                                  callbackBuffer, callbackFn);
     break;
 
   case AccessStrategy::DirectToAccessor:
   case AccessStrategy::DispatchToAccessor:
-    address = emitUsingGetterSetter(SGF, loc, self, std::move(indicesRV),
+    address = emitUsingGetterSetter(gen, loc, self, std::move(indicesRV),
                                     resultBuffer, callbackBuffer, callbackFn);
     break;
   }
 
   // Return the address as a Builtin.RawPointer.
-  SILType rawPointerTy = SILType::getRawPointerType(SGF.getASTContext());
-  address = SGF.B.createAddressToPointer(loc, address, rawPointerTy);
+  SILType rawPointerTy = SILType::getRawPointerType(gen.getASTContext());
+  address = gen.B.createAddressToPointer(loc, address, rawPointerTy);
 
   SILType resultTupleTy =
-      SGF.F.mapTypeIntoContext(SGF.F.getConventions().getSILResultType());
+      gen.F.mapTypeIntoContext(gen.F.getConventions().getSILResultType());
   SILType optCallbackTy = resultTupleTy.getTupleElementType(1);
 
   // Form the callback.
   SILValue callback;
   if (callbackFn) {
     // Make a reference to the callback.
-    callback = SGF.B.createFunctionRef(loc, callbackFn);
-    callback = SGF.B.createThinFunctionToPointer(loc, callback, rawPointerTy);
-    callback = SGF.B.createOptionalSome(loc, callback, optCallbackTy);
+    callback = gen.B.createFunctionRef(loc, callbackFn);
+    callback = gen.B.createThinFunctionToPointer(loc, callback, rawPointerTy);
+    callback = gen.B.createOptionalSome(loc, callback, optCallbackTy);
   } else {
     // There is no callback.
-    callback = SGF.B.createOptionalNone(loc, optCallbackTy);
+    callback = gen.B.createOptionalNone(loc, optCallbackTy);
   }
 
   // Form the result and return.
-  auto result = SGF.B.createTuple(loc, resultTupleTy, { address, callback });
-  SGF.Cleanups.emitCleanupsForReturn(CleanupLocation::get(loc));
-  SGF.B.createReturn(loc, result);
+  auto result = gen.B.createTuple(loc, resultTupleTy, { address, callback });
+  gen.Cleanups.emitCleanupsForReturn(CleanupLocation::get(loc));
+  gen.B.createReturn(loc, result);
 }
 
 /// Recursively walk into the given formal index type, expanding tuples,
 /// in order to form the arguments to a subscript accessor.
-static void translateIndices(SILGenFunction &SGF, SILLocation loc,
+static void translateIndices(SILGenFunction &gen, SILLocation loc,
                              AbstractionPattern pattern, CanType formalType,
                              ArrayRef<ManagedValue> &sourceIndices,
                              RValue &result) {
@@ -612,7 +609,7 @@ static void translateIndices(SILGenFunction &SGF, SILLocation loc,
   if (pattern.isTuple()) {
     auto formalTupleType = cast<TupleType>(formalType);
     for (auto i : indices(formalTupleType.getElementTypes())) {
-      translateIndices(SGF, loc, pattern.getTupleElementType(i),
+      translateIndices(gen, loc, pattern.getTupleElementType(i),
                        formalTupleType.getElementType(i),
                        sourceIndices, result);
     }
@@ -626,31 +623,32 @@ static void translateIndices(SILGenFunction &SGF, SILLocation loc,
   // We're going to build an RValue here, so make sure we translate
   // indirect arguments to be scalar if we have a loadable type.
   if (value.getType().isAddress()) {
-    auto &valueTL = SGF.getTypeLowering(value.getType());
+    auto &valueTL = gen.getTypeLowering(value.getType());
     if (!valueTL.isAddressOnly()) {
-      value = SGF.emitLoad(loc, value.forward(SGF), valueTL,
+      value = gen.emitLoad(loc, value.forward(gen), valueTL,
                            SGFContext(), IsTake);
     }
   }
 
   // Reabstract the subscripts from the requirement pattern to the
   // formal type.
-  value = SGF.emitOrigToSubstValue(loc, value, pattern, formalType);
+  value = gen.emitOrigToSubstValue(loc, value, pattern, formalType);
 
   // Invoking the accessor will expect a value of the formal type, so
   // don't reabstract to that here.
 
   // Add that to the result, further expanding if necessary.
-  result.addElement(SGF, value, formalType, loc);
+  result.addElement(gen, value, formalType, loc);
 }
 
 RValue MaterializeForSetEmitter::
-collectIndicesFromParameters(SILGenFunction &SGF, SILLocation loc,
+collectIndicesFromParameters(SILGenFunction &gen, SILLocation loc,
                              ArrayRef<ManagedValue> sourceIndices) {
   auto witnessSubscript = cast<SubscriptDecl>(WitnessStorage);
   CanType witnessIndicesType =
     witnessSubscript->getIndicesInterfaceType()
-      ->getCanonicalType(GenericSig);
+      ->getCanonicalType(GenericSig,
+                         *SGM.M.getSwiftModule());
   CanType substIndicesType =
     getSubstWitnessInterfaceType(witnessIndicesType);
 
@@ -661,7 +659,7 @@ collectIndicesFromParameters(SILGenFunction &SGF, SILLocation loc,
 
   // Translate and reabstract the index values by recursively walking
   // the abstracted index type.
-  translateIndices(SGF, loc, pattern, substIndicesType,
+  translateIndices(gen, loc, pattern, substIndicesType,
                    sourceIndices, result);
   assert(sourceIndices.empty() && "index value not claimed!");
 
@@ -670,9 +668,11 @@ collectIndicesFromParameters(SILGenFunction &SGF, SILLocation loc,
 
 SILFunction *MaterializeForSetEmitter::createCallback(SILFunction &F,
                                                       GeneratorFn generator) {
-  auto callbackType = SGM.Types.getMaterializeForSetCallbackType(
-      WitnessStorage, GenericSig, SelfInterfaceType, CallbackRepresentation,
-      WitnessMethodConformance);
+  auto callbackType =
+      SGM.Types.getMaterializeForSetCallbackType(WitnessStorage,
+                                                 GenericSig,
+                                                 SelfInterfaceType,
+                                                 CallbackRepresentation);
 
   auto *genericEnv = GenericEnv;
   if (GenericEnv && GenericEnv->getGenericSignature()->areAllParamsConcrete())
@@ -686,21 +686,22 @@ SILFunction *MaterializeForSetEmitter::createCallback(SILFunction &F,
 
   auto callback = SGM.M.createFunction(
       callbackLinkage, CallbackName, callbackType, genericEnv,
-      SILLocation(Witness), IsBare, F.isTransparent(), F.isSerialized(),
-      F.getEntryCount(), IsNotThunk, SubclassScope::NotApplicable,
-      /*inlineStrategy=*/InlineDefault, /*EK=*/EffectsKind::Unspecified,
+      SILLocation(Witness), IsBare, F.isTransparent(), F.isSerialized(), IsNotThunk,
+      SubclassScope::NotApplicable,
+      /*inlineStrategy=*/InlineDefault,
+      /*EK=*/EffectsKind::Unspecified,
       /*InsertBefore=*/&F);
 
   callback->setDebugScope(new (SGM.M) SILDebugScope(Witness, callback));
 
   PrettyStackTraceSILFunction X("silgen materializeForSet callback", callback);
   {
-    SILGenFunction SGF(SGM, *callback);
+    SILGenFunction gen(SGM, *callback);
 
     auto makeParam = [&](unsigned index) -> SILArgument * {
-      SILType type = SGF.F.mapTypeIntoContext(
-          SGF.getSILType(callbackType->getParameters()[index]));
-      return SGF.F.begin()->createFunctionArgument(type);
+      SILType type = gen.F.mapTypeIntoContext(
+          gen.getSILType(callbackType->getParameters()[index]));
+      return gen.F.begin()->createFunctionArgument(type);
     };
 
     // Add arguments for all the parameters.
@@ -714,13 +715,13 @@ SILFunction *MaterializeForSetEmitter::createCallback(SILFunction &F,
 
     // Call the generator function we were provided.
     {
-      LexicalScope scope(SGF, CleanupLocation::get(loc));
-      generator(SGF, loc, valueBuffer, storageBuffer, self);
+      LexicalScope scope(gen, CleanupLocation::get(loc));
+      generator(gen, loc, valueBuffer, storageBuffer, self);
     }
 
     // Return void.
-    auto result = SGF.emitEmptyTuple(loc);
-    SGF.B.createReturn(loc, result);
+    auto result = gen.emitEmptyTuple(loc);
+    gen.B.createReturn(loc, result);
   }
 
   callback->verify();
@@ -729,22 +730,22 @@ SILFunction *MaterializeForSetEmitter::createCallback(SILFunction &F,
 
 /// Emit a materializeForSet operation that projects storage, assuming
 /// that no cleanups or callbacks are required.
-SILValue MaterializeForSetEmitter::emitUsingStorage(SILGenFunction &SGF,
+SILValue MaterializeForSetEmitter::emitUsingStorage(SILGenFunction &gen,
                                                     SILLocation loc,
                                                     ManagedValue self,
                                                     RValue &&indices,
                                                     SILValue callbackBuffer,
                                                     SILFunction *&callback) {
-  LValue lvalue = buildLValue(SGF, loc, self, std::move(indices),
+  LValue lvalue = buildLValue(gen, loc, self, std::move(indices),
                               AccessKind::ReadWrite);
 
   SILGenFunction::UnpairedAccesses unpairedAccesses(callbackBuffer);
-  SGF.UnpairedAccessesForMaterializeForSet = &unpairedAccesses;
+  gen.UnpairedAccessesForMaterializeForSet = &unpairedAccesses;
 
   ManagedValue address =
-    SGF.emitAddressOfLValue(loc, std::move(lvalue), AccessKind::ReadWrite);
+    gen.emitAddressOfLValue(loc, std::move(lvalue), AccessKind::ReadWrite);
 
-  SGF.UnpairedAccessesForMaterializeForSet = nullptr;
+  gen.UnpairedAccessesForMaterializeForSet = nullptr;
 
   // Create a callback to end the unpaired accesses if any were pushed.
   if (unpairedAccesses.NumAccesses) {
@@ -754,7 +755,7 @@ SILValue MaterializeForSetEmitter::emitUsingStorage(SILGenFunction &SGF,
     assert(unpairedAccesses.NumAccesses == 1 &&
            "multiple unpaired accesses not supported");
 
-    callback = createEndUnpairedAccessesCallback(SGF.F, unpairedAccesses);
+    callback = createEndUnpairedAccessesCallback(gen.F, unpairedAccesses);
   }
 
   return address.getUnmanagedValue();
@@ -763,12 +764,12 @@ SILValue MaterializeForSetEmitter::emitUsingStorage(SILGenFunction &SGF,
 SILFunction *
 MaterializeForSetEmitter::createEndUnpairedAccessesCallback(SILFunction &F,
                      const SILGenFunction::UnpairedAccesses &unpairedAccesses) {
-  return createCallback(F, [&](SILGenFunction &SGF, SILLocation loc,
+  return createCallback(F, [&](SILGenFunction &gen, SILLocation loc,
                                SILValue resultBuffer, SILValue callbackStorage,
                                SILValue self) {
     assert(unpairedAccesses.NumAccesses == 1 &&
            "multiple unpaired accesses not supported");
-    SGF.B.createEndUnpairedAccess(loc, callbackStorage,
+    gen.B.createEndUnpairedAccess(loc, callbackStorage,
                                   SILAccessEnforcement::Dynamic,
                                   /*aborting*/ false);
   });
@@ -780,7 +781,7 @@ MaterializeForSetEmitter::createEndUnpairedAccessesCallback(SILFunction &F,
 ///
 /// If it's not an unsafe addressor, this uses a callback function to
 /// write the l-value back.
-SILValue MaterializeForSetEmitter::emitUsingAddressor(SILGenFunction &SGF,
+SILValue MaterializeForSetEmitter::emitUsingAddressor(SILGenFunction &gen,
                                                       SILLocation loc,
                                                       ManagedValue self,
                                                       RValue &&indices,
@@ -789,17 +790,17 @@ SILValue MaterializeForSetEmitter::emitUsingAddressor(SILGenFunction &SGF,
   bool isDirect = (TheAccessSemantics != AccessSemantics::Ordinary);
 
   // Call the mutable addressor.
-  auto addressor = SGF.getAddressorDeclRef(WitnessStorage,
+  auto addressor = gen.getAddressorDeclRef(WitnessStorage,
                                            AccessKind::ReadWrite,
                                            isDirect);
   std::pair<ManagedValue, ManagedValue> result;
   {
-    FormalEvaluationScope Scope(SGF);
+    FormalEvaluationScope Scope(gen);
 
     SILType addressType = WitnessStorageType.getAddressType();
     ArgumentSource baseRV =
-        SGF.prepareAccessorBaseArg(loc, self, SubstSelfType, addressor);
-    result = SGF.emitAddressorAccessor(loc, addressor, WitnessSubs,
+        gen.prepareAccessorBaseArg(loc, self, SubstSelfType, addressor);
+    result = gen.emitAddressorAccessor(loc, addressor, WitnessSubs,
                                        std::move(baseRV), IsSuper, isDirect,
                                        std::move(indices), addressType);
   }
@@ -813,12 +814,12 @@ SILValue MaterializeForSetEmitter::emitUsingAddressor(SILGenFunction &SGF,
     assert(addressorKind == AddressorKind::Unsafe);
   } else {
     SILValue allocatedCallbackBuffer =
-      SGF.B.createAllocValueBuffer(loc, owner.getType(), callbackBuffer);
-    SGF.B.emitStoreValueOperation(loc, owner.forward(SGF),
+      gen.B.createAllocValueBuffer(loc, owner.getType(), callbackBuffer);
+    gen.B.emitStoreValueOperation(loc, owner.forward(gen),
                                   allocatedCallbackBuffer,
                                   StoreOwnershipQualifier::Init);
 
-    callback = createAddressorCallback(SGF.F, owner.getType(), addressorKind);
+    callback = createAddressorCallback(gen.F, owner.getType(), addressorKind);
   }
 
   return address;
@@ -830,12 +831,12 @@ SILFunction *
 MaterializeForSetEmitter::createAddressorCallback(SILFunction &F,
                                                   SILType ownerType,
                                                   AddressorKind addressorKind) {
-  return createCallback(F, [&](SILGenFunction &SGF, SILLocation loc,
+  return createCallback(F, [&](SILGenFunction &gen, SILLocation loc,
                             SILValue resultBuffer, SILValue callbackStorage,
                             SILValue self) {
     auto ownerAddress =
-      SGF.B.createProjectValueBuffer(loc, ownerType, callbackStorage);
-    auto owner = SGF.B.emitLoadValueOperation(loc, ownerAddress,
+      gen.B.createProjectValueBuffer(loc, ownerType, callbackStorage);
+    auto owner = gen.B.emitLoadValueOperation(loc, ownerAddress,
                                               LoadOwnershipQualifier::Take);
 
     switch (addressorKind) {
@@ -845,15 +846,15 @@ MaterializeForSetEmitter::createAddressorCallback(SILFunction &F,
 
     case AddressorKind::Owning:
     case AddressorKind::NativeOwning:
-      SGF.B.createDestroyValue(loc, owner);
+      gen.B.createDestroyValue(loc, owner);
       break;
 
     case AddressorKind::NativePinning:
-      SGF.B.createStrongUnpin(loc, owner, SGF.B.getDefaultAtomicity());
+      gen.B.createStrongUnpin(loc, owner, gen.B.getDefaultAtomicity());
       break;
     }
 
-    SGF.B.createDeallocValueBuffer(loc, ownerType, callbackStorage);
+    gen.B.createDeallocValueBuffer(loc, ownerType, callbackStorage);
   });
 }
 
@@ -861,7 +862,7 @@ MaterializeForSetEmitter::createAddressorCallback(SILFunction &F,
 /// into the result buffer.  This operation creates a callback to write
 /// the l-value back.
 SILValue
-MaterializeForSetEmitter::emitUsingGetterSetter(SILGenFunction &SGF,
+MaterializeForSetEmitter::emitUsingGetterSetter(SILGenFunction &gen,
                                                 SILLocation loc,
                                                 ManagedValue self,
                                                 RValue &&indices,
@@ -874,40 +875,40 @@ MaterializeForSetEmitter::emitUsingGetterSetter(SILGenFunction &SGF,
   CanType indicesFormalType;
   if (isa<SubscriptDecl>(WitnessStorage)) {
     indicesFormalType = indices.getType();
-    indicesTL = &SGF.getTypeLowering(indicesFormalType);
+    indicesTL = &gen.getTypeLowering(indicesFormalType);
     SILValue allocatedCallbackBuffer =
-      SGF.B.createAllocValueBuffer(loc, indicesTL->getLoweredType(),
+      gen.B.createAllocValueBuffer(loc, indicesTL->getLoweredType(),
                                    callbackBuffer);
 
     // Emit into the buffer.
-    auto init = SGF.useBufferAsTemporary(allocatedCallbackBuffer, *indicesTL);
+    auto init = gen.useBufferAsTemporary(allocatedCallbackBuffer, *indicesTL);
     indicesCleanup = init->getInitializedCleanup();
 
-    indices.copyInto(SGF, loc, init.get());
+    indices.copyInto(gen, loc, init.get());
   }
 
   // Set up the result buffer.
   resultBuffer =
-    SGF.B.createPointerToAddress(loc, resultBuffer,
+    gen.B.createPointerToAddress(loc, resultBuffer,
                                  RequirementStorageType.getAddressType(),
                                  /*isStrict*/ true,
                                  /*isInvariant*/ false);
   TemporaryInitialization init(resultBuffer, CleanupHandle::invalid());
 
   // Evaluate the getter into the result buffer.
-  LValue lv = buildLValue(SGF, loc, self, std::move(indices), AccessKind::Read);
-  RValue result = SGF.emitLoadOfLValue(loc, std::move(lv),
+  LValue lv = buildLValue(gen, loc, self, std::move(indices), AccessKind::Read);
+  RValue result = gen.emitLoadOfLValue(loc, std::move(lv),
                                              SGFContext(&init));
   if (!result.isInContext()) {
-    std::move(result).forwardInto(SGF, loc, &init);
+    std::move(result).forwardInto(gen, loc, &init);
   }
 
   // Forward the cleanup on the saved indices.
   if (indicesCleanup.isValid()) {
-    SGF.Cleanups.setCleanupState(indicesCleanup, CleanupState::Dead);
+    gen.Cleanups.setCleanupState(indicesCleanup, CleanupState::Dead);
   }
 
-  callback = createSetterCallback(SGF.F, indicesTL, indicesFormalType);
+  callback = createSetterCallback(gen.F, indicesTL, indicesFormalType);
   return resultBuffer;
 }
 
@@ -918,8 +919,8 @@ namespace {
   public:
     DeallocateValueBuffer(SILType valueType, SILValue buffer)
       : Buffer(buffer), ValueType(valueType) {}
-    void emit(SILGenFunction &SGF, CleanupLocation loc) override {
-      SGF.B.createDeallocValueBuffer(loc, ValueType, Buffer);
+    void emit(SILGenFunction &gen, CleanupLocation loc) override {
+      gen.B.createDeallocValueBuffer(loc, ValueType, Buffer);
     }
     void dump(SILGenFunction &) const override {
 #ifndef NDEBUG
@@ -936,7 +937,7 @@ SILFunction *
 MaterializeForSetEmitter::createSetterCallback(SILFunction &F,
                                                const TypeLowering *indicesTL,
                                                CanType indicesFormalType) {
-  return createCallback(F, [&](SILGenFunction &SGF, SILLocation loc,
+  return createCallback(F, [&](SILGenFunction &gen, SILLocation loc,
                             SILValue value, SILValue callbackBuffer,
                             SILValue self) {
     // If this is a subscript, we need to handle the indices in the
@@ -947,42 +948,42 @@ MaterializeForSetEmitter::createSetterCallback(SILFunction &F,
       SILType indicesTy = indicesTL->getLoweredType();
 
       // Enter a cleanup to deallocate the callback storage.
-      SGF.Cleanups.pushCleanup<DeallocateValueBuffer>(indicesTy,
+      gen.Cleanups.pushCleanup<DeallocateValueBuffer>(indicesTy,
                                                       callbackBuffer);
 
       // Project the value out, loading if necessary, and take
       // ownership of it.
       SILValue indicesV =
-        SGF.B.createProjectValueBuffer(loc, indicesTy, callbackBuffer);
-      if (indicesTL->isLoadable() || !SGF.silConv.useLoweredAddresses())
-        indicesV = indicesTL->emitLoad(SGF.B, loc, indicesV,
+        gen.B.createProjectValueBuffer(loc, indicesTy, callbackBuffer);
+      if (indicesTL->isLoadable() || !gen.silConv.useLoweredAddresses())
+        indicesV = indicesTL->emitLoad(gen.B, loc, indicesV,
                                        LoadOwnershipQualifier::Take);
       ManagedValue mIndices =
-        SGF.emitManagedRValueWithCleanup(indicesV, *indicesTL);
+        gen.emitManagedRValueWithCleanup(indicesV, *indicesTL);
 
       // Explode as an r-value.
-      indices = RValue(SGF, loc, indicesFormalType, mIndices);
+      indices = RValue(gen, loc, indicesFormalType, mIndices);
     }
 
     // The callback gets the address of 'self' at +0.
     ManagedValue mSelf = ManagedValue::forLValue(self);
 
     // That's enough to build the l-value.
-    LValue lvalue = buildLValue(SGF, loc, mSelf, std::move(indices),
+    LValue lvalue = buildLValue(gen, loc, mSelf, std::move(indices),
                                 AccessKind::Write);
 
     // The callback gets the value at +1.
-    auto &valueTL = SGF.getTypeLowering(lvalue.getTypeOfRValue());
-    value = SGF.B.createPointerToAddress(
+    auto &valueTL = gen.getTypeLowering(lvalue.getTypeOfRValue());
+    value = gen.B.createPointerToAddress(
       loc, value, valueTL.getLoweredType().getAddressType(),
       /*isStrict*/ true, /*isInvariant*/ false);
-    if (valueTL.isLoadable() || !SGF.silConv.useLoweredAddresses())
-      value = valueTL.emitLoad(SGF.B, loc, value, LoadOwnershipQualifier::Take);
-    ManagedValue mValue = SGF.emitManagedRValueWithCleanup(value, valueTL);
-    RValue rvalue(SGF, loc, lvalue.getSubstFormalType(), mValue);
+    if (valueTL.isLoadable() || !gen.silConv.useLoweredAddresses())
+      value = valueTL.emitLoad(gen.B, loc, value, LoadOwnershipQualifier::Take);
+    ManagedValue mValue = gen.emitManagedRValueWithCleanup(value, valueTL);
+    RValue rvalue(gen, loc, lvalue.getSubstFormalType(), mValue);
 
     // Finally, call the setter.
-    SGF.emitAssignToLValue(loc, std::move(rvalue), std::move(lvalue));
+    gen.emitAssignToLValue(loc, std::move(rvalue), std::move(lvalue));
   });
 }
 
@@ -1001,10 +1002,15 @@ MaterializeForSetEmitter::createSetterCallback(SILFunction &F,
 ///   reabstracted value instead of modifying it in-place).
 ///
 /// \return true if special code was emitted
-bool SILGenFunction::maybeEmitMaterializeForSetThunk(
-    ProtocolConformanceRef conformance, SILLinkage linkage,
-    Type selfInterfaceType, Type selfType, GenericEnvironment *genericEnv,
-    FuncDecl *requirement, FuncDecl *witness, SubstitutionList witnessSubs) {
+bool SILGenFunction::
+maybeEmitMaterializeForSetThunk(ProtocolConformance *conformance,
+                                SILLinkage linkage,
+                                Type selfInterfaceType,
+                                Type selfType,
+                                GenericEnvironment *genericEnv,
+                                FuncDecl *requirement,
+                                FuncDecl *witness,
+                                SubstitutionList witnessSubs) {
 
   MaterializeForSetEmitter emitter
     = MaterializeForSetEmitter::forWitnessThunk(

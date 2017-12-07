@@ -43,8 +43,8 @@ template <class T> class SILVTableVisitor {
   void maybeAddMethod(FuncDecl *fd) {
     assert(!fd->hasClangNode());
 
-    SILDeclRef constant(fd, SILDeclRef::Kind::Func);
-    maybeAddEntry(constant, constant.requiresNewVTableEntry());
+    maybeAddEntry(SILDeclRef(fd, SILDeclRef::Kind::Func),
+                  fd->needsNewVTableEntry());
   }
 
   void maybeAddConstructor(ConstructorDecl *cd) {
@@ -53,14 +53,18 @@ template <class T> class SILVTableVisitor {
     // Required constructors (or overrides thereof) have their allocating entry
     // point in the vtable.
     if (cd->isRequired()) {
-      SILDeclRef constant(cd, SILDeclRef::Kind::Allocator);
-      maybeAddEntry(constant, constant.requiresNewVTableEntry());
+      bool needsAllocatingEntry = cd->needsNewVTableEntry();
+      if (!needsAllocatingEntry)
+        if (auto *baseCD = cd->getOverriddenDecl())
+          needsAllocatingEntry = !baseCD->isRequired() || baseCD->hasClangNode();
+      maybeAddEntry(SILDeclRef(cd, SILDeclRef::Kind::Allocator),
+                    needsAllocatingEntry);
     }
 
     // All constructors have their initializing constructor in the
     // vtable, which can be used by a convenience initializer.
-    SILDeclRef constant(cd, SILDeclRef::Kind::Initializer);
-    maybeAddEntry(constant, constant.requiresNewVTableEntry());
+    maybeAddEntry(SILDeclRef(cd, SILDeclRef::Kind::Initializer),
+                  cd->needsNewVTableEntry());
   }
 
   void maybeAddEntry(SILDeclRef declRef, bool needsNewEntry) {

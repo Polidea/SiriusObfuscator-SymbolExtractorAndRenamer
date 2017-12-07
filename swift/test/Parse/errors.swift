@@ -4,8 +4,8 @@ enum MSV : Error {
   case Foo, Bar, Baz
   case CarriesInt(Int)
 
-  var _domain: String { return "" }
-  var _code: Int { return 0 }
+  var domain: String { return "" }
+  var code: Int { return 0 }
 }
 
 func opaque_error() -> Error { return MSV.Foo }
@@ -80,9 +80,6 @@ func testAutoclosures() throws {
   try takesThrowingAutoclosure(genNoError()) // expected-warning {{no calls to throwing functions occur within 'try' expression}}
 
   takesThrowingAutoclosure(genError()) // expected-error {{call can throw but is not marked with 'try'}}
-                                       // expected-note@-1 {{did you mean to use 'try'?}} {{28-28=try }}
-                                       // expected-note@-2 {{did you mean to handle error as optional value?}} {{28-28=try? }}
-                                       // expected-note@-3 {{did you mean to disable error propagation?}} {{28-28=try! }}
   takesThrowingAutoclosure(genNoError())
 }
 
@@ -104,7 +101,8 @@ func illformed() throws {
     do {
       _ = try genError()
 
-    } catch MSV.CarriesInt(let i) where i == genError()) { // expected-error {{call can throw, but errors cannot be thrown out of a catch guard expression}} expected-error {{expected '{'}}
+    // TODO: this recovery is terrible
+    } catch MSV.CarriesInt(let i) where i == genError()) { // expected-error {{call can throw, but errors cannot be thrown out of a catch guard expression}} expected-error {{expected '{'}} expected-error {{closure expression is unused}} expected-note {{did you mean to use a 'do' statement?}} {{58-58=do }}
     }
 }
 

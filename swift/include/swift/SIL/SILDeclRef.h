@@ -66,6 +66,8 @@ bool requiresForeignEntryPoint(ValueDecl *vd);
 /// True if the entry point is natively foreign.
 bool requiresForeignToNativeThunk(ValueDecl *vd);
 
+unsigned getNaturalUncurryLevel(ValueDecl *vd);
+
 enum ForDefinition_t : bool {
   NotForDefinition = false,
   ForDefinition = true
@@ -217,7 +219,6 @@ struct SILDeclRef {
   enum class ManglingKind {
     Default,
     DynamicThunk,
-    SwiftDispatchThunk,
   };
 
   /// Produce a mangled form of this constant.
@@ -227,10 +228,6 @@ struct SILDeclRef {
   bool isFunc() const {
     return kind == Kind::Func;
   }
-
-  /// True if the SILDeclRef references a setter function.
-  bool isSetter() const;
-
   /// True if the SILDeclRef references a constructor entry point.
   bool isConstructor() const {
     return kind == Kind::Allocator || kind == Kind::Initializer;
@@ -307,7 +304,7 @@ struct SILDeclRef {
   void print(llvm::raw_ostream &os) const;
   void dump() const;
 
-  unsigned getParameterListCount() const;
+  unsigned getUncurryLevel() const;
 
   ResilienceExpansion getResilienceExpansion() const {
     return ResilienceExpansion(Expansion);
@@ -347,10 +344,6 @@ struct SILDeclRef {
   /// True if the decl ref references a thunk from a natively Swift declaration
   /// to foreign C or ObjC calling convention.
   bool isNativeToForeignThunk() const;
-
-  /// True if the decl ref references a method which introduces a new vtable
-  /// entry.
-  bool requiresNewVTableEntry() const;
 
   /// Return a SILDeclRef to the declaration overridden by this one, or
   /// a null SILDeclRef if there is no override.

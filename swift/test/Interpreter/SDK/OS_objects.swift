@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: cp %s %t/main.swift
 // RUN: %target-build-swift %t/main.swift -I %S/Inputs/custom-modules/ -o %t/OS_objects -Xfrontend -disable-access-control

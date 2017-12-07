@@ -37,7 +37,6 @@ public protocol _HasCustomAnyHashableRepresentation {
   func _toCustomAnyHashable() -> AnyHashable?
 }
 
-@_versioned // FIXME(sil-serialize-all)
 internal protocol _AnyHashableBox {
   var _typeID: ObjectIdentifier { get }
   func _unbox<T : Hashable>() -> T?
@@ -53,33 +52,20 @@ internal protocol _AnyHashableBox {
   func _downCastConditional<T>(into result: UnsafeMutablePointer<T>) -> Bool
 }
 
-@_fixed_layout // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 internal struct _ConcreteHashableBox<Base : Hashable> : _AnyHashableBox {
-  @_versioned // FIXME(sil-serialize-all)
   internal var _baseHashable: Base
-
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init(_ base: Base) {
     self._baseHashable = base
   }
 
-
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal var _typeID: ObjectIdentifier {
     return ObjectIdentifier(type(of: self))
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal func _unbox<T : Hashable>() -> T? {
     return (self as _AnyHashableBox as? _ConcreteHashableBox<T>)?._baseHashable
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal func _isEqual(to rhs: _AnyHashableBox) -> Bool? {
     if let rhs: Base = rhs._unbox() {
       return _baseHashable == rhs
@@ -87,20 +73,14 @@ internal struct _ConcreteHashableBox<Base : Hashable> : _AnyHashableBox {
     return nil
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal var _hashValue: Int {
     return _baseHashable.hashValue
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal var _base: Any {
     return _baseHashable
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal
   func _downCastConditional<T>(into result: UnsafeMutablePointer<T>) -> Bool {
     guard let value = _baseHashable as? T else { return false }
@@ -114,9 +94,7 @@ internal struct _ConcreteHashableBox<Base : Hashable> : _AnyHashableBox {
 // has been bridged to Objective-C. This mapping to Objective-C and back
 // turns a non-custom representation into a custom one, which is used as
 // the lowest-common-denominator for comparisons.
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
-internal func _getBridgedCustomAnyHashable<T>(_ value: T) -> AnyHashable? {
+func _getBridgedCustomAnyHashable<T>(_ value: T) -> AnyHashable? {
   let bridgedValue = _bridgeAnythingToObjectiveC(value)
   return (bridgedValue as?
     _HasCustomAnyHashableRepresentation)?._toCustomAnyHashable()
@@ -142,11 +120,8 @@ internal func _getBridgedCustomAnyHashable<T>(_ value: T) -> AnyHashable? {
 ///     print(descriptions[AnyHashable(43)])       // prints "nil"
 ///     print(descriptions[AnyHashable(Int8(43))]!) // prints "an Int8"
 ///     print(descriptions[AnyHashable(Set(["a", "b"]))]!) // prints "a set of strings"
-@_fixed_layout // FIXME(sil-serialize-all)
 public struct AnyHashable {
-  @_versioned // FIXME(sil-serialize-all)
   internal var _box: _AnyHashableBox
-  @_versioned // FIXME(sil-serialize-all)
   internal var _usedCustomRepresentation: Bool
 
   /// Creates a type-erased hashable value that wraps the given instance.
@@ -167,7 +142,6 @@ public struct AnyHashable {
   ///     // Prints "true"
   ///
   /// - Parameter base: A hashable value to wrap.
-  @_inlineable // FIXME(sil-serialize-all)
   public init<H : Hashable>(_ base: H) {
     if let customRepresentation =
       (base as? _HasCustomAnyHashableRepresentation)?._toCustomAnyHashable() {
@@ -178,13 +152,11 @@ public struct AnyHashable {
 
     self._box = _ConcreteHashableBox(0 as Int)
     self._usedCustomRepresentation = false
-    _makeAnyHashableUpcastingToHashableBaseType(
+    _stdlib_makeAnyHashableUpcastingToHashableBaseType(
       base,
       storingResultInto: &self)
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init<H : Hashable>(_usingDefaultRepresentationOf base: H) {
     self._box = _ConcreteHashableBox(base)
     self._usedCustomRepresentation = false
@@ -200,7 +172,6 @@ public struct AnyHashable {
   ///         print(unwrappedMessage)
   ///     }
   ///     // Prints "Hello world!"
-  @_inlineable // FIXME(sil-serialize-all)
   public var base: Any {
     return _box._base
   }
@@ -209,8 +180,6 @@ public struct AnyHashable {
   ///
   /// This avoids the intermediate re-boxing we would get if we just did
   /// a downcast on `base`.
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal
   func _downCastConditional<T>(into result: UnsafeMutablePointer<T>) -> Bool {
     // Attempt the downcast.
@@ -257,7 +226,6 @@ extension AnyHashable : Equatable {
   /// - Parameters:
   ///   - lhs: A type-erased hashable value.
   ///   - rhs: Another type-erased hashable value.
-  @_inlineable // FIXME(sil-serialize-all)
   public static func == (lhs: AnyHashable, rhs: AnyHashable) -> Bool {
     // If they're equal, we're done.
     if let result = lhs._box._isEqual(to: rhs._box) { return result }
@@ -291,28 +259,24 @@ extension AnyHashable : Equatable {
 }
 
 extension AnyHashable : Hashable {
-  @_inlineable // FIXME(sil-serialize-all)
   public var hashValue: Int {
     return _box._hashValue
   }
 }
 
 extension AnyHashable : CustomStringConvertible {
-  @_inlineable // FIXME(sil-serialize-all)
   public var description: String {
     return String(describing: base)
   }
 }
 
 extension AnyHashable : CustomDebugStringConvertible {
-  @_inlineable // FIXME(sil-serialize-all)
   public var debugDescription: String {
     return "AnyHashable(" + String(reflecting: base) + ")"
   }
 }
 
 extension AnyHashable : CustomReflectable {
-  @_inlineable // FIXME(sil-serialize-all)
   public var customMirror: Mirror {
     return Mirror(
       self,
@@ -325,41 +289,39 @@ extension AnyHashable : CustomReflectable {
 ///
 /// Completely ignores the `_HasCustomAnyHashableRepresentation`
 /// conformance, if it exists.
-/// Called by AnyHashableSupport.cpp.
-@_silgen_name("_swift_makeAnyHashableUsingDefaultRepresentation")
-internal func _makeAnyHashableUsingDefaultRepresentation<H : Hashable>(
+@_silgen_name("_swift_stdlib_makeAnyHashableUsingDefaultRepresentation")
+public // COMPILER_INTRINSIC (actually, called from the runtime)
+func _stdlib_makeAnyHashableUsingDefaultRepresentation<H : Hashable>(
   of value: H,
   storingResultInto result: UnsafeMutablePointer<AnyHashable>
 ) {
   result.pointee = AnyHashable(_usingDefaultRepresentationOf: value)
 }
 
-/// Provided by AnyHashable.cpp.
-@_versioned // FIXME(sil-serialize-all)
-@_silgen_name("_swift_makeAnyHashableUpcastingToHashableBaseType")
-internal func _makeAnyHashableUpcastingToHashableBaseType<H : Hashable>(
+@_silgen_name("_swift_stdlib_makeAnyHashableUpcastingToHashableBaseType")
+func _stdlib_makeAnyHashableUpcastingToHashableBaseType<H : Hashable>(
   _ value: H,
   storingResultInto result: UnsafeMutablePointer<AnyHashable>
 )
 
-@_inlineable // FIXME(sil-serialize-all)
+@_silgen_name("_swift_convertToAnyHashable")
 public // COMPILER_INTRINSIC
 func _convertToAnyHashable<H : Hashable>(_ value: H) -> AnyHashable {
   return AnyHashable(value)
 }
 
-/// Called by the casting machinery.
 @_silgen_name("_swift_convertToAnyHashableIndirect")
-internal func _convertToAnyHashableIndirect<H : Hashable>(
+public // COMPILER_INTRINSIC (actually, called from the runtime)
+func _convertToAnyHashableIndirect<H : Hashable>(
   _ value: H,
   _ target: UnsafeMutablePointer<AnyHashable>
 ) {
   target.initialize(to: AnyHashable(value))
 }
 
-/// Called by the casting machinery.
 @_silgen_name("_swift_anyHashableDownCastConditionalIndirect")
-internal func _anyHashableDownCastConditionalIndirect<T>(
+public // COMPILER_INTRINSIC (actually, called from the runtime)
+func _anyHashableDownCastConditionalIndirect<T>(
   _ value: UnsafePointer<AnyHashable>,
   _ target: UnsafeMutablePointer<T>
 ) -> Bool {

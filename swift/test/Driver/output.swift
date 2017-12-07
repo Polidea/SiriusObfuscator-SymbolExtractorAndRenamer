@@ -1,5 +1,6 @@
-// RUN: %empty-directory(%t)
-// RUN: %empty-directory(%t/sub)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
+// RUN: mkdir -p %t/sub
 // RUN: cd %t
 
 // RUN: %target-swift-frontend -emit-bc %s

@@ -1,5 +1,6 @@
 // RUN: %target-resilience-test
 // REQUIRES: executable_test
+// REQUIRES: no_asan
 
 import StdlibUnittest
 import class_add_property

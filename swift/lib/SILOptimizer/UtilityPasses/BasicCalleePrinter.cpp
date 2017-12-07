@@ -35,7 +35,7 @@ class BasicCalleePrinterPass : public SILModuleTransform {
 
   void printCallees(FullApplySite FAS) {
     llvm::outs() << "Function call site:\n";
-    if (auto *Callee = FAS.getCallee()->getDefiningInstruction())
+    if (auto *Callee = dyn_cast<SILInstruction>(FAS.getCallee()))
       llvm::outs() << *Callee;
     llvm::outs() << *FAS.getInstruction();
 

@@ -34,8 +34,6 @@ struct Node {
   unsigned NameLength;
   unsigned BodyOffset;
   unsigned BodyLength;
-  unsigned DocOffset;
-  unsigned DocLength;
   std::string DisplayName;
   std::string TypeName;
   std::string RuntimeName;
@@ -58,7 +56,7 @@ struct Node {
 struct DocStructureArrayBuilder::Implementation {
   typedef CompactArrayBuilder<StringRef> InheritedTypesBuilder;
   SmallVector<char, 256> inheritedTypesBuffer;
-  typedef CompactArrayBuilder<UIdent, unsigned, unsigned> AttrsBuilder;
+  typedef CompactArrayBuilder<UIdent> AttrsBuilder;
   SmallVector<char, 256> attrsBuffer;
   typedef CompactArrayBuilder<UIdent, unsigned, unsigned> ElementsBuilder;
   SmallVector<char, 256> elementsBuffer;
@@ -74,8 +72,6 @@ struct DocStructureArrayBuilder::Implementation {
                       unsigned,            // NameLength
                       unsigned,            // BodyOffset
                       unsigned,            // BodyLength
-                      unsigned,            // DocOffset
-                      unsigned,            // DocLength
                       Optional<StringRef>, // DisplayName
                       Optional<StringRef>, // TypeName
                       Optional<StringRef>, // RuntimeName
@@ -91,7 +87,7 @@ struct DocStructureArrayBuilder::Implementation {
   SmallVector<unsigned, 16> topIndices;
 
   unsigned addInheritedTypes(ArrayRef<StringRef> inheritedTypes);
-  unsigned addAttrs(ArrayRef<std::tuple<UIdent, unsigned, unsigned>> attrs);
+  unsigned addAttrs(ArrayRef<UIdent> attrs);
   unsigned addElements(ArrayRef<Node::Element> elements);
   unsigned addChildren(ArrayRef<unsigned> offsets);
 
@@ -122,17 +118,13 @@ unsigned DocStructureArrayBuilder::Implementation::addInheritedTypes(
 }
 
 unsigned
-DocStructureArrayBuilder::Implementation::addAttrs(ArrayRef<std::tuple<UIdent, unsigned, unsigned>> attrs) {
+DocStructureArrayBuilder::Implementation::addAttrs(ArrayRef<UIdent> attrs) {
   if (attrs.empty())
     return 0;
 
   AttrsBuilder builder;
-  for (auto attr : attrs) {
-    UIdent uid;
-    unsigned offset, length;
-    std::tie(uid, offset, length) = attr;
-    builder.addEntry(uid, offset, length);
-  }
+  for (UIdent uid : attrs)
+    builder.addEntry(uid);
 
   unsigned offset = attrsBuffer.size();
   builder.appendTo(attrsBuffer);
@@ -175,11 +167,9 @@ void DocStructureArrayBuilder::beginSubStructure(
     unsigned Offset, unsigned Length, SourceKit::UIdent Kind,
     SourceKit::UIdent AccessLevel, SourceKit::UIdent SetterAccessLevel,
     unsigned NameOffset, unsigned NameLength, unsigned BodyOffset,
-    unsigned BodyLength, unsigned DocOffset, unsigned DocLength,
-    StringRef DisplayName, StringRef TypeName,
+    unsigned BodyLength, StringRef DisplayName, StringRef TypeName,
     StringRef RuntimeName, StringRef SelectorName,
-    ArrayRef<StringRef> InheritedTypes,
-    ArrayRef<std::tuple<UIdent, unsigned, unsigned>> Attrs) {
+    ArrayRef<StringRef> InheritedTypes, ArrayRef<UIdent> Attrs) {
 
   Node node = {
       Offset,
@@ -191,8 +181,6 @@ void DocStructureArrayBuilder::beginSubStructure(
       NameLength,
       BodyOffset,
       BodyLength,
-      DocOffset,
-      DocLength,
       DisplayName,
       TypeName,
       RuntimeName,
@@ -228,10 +216,10 @@ void DocStructureArrayBuilder::endSubStructure() {
   impl.structureBuilder.addEntry(
       node.Offset, node.Length, node.Kind, node.AccessLevel,
       node.SetterAccessLevel, node.NameOffset, node.NameLength, node.BodyOffset,
-      node.BodyLength, node.DocOffset, node.DocLength, str(node.DisplayName),
-      str(node.TypeName), str(node.RuntimeName), str(node.SelectorName),
-      node.InheritedTypesOffset, node.AttrsOffset,
-      impl.addElements(node.elements), impl.addChildren(node.childIndices));
+      node.BodyLength, str(node.DisplayName), str(node.TypeName),
+      str(node.RuntimeName), str(node.SelectorName), node.InheritedTypesOffset,
+      node.AttrsOffset, impl.addElements(node.elements),
+      impl.addChildren(node.childIndices));
 }
 
 std::unique_ptr<llvm::MemoryBuffer> DocStructureArrayBuilder::createBuffer() {
@@ -292,8 +280,6 @@ struct OutNode {
   unsigned NameLength;
   unsigned BodyOffset;
   unsigned BodyLength;
-  unsigned DocOffset;
-  unsigned DocLength;
   const char *DisplayName;
   const char *TypeName;
   const char *RuntimeName;
@@ -345,8 +331,6 @@ private:
                              unsigned,         // NameLength
                              unsigned,         // BodyOffset
                              unsigned,         // BodyLength
-                             unsigned,         // DocOffset
-                             unsigned,         // DocLength
                              const char *,     // DisplayName
                              const char *,     // TypeName
                              const char *,     // RuntimeName
@@ -369,9 +353,8 @@ OutNode DocStructureArrayReader::readStructure(size_t index) {
   reader.readEntries(
       index, result.Offset, result.Length, result.Kind, result.AccessLevel,
       result.SetterAccessLevel, result.NameOffset, result.NameLength,
-      result.BodyOffset, result.BodyLength, result.DocOffset, result.DocLength,
-      result.DisplayName, result.TypeName, result.RuntimeName,
-      result.SelectorName, result.InheritedTypesOffset,
+      result.BodyOffset, result.BodyLength, result.DisplayName, result.TypeName,
+      result.RuntimeName, result.SelectorName, result.InheritedTypesOffset,
       result.AttrsOffset, result.ElementsOffset, result.ChildIndicesOffset);
   return result;
 }
@@ -442,7 +425,7 @@ struct InheritedTypeReader {
 };
 
 struct AttributesReader {
-  typedef CompactArrayReader<sourcekitd_uid_t, unsigned, unsigned> CompactArrayReaderTy;
+  typedef CompactArrayReader<sourcekitd_uid_t> CompactArrayReaderTy;
 
   static bool
   dictionary_apply(void *buffer, size_t index,
@@ -451,13 +434,8 @@ struct AttributesReader {
 
     CompactArrayReaderTy reader(buffer);
     sourcekitd_uid_t value;
-    unsigned offset;
-    unsigned length;
-    reader.readEntries(index, value, offset, length);
-
+    reader.readEntries(index, value);
     APPLY(KeyAttribute, UID, value);
-    APPLY(KeyOffset, Int, offset);
-    APPLY(KeyLength, Int, length);
     return true;
   }
 };
@@ -474,18 +452,14 @@ struct DocStructureReader {
     APPLY(KeyLength, Int, node.Length);
     APPLY(KeyKind, UID, node.Kind);
     if (node.AccessLevel)
-      APPLY(KeyAccessLevel, UID, node.AccessLevel);
+      APPLY(KeyAccessibility, UID, node.AccessLevel);
     if (node.SetterAccessLevel)
-      APPLY(KeySetterAccessLevel, UID, node.SetterAccessLevel);
+      APPLY(KeySetterAccessibility, UID, node.SetterAccessLevel);
     APPLY(KeyNameOffset, Int, node.NameOffset);
     APPLY(KeyNameLength, Int, node.NameLength);
     if (node.BodyOffset || node.BodyLength) {
       APPLY(KeyBodyOffset, Int, node.BodyOffset);
       APPLY(KeyBodyLength, Int, node.BodyLength);
-    }
-    if (node.DocOffset || node.DocLength) {
-      APPLY(KeyDocOffset, Int, node.DocOffset);
-      APPLY(KeyDocLength, Int, node.DocLength);
     }
     if (node.DisplayName)
       APPLY(KeyName, String, node.DisplayName);

@@ -8,10 +8,8 @@
     - [@swift-ci](#swift-ci)
     - [Smoke Testing](#smoke-testing)
     - [Validation Testing](#validation-testing)
-    - [Linting](#linting)
-    - [Source Compatibility Testing](#source-compatibility-testing)
+    - [Lint Testing](#lint-testing)
     - [Specific Preset Testing](#specific-preset-testing)
-    - [Testing Compiler Performance](#testing-compiler-performance)
 - [Cross Repository Testing](#cross-repository-testing)
 - [ci.swift.org bots](#ciswiftorg-bots)
 
@@ -25,15 +23,14 @@ In order for the Swift project to be able to advance quickly, it is important th
 
 ### @swift-ci
 
-Users with [commit access](https://swift.org/contributing/#commit-access) can trigger pull request testing by writing a comment on a PR addressed to the GitHub user @swift-ci. Different tests will run depending on the specific comment used. The current test types are:
+swift-ci pull request testing is triggered by writing a comment on this PR addressed to the GitHub user @swift-ci. Different tests will run depending on the specific comment that you use. The current test types are:
 
 1. Smoke Testing
 2. Validation Testing
 3. Benchmarking.
-4. Linting
+4. Lint Testing
 5. Source Compatibility Testing
 6. Specific Preset Testing
-7. Testing Compiler Performance
 
 We describe each in detail below:
 
@@ -82,8 +79,7 @@ All supported platforms     | @swift-ci Please test and merge               | Sw
 All supported platforms     | @swift-ci Please clean test and merge               | Swift Test Linux Platform (smoke test)<br>Swift Test OS X Platform (smoke test)<br> Swift Test Linux Platform <br>Swift Test OS X Platform
 macOS platform               | @swift-ci Please test OS X platform           | Swift Test OS X Platform (smoke test)<br>Swift Test OS X Platform
 macOS platform               | @swift-ci Please clean test OS X platform     | Swift Test OS X Platform (smoke test)<br>Swift Test OS X Platform
-macOS platform               | @swift-ci Please benchmark                    | Swift Benchmark on OS X Platform (many runs - rigorous)
-macOS platform               | @swift-ci Please smoke benchmark              | Swift Benchmark on OS X Platform (few runs - sanity)
+macOS platform               | @swift-ci Please benchmark                    | Swift Benchmark on OS X Platform
 Linux platform               | @swift-ci Please test Linux platform          | Swift Test Linux Platform (smoke test)<br>Swift Test Linux Platform
 Linux platform               | @swift-ci Please clean test Linux platform    | Swift Test Linux Platform (smoke test)<br>Swift Test Linux Platform
 macOS platform               | @swift-ci Please ASAN test                    | Swift ASAN Test OS X Platform
@@ -121,14 +117,13 @@ A validation test on Linux does the following:
 
 Platform        | Comment | Check Status
 ------------    | ------- | ------------
-macOS platform  | @swift-ci Please benchmark       | Swift Benchmark on OS X Platform (many runs - rigorous)
-macOS platform  | @swift-ci Please smoke benchmark | Swift Benchmark on OS X Platform (few runs - sanity)
+macOS platform  | @swift-ci Please benchmark | Swift Benchmark on OS X Platform
 
-### Linting
+### Lint Testing
 
-Language     | Comment | What it Does | Corresponding Local Command
------------- | ------- | ------------ | -------------
-Python       | @swift-ci Please Python lint | Lints Python sources | `./utils/python_lint.py`
+Language     | Comment | Check Status
+------------ | ------- | ------------
+Python       | @swift-ci Please Python lint | Python lint
 
 ### Source Compatibility Testing
 
@@ -150,22 +145,6 @@ preset=buildbot_incremental,tools=RA,stdlib=RD,smoketest=macosx,single-thread
 @swift-ci Please test macOS with preset
 
 ```
-
-### Testing Compiler Performance
-
-Platform        | Comment | Check Status
-------------    | ------- | ------------
-macOS platform  | @swift-ci Please test compiler performance       | Compiles full source compatibility test suite and measures compiler performance
-macOS platform  | @swift-ci Please smoke test compiler performance | Compiles a subset of source compatibility test suite and measures compiler performance
-
-These commands will:
-
-1. Build a set of projects from the compatibility test suite
-2. Collect counters and timers reported by the compiler
-3. Compare the obtained data to the baseline (stored in git) and HEAD (version of a compiler built without the PR changes)
-4. Report the results in a pull request comment
-
-For the detailed explanation of how compiler performance is measured, please refer to [this document](https://github.com/apple/swift/blob/master/docs/CompilerPerformance.md).
 
 ## Cross Repository Testing
 
@@ -196,11 +175,11 @@ apple/swift-lldb#48
 
 1. Create a separate PR for each repository that needs to be changed. Each should reference the main Swift PR and create a reference to all of the others from the main PR.
 
-2. Gate all commits on @swift-ci smoke test and merge. As stated above, it is important that *all* checkins perform PR testing since if breakage enters the tree PR testing becomes less effective. If you have done local testing (using build-toolchain) and have made appropriate changes to the other repositories then perform a smoke test and merge should be sufficient for correctness. This is not meant to check for correctness in your commits, but rather to be sure that no one landed changes in other repositories or in swift that cause your PR to no longer be correct. If you were unable to make workarounds to the other repositories, this smoke test will break *after* Swift has built. Check the log to make sure that it is the expected failure for that platform/repository that coincides with the failure your PR is supposed to fix.
+2. Gate all commits on @swift-ci smoke test and merge. As stated above, it is important that *all* checkins perform PR testing since if breakage enters the tree PR testing becomes less effective. If you have done local testing (using build-toolchain) and have made appropriate changes to the other repositories then perform a smoke test and merge should be sufficient for correctness. This is not meant to check for correctness in your commits, but rather to be sure that no one landed changes in other repositories or in swift that cause your PR to no longer be correct. If you were unable to make workarounds to th eother repositories, this smoke test will break *after* Swift has built. Check the log to make sure that it is the expected failure for that platform/repository that coincides with the failure your PR is supposed to fix.
 
 3. Merge all of the pull requests simultaneously.
 
-4. Watch the public incremental build on [ci.swift.org](https://ci.swift.org/) to make sure that you did not make any mistakes. It should complete within 30-40 minutes depending on what else was being committed in the mean time.
+4. Watch the public incremental build on ci.swift.org to make sure that you did not make any mistakes. It should complete within 30-40 minutes depending on what else was being committed in the mean time.
 
 
 ## ci.swift.org bots

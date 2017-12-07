@@ -24,9 +24,9 @@ htn
 #endif
 
 #if swift(>=4.1)
-aoeu // expected-error {{use of unresolved identifier}}
+aoeu
 #else
-htn 
+htn // expected-error {{use of unresolved identifier}}
 #endif
 
 #if swift(>=5)

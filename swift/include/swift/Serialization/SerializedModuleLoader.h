@@ -193,11 +193,7 @@ public:
 
   bool hasEntryPoint() const override;
 
-  virtual const clang::Module *getUnderlyingClangModule() const override;
-
-  virtual bool getAllGenericSignatures(
-                   SmallVectorImpl<GenericSignature*> &genericSignatures)
-                override;
+  virtual const clang::Module *getUnderlyingClangModule() override;
 
   static bool classof(const FileUnit *file) {
     return file->getKind() == FileUnitKind::SerializedAST;

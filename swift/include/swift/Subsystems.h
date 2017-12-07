@@ -20,6 +20,7 @@
 #include "swift/Basic/LLVM.h"
 #include "swift/Basic/OptionSet.h"
 #include "swift/Basic/Version.h"
+#include "swift/Syntax/TokenSyntax.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
@@ -64,12 +65,12 @@ namespace swift {
   struct TypeLoc;
   class UnifiedStatsReporter;
 
-  /// Used to optionally maintain SIL parsing context for the parser.
-  ///
-  /// When not parsing SIL, this has no overhead.
+  /// SILParserState - This is a context object used to optionally maintain SIL
+  /// parsing context for the parser.
   class SILParserState {
   public:
-    std::unique_ptr<SILParserTUState> Impl;
+    SILModule *M;
+    SILParserTUState *S;
 
     explicit SILParserState(SILModule *M);
     ~SILParserState();
@@ -131,6 +132,16 @@ namespace swift {
                               bool TokenizeInterpolatedString = true,
                               ArrayRef<Token> SplitTokens = ArrayRef<Token>());
 
+  /// \brief Lex and return a vector of `RC<TokenSyntax>` tokens, which include
+  /// leading and trailing trivia.
+  std::vector<std::pair<RC<syntax::TokenSyntax>,
+                                   syntax::AbsolutePosition>>
+  tokenizeWithTrivia(const LangOptions &LangOpts,
+                     const SourceManager &SM,
+                     unsigned BufferID,
+                     unsigned Offset = 0,
+                     unsigned EndOffset = 0);
+
   /// Once parsing is complete, this walks the AST to resolve imports, record
   /// operators, and do other top-level validation.
   ///
@@ -186,7 +197,7 @@ namespace swift {
 
   /// Once type checking is complete, this walks protocol requirements
   /// to resolve default witnesses.
-  void finishTypeCheckingFile(SourceFile &SF);
+  void finishTypeChecking(SourceFile &SF);
 
   /// Now that we have type-checked an entire module, perform any type
   /// checking that requires the full module, e.g., Objective-C method

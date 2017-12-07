@@ -195,11 +195,12 @@ bool swift::immediate::linkLLVMModules(llvm::Module *Module,
                             /*, llvm::Linker::LinkerMode LinkerMode */)
 {
   llvm::LLVMContext &Ctx = SubModule->getContext();
-  auto OldHandler = Ctx.getDiagnosticHandlerCallBack();
+  auto OldHandler = Ctx.getDiagnosticHandler();
   void *OldDiagnosticContext = Ctx.getDiagnosticContext();
-  Ctx.setDiagnosticHandlerCallBack(linkerDiagnosticHandler, nullptr);
+  Ctx.setDiagnosticHandler(linkerDiagnosticHandler, nullptr);
   bool Failed = llvm::Linker::linkModules(*Module, std::move(SubModule));
-  Ctx.setDiagnosticHandlerCallBack(OldHandler, OldDiagnosticContext);
+  Ctx.setDiagnosticHandler(OldHandler, OldDiagnosticContext);
+
   return !Failed;
 }
 

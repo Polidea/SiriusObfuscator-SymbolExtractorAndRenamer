@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: %gyb %s -o %t/main.swift
 // RUN: if [ %target-runtime == "objc" ]; then \
@@ -48,8 +49,7 @@ func withInoutT<T>(_ x: inout T, body: (_ x: inout T) -> Void) {
 #if _runtime(_ObjC)
 %     end
 
-ArrayTestSuite.test("${array_type}<${element_type}>/subscript(_: Int)/COW")
-  .code {
+ArrayTestSuite.test("${array_type}<${element_type}>/subscript(_: Int)/COW") {
   var a: ${array_type}<${array_type}<${element_type}>> = [[
     ${element_type}(10), ${element_type}(20), ${element_type}(30),
     ${element_type}(40), ${element_type}(50), ${element_type}(60),
@@ -119,8 +119,7 @@ ArrayTestSuite.test("${array_type}<${element_type}>/subscript(_: Int)/COW")
   expectEqual(70, a[0][6].value)
 }
 
-ArrayTestSuite.test("${array_type}<${element_type}>/subscript(_: Range<Int>)/COW")
-  .code {
+ArrayTestSuite.test("${array_type}<${element_type}>/subscript(_: Range<Int>)/COW") {
   var a: ${array_type}<${array_type}<${element_type}>> = [[
     ${element_type}(10), ${element_type}(20), ${element_type}(30),
     ${element_type}(40), ${element_type}(50), ${element_type}(60),
@@ -442,10 +441,7 @@ ArrayTestSuite.test("BridgedFromObjC.Verbatim.ImmutableArrayIsRetained") {
   _fixLifetime(bridgedBack)
 }
 
-ArrayTestSuite.test("BridgedFromObjC.Nonverbatim.ImmutableArrayIsCopied")
-  .skip(.iOSAny("<rdar://problem/33926468>"))
-  .skip(.tvOSAny("<rdar://problem/33926468>"))
-  .code {
+ArrayTestSuite.test("BridgedFromObjC.Nonverbatim.ImmutableArrayIsCopied") {
   let nsa: NSArray = CustomImmutableNSArray(_privateInit: ())
 
   CustomImmutableNSArray.timesCopyWithZoneWasCalled = 0
@@ -608,7 +604,7 @@ ArrayTestSuite.test("BridgedToObjC/Verbatim/getObjects") {
     expectEqual(idValue2, unsafeBitCast(a.object(at: 2) as AnyObject, to: UInt.self))
   }
 
-  buffer.deallocate()
+  buffer.deallocate(capacity: 3)
   _fixLifetime(a)
 
   expectAutoreleasedKeysAndValues(unopt: (0, 3))
@@ -882,7 +878,7 @@ ArrayTestSuite.test("BridgedToObjC/Custom/getObjects") {
     expectEqual(idValue2, unsafeBitCast(a.object(at: 2) as AnyObject, to: UInt.self))
   }
 
-  buffer.deallocate()
+  buffer.deallocate(capacity: 3)
   _fixLifetime(a)
 
   expectEqual(3, TestBridgedValueTy.bridgeOperations)
@@ -1148,3 +1144,4 @@ ArrayTestSuite.tearDown {
 #endif // _runtime(_ObjC)
 
 runAllTests()
+

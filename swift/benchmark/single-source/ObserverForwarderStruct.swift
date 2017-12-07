@@ -10,13 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import TestsUtils
-
-public let ObserverForwarderStruct = BenchmarkInfo(
-  name: "ObserverForwarderStruct",
-  runFunction: run_ObserverForwarderStruct,
-  tags: [.validation])
-
 class Observer {
   @inline(never)
   func receive(_ value: Int) {

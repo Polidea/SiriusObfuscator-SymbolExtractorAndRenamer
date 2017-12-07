@@ -22,8 +22,8 @@ def collectionForTraversal(traversal):  # noqa (N802 function name should be low
         raise ValueError("Unknown traversal %r" % traversal)
 
 
-def collectionTypeName(traversal, mutable, rangeReplaceable):  # noqa (N802)
-    name = collectionForTraversal(traversal)
+def sliceTypeName(traversal, mutable, rangeReplaceable):  # noqa (N802)
+    name = collectionForTraversal(traversal).replace('Collection', 'Slice')
     if rangeReplaceable:
         name = 'RangeReplaceable' + name
     if mutable:

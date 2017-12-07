@@ -54,7 +54,7 @@ static Lazy<SwiftNullSentinelCache> Sentinels;
 static id getSentinelForDepth(unsigned depth) {
   // For unnested optionals, use NSNull.
   if (depth == 1)
-    return id_const_cast(kCFNull);
+    return (id)kCFNull;
   // Otherwise, make up our own sentinel.
   // See if we created one for this depth.
   auto &theSentinels = Sentinels.get();

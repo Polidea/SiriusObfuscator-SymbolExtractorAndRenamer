@@ -1,5 +1,0 @@
-func testStringConcatenation() {
-  let firstName = "Jason"
-  let bornYear = "1888"
-  let _ = "Mr. \(firstName)\(bornYear)"
-}

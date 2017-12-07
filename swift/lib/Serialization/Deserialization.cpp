@@ -15,23 +15,19 @@
 #include "swift/Serialization/ModuleFormat.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/DiagnosticsSema.h"
-#include "swift/AST/Expr.h"
 #include "swift/AST/ForeignErrorConvention.h"
 #include "swift/AST/GenericEnvironment.h"
 #include "swift/AST/Initializer.h"
-#include "swift/AST/Pattern.h"
-#include "swift/AST/ParameterList.h"
 #include "swift/AST/PrettyStackTrace.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/ClangImporter/ClangImporter.h"
-#include "swift/ClangImporter/ClangModule.h"
+#include "swift/Parse/Parser.h"
 #include "swift/Serialization/BCReadingExtras.h"
 #include "swift/Serialization/SerializedModuleLoader.h"
 #include "swift/Basic/Defer.h"
 #include "swift/Basic/Statistic.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define DEBUG_TYPE "Serialization"
@@ -126,8 +122,6 @@ const char OverrideError::ID = '\0';
 void OverrideError::anchor() {}
 const char TypeError::ID = '\0';
 void TypeError::anchor() {}
-const char ExtensionError::ID = '\0';
-void ExtensionError::anchor() {}
 
 LLVM_NODISCARD
 static std::unique_ptr<llvm::ErrorInfoBase> takeErrorInfo(llvm::Error error) {
@@ -228,8 +222,8 @@ getActualDefaultArgKind(uint8_t raw) {
     return swift::DefaultArgumentKind::Function;
   case serialization::DefaultArgumentKind::DSOHandle:
     return swift::DefaultArgumentKind::DSOHandle;
-  case serialization::DefaultArgumentKind::NilLiteral:
-    return swift::DefaultArgumentKind::NilLiteral;
+  case serialization::DefaultArgumentKind::Nil:
+    return swift::DefaultArgumentKind::Nil;
   case serialization::DefaultArgumentKind::EmptyArray:
     return swift::DefaultArgumentKind::EmptyArray;
   case serialization::DefaultArgumentKind::EmptyDictionary:
@@ -439,11 +433,9 @@ SILLayout *ModuleFile::readSILLayout(llvm::BitstreamCursor &Cursor) {
   unsigned kind = Cursor.readRecord(next.ID, scratch);
   switch (kind) {
   case decls_block::SIL_LAYOUT: {
-    GenericSignatureID rawGenericSig;
     unsigned numFields;
     ArrayRef<uint64_t> types;
-    decls_block::SILLayoutLayout::readRecord(scratch, rawGenericSig,
-                                             numFields, types);
+    decls_block::SILLayoutLayout::readRecord(scratch, numFields, types);
     
     SmallVector<SILField, 4> fields;
     for (auto fieldInfo : types.slice(0, numFields)) {
@@ -454,10 +446,20 @@ SILLayout *ModuleFile::readSILLayout(llvm::BitstreamCursor &Cursor) {
                  isMutable));
     }
     
-    CanGenericSignature canSig;
-    if (auto sig = getGenericSignature(rawGenericSig))
-      canSig = sig->getCanonicalSignature();
-    return SILLayout::get(getContext(), canSig, fields);
+    SmallVector<GenericTypeParamType*, 4> genericParams;
+    for (auto typeId : types.slice(numFields)) {
+      auto type = getType(typeId)->castTo<GenericTypeParamType>();
+      genericParams.push_back(type);
+    }
+    
+    SmallVector<Requirement, 4> requirements;
+    readGenericRequirements(requirements, DeclTypeCursor);
+    CanGenericSignature sig;
+    if (!genericParams.empty() || !requirements.empty()) {
+      sig = GenericSignature::get(genericParams, requirements)
+        ->getCanonicalSignature();
+    }
+    return SILLayout::get(getContext(), sig, fields);
   }
   default:
     error();
@@ -625,7 +627,7 @@ NormalProtocolConformance *ModuleFile::readNormalConformance(
 
   ASTContext &ctx = getContext();
   DeclContext *dc = getDeclContext(contextID);
-  Type conformingType = dc->getDeclaredInterfaceType();
+  Type conformingType = dc->getDeclaredTypeInContext();
   PrettyStackTraceType trace(ctx, "reading conformance for", conformingType);
 
   auto proto = cast<ProtocolDecl>(getDecl(protoID));
@@ -752,10 +754,6 @@ GenericParamList *ModuleFile::maybeReadGenericParams(DeclContext *DC,
     if (!shouldContinue)
       break;
   }
-
-  // Don't create empty generic parameter lists.
-  if (params.empty())
-    return nullptr;
 
   auto paramList = GenericParamList::create(getContext(), SourceLoc(),
                                             params, SourceLoc(), { },
@@ -912,68 +910,6 @@ void ModuleFile::configureGenericEnvironment(
   }
 }
 
-GenericSignature *ModuleFile::getGenericSignature(
-                                      serialization::GenericSignatureID ID) {
-  using namespace decls_block;
-
-  // Zero is a sentinel for having no generic signature.
-  if (ID == 0) return nullptr;
-
-  assert(ID <= GenericSignatures.size() && "invalid GenericSignature ID");
-  auto &sigOrOffset = GenericSignatures[ID-1];
-
-  // If we've already deserialized this generic signature, return it.
-  if (sigOrOffset.isComplete()) {
-    return sigOrOffset.get();
-  }
-
-  // Read the generic signature.
-  BCOffsetRAII restoreOffset(DeclTypeCursor);
-  DeclTypeCursor.JumpToBit(sigOrOffset);
-  DeserializingEntityRAII deserializingEntity(*this);
-
-  // Read the parameter types.
-  SmallVector<GenericTypeParamType *, 4> paramTypes;
-  StringRef blobData;
-  SmallVector<uint64_t, 8> scratch;
-
-  auto entry = DeclTypeCursor.advance(AF_DontPopBlockAtEnd);
-  if (entry.Kind != llvm::BitstreamEntry::Record) {
-    error();
-    return nullptr;
-  }
-
-  unsigned recordID = DeclTypeCursor.readRecord(entry.ID, scratch, &blobData);
-  if (recordID != GENERIC_SIGNATURE) {
-    error();
-    return nullptr;
-  }
-
-  ArrayRef<uint64_t> rawParamIDs;
-  GenericSignatureLayout::readRecord(scratch, rawParamIDs);
-
-  for (unsigned i = 0, n = rawParamIDs.size(); i != n; ++i) {
-    auto paramTy = getType(rawParamIDs[i])->castTo<GenericTypeParamType>();
-    paramTypes.push_back(paramTy);
-  }
-
-  // Read the generic requirements.
-  SmallVector<Requirement, 4> requirements;
-  readGenericRequirements(requirements, DeclTypeCursor);
-
-  // Construct the generic signature from the loaded parameters and
-  // requirements.
-  auto signature = GenericSignature::get(paramTypes, requirements);
-
-  // If we've already deserialized this generic signature, return it.
-  if (sigOrOffset.isComplete()) {
-    return sigOrOffset.get();
-  }
-
-  sigOrOffset = signature;
-  return signature;
-}
-
 llvm::PointerUnion<GenericSignature *, GenericEnvironment *>
 ModuleFile::getGenericSignatureOrEnvironment(
                                          serialization::GenericEnvironmentID ID,
@@ -994,21 +930,13 @@ ModuleFile::getGenericSignatureOrEnvironment(
     return envOrOffset.get();
   }
 
-  // Extract the bit offset or generic signature ID.
-  uint64_t bitOffset = envOrOffset;
-  GenericSignature *signature = nullptr;
-  if (bitOffset & 0x01) {
-    // We have a generic signature ID.
-    signature = getGenericSignature(bitOffset >> 1);
-  } else {
-    bitOffset = bitOffset >> 1;
+  // Read the generic environment.
+  BCOffsetRAII restoreOffset(DeclTypeCursor);
+  DeclTypeCursor.JumpToBit(envOrOffset);
+  DeserializingEntityRAII deserializingEntity(*this);
 
-    // Read the generic environment.
-    BCOffsetRAII restoreOffset(DeclTypeCursor);
-    DeclTypeCursor.JumpToBit(bitOffset);
-    DeserializingEntityRAII deserializingEntity(*this);
-
-    SmallVector<GenericTypeParamType *, 4> paramTypes;
+  SmallVector<GenericTypeParamType *, 4> paramTypes;
+  {
     using namespace decls_block;
 
     StringRef blobData;
@@ -1025,54 +953,71 @@ ModuleFile::getGenericSignatureOrEnvironment(
       return result;
 
     unsigned recordID = DeclTypeCursor.readRecord(entry.ID, scratch, &blobData);
-    if (recordID != SIL_GENERIC_ENVIRONMENT) {
-      error();
-      return result;
+    switch (recordID) {
+    case GENERIC_ENVIRONMENT: {
+      lastRecordOffset.reset();
+
+      ArrayRef<uint64_t> rawParamIDs;
+      GenericEnvironmentLayout::readRecord(scratch, rawParamIDs);
+
+      for (unsigned i = 0, n = rawParamIDs.size(); i != n; ++i) {
+        auto paramTy = getType(rawParamIDs[i])->castTo<GenericTypeParamType>();
+        paramTypes.push_back(paramTy);
+      }
+      break;
     }
 
-    ArrayRef<uint64_t> rawParamIDs;
-    SILGenericEnvironmentLayout::readRecord(scratch, rawParamIDs);
-    lastRecordOffset.reset();
+    case SIL_GENERIC_ENVIRONMENT: {
+      ArrayRef<uint64_t> rawParamIDs;
+      SILGenericEnvironmentLayout::readRecord(scratch, rawParamIDs);
+      lastRecordOffset.reset();
 
-    if (rawParamIDs.size() % 2 != 0) {
-      error();
-      return result;
-    }
-
-    for (unsigned i = 0, n = rawParamIDs.size(); i != n; i += 2) {
-      Identifier name = getIdentifier(rawParamIDs[i]);
-      auto paramTy = getType(rawParamIDs[i+1])->castTo<GenericTypeParamType>();
-
-      if (!name.empty()) {
-        auto paramDecl =
-          createDecl<GenericTypeParamDecl>(getAssociatedModule(),
-                                           name,
-                                           SourceLoc(),
-                                           paramTy->getDepth(),
-                                           paramTy->getIndex());
-        paramTy = paramDecl->getDeclaredInterfaceType()
-                   ->castTo<GenericTypeParamType>();
+      if (rawParamIDs.size() % 2 != 0) {
+        error();
+        return result;
       }
 
-      paramTypes.push_back(paramTy);
+      for (unsigned i = 0, n = rawParamIDs.size(); i != n; i += 2) {
+        Identifier name = getIdentifier(rawParamIDs[i]);
+        auto paramTy = getType(rawParamIDs[i+1])->castTo<GenericTypeParamType>();
+
+        if (!name.empty()) {
+          auto paramDecl =
+            createDecl<GenericTypeParamDecl>(getAssociatedModule(),
+                                             name,
+                                             SourceLoc(),
+                                             paramTy->getDepth(),
+                                             paramTy->getIndex());
+          paramTy = paramDecl->getDeclaredInterfaceType()
+                     ->castTo<GenericTypeParamType>();
+        }
+
+        paramTypes.push_back(paramTy);
+      }
+      break;
     }
 
-    // If there are no parameters, the environment is empty.
-    if (paramTypes.empty()) {
-      if (wantEnvironment)
-        envOrOffset = nullptr;
-
+    default:
+      error();
       return result;
     }
-
-    // Read the generic requirements.
-    SmallVector<Requirement, 4> requirements;
-    readGenericRequirements(requirements, DeclTypeCursor);
-
-    // Construct the generic signature from the loaded parameters and
-    // requirements.
-    signature = GenericSignature::get(paramTypes, requirements);
   }
+
+  // If there are no parameters, the environment is empty.
+  if (paramTypes.empty()) {
+    if (wantEnvironment)
+      envOrOffset = nullptr;
+
+    return result;
+  }
+
+  // Read the generic requirements.
+  SmallVector<Requirement, 4> requirements;
+  readGenericRequirements(requirements, DeclTypeCursor);
+
+  // Construct the generic signature from the loaded parameters and
+  // requirements.
+  auto signature = GenericSignature::get(paramTypes, requirements);
 
   // If we only want the signature, return it now.
   if (!wantEnvironment) return signature;
@@ -1084,7 +1029,7 @@ ModuleFile::getGenericSignatureOrEnvironment(
 
   // Form the generic environment. Record it now so that deserialization of
   // the archetypes in the environment can refer to this environment.
-  auto genericEnv = signature->createGenericEnvironment();
+  auto genericEnv = signature->createGenericEnvironment(*getAssociatedModule());
   envOrOffset = genericEnv;
 
   return genericEnv;
@@ -1149,23 +1094,6 @@ getActualCtorInitializerKind(uint8_t raw) {
   return None;
 }
 
-/// Determine whether the two modules are re-exported to the same module.
-static bool reExportedToSameModule(const ModuleDecl *fromModule,
-                                   const ModuleDecl *toModule) {
-  auto fromClangModule
-    = dyn_cast<ClangModuleUnit>(fromModule->getFiles().front());
-  if (!fromClangModule)
-    return false;
-
-  auto toClangModule
-  = dyn_cast<ClangModuleUnit>(toModule->getFiles().front());
-  if (!toClangModule)
-    return false;
-
-  return fromClangModule->getExportedModuleName() ==
-    toClangModule->getExportedModuleName();
-}
-
 /// Remove values from \p values that don't match the expected type or module.
 ///
 /// Any of \p expectedTy, \p expectedModule, or \p expectedGenericSig can be
@@ -1198,8 +1126,7 @@ static void filterValues(Type expectedTy, ModuleDecl *expectedModule,
     // FIXME: Should be able to move a value from an extension in a derived
     // module to the original definition in a base module.
     if (expectedModule && !value->hasClangNode() &&
-        value->getModuleContext() != expectedModule &&
-        !reExportedToSameModule(value->getModuleContext(), expectedModule))
+        value->getModuleContext() != expectedModule)
       return true;
 
     // If we're expecting a member within a constrained extension with a
@@ -1274,21 +1201,12 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
       XRefValuePathPieceLayout::readRecord(scratch, TID, IID, inProtocolExt,
                                            isStatic);
 
-    DeclBaseName name = getDeclBaseName(IID);
+    Identifier name = getIdentifier(IID);
     pathTrace.addValue(name);
 
-    Type filterTy;
-    if (!isType) {
-      auto maybeType = getTypeChecked(TID);
-      if (!maybeType) {
-        // FIXME: Don't throw away the inner error's information.
-        llvm::consumeError(maybeType.takeError());
-        return llvm::make_error<XRefError>("couldn't decode type",
-                                           pathTrace, name);
-      }
-      filterTy = maybeType.get();
+    Type filterTy = getType(TID);
+    if (!isType)
       pathTrace.addType(filterTy);
-    }
 
     baseModule->lookupQualified(ModuleType::get(baseModule), name,
                                 NL_QualifiedDefault | NL_KnownNoDependency,
@@ -1454,7 +1372,7 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
     case XREF_VALUE_PATH_PIECE:
     case XREF_INITIALIZER_PATH_PIECE: {
       TypeID TID = 0;
-      DeclBaseName memberName;
+      Identifier memberName;
       Optional<swift::CtorInitializerKind> ctorInit;
       bool isType = false;
       bool inProtocolExt = false;
@@ -1463,7 +1381,7 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
       case XREF_TYPE_PATH_PIECE: {
         IdentifierID IID;
         XRefTypePathPieceLayout::readRecord(scratch, IID, inProtocolExt);
-        memberName = getDeclBaseName(IID);
+        memberName = getIdentifier(IID);
         isType = true;
         break;
       }
@@ -1472,7 +1390,7 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
         IdentifierID IID;
         XRefValuePathPieceLayout::readRecord(scratch, TID, IID, inProtocolExt,
                                              isStatic);
-        memberName = getDeclBaseName(IID);
+        memberName = getIdentifier(IID);
         break;
       }
 
@@ -1491,18 +1409,9 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
 
       pathTrace.addValue(memberName);
 
-      Type filterTy;
-      if (!isType) {
-        auto maybeType = getTypeChecked(TID);
-        if (!maybeType) {
-          // FIXME: Don't throw away the inner error's information.
-          llvm::consumeError(maybeType.takeError());
-          return llvm::make_error<XRefError>("couldn't decode type",
-                                             pathTrace, memberName);
-        }
-        filterTy = maybeType.get();
+      Type filterTy = getType(TID);
+      if (!isType)
         pathTrace.addType(filterTy);
-      }
 
       if (values.size() != 1) {
         return llvm::make_error<XRefError>("multiple matching base values",
@@ -1528,13 +1437,23 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
 
     case XREF_EXTENSION_PATH_PIECE: {
       ModuleID ownerID;
-      GenericSignatureID rawGenericSig;
-      XRefExtensionPathPieceLayout::readRecord(scratch, ownerID, rawGenericSig);
+      ArrayRef<uint64_t> genericParamIDs;
+      XRefExtensionPathPieceLayout::readRecord(scratch, ownerID,
+                                               genericParamIDs);
       M = getModule(ownerID);
       pathTrace.addExtension(M);
 
       // Read the generic signature, if we have one.
-      genericSig = CanGenericSignature(getGenericSignature(rawGenericSig));
+      if (!genericParamIDs.empty()) {
+        SmallVector<GenericTypeParamType *, 4> params;
+        SmallVector<Requirement, 5> requirements;
+        for (TypeID paramID : genericParamIDs) {
+          params.push_back(getType(paramID)->castTo<GenericTypeParamType>());
+        }
+        readGenericRequirements(requirements, DeclTypeCursor);
+
+        genericSig = GenericSignature::getCanonical(params, requirements);
+      }
 
       continue;
     }
@@ -1690,26 +1609,11 @@ ModuleFile::resolveCrossReference(ModuleDecl *baseModule, uint32_t pathLen) {
   return values.front();
 }
 
-DeclBaseName ModuleFile::getDeclBaseName(IdentifierID IID) {
+Identifier ModuleFile::getIdentifier(IdentifierID IID) {
   if (IID == 0)
     return Identifier();
 
-  if (IID < NUM_SPECIAL_IDS) {
-    switch (static_cast<SpecialIdentifierID>(static_cast<uint8_t>(IID))) {
-    case BUILTIN_MODULE_ID:
-    case CURRENT_MODULE_ID:
-    case OBJC_HEADER_MODULE_ID:
-        llvm_unreachable("Cannot get DeclBaseName of special module id");
-    case SUBSCRIPT_ID:
-      return DeclBaseName::createSubscript();
-    case serialization::DESTRUCTOR_ID:
-      return DeclBaseName::createDestructor();
-    case NUM_SPECIAL_IDS:
-      llvm_unreachable("implementation detail only");
-    }
-  }
-
-  size_t rawID = IID - NUM_SPECIAL_IDS;
+  size_t rawID = IID - NUM_SPECIAL_MODULES;
   assert(rawID < Identifiers.size() && "invalid identifier ID");
   auto identRecord = Identifiers[rawID];
 
@@ -1724,12 +1628,6 @@ DeclBaseName ModuleFile::getDeclBaseName(IdentifierID IID) {
          "unterminated identifier string data");
 
   return getContext().getIdentifier(rawStrPtr.slice(0, terminatorOffset));
-}
-
-Identifier ModuleFile::getIdentifier(IdentifierID IID) {
-  auto name = getDeclBaseName(IID);
-  assert(!name.isSpecial());
-  return name.getIdentifier();
 }
 
 DeclContext *ModuleFile::getLocalDeclContext(DeclContextID DCID) {
@@ -1874,8 +1772,8 @@ DeclContext *ModuleFile::getDeclContext(DeclContextID DCID) {
 }
 
 ModuleDecl *ModuleFile::getModule(ModuleID MID) {
-  if (MID < NUM_SPECIAL_IDS) {
-    switch (static_cast<SpecialIdentifierID>(static_cast<uint8_t>(MID))) {
+  if (MID < NUM_SPECIAL_MODULES) {
+    switch (static_cast<SpecialModuleID>(static_cast<uint8_t>(MID))) {
     case BUILTIN_MODULE_ID:
       return getContext().TheBuiltinModule;
     case CURRENT_MODULE_ID:
@@ -1885,10 +1783,7 @@ ModuleDecl *ModuleFile::getModule(ModuleID MID) {
         static_cast<ClangImporter *>(getContext().getClangModuleLoader());
       return clangImporter->getImportedHeaderModule();
     }
-    case SUBSCRIPT_ID:
-    case DESTRUCTOR_ID:
-      llvm_unreachable("Modules cannot be named with special names");
-    case NUM_SPECIAL_IDS:
+    case NUM_SPECIAL_MODULES:
       llvm_unreachable("implementation detail only");
     }
   }
@@ -1959,11 +1854,12 @@ static bool isDeclAttrRecord(unsigned ID) {
   }
 }
 
-static Optional<swift::AccessLevel> getActualAccessLevel(uint8_t raw) {
-  switch (serialization::AccessLevel(raw)) {
+static Optional<swift::Accessibility>
+getActualAccessibility(uint8_t raw) {
+  switch (serialization::AccessibilityKind(raw)) {
 #define CASE(NAME) \
-  case serialization::AccessLevel::NAME: \
-    return swift::AccessLevel::NAME;
+  case serialization::AccessibilityKind::NAME: \
+    return Accessibility::NAME;
   CASE(Private)
   CASE(FilePrivate)
   CASE(Internal)
@@ -2003,30 +1899,6 @@ getActualAddressorKind(uint8_t raw) {
     return swift::AddressorKind::NativePinning;
   }
 
-  return None;
-}
-
-static Optional<swift::SelfAccessKind>
-getActualSelfAccessKind(uint8_t raw) {
-  switch (serialization::SelfAccessKind(raw)) {
-  case serialization::SelfAccessKind::NonMutating:
-    return swift::SelfAccessKind::NonMutating;
-  case serialization::SelfAccessKind::Mutating:
-    return swift::SelfAccessKind::Mutating;
-  case serialization::SelfAccessKind::__Consuming:
-    return swift::SelfAccessKind::__Consuming;
-  }
-  return None;
-}
-
-static
-Optional<swift::ResilienceExpansion> getActualResilienceExpansion(uint8_t raw) {
-  switch (serialization::ResilienceExpansion(raw)) {
-  case serialization::ResilienceExpansion::Minimal:
-    return swift::ResilienceExpansion::Minimal;
-  case serialization::ResilienceExpansion::Maximal:
-    return swift::ResilienceExpansion::Maximal;
-  }
   return None;
 }
 
@@ -2162,23 +2034,6 @@ Decl *ModuleFile::getDecl(DeclID DID, Optional<DeclContext *> ForcedContext) {
 
 Expected<Decl *>
 ModuleFile::getDeclChecked(DeclID DID, Optional<DeclContext *> ForcedContext) {
-  // Tag every deserialized ValueDecl coming out of getDeclChecked with its ID.
-  Expected<Decl *> deserialized = getDeclCheckedImpl(DID, ForcedContext);
-  if (deserialized && deserialized.get()) {
-    if (auto *IDC = dyn_cast<IterableDeclContext>(deserialized.get())) {
-      // Only set the DeclID on the returned Decl if it's one that was loaded
-      // and _wasn't_ one that had its DeclID set elsewhere (a followed XREF).
-      if (IDC->wasDeserialized() &&
-          static_cast<uint32_t>(IDC->getDeclID()) == 0) {
-        IDC->setDeclID(DID);
-      }
-    }
-  }
-  return deserialized;
-}
-
-Expected<Decl *>
-ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext) {
   if (DID == 0)
     return nullptr;
 
@@ -2203,8 +2058,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
   SmallVector<uint64_t, 64> scratch;
   StringRef blobData;
 
-  if (auto s = ctx.Stats)
-    s->getFrontendCounters().NumDeclsDeserialized++;
+  if (ctx.Stats)
+    ctx.Stats->getFrontendCounters().NumDeclsDeserialized++;
 
   // Read the attributes (if any).
   // This isn't just using DeclAttributes because that would result in the
@@ -2336,14 +2191,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
         break;
       }
 
-      case decls_block::Optimize_DECL_ATTR: {
-        unsigned kind;
-        serialization::decls_block::OptimizeDeclAttrLayout::readRecord(
-            scratch, kind);
-        Attr = new (ctx) OptimizeAttr((OptimizationMode)kind);
-        break;
-      }
-
       case decls_block::Effects_DECL_ATTR: {
         unsigned kind;
         serialization::decls_block::EffectsDeclAttrLayout::readRecord(scratch,
@@ -2414,6 +2261,16 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 #undef DEF_VER_TUPLE_PIECES
 #undef LIST_VER_TUPLE_PIECES
 #undef DECODE_VER_TUPLE
+      }
+
+      case decls_block::AutoClosure_DECL_ATTR: {
+        bool isImplicit;
+        bool isEscaping;
+        serialization::decls_block::AutoClosureDeclAttrLayout::readRecord(
+          scratch, isImplicit, isEscaping);
+        Attr = new (ctx) AutoClosureAttr(SourceLoc(), SourceRange(),
+                                         isEscaping, isImplicit);
+        break;
       }
 
       case decls_block::ObjC_DECL_ATTR: {
@@ -2514,22 +2371,11 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     bool isImplicit;
     GenericEnvironmentID genericEnvID;
     uint8_t rawAccessLevel;
-    ArrayRef<uint64_t> dependencyIDs;
 
     decls_block::TypeAliasLayout::readRecord(scratch, nameID, contextID,
                                              underlyingTypeID, interfaceTypeID,
                                              isImplicit, genericEnvID,
-                                             rawAccessLevel, dependencyIDs);
-
-    Identifier name = getIdentifier(nameID);
-
-    for (TypeID dependencyID : dependencyIDs) {
-      auto dependency = getTypeChecked(dependencyID);
-      if (!dependency) {
-        return llvm::make_error<TypeError>(
-            name, takeErrorInfo(dependency.takeError()));
-      }
-    }
+                                             rawAccessLevel);
 
     auto DC = ForcedContext ? *ForcedContext : getDeclContext(contextID);
 
@@ -2537,7 +2383,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (declOrOffset.isComplete())
       return declOrOffset;
 
-    auto alias = createDecl<TypeAliasDecl>(SourceLoc(), SourceLoc(), name,
+    auto alias = createDecl<TypeAliasDecl>(SourceLoc(), SourceLoc(),
+                                           getIdentifier(nameID),
                                            SourceLoc(), genericParams, DC);
     declOrOffset = alias;
 
@@ -2545,8 +2392,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     alias->setUnderlyingType(getType(underlyingTypeID));
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      alias->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      alias->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -2595,13 +2442,13 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     DeclContextID contextID;
     TypeID defaultDefinitionID;
     bool isImplicit;
-    ArrayRef<uint64_t> rawOverriddenIDs;
+    ArrayRef<uint64_t> rawInheritedIDs;
 
     decls_block::AssociatedTypeDeclLayout::readRecord(scratch, nameID,
                                                       contextID,
                                                       defaultDefinitionID,
                                                       isImplicit,
-                                                      rawOverriddenIDs);
+                                                      rawInheritedIDs);
 
     auto DC = ForcedContext ? *ForcedContext : getDeclContext(contextID);
     if (declOrOffset.isComplete())
@@ -2622,23 +2469,18 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     assert(!assocType->getDeclaredInterfaceType()->hasError() &&
            "erroneous associated type");
 
-    AccessLevel parentAccess = cast<ProtocolDecl>(DC)->getFormalAccess();
-    assocType->setAccess(std::max(parentAccess, AccessLevel::Internal));
+    Accessibility parentAccess = cast<ProtocolDecl>(DC)->getFormalAccess();
+    assocType->setAccessibility(std::max(parentAccess,Accessibility::Internal));
     if (isImplicit)
       assocType->setImplicit();
 
+    auto inherited = ctx.Allocate<TypeLoc>(rawInheritedIDs.size());
+    for_each(inherited, rawInheritedIDs, [this](TypeLoc &loc, uint64_t rawID) {
+      loc.setType(getType(rawID));
+    });
+    assocType->setInherited(inherited);
+
     assocType->setCheckedInheritanceClause();
-
-    // Overridden associated types.
-    SmallVector<AssociatedTypeDecl *, 2> overriddenAssocTypes;
-    for (auto overriddenID : rawOverriddenIDs) {
-      if (auto overriddenAssocType =
-              dyn_cast_or_null<AssociatedTypeDecl>(getDecl(overriddenID))) {
-        overriddenAssocTypes.push_back(overriddenAssocType);
-      }
-    }
-    (void)assocType->setOverriddenDecls(overriddenAssocTypes);
-
     break;
   }
 
@@ -2673,8 +2515,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     // Read the generic environment.
     configureGenericEnvironment(theStruct, genericEnvID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      theStruct->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      theStruct->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -2706,7 +2548,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     TypeID interfaceID;
     DeclID overriddenID;
     bool needsNewVTableEntry, firstTimeRequired;
-    uint8_t rawDefaultArgumentResilienceExpansion;
     unsigned numArgNames;
     ArrayRef<uint64_t> argNameAndDependencyIDs;
 
@@ -2718,7 +2559,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
                                                overriddenID,
                                                rawAccessLevel,
                                                needsNewVTableEntry,
-                                               rawDefaultArgumentResilienceExpansion,
                                                firstTimeRequired,
                                                numArgNames,
                                                argNameAndDependencyIDs);
@@ -2781,37 +2621,34 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     configureGenericEnvironment(ctor, genericEnvID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      ctor->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      ctor->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
     }
 
-    bool mutating = parent->getDeclaredInterfaceType()->hasReferenceSemantics();
-    auto *selfDecl = ParamDecl::createSelf(SourceLoc(), parent,
-                                           /*static*/ false,
-                                           /*mutating*/ mutating);
-    selfDecl->setImplicit();
-
-    auto *bodyParams = readParameterList();
-    assert(bodyParams && "missing parameters for constructor");
-    ctor->setParameterLists(selfDecl, bodyParams);
+    auto *bodyParams0 = readParameterList();
+    bodyParams0->get(0)->setImplicit();  // self is implicit.
+    
+    auto *bodyParams1 = readParameterList();
+    assert(bodyParams0 && bodyParams1 && "missing parameters for constructor");
+    ctor->setParameterLists(bodyParams0->get(0), bodyParams1);
 
     auto interfaceType = getType(interfaceID);
     ctor->setInterfaceType(interfaceType);
 
     // Set the initializer interface type of the constructor.
     auto allocType = ctor->getInterfaceType();
-    auto selfParam = computeSelfParam(ctor, /*isInitializingCtor=*/true);
+    auto selfTy = ctor->computeInterfaceSelfType(/*isInitializingCtor=*/true);
     if (auto polyFn = allocType->getAs<GenericFunctionType>()) {
       ctor->setInitializerInterfaceType(
               GenericFunctionType::get(polyFn->getGenericSignature(),
-                                       {selfParam}, polyFn->getResult(),
+                                       selfTy, polyFn->getResult(),
                                        polyFn->getExtInfo()));
     } else {
       auto fn = allocType->castTo<FunctionType>();
-      ctor->setInitializerInterfaceType(FunctionType::get({selfParam},
+      ctor->setInitializerInterfaceType(FunctionType::get(selfTy,
                                                           fn->getResult(),
                                                           fn->getExtInfo()));
     }
@@ -2828,25 +2665,13 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (auto overriddenCtor = cast_or_null<ConstructorDecl>(overridden.get()))
       ctor->setOverriddenDecl(overriddenCtor);
     ctor->setNeedsNewVTableEntry(needsNewVTableEntry);
-
-    if (auto defaultArgumentResilienceExpansion = getActualResilienceExpansion(
-            rawDefaultArgumentResilienceExpansion)) {
-      ctor->setDefaultArgumentResilienceExpansion(
-          *defaultArgumentResilienceExpansion);
-    } else {
-      error();
-      return nullptr;
-    }
-
     break;
   }
 
   case decls_block::VAR_DECL: {
     IdentifierID nameID;
     DeclContextID contextID;
-    bool isImplicit, isObjC, isStatic, hasNonPatternBindingInit;
-    bool isGetterMutating, isSetterMutating;
-    unsigned specifier;
+    bool isImplicit, isObjC, isStatic, isLet, hasNonPatternBindingInit;
     uint8_t storageKind, rawAccessLevel, rawSetterAccessLevel;
     TypeID interfaceTypeID;
     DeclID getterID, setterID, materializeForSetID, willSetID, didSetID;
@@ -2854,10 +2679,9 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     ArrayRef<uint64_t> dependencyIDs;
 
     decls_block::VarLayout::readRecord(scratch, nameID, contextID,
-                                       isImplicit, isObjC, isStatic, specifier,
-                                       hasNonPatternBindingInit,
-                                       isGetterMutating, isSetterMutating,
-                                       storageKind, interfaceTypeID,
+                                       isImplicit, isObjC, isStatic, isLet,
+                                       hasNonPatternBindingInit, storageKind,
+                                       interfaceTypeID,
                                        getterID, setterID, materializeForSetID,
                                        addressorID, mutableAddressorID,
                                        willSetID, didSetID, overriddenID,
@@ -2875,30 +2699,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     for (TypeID dependencyID : dependencyIDs) {
       auto dependency = getTypeChecked(dependencyID);
       if (!dependency) {
-        // Stored properties in classes still impact class object layout because
-        // their offset is computed and stored in the field offset vector.
-        DeclDeserializationError::Flags flags;
-        
-        if (!isStatic) {
-          switch ((StorageKind)storageKind) {
-          case StorageKind::Stored:
-          case StorageKind::StoredWithObservers:
-          case StorageKind::StoredWithTrivialAccessors:
-            flags |= DeclDeserializationError::Flag::NeedsFieldOffsetVectorEntry;
-            break;
-            
-          case StorageKind::Addressed:
-          case StorageKind::AddressedWithObservers:
-          case StorageKind::AddressedWithTrivialAccessors:
-          case StorageKind::Computed:
-          case StorageKind::ComputedWithMutableAddress:
-          case StorageKind::InheritedWithObservers:
-            break;
-          }
-        }
-        
         return llvm::make_error<TypeError>(
-            name, takeErrorInfo(dependency.takeError()), flags);
+            name, takeErrorInfo(dependency.takeError()));
       }
     }
 
@@ -2906,13 +2708,10 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (declOrOffset.isComplete())
       return declOrOffset;
 
-    auto var = createDecl<VarDecl>(/*IsStatic*/isStatic,
-                                   (VarDecl::Specifier)specifier,
+    auto var = createDecl<VarDecl>(/*IsStatic*/isStatic, /*IsLet*/isLet,
                                    /*IsCaptureList*/false, SourceLoc(), name,
                                    Type(), DC);
     var->setHasNonPatternBindingInit(hasNonPatternBindingInit);
-    var->setIsGetterMutating(isGetterMutating);
-    var->setIsSetterMutating(isSetterMutating);
     declOrOffset = var;
 
     Type interfaceType = getType(interfaceTypeID);
@@ -2924,16 +2723,16 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     configureStorage(var, storageKind, getterID, setterID, materializeForSetID,
                      addressorID, mutableAddressorID, willSetID, didSetID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      var->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      var->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
     }
 
     if (var->isSettable(nullptr)) {
-      if (auto setterAccess = getActualAccessLevel(rawSetterAccessLevel)) {
-        var->setSetterAccess(*setterAccess);
+      if (auto setterAccess = getActualAccessibility(rawSetterAccessLevel)) {
+        var->setSetterAccessibility(*setterAccess);
       } else {
         error();
         return nullptr;
@@ -2954,18 +2753,17 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
   case decls_block::PARAM_DECL: {
     IdentifierID argNameID, paramNameID;
     DeclContextID contextID;
-    unsigned specifier;
+    bool isLet;
     TypeID interfaceTypeID;
 
     decls_block::ParamLayout::readRecord(scratch, argNameID, paramNameID,
-                                         contextID, specifier, interfaceTypeID);
+                                         contextID, isLet, interfaceTypeID);
 
     auto DC = ForcedContext ? *ForcedContext : getDeclContext(contextID);
     if (declOrOffset.isComplete())
       return declOrOffset;
 
-    auto param = createDecl<ParamDecl>((VarDecl::Specifier)specifier,
-                                       SourceLoc(), SourceLoc(),
+    auto param = createDecl<ParamDecl>(isLet, SourceLoc(), SourceLoc(),
                                        getIdentifier(argNameID), SourceLoc(),
                                        getIdentifier(paramNameID), Type(), DC);
 
@@ -2981,7 +2779,7 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
       return nullptr;
     }
 
-    param->setInterfaceType(paramTy->getInOutObjectType());
+    param->setInterfaceType(paramTy);
     break;
   }
 
@@ -2989,30 +2787,27 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     DeclContextID contextID;
     bool isImplicit;
     bool isStatic;
-    uint8_t rawStaticSpelling, rawAccessLevel, rawAddressorKind, rawMutModifier;
-    bool isObjC, hasDynamicSelf, hasForcedStaticDispatch, throws;
-    unsigned numNameComponentsBiased;
+    uint8_t rawStaticSpelling, rawAccessLevel, rawAddressorKind;
+    bool isObjC, isMutating, hasDynamicSelf, throws;
+    unsigned numParamPatterns, numNameComponentsBiased;
     GenericEnvironmentID genericEnvID;
     TypeID interfaceTypeID;
     DeclID associatedDeclID;
     DeclID overriddenID;
     DeclID accessorStorageDeclID;
     bool needsNewVTableEntry;
-    uint8_t rawDefaultArgumentResilienceExpansion;
     ArrayRef<uint64_t> nameAndDependencyIDs;
 
     decls_block::FuncLayout::readRecord(scratch, contextID, isImplicit,
                                         isStatic, rawStaticSpelling, isObjC,
-                                        rawMutModifier, hasDynamicSelf,
-                                        hasForcedStaticDispatch, throws,
-                                        genericEnvID,
+                                        isMutating, hasDynamicSelf, throws,
+                                        numParamPatterns, genericEnvID,
                                         interfaceTypeID,
                                         associatedDeclID, overriddenID,
                                         accessorStorageDeclID,
                                         numNameComponentsBiased,
                                         rawAddressorKind, rawAccessLevel,
                                         needsNewVTableEntry,
-                                        rawDefaultArgumentResilienceExpansion,
                                         nameAndDependencyIDs);
 
     // Resolve the name ids.
@@ -3077,7 +2872,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (declOrOffset.isComplete())
       return declOrOffset;
 
-    auto numParamPatterns = DC->isTypeContext() ? 2 : 1;
     auto fn = FuncDecl::createDeserialized(
         ctx, /*StaticLoc=*/SourceLoc(), staticSpelling.getValue(),
         /*FuncLoc=*/SourceLoc(), name, /*NameLoc=*/SourceLoc(),
@@ -3089,8 +2883,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     configureGenericEnvironment(fn, genericEnvID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      fn->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      fn->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -3099,13 +2893,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (auto addressorKind = getActualAddressorKind(rawAddressorKind)) {
       if (*addressorKind != AddressorKind::NotAddressor)
         fn->setAddressorKind(*addressorKind);
-    } else {
-      error();
-      return nullptr;
-    }
-    
-    if (auto SelfAccessKind = getActualSelfAccessKind(rawMutModifier)) {
-      fn->setSelfAccessKind(*SelfAccessKind);
     } else {
       error();
       return nullptr;
@@ -3129,16 +2916,13 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     fn->setInterfaceType(interfaceType);
 
     SmallVector<ParameterList*, 2> paramLists;
-    if (DC->isTypeContext()) {
-      auto *selfDecl = ParamDecl::createSelf(SourceLoc(), DC,
-                                             fn->isStatic(),
-                                             fn->isMutating());
-      selfDecl->setImplicit();
-      paramLists.push_back(ParameterList::create(ctx, selfDecl));
-    }
+    for (unsigned i = 0, e = numParamPatterns; i != e; ++i)
+      paramLists.push_back(readParameterList());
 
-    paramLists.push_back(readParameterList());
-
+    // If the first parameter list is (self), mark it implicit.
+    if (numParamPatterns && DC->isTypeContext())
+      paramLists[0]->get(0)->setImplicit();
+    
     fn->setDeserializedSignature(paramLists, TypeLoc());
 
     if (auto errorConvention = maybeReadForeignErrorConvention())
@@ -3152,19 +2936,9 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     fn->setStatic(isStatic);
     if (isImplicit)
       fn->setImplicit();
+    fn->setMutating(isMutating);
     fn->setDynamicSelf(hasDynamicSelf);
-    fn->setForcedStaticDispatch(hasForcedStaticDispatch);
     fn->setNeedsNewVTableEntry(needsNewVTableEntry);
-
-    if (auto defaultArgumentResilienceExpansion = getActualResilienceExpansion(
-            rawDefaultArgumentResilienceExpansion)) {
-      fn->setDefaultArgumentResilienceExpansion(
-          *defaultArgumentResilienceExpansion);
-    } else {
-      error();
-      return nullptr;
-    }
-
     break;
   }
 
@@ -3228,14 +3002,13 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
   case decls_block::PROTOCOL_DECL: {
     IdentifierID nameID;
     DeclContextID contextID;
-    bool isImplicit, isClassBounded, isObjC, existentialTypeSupported;
+    bool isImplicit, isClassBounded, isObjC;
     GenericEnvironmentID genericEnvID;
     uint8_t rawAccessLevel;
     ArrayRef<uint64_t> rawInheritedIDs;
 
     decls_block::ProtocolLayout::readRecord(scratch, nameID, contextID,
                                             isImplicit, isClassBounded, isObjC,
-                                            existentialTypeSupported,
                                             genericEnvID, rawAccessLevel,
                                             rawInheritedIDs);
 
@@ -3249,10 +3022,9 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     declOrOffset = proto;
 
     proto->setRequiresClass(isClassBounded);
-    proto->setExistentialTypeSupported(existentialTypeSupported);
-
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      proto->setAccess(*accessLevel);
+    
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      proto->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -3266,21 +3038,17 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     configureGenericEnvironment(proto, genericEnvID);
 
+    SmallVector<Requirement, 4> requirements;
+    readGenericRequirements(requirements, DeclTypeCursor);
+
     if (isImplicit)
       proto->setImplicit();
     proto->computeType();
 
-    proto->setCircularityCheck(CircularityCheck::Checked);
-
-    // Establish the requirement signature.
-    {
-      SmallVector<Requirement, 4> requirements;
-      readGenericRequirements(requirements, DeclTypeCursor);
-      proto->setRequirementSignature(requirements);
-    }
+    proto->setRequirementSignature(requirements);
 
     proto->setMemberLoader(this, DeclTypeCursor.GetCurrentBitNo());
-
+    proto->setCircularityCheck(CircularityCheck::Checked);
     break;
   }
 
@@ -3437,8 +3205,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     configureGenericEnvironment(theClass, genericEnvID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      theClass->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      theClass->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -3508,8 +3276,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     configureGenericEnvironment(theEnum, genericEnvID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      theEnum->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      theEnum->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
@@ -3581,15 +3349,15 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
 
     if (isImplicit)
       elem->setImplicit();
-    elem->setAccess(std::max(cast<EnumDecl>(DC)->getFormalAccess(),
-                             AccessLevel::Internal));
+    elem->setAccessibility(std::max(cast<EnumDecl>(DC)->getFormalAccess(),
+                                    Accessibility::Internal));
 
     break;
   }
 
   case decls_block::SUBSCRIPT_DECL: {
     DeclContextID contextID;
-    bool isImplicit, isObjC, isGetterMutating, isSetterMutating;
+    bool isImplicit, isObjC;
     GenericEnvironmentID genericEnvID;
     TypeID interfaceTypeID;
     DeclID getterID, setterID, materializeForSetID;
@@ -3601,9 +3369,7 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     ArrayRef<uint64_t> argNameAndDependencyIDs;
 
     decls_block::SubscriptLayout::readRecord(scratch, contextID,
-                                             isImplicit, isObjC,
-                                             isGetterMutating, isSetterMutating,
-                                             rawStorageKind,
+                                             isImplicit, isObjC, rawStorageKind,
                                              genericEnvID,
                                              interfaceTypeID,
                                              getterID, setterID,
@@ -3617,7 +3383,7 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     SmallVector<Identifier, 2> argNames;
     for (auto argNameID : argNameAndDependencyIDs.slice(0, numArgNames))
       argNames.push_back(getIdentifier(argNameID));
-    DeclName name(ctx, DeclBaseName::createSubscript(), argNames);
+    DeclName name(ctx, ctx.Id_subscript, argNames);
 
     Expected<Decl *> overridden = getDeclChecked(overriddenID);
     if (!overridden) {
@@ -3644,8 +3410,6 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     auto subscript = createDecl<SubscriptDecl>(name, SourceLoc(), nullptr,
                                                SourceLoc(), TypeLoc(),
                                                parent, genericParams);
-    subscript->setIsGetterMutating(isGetterMutating);
-    subscript->setIsSetterMutating(isSetterMutating);
     declOrOffset = subscript;
 
     configureGenericEnvironment(subscript, genericEnvID);
@@ -3656,16 +3420,16 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
                      getterID, setterID, materializeForSetID,
                      addressorID, mutableAddressorID, willSetID, didSetID);
 
-    if (auto accessLevel = getActualAccessLevel(rawAccessLevel)) {
-      subscript->setAccess(*accessLevel);
+    if (auto accessLevel = getActualAccessibility(rawAccessLevel)) {
+      subscript->setAccessibility(*accessLevel);
     } else {
       error();
       return nullptr;
     }
 
     if (subscript->isSettable()) {
-      if (auto setterAccess = getActualAccessLevel(rawSetterAccessLevel)) {
-        subscript->setSetterAccess(*setterAccess);
+      if (auto setterAccess = getActualAccessibility(rawSetterAccessLevel)) {
+        subscript->setSetterAccessibility(*setterAccess);
       } else {
         error();
         return nullptr;
@@ -3689,24 +3453,14 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     DeclContextID contextID;
     bool isImplicit;
     GenericEnvironmentID genericEnvID;
-    unsigned numConformances, numInherited;
-    ArrayRef<uint64_t> inheritedAndDependencyIDs;
+    unsigned numConformances;
+    ArrayRef<uint64_t> rawInheritedIDs;
 
     decls_block::ExtensionLayout::readRecord(scratch, baseID, contextID,
                                              isImplicit, genericEnvID,
-                                             numConformances, numInherited,
-                                             inheritedAndDependencyIDs);
+                                             numConformances, rawInheritedIDs);
 
     auto DC = getDeclContext(contextID);
-
-    for (TypeID dependencyID : inheritedAndDependencyIDs.slice(numInherited)) {
-      auto dependency = getTypeChecked(dependencyID);
-      if (!dependency) {
-        return llvm::make_error<ExtensionError>(
-            takeErrorInfo(dependency.takeError()));
-      }
-    }
-
     if (declOrOffset.isComplete())
       return declOrOffset;
 
@@ -3732,8 +3486,8 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (isImplicit)
       extension->setImplicit();
 
-    auto inheritedTypes = ctx.Allocate<TypeLoc>(numInherited);
-    for_each(inheritedTypes, inheritedAndDependencyIDs.slice(0, numInherited),
+    auto inheritedTypes = ctx.Allocate<TypeLoc>(rawInheritedIDs.size());
+    for_each(inheritedTypes, rawInheritedIDs,
              [this](TypeLoc &tl, uint64_t rawID) {
       tl = TypeLoc::withoutLoc(getType(rawID));
     });
@@ -3780,18 +3534,19 @@ ModuleFile::getDeclCheckedImpl(DeclID DID, Optional<DeclContext *> ForcedContext
     if (declOrOffset.isComplete())
       return declOrOffset;
 
-    auto dtor = createDecl<DestructorDecl>(SourceLoc(), /*selfpat*/nullptr, DC);
+    auto dtor = createDecl<DestructorDecl>(ctx.Id_deinit, SourceLoc(),
+                                           /*selfpat*/nullptr, DC);
     declOrOffset = dtor;
 
     configureGenericEnvironment(dtor, genericEnvID);
 
-    dtor->setAccess(std::max(cast<ClassDecl>(DC)->getFormalAccess(),
-                             AccessLevel::Internal));
-    auto *selfDecl = ParamDecl::createSelf(SourceLoc(), DC,
-                                           /*static*/ false,
-                                           /*mutating*/ false);
-    selfDecl->setImplicit();
-    dtor->setSelfDecl(selfDecl);
+    dtor->setAccessibility(std::max(cast<ClassDecl>(DC)->getFormalAccess(),
+                                    Accessibility::Internal));
+    auto *selfParams = readParameterList();
+    selfParams->get(0)->setImplicit();  // self is implicit.
+
+    assert(selfParams && "Didn't get self pattern?");
+    dtor->setSelfDecl(selfParams->get(0));
 
     auto interfaceType = getType(interfaceID);
     dtor->setInterfaceType(interfaceType);
@@ -3868,26 +3623,6 @@ getActualSILFunctionTypeRepresentation(uint8_t rep) {
   CASE(Method)
   CASE(ObjCMethod)
   CASE(WitnessMethod)
-#undef CASE
-  default:
-    return None;
-  }
-}
-
-/// Translate from the Serialization coroutine kind enum values to the AST
-/// strongly-typed enum.
-///
-/// The former is guaranteed to be stable, but may not reflect this version of
-/// the AST.
-static Optional<swift::SILCoroutineKind>
-getActualSILCoroutineKind(uint8_t rep) {
-  switch (rep) {
-#define CASE(KIND) \
-  case (uint8_t)serialization::SILCoroutineKind::KIND: \
-    return swift::SILCoroutineKind::KIND;
-  CASE(None)
-  CASE(YieldOnce)
-  CASE(YieldMany)
 #undef CASE
   default:
     return None;
@@ -3979,8 +3714,8 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
   StringRef blobData;
   unsigned recordID = DeclTypeCursor.readRecord(entry.ID, scratch, &blobData);
 
-  if (auto s = ctx.Stats)
-    s->getFrontendCounters().NumTypesDeserialized++;
+  if (ctx.Stats)
+    ctx.Stats->getFrontendCounters().NumTypesDeserialized++;
 
   switch (recordID) {
   case decls_block::NAME_ALIAS_TYPE: {
@@ -4047,19 +3782,17 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
 
   case decls_block::PAREN_TYPE: {
     TypeID underlyingID;
-    bool isVariadic, isAutoClosure, isEscaping, isInOut, isShared;
+    bool isVariadic, isAutoClosure, isEscaping;
     decls_block::ParenTypeLayout::readRecord(scratch, underlyingID, isVariadic,
-                                             isAutoClosure, isEscaping,
-                                             isInOut, isShared);
+                                             isAutoClosure, isEscaping);
 
     auto underlyingTy = getTypeChecked(underlyingID);
     if (!underlyingTy)
       return underlyingTy.takeError();
-    
+
     typeOrOffset = ParenType::get(
-        ctx, underlyingTy.get()->getInOutObjectType(),
-        ParameterTypeFlags(isVariadic, isAutoClosure, isEscaping,
-                           isInOut, isShared));
+        ctx, underlyingTy.get(),
+        ParameterTypeFlags(isVariadic, isAutoClosure, isEscaping));
     break;
   }
 
@@ -4079,19 +3812,17 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
 
       IdentifierID nameID;
       TypeID typeID;
-      bool isVariadic, isAutoClosure, isEscaping, isInOut, isShared;
+      bool isVariadic, isAutoClosure, isEscaping;
       decls_block::TupleTypeEltLayout::readRecord(
-          scratch, nameID, typeID, isVariadic, isAutoClosure, isEscaping,
-          isInOut, isShared);
+          scratch, nameID, typeID, isVariadic, isAutoClosure, isEscaping);
 
       auto elementTy = getTypeChecked(typeID);
       if (!elementTy)
         return elementTy.takeError();
-      
+
       elements.emplace_back(
-          elementTy.get()->getInOutObjectType(), getIdentifier(nameID),
-          ParameterTypeFlags(isVariadic, isAutoClosure, isEscaping,
-                             isInOut, isShared));
+          elementTy.get(), getIdentifier(nameID),
+          ParameterTypeFlags(isVariadic, isAutoClosure, isEscaping));
     }
 
     typeOrOffset = TupleType::get(elements, ctx);
@@ -4371,23 +4102,40 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
     TypeID resultID;
     uint8_t rawRep;
     bool throws = false;
-    GenericSignatureID rawGenericSig;
+    ArrayRef<uint64_t> genericParamIDs;
 
     decls_block::GenericFunctionTypeLayout::readRecord(scratch,
                                                        inputID,
                                                        resultID,
                                                        rawRep,
                                                        throws,
-                                                       rawGenericSig);
+                                                       genericParamIDs);
     auto rep = getActualFunctionTypeRepresentation(rawRep);
     if (!rep.hasValue()) {
       error();
       return nullptr;
     }
 
-    auto sig = getGenericSignature(rawGenericSig);
-    auto info = GenericFunctionType::ExtInfo(*rep, throws);
+    // Read the generic parameters.
+    SmallVector<GenericTypeParamType *, 4> genericParams;
+    for (auto paramID : genericParamIDs) {
+      auto param = dyn_cast_or_null<GenericTypeParamType>(
+                     getType(paramID).getPointer());
+      if (!param) {
+        error();
+        break;
+      }
+
+      genericParams.push_back(param);
+    }
     
+    // Read the generic requirements.
+    SmallVector<Requirement, 4> requirements;
+    readGenericRequirements(requirements, DeclTypeCursor);
+    auto info = GenericFunctionType::ExtInfo(*rep, throws);
+
+    auto sig = GenericSignature::get(genericParams, requirements);
+
     auto inputTy = getTypeChecked(inputID);
     if (!inputTy)
       return inputTy.takeError();
@@ -4460,29 +4208,21 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
   }
       
   case decls_block::SIL_FUNCTION_TYPE: {
-    uint8_t rawCoroutineKind;
     uint8_t rawCalleeConvention;
     uint8_t rawRepresentation;
     bool pseudogeneric = false;
-    bool noescape;
     bool hasErrorResult;
     unsigned numParams;
-    unsigned numYields;
     unsigned numResults;
-    GenericSignatureID rawGenericSig;
     ArrayRef<uint64_t> variableData;
 
     decls_block::SILFunctionTypeLayout::readRecord(scratch,
-                                             rawCoroutineKind,
                                              rawCalleeConvention,
                                              rawRepresentation,
                                              pseudogeneric,
-                                             noescape,
                                              hasErrorResult,
                                              numParams,
-                                             numYields,
                                              numResults,
-                                             rawGenericSig,
                                              variableData);
 
     // Process the ExtInfo.
@@ -4492,14 +4232,7 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
       error();
       return nullptr;
     }
-    SILFunctionType::ExtInfo extInfo(*representation, pseudogeneric, noescape);
-
-    // Process the coroutine kind.
-    auto coroutineKind = getActualSILCoroutineKind(rawCoroutineKind);
-    if (!coroutineKind.hasValue()) {
-      error();
-      return nullptr;
-    }
+    SILFunctionType::ExtInfo extInfo(*representation, pseudogeneric);
 
     // Process the callee convention.
     auto calleeConvention = getActualParameterConvention(rawCalleeConvention);
@@ -4514,14 +4247,6 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
       auto type = getType(typeID);
       if (!convention || !type) return None;
       return SILParameterInfo(type->getCanonicalType(), *convention);
-    };
-
-    auto processYield = [&](TypeID typeID, uint64_t rawConvention)
-                                  -> Optional<SILYieldInfo> {
-      auto convention = getActualParameterConvention(rawConvention);
-      auto type = getType(typeID);
-      if (!convention || !type) return None;
-      return SILYieldInfo(type->getCanonicalType(), *convention);
     };
 
     auto processResult = [&](TypeID typeID, uint64_t rawConvention)
@@ -4555,20 +4280,6 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
       allParams.push_back(*param);
     }
 
-    // Process the yields.
-    SmallVector<SILYieldInfo, 8> allYields;
-    allYields.reserve(numYields);
-    for (unsigned i = 0; i != numYields; ++i) {
-      auto typeID = variableData[nextVariableDataIndex++];
-      auto rawConvention = variableData[nextVariableDataIndex++];
-      auto yield = processYield(typeID, rawConvention);
-      if (!yield) {
-        error();
-        return nullptr;
-      }
-      allYields.push_back(*yield);
-    }
-
     // Process the results.
     SmallVector<SILResultInfo, 8> allResults;
     allParams.reserve(numResults);
@@ -4595,19 +4306,26 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
       }
     }
 
-    Optional<ProtocolConformanceRef> witnessMethodConformance;
-    if (*representation == SILFunctionTypeRepresentation::WitnessMethod) {
-      witnessMethodConformance = readConformance(DeclTypeCursor);
+    // Process the generic signature parameters.
+    SmallVector<GenericTypeParamType *, 8> genericParamTypes;
+    for (auto id : variableData.slice(nextVariableDataIndex)) {
+      genericParamTypes.push_back(
+                  cast<GenericTypeParamType>(getType(id)->getCanonicalType()));
     }
 
-    GenericSignature *genericSig = getGenericSignature(rawGenericSig);
+    // Read the generic requirements, if any.
+    SmallVector<Requirement, 4> requirements;
+    readGenericRequirements(requirements, DeclTypeCursor);
+
+    GenericSignature *genericSig = nullptr;
+    if (!genericParamTypes.empty() || !requirements.empty())
+      genericSig = GenericSignature::get(genericParamTypes, requirements,
+                                         /*isKnownCanonical=*/true);
 
     typeOrOffset = SILFunctionType::get(genericSig, extInfo,
-                                        coroutineKind.getValue(),
                                         calleeConvention.getValue(),
-                                        allParams, allYields, allResults,
-                                        errorResult,
-                                        ctx, witnessMethodConformance);
+                                        allParams, allResults, errorResult,
+                                        ctx);
     break;
   }
 
@@ -4702,83 +4420,6 @@ Expected<Type> ModuleFile::getTypeChecked(TypeID TID) {
   return typeOrOffset;
 }
 
-Decl *handleErrorAndSupplyMissingClassMember(ASTContext &context,
-                                             llvm::Error &&error,
-                                             ClassDecl *containingClass) {
-  Decl *suppliedMissingMember = nullptr;
-  auto handleMissingClassMember = [&](const DeclDeserializationError &error) {
-    if (error.isDesignatedInitializer())
-      containingClass->setHasMissingDesignatedInitializers();
-    if (error.needsVTableEntry() || error.needsAllocatingVTableEntry())
-      containingClass->setHasMissingVTableEntries();
-
-    if (error.getName().getBaseName() == context.Id_init) {
-      suppliedMissingMember = MissingMemberDecl::forInitializer(
-          context, containingClass, error.getName(), error.needsVTableEntry(),
-          error.needsAllocatingVTableEntry());
-    } else if (error.needsVTableEntry()) {
-      suppliedMissingMember = MissingMemberDecl::forMethod(
-          context, containingClass, error.getName(), error.needsVTableEntry());
-    } else if (error.needsFieldOffsetVectorEntry()) {
-      suppliedMissingMember = MissingMemberDecl::forStoredProperty(
-          context, containingClass, error.getName());
-    }
-    // FIXME: Handle other kinds of missing members: properties,
-    // subscripts, and methods that don't need vtable entries.
-  };
-  llvm::handleAllErrors(std::move(error), handleMissingClassMember);
-  return suppliedMissingMember;
-}
-
-Decl *handleErrorAndSupplyMissingProtoMember(ASTContext &context,
-                                             llvm::Error &&error,
-                                             ProtocolDecl *containingProto) {
-  Decl *suppliedMissingMember = nullptr;
-
-  auto handleMissingProtocolMember =
-      [&](const DeclDeserializationError &error) {
-        assert(!error.needsAllocatingVTableEntry());
-        if (error.needsVTableEntry())
-          containingProto->setHasMissingRequirements(true);
-
-        if (error.getName().getBaseName() == context.Id_init) {
-          suppliedMissingMember = MissingMemberDecl::forInitializer(
-              context, containingProto, error.getName(),
-              error.needsVTableEntry(), error.needsAllocatingVTableEntry());
-              return;
-        }
-        if (error.needsVTableEntry()) {
-          suppliedMissingMember = MissingMemberDecl::forMethod(
-              context, containingProto, error.getName(),
-              error.needsVTableEntry());
-        }
-        // FIXME: Handle other kinds of missing members: properties,
-        // subscripts, and methods that don't need vtable entries.
-      };
-  llvm::handleAllErrors(std::move(error), handleMissingProtocolMember);
-  return suppliedMissingMember;
-}
-
-Decl *handleErrorAndSupplyMissingMiscMember(llvm::Error &&error) {
-  llvm::consumeError(std::move(error));
-  return nullptr;
-}
-
-Decl *handleErrorAndSupplyMissingMember(ASTContext &context, Decl *container,
-                                        llvm::Error &&error) {
-  // Drop the member if it had a problem.
-  // FIXME: Handle overridable members in class extensions too, someday.
-  if (auto *containingClass = dyn_cast<ClassDecl>(container)) {
-    return handleErrorAndSupplyMissingClassMember(context, std::move(error),
-                                                  containingClass);
-  }
-  if (auto *containingProto = dyn_cast<ProtocolDecl>(container)) {
-    return handleErrorAndSupplyMissingProtoMember(context, std::move(error),
-                                                  containingProto);
-  }
-  return handleErrorAndSupplyMissingMiscMember(std::move(error));
-}
-
 void ModuleFile::loadAllMembers(Decl *container, uint64_t contextData) {
   PrettyStackTraceDecl trace("loading members for", container);
   ++NumMemberListsLoaded;
@@ -4813,18 +4454,60 @@ void ModuleFile::loadAllMembers(Decl *container, uint64_t contextData) {
   members.reserve(rawMemberIDs.size());
   for (DeclID rawID : rawMemberIDs) {
     Expected<Decl *> next = getDeclChecked(rawID);
-    if (next) {
-      assert(next.get() && "unchecked error deserializing next member");
-      members.push_back(next.get());
-    } else {
+    if (!next) {
       if (!getContext().LangOpts.EnableDeserializationRecovery)
         fatal(next.takeError());
 
-      Decl *suppliedMissingMember = handleErrorAndSupplyMissingMember(
-          getContext(), container, next.takeError());
-      if (suppliedMissingMember)
-        members.push_back(suppliedMissingMember);
+      // Drop the member if it had a problem.
+      // FIXME: Handle overridable members in class extensions too, someday.
+      if (auto *containingClass = dyn_cast<ClassDecl>(container)) {
+        auto handleMissingClassMember =
+            [&](const DeclDeserializationError &error) {
+          if (error.isDesignatedInitializer())
+            containingClass->setHasMissingDesignatedInitializers();
+          if (error.needsVTableEntry() || error.needsAllocatingVTableEntry())
+            containingClass->setHasMissingVTableEntries();
+
+          if (error.getName().getBaseName() == getContext().Id_init) {
+            members.push_back(MissingMemberDecl::forInitializer(
+                getContext(), containingClass, error.getName(),
+                error.needsVTableEntry(), error.needsAllocatingVTableEntry()));
+          } else if (error.needsVTableEntry()) {
+            members.push_back(MissingMemberDecl::forMethod(
+                getContext(), containingClass, error.getName(),
+                error.needsVTableEntry()));
+          }
+          // FIXME: Handle other kinds of missing members: properties,
+          // subscripts, and methods that don't need vtable entries.
+        };
+        llvm::handleAllErrors(next.takeError(), handleMissingClassMember);
+      } else if (auto *containingProto = dyn_cast<ProtocolDecl>(container)) {
+        auto handleMissingProtocolMember =
+            [&](const DeclDeserializationError &error) {
+          assert(!error.needsAllocatingVTableEntry());
+          if (error.needsVTableEntry())
+            containingProto->setHasMissingRequirements(true);
+
+          if (error.getName().getBaseName() == getContext().Id_init) {
+            members.push_back(MissingMemberDecl::forInitializer(
+                getContext(), containingProto, error.getName(),
+                error.needsVTableEntry(), error.needsAllocatingVTableEntry()));
+          } else if (error.needsVTableEntry()) {
+            members.push_back(MissingMemberDecl::forMethod(
+                getContext(), containingProto, error.getName(),
+                error.needsVTableEntry()));
+          }
+          // FIXME: Handle other kinds of missing members: properties,
+          // subscripts, and methods that don't need vtable entries.
+        };
+        llvm::handleAllErrors(next.takeError(), handleMissingProtocolMember);
+      } else {
+        llvm::consumeError(next.takeError());
+      }
+      continue;
     }
+    assert(next.get() && "unchecked error deserializing next member");
+    members.push_back(next.get());
   }
 
   for (auto member : members)
@@ -4874,11 +4557,6 @@ void ModuleFile::finishNormalConformance(NormalProtocolConformance *conformance,
                              conformance->getType());
   PrettyStackTraceDecl traceTo("... to", conformance->getProtocol());
   ++NumNormalProtocolConformancesCompleted;
-
-  assert(conformance->isComplete());
-
-  conformance->setState(ProtocolConformanceState::Incomplete);
-  SWIFT_DEFER { conformance->setState(ProtocolConformanceState::Complete); };
 
   // Find the conformance record.
   BCOffsetRAII restoreOffset(DeclTypeCursor);
@@ -5024,9 +4702,24 @@ void ModuleFile::finishNormalConformance(NormalProtocolConformance *conformance,
 
     // Requirement -> synthetic map.
     SmallVector<Substitution, 4> reqToSyntheticSubs;
-    if (auto syntheticSig = getGenericSignature(*rawIDIter++)) {
+    if (unsigned numGenericParams = *rawIDIter++) {
+      // Generic parameters of the synthetic environment.
+      SmallVector<GenericTypeParamType *, 2> genericParams;
+      while (numGenericParams--) {
+        genericParams.push_back(
+          getType(*rawIDIter++)->castTo<GenericTypeParamType>());
+      }
+
+      // Generic requirements of the synthetic environment.
+      SmallVector<Requirement, 4> requirements;
+      readGenericRequirements(requirements, DeclTypeCursor);
+
+      // Form the generic signature for the synthetic environment.
+      syntheticSig = GenericSignature::get(genericParams, requirements);
+
       // Create the synthetic environment.
-      syntheticEnv = syntheticSig->createGenericEnvironment();
+      syntheticEnv =
+        syntheticSig->createGenericEnvironment(*getAssociatedModule());
 
       // Requirement -> synthetic substitutions.
       if (unsigned numReqSubstitutions = *rawIDIter++) {

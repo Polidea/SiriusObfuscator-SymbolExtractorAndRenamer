@@ -11,15 +11,13 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "definite-init"
+#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "DIMemoryUseCollectorOwnership.h"
 #include "swift/AST/DiagnosticEngine.h"
 #include "swift/AST/DiagnosticsSIL.h"
 #include "swift/AST/Expr.h"
-#include "swift/ClangImporter/ClangModule.h"
-#include "swift/SIL/InstructionUtils.h"
 #include "swift/SIL/SILArgument.h"
 #include "swift/SIL/SILBuilder.h"
-#include "swift/SILOptimizer/PassManager/Passes.h"
 #include "swift/SILOptimizer/PassManager/Transforms.h"
 #include "swift/SILOptimizer/Utils/CFG.h"
 #include "swift/SILOptimizer/Utils/Local.h"
@@ -47,13 +45,10 @@ llvm::cl::opt<bool> TriggerUnreachableOnFailure(
 STATISTIC(NumAssignRewritten, "Number of assigns rewritten");
 
 template<typename ...ArgTypes>
-static InFlightDiagnostic diagnose(SILModule &M, SILLocation loc,
-                                   ArgTypes... args) {
-  auto diag = M.getASTContext().Diags.diagnose(loc.getSourceLoc(),
-                                               Diagnostic(args...));
+static void diagnose(SILModule &M, SILLocation loc, ArgTypes... args) {
+  M.getASTContext().Diags.diagnose(loc.getSourceLoc(), Diagnostic(args...));
   if (TriggerUnreachableOnFailure)
     llvm_unreachable("Triggering standard assertion failure routine");
-  return diag;
 }
 
 enum class PartialInitializationKind {
@@ -88,8 +83,8 @@ static void LowerAssignInstruction(SILBuilder &B, AssignInst *Inst,
     // If this is an initialization, or the storage type is trivial, we
     // can just replace the assignment with a store.
     assert(isInitialization != PartialInitializationKind::IsReinitialization);
-    B.createTrivialStoreOr(Loc, Src, Inst->getDest(),
-                           StoreOwnershipQualifier::Init);
+    B.createStore(Loc, Src, Inst->getDest(),
+                  StoreOwnershipQualifier::Unqualified);
     Inst->eraseFromParent();
     return;
   }
@@ -101,8 +96,9 @@ static void LowerAssignInstruction(SILBuilder &B, AssignInst *Inst,
     // instance, which has not been initialized and never will be, must be
     // freed using dealloc_partial_ref.
     SILValue Pointer =
-        B.createLoad(Loc, Inst->getDest(), LoadOwnershipQualifier::Take);
-    B.createStore(Loc, Src, Inst->getDest(), StoreOwnershipQualifier::Init);
+        B.createLoad(Loc, Inst->getDest(), LoadOwnershipQualifier::Unqualified);
+    B.createStore(Loc, Src, Inst->getDest(),
+                  StoreOwnershipQualifier::Unqualified);
 
     auto MetatypeTy = CanMetatypeType::get(
         Inst->getDest()->getType().getSwiftRValueType(),
@@ -124,9 +120,9 @@ static void LowerAssignInstruction(SILBuilder &B, AssignInst *Inst,
   // This is basically TypeLowering::emitStoreOfCopy, except that if we have
   // a known incoming value, we can avoid the load.
   SILValue IncomingVal =
-      B.createLoad(Loc, Inst->getDest(), LoadOwnershipQualifier::Take);
+      B.createLoad(Loc, Inst->getDest(), LoadOwnershipQualifier::Unqualified);
   B.createStore(Inst->getLoc(), Src, Inst->getDest(),
-                StoreOwnershipQualifier::Init);
+                StoreOwnershipQualifier::Unqualified);
 
   B.emitDestroyValueOperation(Loc, IncomingVal);
   Inst->eraseFromParent();
@@ -357,23 +353,24 @@ namespace {
 
     /// Helper flag used during building the worklist for the dataflow analysis.
     bool isInWorkList : 1;
-
+    
     /// Availability of elements within the block.
     /// Not "empty" for all blocks which have non-load uses or contain the
     /// definition of the memory object.
     AvailabilitySet LocalAvailability;
-
+    
     /// The live out information of the block. This is the LocalAvailability
     /// plus the information merged-in from the predecessor blocks.
     AvailabilitySet OutAvailability;
-
-    /// Keep track of blocks where the contents of the self box are stored to
-    /// as a result of a successful self.init or super.init call.
-    Optional<DIKind> LocalSelfInitialized;
-
-    /// The live out information of the block. This is the LocalSelfInitialized
+    
+    /// Keep track of blocks where the contents of the self box are not valid
+    /// because we're in an error path dominated by a self.init or super.init
+    /// delegation.
+    Optional<DIKind> LocalSelfConsumed;
+    
+    /// The live out information of the block. This is the LocalSelfConsumed
     /// plus the information merged-in from the predecessor blocks.
-    Optional<DIKind> OutSelfInitialized;
+    Optional<DIKind> OutSelfConsumed;
 
     LiveOutBlockState(unsigned NumElements)
       : HasNonLoadUse(false),
@@ -386,10 +383,10 @@ namespace {
     void setUnknownToNotAvailable() {
       LocalAvailability.changeUnsetElementsTo(DIKind::No);
       OutAvailability.changeUnsetElementsTo(DIKind::No);
-      if (!LocalSelfInitialized.hasValue())
-        LocalSelfInitialized = DIKind::No;
-      if (!OutSelfInitialized.hasValue())
-        OutSelfInitialized = DIKind::No;
+      if (!LocalSelfConsumed.hasValue())
+        LocalSelfConsumed = DIKind::No;
+      if (!OutSelfConsumed.hasValue())
+        OutSelfConsumed = DIKind::No;
     }
 
     /// Transfer function for dataflow analysis.
@@ -433,12 +430,12 @@ namespace {
       }
 
       Optional<DIKind> result;
-      if (transferAvailability(Pred.OutSelfInitialized,
-                               OutSelfInitialized,
-                               LocalSelfInitialized,
+      if (transferAvailability(Pred.OutSelfConsumed,
+                               OutSelfConsumed,
+                               LocalSelfConsumed,
                                result)) {
         changed = true;
-        OutSelfInitialized = result;
+        OutSelfConsumed = result;
       }
 
       return changed;
@@ -456,16 +453,16 @@ namespace {
       }
     }
 
-    /// Mark the block as storing to self, indicating the self box has been
-    /// initialized.
-    void markStoreToSelf() {
-      LocalSelfInitialized = DIKind::Yes;
-      OutSelfInitialized = DIKind::Yes;
+    /// Mark the block as a failure path, indicating the self value has been
+    /// consumed.
+    void markFailure(bool partial) {
+      LocalSelfConsumed = (partial ? DIKind::Partial : DIKind::Yes);
+      OutSelfConsumed = LocalSelfConsumed;
     }
 
     /// If true, we're not done with our dataflow analysis yet.
     bool containsUndefinedValues() {
-      return (!OutSelfInitialized.hasValue() ||
+      return (!OutSelfConsumed.hasValue() ||
               OutAvailability.containsUnknownElements());
     }
   };
@@ -473,7 +470,7 @@ namespace {
   struct ConditionalDestroy {
     unsigned ReleaseID;
     AvailabilitySet Availability;
-    DIKind SelfInitialized;
+    DIKind SelfConsumed;
   };
 
 } // end anonymous namespace
@@ -489,7 +486,7 @@ namespace {
     DIMemoryObjectInfo TheMemory;
 
     SmallVectorImpl<DIMemoryUse> &Uses;
-    TinyPtrVector<SILInstruction *> &StoresToSelf;
+    TinyPtrVector<TermInst *> &FailableInits;
     SmallVectorImpl<SILInstruction *> &Destroys;
     std::vector<ConditionalDestroy> ConditionalDestroys;
 
@@ -509,24 +506,12 @@ namespace {
     
     /// This is true when there is a destroy on a path where the self value may
     /// have been consumed, in which case there is nothing to do.
-    bool HasConditionalSelfInitialized = false;
-    
-    /// This is true when the object being checked is a 'self' parameter for a
-    /// struct in a non-delegating cross-module initializer. In this case, the
-    /// initializer is not allowed to be fieldwise in Swift 5, so we produce a
-    /// warning in Swift 4 and earlier.
-    bool WantsCrossModuleStructInitializerDiagnostic = false;
-
-    /// This is true if any diagnostics have offered a fix-it to insert
-    /// `self.init()`. While the first diagnostic to offer this may not be
-    /// suggesting it in the best place, offering it more than once is clearly
-    /// wrong.
-    bool HasSuggestedNoArgSelfInit = false;
+    bool HasConditionalSelfConsumed = false;
 
     // Keep track of whether we've emitted an error.  We only emit one error per
     // location as a policy decision.
     std::vector<SILLocation> EmittedErrorLocs;
-    SmallPtrSet<const SILBasicBlock *, 16> BlocksReachableFromEntry;
+    SmallPtrSet<SILBasicBlock*, 16> BlocksReachableFromEntry;
     
   public:
     LifetimeChecker(const DIMemoryObjectInfo &TheMemory,
@@ -536,43 +521,35 @@ namespace {
 
   private:
 
-    void emitSelfConsumedDiagnostic(SILInstruction *Inst);
-
     LiveOutBlockState &getBlockInfo(SILBasicBlock *BB) {
       return PerBlockInfo.insert({BB,
                      LiveOutBlockState(TheMemory.NumElements)}).first->second;
     }
-
+    
     AvailabilitySet getLivenessAtInst(SILInstruction *Inst, unsigned FirstElt,
                                       unsigned NumElts);
-    AvailabilitySet getLivenessAtNonTupleInst(SILInstruction *Inst,
-                                              SILBasicBlock *InstBB,
-                                              AvailabilitySet &CurrentSet);
     int getAnyUninitializedMemberAtInst(SILInstruction *Inst, unsigned FirstElt,
                                         unsigned NumElts);
 
-    DIKind getSelfInitializedAtInst(SILInstruction *Inst);
+    DIKind getSelfConsumedAtInst(SILInstruction *Inst);
 
     bool isInitializedAtUse(const DIMemoryUse &Use,
                             bool *SuperInitDone = nullptr,
-                            bool *FailedSelfUse = nullptr,
-                            bool *FullyUninitialized = nullptr);
-
+                            bool *FailedSelfUse = nullptr);
+    
 
     void handleStoreUse(unsigned UseID);
     void handleLoadUse(unsigned UseID);
     void handleInOutUse(const DIMemoryUse &Use);
     void handleEscapeUse(const DIMemoryUse &Use);
 
-    bool diagnoseReturnWithoutInitializingStoredProperties(
-        const SILInstruction *Inst, SILLocation loc, const DIMemoryUse &Use);
-
-    void handleLoadUseFailure(const DIMemoryUse &Use,
+    void handleLoadUseFailure(const DIMemoryUse &InstInfo,
                               bool SuperInitDone,
                               bool FailedSelfUse);
 
-    void handleSelfInitUse(DIMemoryUse &Use);
-    void updateInstructionForInitState(DIMemoryUse &Use);
+    void handleSuperInitUse(const DIMemoryUse &InstInfo);
+    void handleSelfInitUse(DIMemoryUse &InstInfo);
+    void updateInstructionForInitState(DIMemoryUse &InstInfo);
 
 
     void processUninitializedRelease(SILInstruction *Release,
@@ -589,9 +566,9 @@ namespace {
     void putIntoWorkList(SILBasicBlock *BB, WorkListType &WorkList);
     void computePredsLiveOut(SILBasicBlock *BB);
     void getOutAvailability(SILBasicBlock *BB, AvailabilitySet &Result);
-    void getOutSelfInitialized(SILBasicBlock *BB, Optional<DIKind> &Result);
+    void getOutSelfConsumed(SILBasicBlock *BB, Optional<DIKind> &Result);
 
-    bool shouldEmitError(const SILInstruction *Inst);
+    bool shouldEmitError(SILInstruction *Inst);
     std::string getUninitElementName(const DIMemoryUse &Use);
     void noteUninitializedMembers(const DIMemoryUse &Use);
     void diagnoseInitError(const DIMemoryUse &Use,
@@ -600,14 +577,14 @@ namespace {
     bool diagnoseMethodCall(const DIMemoryUse &Use,
                             bool SuperInitDone);
     
-    bool isBlockIsReachableFromEntry(const SILBasicBlock *BB);
+    bool isBlockIsReachableFromEntry(SILBasicBlock *BB);
   };
 } // end anonymous namespace
 
 LifetimeChecker::LifetimeChecker(const DIMemoryObjectInfo &TheMemory,
                                  DIElementUseInfo &UseInfo)
     : Module(TheMemory.MemoryInst->getModule()), TheMemory(TheMemory),
-      Uses(UseInfo.Uses), StoresToSelf(UseInfo.StoresToSelf),
+      Uses(UseInfo.Uses), FailableInits(UseInfo.FailableInits),
       Destroys(UseInfo.Releases) {
 
   // The first step of processing an element is to collect information about the
@@ -633,11 +610,14 @@ LifetimeChecker::LifetimeChecker(const DIMemoryObjectInfo &TheMemory,
     BBInfo.markAvailable(Use);
   }
 
-  // Mark blocks where the self box is initialized.
-  for (auto *I : StoresToSelf) {
-    // FIXME: critical edges?
-    auto *bb = I->getParent();
-    getBlockInfo(bb).markStoreToSelf();
+  // Mark blocks where the self value has been consumed.
+  for (auto *I : FailableInits) {
+    auto *bb = I->getSuccessors()[1].getBB();
+
+    // Horrible hack. Failing inits create critical edges, where all
+    // 'return nil's end up. We'll split the edge later.
+    bool criticalEdge = isCriticalEdge(I, 1);
+    getBlockInfo(bb).markFailure(criticalEdge);
   }
 
   // If isn't really a use, but we account for the alloc_box/mark_uninitialized
@@ -651,27 +631,22 @@ LifetimeChecker::LifetimeChecker(const DIMemoryObjectInfo &TheMemory,
   // locally inferred by the loop above.  Mark any unset elements as not
   // available.
   MemBBInfo.setUnknownToNotAvailable();
-
-  // Finally, check if we need to emit compatibility diagnostics for cross-module
-  // non-delegating struct initializers.
-  if (TheMemory.isCrossModuleStructInitSelf())
-    WantsCrossModuleStructInitializerDiagnostic = true;
 }
 
 /// Determine whether the specified block is reachable from the entry of the
 /// containing function's entrypoint.  This allows us to avoid diagnosing DI
 /// errors in synthesized code that turns out to be unreachable.
-bool LifetimeChecker::isBlockIsReachableFromEntry(const SILBasicBlock *BB) {
+bool LifetimeChecker::isBlockIsReachableFromEntry(SILBasicBlock *BB) {
   // Lazily compute reachability, so we only have to do it in the case of an
   // error.
   if (BlocksReachableFromEntry.empty()) {
-    SmallVector<const SILBasicBlock*, 128> Worklist;
+    SmallVector<SILBasicBlock*, 128> Worklist;
     Worklist.push_back(&BB->getParent()->front());
     BlocksReachableFromEntry.insert(Worklist.back());
     
     // Collect all reachable blocks by walking the successors.
     while (!Worklist.empty()) {
-      const SILBasicBlock *BB = Worklist.pop_back_val();
+      SILBasicBlock *BB = Worklist.pop_back_val();
       for (auto &Succ : BB->getSuccessors()) {
         if (BlocksReachableFromEntry.insert(Succ).second)
           Worklist.push_back(Succ);
@@ -686,7 +661,7 @@ bool LifetimeChecker::isBlockIsReachableFromEntry(const SILBasicBlock *BB) {
 /// shouldEmitError - Check to see if we've already emitted an error at the
 /// specified instruction.  If so, return false.  If not, remember the
 /// instruction and return true.
-bool LifetimeChecker::shouldEmitError(const SILInstruction *Inst) {
+bool LifetimeChecker::shouldEmitError(SILInstruction *Inst) {
   // If this instruction is in a dead region, don't report the error.  This can
   // occur because we haven't run DCE before DI and this may be a synthesized
   // statement.  If it isn't synthesized, then DCE will report an error on the
@@ -712,6 +687,13 @@ bool LifetimeChecker::shouldEmitError(const SILInstruction *Inst) {
 void LifetimeChecker::noteUninitializedMembers(const DIMemoryUse &Use) {
   assert(TheMemory.isAnyInitSelf() && !TheMemory.isDelegatingInit() &&
          "Not a designated initializer");
+
+  // Root protocol initializers (ones that reassign to self, not delegating to
+  // self.init) have no members to initialize and self itself has already been
+  // reported to be uninit in the primary diagnostic.
+  if (TheMemory.isProtocolInitSelf())
+    return;
+
 
   // Determine which members, specifically are uninitialized.
   AvailabilitySet Liveness =
@@ -863,6 +845,9 @@ void LifetimeChecker::doIt() {
     case DIUseKind::Escape:
       handleEscapeUse(Use);
       break;
+    case DIUseKind::SuperInit:
+      handleSuperInitUse(Use);
+      break;
     case DIUseKind::SelfInit:
       handleSelfInitUse(Use);
       break;
@@ -887,7 +872,7 @@ void LifetimeChecker::doIt() {
   SILValue ControlVariable;
   if (HasConditionalInitAssign ||
       HasConditionalDestroy ||
-      HasConditionalSelfInitialized)
+      HasConditionalSelfConsumed)
     ControlVariable = handleConditionalInitAssign();
   if (!ConditionalDestroys.empty())
     handleConditionalDestroys(ControlVariable);
@@ -915,13 +900,11 @@ void LifetimeChecker::handleLoadUse(unsigned UseID) {
         continue;
 
       unsigned OperandNumber = OEAUse->getOperandNumber();
-      auto OptArgumentNumber =
-        AI->getArgumentIndexForOperandIndex(OperandNumber);
-      if (!OptArgumentNumber)
+      if (OperandNumber < 1 || OperandNumber > AI->getNumCallArguments())
         // Not used as a call argument
         continue;
 
-      unsigned ArgumentNumber = *OptArgumentNumber;
+      unsigned ArgumentNumber = OperandNumber - 1;
 
       CanSILFunctionType calleeType = AI->getSubstCalleeType();
       SILParameterInfo parameterInfo = calleeType->getParameters()[ArgumentNumber];
@@ -945,50 +928,29 @@ void LifetimeChecker::handleLoadUse(unsigned UseID) {
   }
 }
 
-void LifetimeChecker::emitSelfConsumedDiagnostic(SILInstruction *Inst) {
-  if (!shouldEmitError(Inst))
-    return;
-
-  diagnose(Module, Inst->getLoc(),
-           diag::self_inside_catch_superselfinit,
-           (unsigned)TheMemory.isDelegatingInit());
-}
-
-/// If \p theStruct is imported from C and has a zeroing no-argument
-/// initializer, add a note to suggest calling it ahead of \p loc.
-///
-/// Most (but not all) C structs have a zeroing no-argument initializer;
-/// the ones that don't have fields don't make sense to zero.
-static void maybeSuggestNoArgSelfInit(SILModule &module, SILLocation loc,
-                                      StructDecl *theStruct) {
-  if (!theStruct || !theStruct->hasClangNode())
-    return;
-
-  ASTContext &ctx = module.getASTContext();
-  DeclName noArgInit(ctx, ctx.Id_init, ArrayRef<Identifier>());
-
-  auto lookupResults = theStruct->lookupDirect(noArgInit);
-  if (lookupResults.size() != 1)
-    return;
-  if (lookupResults.front()->getDeclContext() != theStruct)
-    return;
-
-  diagnose(module, loc, diag::designated_init_c_struct_fix)
-    .fixItInsert(loc.getStartSourceLoc(), "self.init()\n");
-}
-
 void LifetimeChecker::handleStoreUse(unsigned UseID) {
-  DIMemoryUse &Use = Uses[UseID];
+  DIMemoryUse &InstInfo = Uses[UseID];
+
+  if (getSelfConsumedAtInst(InstInfo.Inst) != DIKind::No) {
+    // FIXME: more specific diagnostics here, handle this case gracefully below.
+    if (!shouldEmitError(InstInfo.Inst))
+      return;
+
+    diagnose(Module, InstInfo.Inst->getLoc(),
+             diag::self_inside_catch_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
+    return;
+  }
 
   // Determine the liveness state of the element that we care about.
-  auto Liveness = getLivenessAtInst(Use.Inst, Use.FirstElement,
-                                    Use.NumElements);
+  auto Liveness = getLivenessAtInst(InstInfo.Inst, InstInfo.FirstElement,
+                                    InstInfo.NumElements);
 
   // Check to see if the stored location is either fully uninitialized or fully
   // initialized.
   bool isFullyInitialized = true;
   bool isFullyUninitialized = true;
-  for (unsigned i = Use.FirstElement, e = i+Use.NumElements;
+  for (unsigned i = InstInfo.FirstElement, e = i+InstInfo.NumElements;
        i != e;++i) {
     auto DI = Liveness.get(i);
     if (DI != DIKind::Yes)
@@ -997,42 +959,31 @@ void LifetimeChecker::handleStoreUse(unsigned UseID) {
       isFullyUninitialized = false;
   }
 
-  if (TheMemory.isNonRootClassSelf()) {
-    if (getSelfInitializedAtInst(Use.Inst) != DIKind::Yes) {
-      auto SelfLiveness = getLivenessAtInst(Use.Inst,
-                                            0, TheMemory.NumElements);
-      if (SelfLiveness.isAllYes()) {
-        emitSelfConsumedDiagnostic(Use.Inst);
-        return;
-      }
-    }
-  }
-
   // If this is a partial store into a struct and the whole struct hasn't been
   // initialized, diagnose this as an error.
-  if (Use.Kind == DIUseKind::PartialStore && !isFullyInitialized) {
-    assert(Use.NumElements == 1 && "partial stores are intra-element");
-    diagnoseInitError(Use, diag::struct_not_fully_initialized);
+  if (InstInfo.Kind == DIUseKind::PartialStore && !isFullyInitialized) {
+    assert(InstInfo.NumElements == 1 && "partial stores are intra-element");
+    diagnoseInitError(InstInfo, diag::struct_not_fully_initialized);
     return;
   }
 
   // If this is a store to a 'let' property in an initializer, then we only
   // allow the assignment if the property was completely uninitialized.
   // Overwrites are not permitted.
-  if (Use.Kind == DIUseKind::PartialStore || !isFullyUninitialized) {
-    for (unsigned i = Use.FirstElement, e = i+Use.NumElements;
+  if (InstInfo.Kind == DIUseKind::PartialStore || !isFullyUninitialized) {
+    for (unsigned i = InstInfo.FirstElement, e = i+InstInfo.NumElements;
          i != e; ++i) {
       if (Liveness.get(i) == DIKind::No || !TheMemory.isElementLetProperty(i))
         continue;
 
       // Don't emit errors for unreachable code, or if we have already emitted
       // a diagnostic.
-      if (!shouldEmitError(Use.Inst))
+      if (!shouldEmitError(InstInfo.Inst))
         continue;
       
       std::string PropertyName;
       auto *VD = TheMemory.getPathStringToElement(i, PropertyName);
-      diagnose(Module, Use.Inst->getLoc(),
+      diagnose(Module, InstInfo.Inst->getLoc(),
                diag::immutable_property_already_initialized, PropertyName);
       
       if (auto *Var = dyn_cast<VarDecl>(VD)) {
@@ -1045,64 +996,12 @@ void LifetimeChecker::handleStoreUse(unsigned UseID) {
     }
   }
 
-  // Check if we're in a struct initializer that uses CrossModuleRootSelf rather
-  // than DelegatingSelf for Swift 4 compatibility. We look for a problem case by
-  // seeing if there are any assignments to individual fields that might be
-  // initializations; that is, that they're not dominated by `self = other`.
-
-  auto isFullValueAssignment = [this](const SILInstruction *inst) -> bool {
-    SILValue addr;
-    if (auto *copyAddr = dyn_cast<CopyAddrInst>(inst))
-      addr = copyAddr->getDest();
-    else if (auto *assign = dyn_cast<AssignInst>(inst))
-      addr = assign->getDest();
-    else
-      return false;
-
-    if (auto *access = dyn_cast<BeginAccessInst>(addr))
-      addr = access->getSource();
-    if (auto *projection = dyn_cast<ProjectBoxInst>(addr))
-      addr = projection->getOperand();
-
-    return addr == TheMemory.getAddress();
-  };
-
-  if (!isFullyInitialized && WantsCrossModuleStructInitializerDiagnostic &&
-      !isFullValueAssignment(Use.Inst)) {
-    // Deliberately don't check shouldEmitError here; we're using DI to approximate
-    // whether this would be a valid delegating initializer, but the error when it
-    // /is/ a delegating initializer won't be path-sensitive.
-
-    Type selfTy;
-    SILLocation fnLoc = TheMemory.getFunction().getLocation();
-    if (auto *ctor = fnLoc.getAsASTNode<ConstructorDecl>())
-      selfTy = ctor->getImplicitSelfDecl()->getType()->getInOutObjectType();
-    else
-      selfTy = TheMemory.getType();
-
-    StructDecl *theStruct = selfTy->getStructOrBoundGenericStruct();
-    assert(theStruct);
-
-    diagnose(Module, Use.Inst->getLoc(),
-             diag::designated_init_in_cross_module_extension,
-             selfTy, !isFullyUninitialized,
-             theStruct->getParentModule()->getName(),
-             theStruct->hasClangNode());
-    if (!HasSuggestedNoArgSelfInit && isFullyUninitialized) {
-      maybeSuggestNoArgSelfInit(Module, Use.Inst->getLoc(), theStruct);
-      HasSuggestedNoArgSelfInit = true;
-    }
-
-    // Don't emit more than one of these diagnostics per initializer.
-    WantsCrossModuleStructInitializerDiagnostic = false;
-  }
-
   // If this is an initialization or a normal assignment, upgrade the store to
   // an initialization or assign in the uses list so that clients know about it.
   if (isFullyUninitialized) {
-    Use.Kind = DIUseKind::Initialization;
+    InstInfo.Kind = DIUseKind::Initialization;
   } else if (isFullyInitialized) {
-    Use.Kind = DIUseKind::Assign;
+    InstInfo.Kind = DIUseKind::Assign;
   } else {
     // If it is initialized on some paths, but not others, then we have an
     // inconsistent initialization, which needs dynamic control logic in the
@@ -1110,21 +1009,21 @@ void LifetimeChecker::handleStoreUse(unsigned UseID) {
 
     // This is classified as InitOrAssign (not PartialStore), so there are only
     // a few instructions that could reach here.
-    assert(Use.Kind == DIUseKind::InitOrAssign &&
+    assert(InstInfo.Kind == DIUseKind::InitOrAssign &&
            "should only have inconsistent InitOrAssign's here");
 
     // If this access stores something of non-trivial type, then keep track of
     // it for later.   Once we've collected all of the conditional init/assigns,
     // we can insert a single control variable for the memory object for the
     // whole function.
-    if (!Use.onlyTouchesTrivialElements(TheMemory))
+    if (!InstInfo.onlyTouchesTrivialElements(TheMemory))
       HasConditionalInitAssign = true;
     return;
   }
   
   // Otherwise, we have a definite init or assign.  Make sure the instruction
   // itself is tagged properly.
-  updateInstructionForInitState(Use);
+  updateInstructionForInitState(InstInfo);
 }
 
 void LifetimeChecker::handleInOutUse(const DIMemoryUse &Use) {
@@ -1134,7 +1033,13 @@ void LifetimeChecker::handleInOutUse(const DIMemoryUse &Use) {
   // before the "address" is passed as an l-value.
   if (!isInitializedAtUse(Use, &IsSuperInitDone, &FailedSelfUse)) {
     if (FailedSelfUse) {
-      emitSelfConsumedDiagnostic(Use.Inst);
+      // FIXME: more specific diagnostics here, handle this case gracefully below.
+      if (!shouldEmitError(Use.Inst))
+        return;
+      
+      diagnose(Module, Use.Inst->getLoc(),
+               diag::self_inside_catch_superselfinit,
+               (unsigned)TheMemory.isDelegatingInit());
       return;
     }
 
@@ -1186,7 +1091,7 @@ void LifetimeChecker::handleInOutUse(const DIMemoryUse &Use) {
           if (auto *DSCE = dyn_cast<SelfApplyExpr>(CE->getFn()))
             // Normal method calls are curried, so they are:
             // (call_expr (dot_syntax_call_expr (decl_ref_expr METHOD)))
-            FD = dyn_cast_or_null<FuncDecl>(DSCE->getCalledValue());
+            FD = dyn_cast<FuncDecl>(DSCE->getCalledValue());
           else
             // Operators and normal function calls are just (CallExpr DRE)
             FD = dyn_cast_or_null<FuncDecl>(CE->getCalledValue());
@@ -1228,17 +1133,21 @@ void LifetimeChecker::handleInOutUse(const DIMemoryUse &Use) {
 void LifetimeChecker::handleEscapeUse(const DIMemoryUse &Use) {
   // The value must be fully initialized at all escape points.  If not, diagnose
   // the error.
-  bool SuperInitDone, FailedSelfUse, FullyUninitialized;
+  bool SuperInitDone, FailedSelfUse;
 
-  if (isInitializedAtUse(Use, &SuperInitDone, &FailedSelfUse,
-                         &FullyUninitialized)) {
+  if (isInitializedAtUse(Use, &SuperInitDone, &FailedSelfUse))
     return;
-  }
 
   auto Inst = Use.Inst;
 
   if (FailedSelfUse) {
-    emitSelfConsumedDiagnostic(Inst);
+    // FIXME: more specific diagnostics here, handle this case gracefully below.
+    if (!shouldEmitError(Inst))
+      return;
+    
+    diagnose(Module, Inst->getLoc(),
+             diag::self_inside_catch_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
     return;
   }
 
@@ -1249,54 +1158,21 @@ void LifetimeChecker::handleEscapeUse(const DIMemoryUse &Use) {
 
     if (!shouldEmitError(Inst)) return;
 
+    auto diagID = diag::self_before_superselfinit;
+
     // If this is a load with a single user that is a return, then this is
     // a return before self.init.   Emit a specific diagnostic.
     if (auto *LI = dyn_cast<LoadInst>(Inst))
       if (LI->hasOneUse() &&
           isa<ReturnInst>((*LI->use_begin())->getUser())) {
-        diagnose(Module, Inst->getLoc(),
-                 diag::superselfinit_not_called_before_return,
-                 (unsigned)TheMemory.isDelegatingInit());
-        return;
+        diagID = diag::superselfinit_not_called_before_return;
       }
     if (isa<ReturnInst>(Inst)) {
-      diagnose(Module, Inst->getLoc(),
-               diag::superselfinit_not_called_before_return,
-               (unsigned)TheMemory.isDelegatingInit());
-      return;
+      diagID = diag::superselfinit_not_called_before_return;
     }
 
-    if (!TheMemory.isClassInitSelf()) {
-      // If this is a copy_addr into the indirect result, then we're looking at
-      // the implicit "return self" in an address-only initializer.  Emit a
-      // specific diagnostic.
-      if (auto *CA = dyn_cast<CopyAddrInst>(Inst)) {
-        if (CA->isInitializationOfDest() &&
-            !CA->getFunction()->getArguments().empty() &&
-            SILValue(CA->getFunction()->getArgument(0)) == CA->getDest()) {
-          diagnose(Module, Inst->getLoc(),
-                   diag::superselfinit_not_called_before_return,
-                   (unsigned)TheMemory.isDelegatingInit());
-          return;
-        }
-      }
-    }
-
-    if (TheMemory.isDelegatingInit()) {
-      if (TheMemory.isClassInitSelf()) {
-        diagnose(Module, Inst->getLoc(), diag::self_before_selfinit);
-      } else {
-        diagnose(Module, Inst->getLoc(), diag::self_before_selfinit_value_type);
-        if (!HasSuggestedNoArgSelfInit && FullyUninitialized) {
-          auto *maybeStruct =
-              TheMemory.getType().getStructOrBoundGenericStruct();
-          maybeSuggestNoArgSelfInit(Module, Inst->getLoc(), maybeStruct);
-          HasSuggestedNoArgSelfInit = true;
-        }
-      }
-    } else {
-      diagnose(Module, Inst->getLoc(), diag::self_before_superinit);
-    }
+    diagnose(Module, Inst->getLoc(), diagID,
+             (unsigned)TheMemory.isDelegatingInit());
     return;
   }
 
@@ -1304,7 +1180,11 @@ void LifetimeChecker::handleEscapeUse(const DIMemoryUse &Use) {
       !TheMemory.isClassInitSelf()) {
     if (!shouldEmitError(Inst)) return;
 
-    diagnose(Module, Inst->getLoc(), diag::use_of_self_before_fully_init);
+    auto diagID = diag::use_of_self_before_fully_init;
+    if (TheMemory.isProtocolInitSelf())
+      diagID = diag::use_of_self_before_fully_init_protocol;
+
+    diagnose(Module, Inst->getLoc(), diagID);
     noteUninitializedMembers(Use);
     return;
   }
@@ -1379,50 +1259,10 @@ void LifetimeChecker::diagnoseRefElementAddr(RefElementAddrInst *REI) {
            REI->getField()->getName(), true, Kind);
 }
 
-template <typename T>
-static FuncDecl *
-findMethodForStoreInitializationOfTemporary(const DIMemoryObjectInfo &TheMemory,
-                                            T *SI) {
-  // We unconditionally strip borrow since a store must take a consuming
-  // argument, so the ownership verifier would trip. So we know that such a
-  // thing can not happen. On the other hand, for store_borrow, we need to
-  // strip the borrow, so lets use idempotence for correctness.
-  if (stripBorrow(SI->getSrc()) != TheMemory.MemoryInst ||
-      !isa<AllocStackInst>(SI->getDest()) || !TheMemory.isClassInitSelf()) {
-    return nullptr;
-  }
-
-  ApplyInst *TheApply = nullptr;
-
-  // Check to see if the address of the alloc_stack is only passed to one
-  // apply_inst and gather the apply while we are at it.
-  for (auto UI : SI->getDest()->getUses()) {
-    if (auto *ApplyUser = dyn_cast<ApplyInst>(UI->getUser())) {
-      if (TheApply || UI->getOperandNumber() != 1) {
-        return nullptr;
-      }
-      TheApply = ApplyUser;
-    }
-  }
-
-  // If we didn't find an apply, just return nullptr. This isn't our pattern.
-  if (!TheApply)
-    return nullptr;
-
-  // Otherwise, try to get the func decl from the referenced function if we can
-  // find one.
-  auto *Fn = TheApply->getReferencedFunction();
-  if (!Fn->hasLocation())
-    return nullptr;
-
-  return Fn->getLocation().getAsASTNode<FuncDecl>();
-}
-
 bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
                                          bool SuperInitDone) {
   SILInstruction *Inst = Use.Inst;
 
-  // All of these cases imply that Inst as at +0.
   if (auto *REI = dyn_cast<RefElementAddrInst>(Inst)) {
     diagnoseRefElementAddr(REI);
     return true;
@@ -1432,42 +1272,7 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
   // so, emit a specific diagnostic.
   FuncDecl *Method = nullptr;
 
-  // Check for an access to the base class through a borrow+cast.
-  if (auto *BBI = dyn_cast<BeginBorrowInst>(Inst)) {
-    llvm::SmallVector<Operand *, 8> Worklist(BBI->use_begin(), BBI->use_end());
-    while (!Worklist.empty()) {
-      auto *BBIOp = Worklist.pop_back_val();
-      auto *BBIOpUser = BBIOp->getUser();
-
-      // Skip over end_borrow.
-      if (isa<EndBorrowInst>(BBIOpUser))
-        continue;
-
-      // Look through upcasts.
-      if (auto upcast = dyn_cast<UpcastInst>(BBIOpUser)) {
-        std::copy(upcast->use_begin(), upcast->use_end(),
-                  std::back_inserter(Worklist));
-        continue;
-      }
-
-      // Look through unchecked_ref_cast.
-      if (auto cast = dyn_cast<UncheckedRefCastInst>(BBIOpUser)) {
-        std::copy(cast->use_begin(), cast->use_end(),
-                  std::back_inserter(Worklist));
-        continue;
-      }
-
-      // If we have a ref_element_addr, then perform the diagnosis.
-      if (auto *REI = dyn_cast<RefElementAddrInst>(BBIOpUser)) {
-        diagnoseRefElementAddr(REI);
-        return true;
-      }
-
-      // If we were not able to find a better error, return false.
-      return false;
-    }
-  }
-
+  // Check for an access to the base class through an Upcast.
   if (auto UCI = dyn_cast<UpcastInst>(Inst)) {
     // If the upcast is used by a ref_element_addr, then it is an access to a
     // base ivar before super.init is called.
@@ -1485,7 +1290,7 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
     // be removed.
     //
     // TODO: Implement the SILGen fixes so this can be removed.
-    MethodInst *MI = nullptr;
+    ClassMethodInst *CMI = nullptr;
     ApplyInst *AI = nullptr;
     SILInstruction *Release = nullptr;
     for (auto UI : UCI->getUses()) {
@@ -1496,16 +1301,9 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
           continue;
         }
       }
-      if (auto *CMI = dyn_cast<ClassMethodInst>(User)) {
-        if (!MI) {
-          MI = CMI;
-          continue;
-        }
-      }
-
-      if (auto *OMI = dyn_cast<ObjCMethodInst>(User)) {
-        if (!MI) {
-          MI = OMI;
+      if (auto *TCMI = dyn_cast<ClassMethodInst>(User)) {
+        if (!CMI) {
+          CMI = TCMI;
           continue;
         }
       }
@@ -1519,7 +1317,7 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
 
       // Not a pattern we recognize, conservatively generate a generic
       // diagnostic.
-      MI = nullptr;
+      CMI = nullptr;
       break;
     }
 
@@ -1529,11 +1327,11 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
     // That is the only case where we support pattern matching a release.
     if (Release && AI &&
         !AI->getSubstCalleeType()->getExtInfo().hasGuaranteedSelfParam())
-      MI = nullptr;
+      CMI = nullptr;
 
-    if (AI && MI) {
+    if (AI && CMI) {
       // TODO: Could handle many other members more specifically.
-      Method = dyn_cast<FuncDecl>(MI->getMember().getDecl());
+      Method = dyn_cast<FuncDecl>(CMI->getMember().getDecl());
     }
   }
 
@@ -1543,9 +1341,6 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
     // If this is a method application, produce a nice, specific, error.
     if (auto *CMI = dyn_cast<ClassMethodInst>(Inst->getOperand(0)))
       Method = dyn_cast<FuncDecl>(CMI->getMember().getDecl());
-
-    if (auto *OMI = dyn_cast<ObjCMethodInst>(Inst->getOperand(0)))
-      Method = dyn_cast<FuncDecl>(OMI->getMember().getDecl());
 
     // If this is a direct/devirt method application, check the location info.
     if (auto *Fn = cast<ApplyInst>(Inst)->getReferencedFunction()) {
@@ -1558,12 +1353,31 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
   // protocol in a root class, then we could have a store to a temporary whose
   // address is passed into an apply.  Look through this pattern.
   if (auto *SI = dyn_cast<StoreInst>(Inst)) {
-    Method = findMethodForStoreInitializationOfTemporary(TheMemory, SI);
+    if (SI->getSrc() == TheMemory.MemoryInst &&
+        isa<AllocStackInst>(SI->getDest()) &&
+        TheMemory.isClassInitSelf()) {
+      ApplyInst *TheApply = nullptr;
+      // Check to see if the address of the alloc_stack is only passed to one
+      // apply_inst.
+      for (auto UI : SI->getDest()->getUses()) {
+        if (auto *ApplyUser = dyn_cast<ApplyInst>(UI->getUser())) {
+          if (!TheApply && UI->getOperandNumber() == 1) {
+            TheApply = ApplyUser;
+          } else {
+            TheApply = nullptr;
+            break;
+          }
+        }
+      }
+      
+      if (TheApply) {
+        if (auto *Fn = TheApply->getReferencedFunction())
+          if (Fn->hasLocation())
+            Method = Fn->getLocation().getAsASTNode<FuncDecl>();
+      }
+    }
   }
-
-  if (auto *SI = dyn_cast<StoreBorrowInst>(Inst)) {
-    Method = findMethodForStoreInitializationOfTemporary(TheMemory, SI);
-  }
+  
 
   // If we were able to find a method call, emit a diagnostic about the method.
   if (Method) {
@@ -1594,51 +1408,25 @@ bool LifetimeChecker::diagnoseMethodCall(const DIMemoryUse &Use,
   return false;
 }
 
-bool LifetimeChecker::diagnoseReturnWithoutInitializingStoredProperties(
-    const SILInstruction *Inst, SILLocation loc, const DIMemoryUse &Use) {
-  if (!TheMemory.isAnyInitSelf())
-    return false;
-  if (TheMemory.isClassInitSelf() || TheMemory.isDelegatingInit())
-    return false;
-
-  if (!shouldEmitError(Inst))
-    return true;
-
-  if (TheMemory.isCrossModuleStructInitSelf() &&
-      TheMemory.HasDummyElement) {
-    Type selfTy = TheMemory.getType();
-    const StructDecl *theStruct = selfTy->getStructOrBoundGenericStruct();
-    assert(theStruct);
-
-    bool fullyUnitialized;
-    (void)isInitializedAtUse(Use, nullptr, nullptr, &fullyUnitialized);
-
-    diagnose(Module, loc,
-             diag::designated_init_in_cross_module_extension,
-             selfTy, !fullyUnitialized,
-             theStruct->getParentModule()->getName(),
-             theStruct->hasClangNode());
-  } else {
-    diagnose(Module, loc,
-             diag::return_from_init_without_initing_stored_properties);
-    noteUninitializedMembers(Use);
-  }
-
-  return true;
-}
-
-/// Check and diagnose various failures when a load use is not fully
-/// initialized.
+/// handleLoadUseFailure - Check and diagnose various failures when a load use
+/// is not fully initialized.
 ///
-/// TODO: In the "No" case, we can emit a fixit adding a default initialization
-/// of the type.
+/// TODO: In the "No" case, we can emit a fixit adding a default
+/// initialization of the type.
+///
 void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
                                            bool SuperInitDone,
                                            bool FailedSelfUse) {
   SILInstruction *Inst = Use.Inst;
   
   if (FailedSelfUse) {
-    emitSelfConsumedDiagnostic(Inst);
+    // FIXME: more specific diagnostics here, handle this case gracefully below.
+    if (!shouldEmitError(Inst))
+      return;
+    
+    diagnose(Module, Inst->getLoc(),
+             diag::self_inside_catch_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
     return;
   }
   
@@ -1646,11 +1434,10 @@ void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
   // retain_value for non-trivial structs/enums), then this is a return in the
   // enum/struct init case, and we haven't stored to self.   Emit a specific
   // diagnostic.
-  if (isa<LoadInst>(Inst) || isa<LoadBorrowInst>(Inst)) {
-    auto *LI = Inst;
+  if (auto *LI = dyn_cast<LoadInst>(Inst)) {
     bool hasReturnUse = false, hasUnknownUses = false;
     
-    for (auto LoadUse : cast<SingleValueInstruction>(LI)->getUses()) {
+    for (auto LoadUse : LI->getUses()) {
       auto *User = LoadUse->getUser();
       
       // Ignore retains of the struct/enum before the return.
@@ -1695,8 +1482,19 @@ void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
         }
       }
       
-      if (diagnoseReturnWithoutInitializingStoredProperties(Inst, returnLoc,
-                                                            Use)) {
+      if (TheMemory.isEnumInitSelf()) {
+        if (!shouldEmitError(Inst)) return;
+        diagnose(Module, returnLoc,
+                 diag::return_from_init_without_initing_self);
+        return;
+      }
+      
+      if (TheMemory.isAnyInitSelf() && !TheMemory.isClassInitSelf() &&
+                 !TheMemory.isDelegatingInit()) {
+        if (!shouldEmitError(Inst)) return;
+        diagnose(Module, returnLoc,
+                 diag::return_from_init_without_initing_stored_properties);
+        noteUninitializedMembers(Use);
         return;
       }
     }
@@ -1710,9 +1508,26 @@ void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
     if (CA->isInitializationOfDest() &&
         !CA->getFunction()->getArguments().empty() &&
         SILValue(CA->getFunction()->getArgument(0)) == CA->getDest()) {
-      if (diagnoseReturnWithoutInitializingStoredProperties(Inst,
-                                                            Inst->getLoc(),
-                                                            Use)) {
+      if (TheMemory.isEnumInitSelf()) {
+        if (!shouldEmitError(Inst)) return;
+        diagnose(Module, Inst->getLoc(),
+                 diag::return_from_init_without_initing_self);
+        return;
+      }
+
+      if (TheMemory.isProtocolInitSelf()) {
+        if (!shouldEmitError(Inst)) return;
+        diagnose(Module, Inst->getLoc(),
+                 diag::return_from_protocol_init_without_initing_self);
+        return;
+      }
+
+      if (TheMemory.isAnyInitSelf() && !TheMemory.isClassInitSelf() &&
+          !TheMemory.isDelegatingInit()) {
+        if (!shouldEmitError(Inst)) return;
+        diagnose(Module, Inst->getLoc(),
+                 diag::return_from_init_without_initing_stored_properties);
+        noteUninitializedMembers(Use);
         return;
       }
     }
@@ -1743,15 +1558,8 @@ void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
   // generic error, depending on what kind of failure this is.
   if (!SuperInitDone) {
     if (!shouldEmitError(Inst)) return;
-    if (TheMemory.isDelegatingInit()) {
-      if (TheMemory.isClassInitSelf()) {
-        diagnose(Module, Inst->getLoc(), diag::self_before_selfinit);
-      } else {
-        diagnose(Module, Inst->getLoc(), diag::self_before_selfinit_value_type);
-      }
-    } else {
-      diagnose(Module, Inst->getLoc(), diag::self_before_superinit);
-    }
+    diagnose(Module, Inst->getLoc(), diag::self_before_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
     return;
   }
 
@@ -1766,78 +1574,114 @@ void LifetimeChecker::handleLoadUseFailure(const DIMemoryUse &Use,
 
   // If this is a load of self in a struct/enum/protocol initializer, then it
   // must be a use of 'self' before all the stored properties are set up.
-  if ((isa<LoadInst>(Inst) || isa<LoadBorrowInst>(Inst)) &&
-      TheMemory.isAnyInitSelf() && !TheMemory.isClassInitSelf()) {
+  if (isa<LoadInst>(Inst) && TheMemory.isAnyInitSelf() &&
+      !TheMemory.isClassInitSelf()) {
     if (!shouldEmitError(Inst)) return;
 
-    diagnose(Module, Inst->getLoc(), diag::use_of_self_before_fully_init);
+    auto diagID = diag::use_of_self_before_fully_init;
+    if (TheMemory.isProtocolInitSelf())
+      diagID = diag::use_of_self_before_fully_init_protocol;
+    diagnose(Module, Inst->getLoc(), diagID);
     noteUninitializedMembers(Use);
     return;
   }
   
   // If this is a load into a promoted closure capture, diagnose properly as
   // a capture.
-  if ((isa<LoadInst>(Inst) || isa<LoadBorrowInst>(Inst)) &&
-      Inst->getLoc().isASTNode<AbstractClosureExpr>())
+  if (isa<LoadInst>(Inst) && Inst->getLoc().isASTNode<AbstractClosureExpr>())
     diagnoseInitError(Use, diag::variable_closure_use_uninit);
   else
     diagnoseInitError(Use, diag::variable_used_before_initialized);
 }
 
-/// handleSelfInitUse - When processing a 'self' argument on a class, this is
-/// a call to self.init or super.init.
-void LifetimeChecker::handleSelfInitUse(DIMemoryUse &Use) {
-  auto *Inst = Use.Inst;
+/// handleSuperInitUse - When processing a 'self' argument on a class, this is
+/// a call to super.init.
+void LifetimeChecker::handleSuperInitUse(const DIMemoryUse &InstInfo) {
+  // This is an apply or try_apply.
+  auto *Inst = InstInfo.Inst;
 
-  assert(TheMemory.isAnyInitSelf());
-  assert(!TheMemory.isClassInitSelf() || TheMemory.isNonRootClassSelf());
-  assert(TheMemory.getType()->hasReferenceSemantics());
+  if (getSelfConsumedAtInst(Inst) != DIKind::No) {
+    // FIXME: more specific diagnostics here, handle this case gracefully below.
+    if (!shouldEmitError(Inst))
+      return;
+    
+    diagnose(Module, Inst->getLoc(),
+             diag::self_inside_catch_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
+    return;
+  }
 
   // Determine the liveness states of the memory object, including the
-  // self/super.init state.
+  // super.init state.
   AvailabilitySet Liveness = getLivenessAtInst(Inst, 0, TheMemory.NumElements);
 
-  // self/super.init() calls require that self/super.init has not already
-  // been called. If it has, reject the program.
+  // super.init() calls require that super.init has not already been called. If
+  // it has, reject the program.
   switch (Liveness.get(TheMemory.NumElements-1)) {
   case DIKind::No:  // This is good! Keep going.
     break;
   case DIKind::Yes:
   case DIKind::Partial:
     // This is bad, only one super.init call is allowed.
-    if (getSelfInitializedAtInst(Inst) != DIKind::Yes) {
-      emitSelfConsumedDiagnostic(Inst);
-      return;
-    }
-
     if (shouldEmitError(Inst))
-      diagnose(Module, Inst->getLoc(), diag::selfinit_multiple_times,
-               TheMemory.isDelegatingInit());
+      diagnose(Module, Inst->getLoc(), diag::selfinit_multiple_times, 0);
     return;
   }
 
-  if (TheMemory.isDelegatingInit()) {
-    assert(TheMemory.NumElements == 1 && "delegating inits have a single elt");
+  // super.init also requires that all ivars are initialized before the
+  // superclass initializer runs.
+  for (unsigned i = 0, e = TheMemory.NumElements-1; i != e; ++i) {
+    if (Liveness.get(i) == DIKind::Yes) continue;
 
-    // Lower Assign instructions if needed.
-    if (isa<AssignInst>(Use.Inst))
-      updateInstructionForInitState(Use);
-  } else {
-    // super.init also requires that all ivars are initialized before the
-    // superclass initializer runs.
-    for (unsigned i = 0, e = TheMemory.NumElements-1; i != e; ++i) {
-      if (Liveness.get(i) == DIKind::Yes) continue;
-
-      // If the super.init call is implicit generated, produce a specific
-      // diagnostic.
-      bool isImplicit = Use.Inst->getLoc().getSourceLoc().isInvalid();
-      auto diag = isImplicit ? diag::ivar_not_initialized_at_implicit_superinit :
-                  diag::ivar_not_initialized_at_superinit;
-      return diagnoseInitError(Use, diag);
-    }
-
-    // Otherwise everything is good!
+    // If the super.init call is implicit generated, produce a specific
+    // diagnostic.
+    bool isImplicit = InstInfo.Inst->getLoc().getSourceLoc().isInvalid();
+    auto diag = isImplicit ? diag::ivar_not_initialized_at_implicit_superinit :
+                diag::ivar_not_initialized_at_superinit;
+    return diagnoseInitError(InstInfo, diag);
   }
+
+  // Otherwise everything is good!
+}
+
+/// handleSelfInitUse - When processing a 'self' argument on a class, this is
+/// a call to self.init.
+void LifetimeChecker::handleSelfInitUse(DIMemoryUse &InstInfo) {
+  auto *Inst = InstInfo.Inst;
+
+  assert(TheMemory.NumElements == 1 && "delegating inits have a single elt");
+  
+  if (getSelfConsumedAtInst(Inst) != DIKind::No) {
+    // FIXME: more specific diagnostics here, handle this case gracefully below.
+    if (!shouldEmitError(Inst))
+      return;
+    
+    diagnose(Module, Inst->getLoc(),
+             diag::self_inside_catch_superselfinit,
+             (unsigned)TheMemory.isDelegatingInit());
+    return;
+  }
+
+  // Determine the self.init state.  self.init() calls require that self.init
+  // has not already been called. If it has, reject the program.
+  switch (getLivenessAtInst(Inst, 0, 1).get(0)) {
+  case DIKind::No:  // This is good! Keep going.
+    break;
+  case DIKind::Yes:
+  case DIKind::Partial:
+    // This is bad, only one self.init call is allowed.
+    if (EmittedErrorLocs.empty() && shouldEmitError(Inst))
+      diagnose(Module, Inst->getLoc(), diag::selfinit_multiple_times, 1);
+    return;
+  }
+
+  // If this is a copy_addr, make sure we remember that it is an initialization.
+  if (auto *CAI = dyn_cast<CopyAddrInst>(InstInfo.Inst))
+    CAI->setIsInitializationOfDest(IsInitialization);
+
+  // Lower Assign instructions if needed.
+  if (isa<AssignInst>(InstInfo.Inst))
+    updateInstructionForInitState(InstInfo);
 }
 
 
@@ -1845,15 +1689,15 @@ void LifetimeChecker::handleSelfInitUse(DIMemoryUse &Use) {
 /// from being InitOrAssign to some concrete state, update it for that state.
 /// This includes rewriting them from assign instructions into their composite
 /// operations.
-void LifetimeChecker::updateInstructionForInitState(DIMemoryUse &Use) {
-  SILInstruction *Inst = Use.Inst;
+void LifetimeChecker::updateInstructionForInitState(DIMemoryUse &InstInfo) {
+  SILInstruction *Inst = InstInfo.Inst;
 
   IsInitialization_t InitKind;
-  if (Use.Kind == DIUseKind::Initialization ||
-      Use.Kind == DIUseKind::SelfInit)
+  if (InstInfo.Kind == DIUseKind::Initialization ||
+      InstInfo.Kind == DIUseKind::SelfInit)
     InitKind = IsInitialization;
   else {
-    assert(Use.Kind == DIUseKind::Assign);
+    assert(InstInfo.Kind == DIUseKind::Assign);
     InitKind = IsNotInitialization;
   }
 
@@ -1887,8 +1731,8 @@ void LifetimeChecker::updateInstructionForInitState(DIMemoryUse &Use) {
   if (auto *AI = dyn_cast<AssignInst>(Inst)) {
     // Remove this instruction from our data structures, since we will be
     // removing it.
-    auto Kind = Use.Kind;
-    Use.Inst = nullptr;
+    auto Kind = InstInfo.Kind;
+    InstInfo.Inst = nullptr;
     NonLoadUses.erase(Inst);
 
     PartialInitializationKind PartialInitKind;
@@ -1903,8 +1747,8 @@ void LifetimeChecker::updateInstructionForInitState(DIMemoryUse &Use) {
                          : PartialInitializationKind::IsNotInitialization);
     }
 
-    unsigned FirstElement = Use.FirstElement;
-    unsigned NumElements = Use.NumElements;
+    unsigned FirstElement = InstInfo.FirstElement;
+    unsigned NumElements = InstInfo.NumElements;
 
     SmallVector<SILInstruction*, 4> InsertedInsts;
     SILBuilderWithScope B(Inst, &InsertedInsts);
@@ -1955,7 +1799,8 @@ void LifetimeChecker::processUninitializedRelease(SILInstruction *Release,
 
     if (!consumed) {
       if (Pointer->getType().isAddress())
-        Pointer = B.createLoad(Loc, Pointer, LoadOwnershipQualifier::Take);
+        Pointer =
+            B.createLoad(Loc, Pointer, LoadOwnershipQualifier::Unqualified);
 
       auto MetatypeTy = CanMetatypeType::get(
           TheMemory.MemorySILType.getSwiftRValueType(),
@@ -1988,7 +1833,7 @@ void LifetimeChecker::deleteDeadRelease(unsigned ReleaseID) {
   SILInstruction *Release = Destroys[ReleaseID];
   if (isa<DestroyAddrInst>(Release)) {
     SILValue Addr = Release->getOperand(0);
-    if (auto *AddrI = Addr->getDefiningInstruction())
+    if (auto *AddrI = dyn_cast<SILInstruction>(Addr))
       recursivelyDeleteTriviallyDeadInstructions(AddrI);
   }
   Release->eraseFromParent();
@@ -2011,32 +1856,17 @@ void LifetimeChecker::processNonTrivialRelease(unsigned ReleaseID) {
   if (isa<DeallocStackInst>(Release) || isa<DeallocBoxInst>(Release) ||
       isa<DeallocRefInst>(Release) || isa<DeallocPartialRefInst>(Release))
     return;
-
-  // We only handle strong_release, destroy_value, and destroy_addr here.  The
-  // former is a
+  
+  // We only handle strong_release and destroy_addr here.  The former is a
   // release of a class in an initializer, the later is used for local variable
   // destruction.
-  assert(isa<StrongReleaseInst>(Release) || isa<DestroyValueInst>(Release) ||
-         isa<DestroyAddrInst>(Release));
-
+  assert(isa<StrongReleaseInst>(Release) || isa<DestroyAddrInst>(Release));
+  
   auto Availability = getLivenessAtInst(Release, 0, TheMemory.NumElements);
-  DIKind SelfInitialized = DIKind::Yes;
+  DIKind SelfConsumed =
+    getSelfConsumedAtInst(Release);
 
-  if (TheMemory.isNonRootClassSelf()) {
-    SelfInitialized = getSelfInitializedAtInst(Release);
-
-    if (SelfInitialized == DIKind::Yes) {
-      assert(Availability.isAllYes() &&
-             "Should not store 'self' with uninitialized members into the box");
-    }
-  }
-
-  // If the memory object is completely initialized, then nothing needs to be
-  // done at this release point.
-  if (Availability.isAllYes() && SelfInitialized == DIKind::Yes)
-    return;
-
-  if (Availability.isAllYes() && SelfInitialized == DIKind::No) {
+  if (SelfConsumed == DIKind::Yes) {
     // We're in an error path after performing a self.init or super.init
     // delegation. The value was already consumed so there's nothing to release.
     processUninitializedRelease(Release, true, Release->getIterator());
@@ -2044,15 +1874,18 @@ void LifetimeChecker::processNonTrivialRelease(unsigned ReleaseID) {
     return;
   }
 
+  // If the memory object is completely initialized, then nothing needs to be
+  // done at this release point.
+  if (Availability.isAllYes() && SelfConsumed == DIKind::No)
+    return;
+
   // If it is all 'no' then we can handle it specially without conditional code.
-  if (Availability.isAllNo() && SelfInitialized == DIKind::No) {
+  if (Availability.isAllNo() && SelfConsumed == DIKind::No) {
     processUninitializedRelease(Release, false, Release->getIterator());
     deleteDeadRelease(ReleaseID);
     return;
   }
-
-  // Otherwise, it is partially live.
-
+  
   // If any elements or the 'super.init' state are conditionally live, we need
   // to emit conditional logic.
   if (Availability.hasAny(DIKind::Partial))
@@ -2060,11 +1893,11 @@ void LifetimeChecker::processNonTrivialRelease(unsigned ReleaseID) {
 
   // If the self value was conditionally consumed, we need to emit conditional
   // logic.
-  if (SelfInitialized == DIKind::Partial)
-    HasConditionalSelfInitialized = true;
+  if (SelfConsumed == DIKind::Partial)
+    HasConditionalSelfConsumed = true;
 
-  // Save it for later processing.
-  ConditionalDestroys.push_back({ ReleaseID, Availability, SelfInitialized });
+  // Otherwise, it is partially live, save it for later processing.
+  ConditionalDestroys.push_back({ ReleaseID, Availability, SelfConsumed });
 }
 
 static Identifier getBinaryFunction(StringRef Name, SILType IntSILTy,
@@ -2101,7 +1934,7 @@ static void updateControlVariable(SILLocation Loc,
   // load/or/store sequence to mask in the bits.
   if (!Bitmask.isAllOnesValue()) {
     SILValue Tmp =
-        B.createLoad(Loc, ControlVariable, LoadOwnershipQualifier::Trivial);
+        B.createLoad(Loc, ControlVariable, LoadOwnershipQualifier::Unqualified);
     if (!OrFn.get())
       OrFn = getBinaryFunction("or", IVType, B.getASTContext());
       
@@ -2110,18 +1943,20 @@ static void updateControlVariable(SILLocation Loc,
   }
 
   B.createStore(Loc, MaskVal, ControlVariable,
-                StoreOwnershipQualifier::Trivial);
+                StoreOwnershipQualifier::Unqualified);
 }
 
 /// Test a bit in the control variable at the current insertion point.
 static SILValue testControlVariable(SILLocation Loc,
                                     unsigned Elt,
                                     SILValue ControlVariableAddr,
+                                    SILValue &ControlVariable,
                                     Identifier &ShiftRightFn,
                                     Identifier &TruncateFn,
                                     SILBuilder &B) {
-  SILValue ControlVariable =
-        B.createLoad(Loc, ControlVariableAddr, LoadOwnershipQualifier::Trivial);
+  if (!ControlVariable)
+    ControlVariable = B.createLoad(Loc, ControlVariableAddr,
+                                   LoadOwnershipQualifier::Unqualified);
 
   SILValue CondVal = ControlVariable;
   CanBuiltinIntegerType IVType = CondVal->getType().castTo<BuiltinIntegerType>();
@@ -2165,7 +2000,7 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
   unsigned NumMemoryElements = TheMemory.NumElements;
 
   // We might need an extra bit to check if self was consumed.
-  if (HasConditionalSelfInitialized)
+  if (HasConditionalSelfConsumed)
     NumMemoryElements++;
 
   // Create the control variable as the first instruction in the function (so
@@ -2194,7 +2029,7 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
   SILValue ControlVariableAddr = ControlVariableBox;
   auto Zero = B.createIntegerLiteral(Loc, IVType, 0);
   B.createStore(Loc, Zero, ControlVariableAddr,
-                StoreOwnershipQualifier::Trivial);
+                StoreOwnershipQualifier::Unqualified);
 
   Identifier OrFn;
 
@@ -2219,6 +2054,7 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
       break;
 
     case DIUseKind::SelfInit:
+    case DIUseKind::SuperInit:
     case DIUseKind::Initialization:
       // If this is an initialization of only trivial elements, then we don't
       // need to update the bitvector.
@@ -2256,7 +2092,7 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
     for (unsigned Elt = Use.FirstElement, e = Elt+Use.NumElements;
          Elt != e; ++Elt) {
       auto CondVal = testControlVariable(Loc, Elt, ControlVariableAddr,
-                                         ShiftRightFn, TruncateFn,
+                                         ControlVariable, ShiftRightFn, TruncateFn,
                                          B);
       
       SILBasicBlock *TrueBB, *FalseBB, *ContBB;
@@ -2267,18 +2103,10 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
 
       // Emit a destroy_addr in the taken block.
       B.setInsertionPoint(TrueBB->begin());
-      SILValue EltPtr;
-      {
-        llvm::SmallVector<std::pair<SILValue, SILValue>, 4> EndBorrowList;
-        EltPtr = TheMemory.emitElementAddress(Elt, Loc, B, EndBorrowList);
-        if (auto *DA = B.emitDestroyAddrAndFold(Loc, EltPtr))
-          Destroys.push_back(DA);
-        while (!EndBorrowList.empty()) {
-          SILValue Borrowed, Original;
-          std::tie(Borrowed, Original) = EndBorrowList.pop_back_val();
-          B.createEndBorrow(Loc, Borrowed, Original);
-        }
-      }
+      SILValue EltPtr = TheMemory.emitElementAddress(Elt, Loc, B);
+      if (auto *DA = B.emitDestroyAddrAndFold(Loc, EltPtr))
+        Destroys.push_back(DA);
+
       B.setInsertionPoint(ContBB->begin());
     }
     
@@ -2296,11 +2124,15 @@ SILValue LifetimeChecker::handleConditionalInitAssign() {
     --i;
   }
 
-  // At each block that stores to self, mark the self value as having been
-  // initialized.
-  if (HasConditionalSelfInitialized) {
-    for (auto *I : StoresToSelf) {
-      auto *bb = I->getParent();
+  // At each failure block, mark the self value as having been consumed.
+  if (HasConditionalSelfConsumed) {
+    for (auto *I : FailableInits) {
+      auto *bb = I->getSuccessors()[1].getBB();
+
+      bool criticalEdge = isCriticalEdge(I, 1);
+      if (criticalEdge)
+        bb = splitEdge(I, 1);
+
       B.setInsertionPoint(bb->begin());
 
       // Set the most significant bit.
@@ -2323,104 +2155,12 @@ handleConditionalDestroys(SILValue ControlVariableAddr) {
 
   unsigned NumMemoryElements = TheMemory.NumElements;
   
-  unsigned SelfInitializedElt = TheMemory.NumElements;
+  unsigned SelfConsumedElt = TheMemory.NumElements;
   unsigned SuperInitElt = TheMemory.NumElements - 1;
 
   // We might need an extra bit to check if self was consumed.
-  if (HasConditionalSelfInitialized)
+  if (HasConditionalSelfConsumed)
     NumMemoryElements++;
-
-  // Utilities.
-
-  auto destroyMemoryElement = [&](SILLocation Loc, unsigned Elt) {
-    llvm::SmallVector<std::pair<SILValue, SILValue>, 4> EndBorrowList;
-    SILValue EltPtr =
-        TheMemory.emitElementAddress(Elt, Loc, B, EndBorrowList);
-    if (auto *DA = B.emitDestroyAddrAndFold(Loc, EltPtr))
-      Destroys.push_back(DA);
-    while (!EndBorrowList.empty()) {
-      SILValue Borrowed, Original;
-      std::tie(Borrowed, Original) = EndBorrowList.pop_back_val();
-      B.createEndBorrow(Loc, Borrowed, Original);
-    }
-  };
-
-  // Destroy all the allocation's fields, not including the allocation
-  // itself, if we have a class initializer.
-  auto destroyMemoryElements = [&](SILLocation Loc,
-                                   AvailabilitySet Availability) {
-    // Delegating initializers don't model the fields of the class.
-    if (TheMemory.isClassInitSelf() && TheMemory.isDelegatingInit())
-      return;
-
-    // Destroy those fields of TheMemory that are already initialized, skip
-    // those fields that are known not to be initialized, and conditionally
-    // destroy fields in a control-flow sensitive situation.
-    for (unsigned Elt = 0; Elt < TheMemory.getNumMemoryElements(); ++Elt) {
-      switch (Availability.get(Elt)) {
-      case DIKind::No:
-        // If an element is known to be uninitialized, then we know we can
-        // completely ignore it.
-        continue;
-
-      case DIKind::Partial:
-        // In the partially live case, we have to check our control variable to
-        // destroy it.  Handle this below.
-        break;
-
-      case DIKind::Yes:
-        // If an element is known to be initialized, then we can strictly
-        // destroy its value at releases position.
-        destroyMemoryElement(Loc, Elt);
-        continue;
-      }
-
-      // Insert a load of the liveness bitmask and split the CFG into a diamond
-      // right before the destroy_addr, if we haven't already loaded it.
-      auto CondVal = testControlVariable(Loc, Elt, ControlVariableAddr,
-                                         ShiftRightFn, TruncateFn,
-                                         B);
-
-      SILBasicBlock *ReleaseBlock, *DeallocBlock, *ContBlock;
-
-      InsertCFGDiamond(CondVal, Loc, B,
-                       /*createTrueBB=*/true,
-                       /*createFalseBB=*/false,
-                       ReleaseBlock, DeallocBlock, ContBlock);
-
-      // Set up the initialized release block.
-      B.setInsertionPoint(ReleaseBlock->begin());
-      destroyMemoryElement(Loc, Elt);
-
-      B.setInsertionPoint(ContBlock->begin());
-    }
-  };
-
-  // Either release the self reference, or just deallocate the box,
-  // depending on if the self box was initialized or not.
-  auto emitReleaseOfSelfWhenNotConsumed = [&](SILLocation Loc,
-                                              SILInstruction *Release) {
-    auto CondVal = testControlVariable(Loc, SelfInitializedElt,
-                                       ControlVariableAddr,
-                                       ShiftRightFn,
-                                       TruncateFn,
-                                       B);
-
-    SILBasicBlock *ReleaseBlock, *ConsumedBlock, *ContBlock;
-
-    InsertCFGDiamond(CondVal, Loc, B,
-                     /*createTrueBB=*/true,
-                     /*createFalseBB=*/true,
-                     ReleaseBlock, ConsumedBlock, ContBlock);
-
-    // If true, self is fully initialized; just release it as usual.
-    B.setInsertionPoint(ReleaseBlock->begin());
-    Release->moveBefore(&*B.getInsertionPoint());
-
-    // If false, self is consumed.
-    B.setInsertionPoint(ConsumedBlock->begin());
-    processUninitializedRelease(Release, true, B.getInsertionPoint());
-  };
 
   // After handling any conditional initializations, check to see if we have any
   // cases where the value is only partially initialized by the time its
@@ -2430,128 +2170,160 @@ handleConditionalDestroys(SILValue ControlVariableAddr) {
     auto *Release = Destroys[CDElt.ReleaseID];
     auto Loc = Release->getLoc();
     auto &Availability = CDElt.Availability;
-
+    SILValue ControlVariable;
+    
     B.setInsertionPoint(Release);
 
-    // Value types and root classes don't require any fancy handling.
-    // Just conditionally destroy each memory element, and for classes,
-    // also free the partially initialized object.
-    if (!TheMemory.isNonRootClassSelf()) {
-      destroyMemoryElements(Loc, Availability);
-      processUninitializedRelease(Release, false, B.getInsertionPoint());
-
-      // The original strong_release or destroy_addr instruction is
-      // always dead at this point.
-      deleteDeadRelease(CDElt.ReleaseID);
-      continue;
-    }
-
-    // Hard case -- we have a self reference which requires additional
-    // handling to deal with the 'self' value being consumed.
-    bool isDeadRelease = true;
-
-    auto SelfLive = Availability.get(SuperInitElt);
-
-    switch (SelfLive) {
+    // If the self value may have been consumed, we need to check for this
+    // before doing anything else.
+    switch (CDElt.SelfConsumed) {
     case DIKind::No:
-      assert(CDElt.SelfInitialized == DIKind::No &&
-             "Impossible to have initialized the self box where "
-             "self.init was not called");
-
-      // self.init or super.init was not called. If we're in the super.init
-      // case, destroy any initialized fields.
-      destroyMemoryElements(Loc, Availability);
-      processUninitializedRelease(Release, false, B.getInsertionPoint());
       break;
+
+    case DIKind::Partial: {
+      auto CondVal = testControlVariable(Loc, SelfConsumedElt, ControlVariableAddr,
+                                         ControlVariable, ShiftRightFn, TruncateFn,
+                                         B);
+      
+      SILBasicBlock *ConsumedBlock, *DeallocBlock, *ContBlock;
+      
+      InsertCFGDiamond(CondVal, Loc, B,
+                       /*createTrueBB=*/true,
+                       /*createFalseBB=*/true,
+                       ConsumedBlock, DeallocBlock, ContBlock);
+
+      // Boxes have to be deallocated even if the payload was consumed.
+      processUninitializedRelease(Release, true, ConsumedBlock->begin());
+
+      B.setInsertionPoint(DeallocBlock->begin());
+      break;
+    }
 
     case DIKind::Yes:
-      switch (CDElt.SelfInitialized) {
+      // We should have skipped this conditional destroy by now, oops
+      llvm_unreachable("Destroy of consumed self is not conditional");
+    }
+
+    // If we're in a designated initializer the object might already be fully
+    // initialized.
+    if (TheMemory.isDerivedClassSelf()) {
+      switch (Availability.get(SuperInitElt)) {
       case DIKind::No:
-        llvm_unreachable("Impossible to have initialized the self box where "
-                         "self.init was not called");
-      case DIKind::Yes:
-        llvm_unreachable("This should have been an unconditional destroy");
-
-      case DIKind::Partial: {
-        // self.init or super.init was called, but we don't know if the
-        // self value was consumed or not.
-        emitReleaseOfSelfWhenNotConsumed(Loc, Release);
-        isDeadRelease = false;
-        break;
-      }
-      }
-      break;
-
-    case DIKind::Partial:
-      switch (CDElt.SelfInitialized) {
-      case DIKind::No: {
-        // self.init or super.init may or may not have been called.
-        // We have not yet stored 'self' into the box.
-
-        auto CondVal = testControlVariable(Loc, SuperInitElt,
-                                           ControlVariableAddr,
-                                           ShiftRightFn,
-                                           TruncateFn,
-                                           B);
-
-        SILBasicBlock *ConsumedBlock, *DeallocBlock, *ContBlock;
-
-        InsertCFGDiamond(CondVal, Loc, B,
-                         /*createTrueBB=*/true,
-                         /*createFalseBB=*/true,
-                         ConsumedBlock, DeallocBlock, ContBlock);
-
-        // If true, self.init or super.init was called and self was consumed.
-        B.setInsertionPoint(ConsumedBlock->begin());
-        processUninitializedRelease(Release, true, B.getInsertionPoint());
-
-        // If false, self is uninitialized and must be freed.
-        B.setInsertionPoint(DeallocBlock->begin());
-        destroyMemoryElements(Loc, Availability);
-        processUninitializedRelease(Release, false, B.getInsertionPoint());
-
-        break;
-      }
-
-      case DIKind::Yes:
-        llvm_unreachable("Impossible to have initialized the self box where "
-                         "self.init may not have been called");
+        // super.init() has not been called yet, proceed below.
         break;
 
       case DIKind::Partial: {
-        // self.init or super.init may or may not have been called.
-        // We may or may have stored 'self' into the box.
-
-        auto CondVal = testControlVariable(Loc, SuperInitElt,
-                                           ControlVariableAddr,
-                                           ShiftRightFn,
-                                           TruncateFn,
+        // super.init() may or may not have been called yet, we have to check.
+        auto CondVal = testControlVariable(Loc, SuperInitElt, ControlVariableAddr,
+                                           ControlVariable, ShiftRightFn, TruncateFn,
                                            B);
-
-        SILBasicBlock *LiveBlock, *DeallocBlock, *ContBlock;
-
+        
+        SILBasicBlock *ReleaseBlock, *DeallocBlock, *ContBlock;
+        
         InsertCFGDiamond(CondVal, Loc, B,
                          /*createTrueBB=*/true,
                          /*createFalseBB=*/true,
-                         LiveBlock, DeallocBlock, ContBlock);
+                         ReleaseBlock, DeallocBlock, ContBlock);
 
-        // If true, self was consumed or is fully initialized.
-        B.setInsertionPoint(LiveBlock->begin());
-        emitReleaseOfSelfWhenNotConsumed(Loc, Release);
-        isDeadRelease = false;
-
-        // If false, self is uninitialized and must be freed.
+        // Set up the initialized release block.
+        B.setInsertionPoint(ReleaseBlock->begin());
+        if (isa<StrongReleaseInst>(Release))
+          Destroys.push_back(B.emitStrongReleaseAndFold(Loc, Release->getOperand(0)));
+        else
+          Destroys.push_back(B.emitDestroyAddrAndFold(Loc, Release->getOperand(0)));
+        
         B.setInsertionPoint(DeallocBlock->begin());
-        destroyMemoryElements(Loc, Availability);
-        processUninitializedRelease(Release, false, B.getInsertionPoint());
-
         break;
       }
+      case DIKind::Yes:
+        // super.init() already called, just release the value.
+        Release->removeFromParent();
+        B.getInsertionBB()->insert(B.getInsertionPoint(), Release);
+        continue;
       }
     }
 
-    if (isDeadRelease)
-      deleteDeadRelease(CDElt.ReleaseID);
+    // If the memory is not-fully initialized at the destroy_addr, then there
+    // can be multiple issues: we could have some tuple elements initialized and
+    // some not, or we could have a control flow sensitive situation where the
+    // elements are only initialized on some paths.  We handle this by splitting
+    // the multi-element case into its component parts and treating each
+    // separately.
+    //
+    // Classify each element into three cases: known initialized, known
+    // uninitialized, or partially initialized.  The first two cases are simple
+    // to handle, whereas the partial case requires dynamic codegen based on the
+    // liveness bitmask.
+    for (unsigned Elt = 0; Elt != TheMemory.getNumMemoryElements(); ++Elt) {
+      switch (Availability.get(Elt)) {
+      case DIKind::No:
+        // If an element is known to be uninitialized, then we know we can
+        // completely ignore it.
+        if (TheMemory.isDelegatingInit()) {
+          // In a convenience initializer, the sole element of the memory
+          // represents the self instance itself, so if self is neither
+          // initialized nor consumed, we have to free the memory.
+          assert(TheMemory.getNumMemoryElements() == 1);
+          processUninitializedRelease(Release, false, B.getInsertionPoint());
+        }
+
+        continue;
+      case DIKind::Partial:
+        // In the partially live case, we have to check our control variable to
+        // destroy it.  Handle this below.
+        break;
+
+      case DIKind::Yes:
+        // If an element is known to be initialized, then we can strictly
+        // destroy its value at releases position.
+        SILValue EltPtr = TheMemory.emitElementAddress(Elt, Loc, B);
+        if (auto *DA = B.emitDestroyAddrAndFold(Release->getLoc(), EltPtr))
+          Destroys.push_back(DA);
+        continue;
+      }
+      
+      // Note - in some partial liveness cases, we can push the destroy_addr up
+      // the CFG, instead of immediately generating dynamic control flow checks.
+      // This could be handled in processNonTrivialRelease some day.
+      
+      // Insert a load of the liveness bitmask and split the CFG into a diamond
+      // right before the destroy_addr, if we haven't already loaded it.
+      auto CondVal = testControlVariable(Loc, Elt, ControlVariableAddr,
+                                         ControlVariable, ShiftRightFn, TruncateFn,
+                                         B);
+      
+      SILBasicBlock *ReleaseBlock, *DeallocBlock, *ContBlock;
+
+      InsertCFGDiamond(CondVal, Loc, B,
+                       /*createTrueBB=*/true,
+                       /*createFalseBB=*/TheMemory.isDelegatingInit(),
+                       ReleaseBlock, DeallocBlock, ContBlock);
+
+      // Set up the initialized release block.
+      B.setInsertionPoint(ReleaseBlock->begin());
+      SILValue EltPtr = TheMemory.emitElementAddress(Elt, Loc, B);
+      if (auto *DA = B.emitDestroyAddrAndFold(Loc, EltPtr))
+        Destroys.push_back(DA);
+
+      // Set up the uninitialized release block. Free the self value in
+      // convenience initializers, otherwise there's nothing to do.
+      if (TheMemory.isDelegatingInit()) {
+        assert(TheMemory.getNumMemoryElements() == 1);
+        processUninitializedRelease(Release, false, DeallocBlock->begin());
+      }
+
+      B.setInsertionPoint(ContBlock->begin());
+    }
+
+    // If we're in a designated initializer, the elements of the memory
+    // represent instance variables -- after destroying them, we have to
+    // destroy the class instance itself.
+    if (!TheMemory.isDelegatingInit())
+      processUninitializedRelease(Release, false, B.getInsertionPoint());
+
+    // We've split up the release into zero or more primitive operations,
+    // delete it now.
+    deleteDeadRelease(CDElt.ReleaseID);
   }
 }
 
@@ -2622,65 +2394,36 @@ getOutAvailability(SILBasicBlock *BB, AvailabilitySet &Result) {
   computePredsLiveOut(BB);
 
   for (auto *Pred : BB->getPredecessorBlocks()) {
+    // If self was consumed in a predecessor P, don't look at availability
+    // at all, because there's no point in making things more conditional
+    // than they are. If we enter the current block through P, the self value
+    // will be null and we don't have to destroy anything.
     auto &BBInfo = getBlockInfo(Pred);
+    if (BBInfo.OutSelfConsumed.hasValue() &&
+        *BBInfo.OutSelfConsumed == DIKind::Yes)
+      continue;
+
     Result.mergeIn(BBInfo.OutAvailability);
   }
   DEBUG(llvm::dbgs() << "    Result: " << Result << "\n");
 }
 
 void LifetimeChecker::
-getOutSelfInitialized(SILBasicBlock *BB, Optional<DIKind> &Result) {
+getOutSelfConsumed(SILBasicBlock *BB, Optional<DIKind> &Result) {
   computePredsLiveOut(BB);
 
   for (auto *Pred : BB->getPredecessorBlocks())
-    Result = mergeKinds(Result, getBlockInfo(Pred).OutSelfInitialized);
-}
-
-AvailabilitySet
-LifetimeChecker::getLivenessAtNonTupleInst(swift::SILInstruction *Inst,
-                                           swift::SILBasicBlock *InstBB,
-                                           AvailabilitySet &Result) {
-  // If there is a store in the current block, scan the block to see if the
-  // store is before or after the load.  If it is before, it produces the value
-  // we are looking for.
-  if (getBlockInfo(InstBB).HasNonLoadUse) {
-    for (auto BBI = Inst->getIterator(), E = InstBB->begin(); BBI != E;) {
-      --BBI;
-      SILInstruction *TheInst = &*BBI;
-
-      // If this instruction is unrelated to the memory, ignore it.
-      if (!NonLoadUses.count(TheInst))
-        continue;
-
-      // If we found the allocation itself, then we are loading something that
-      // is not defined at all yet.  Otherwise, we've found a definition, or
-      // something else that will require that the memory is initialized at
-      // this point.
-      Result.set(0, TheInst == TheMemory.MemoryInst ? DIKind::No : DIKind::Yes);
-      return Result;
-    }
-  }
-
-  getOutAvailability(InstBB, Result);
-
-  // If the result element wasn't computed, we must be analyzing code within
-  // an unreachable cycle that is not dominated by "TheMemory".  Just force
-  // the unset element to yes so that clients don't have to handle this.
-  if (!Result.getConditional(0))
-    Result.set(0, DIKind::Yes);
-
-  return Result;
+    Result = mergeKinds(Result, getBlockInfo(Pred).OutSelfConsumed);
 }
 
 /// getLivenessAtInst - Compute the liveness state for any number of tuple
 /// elements at the specified instruction.  The elements are returned as an
 /// AvailabilitySet.  Elements outside of the range specified may not be
 /// computed correctly.
-AvailabilitySet LifetimeChecker::getLivenessAtInst(SILInstruction *Inst,
-                                                   unsigned FirstElt,
-                                                   unsigned NumElts) {
-  DEBUG(llvm::dbgs() << "Get liveness " << FirstElt << ", #" << NumElts
-                     << " at " << *Inst);
+AvailabilitySet LifetimeChecker::
+getLivenessAtInst(SILInstruction *Inst, unsigned FirstElt, unsigned NumElts) {
+  DEBUG(llvm::dbgs() << "Get liveness " << FirstElt << ", #" << NumElts <<
+        " at " << *Inst);
 
   AvailabilitySet Result(TheMemory.NumElements);
 
@@ -2688,13 +2431,44 @@ AvailabilitySet LifetimeChecker::getLivenessAtInst(SILInstruction *Inst,
   // care about any of the elements.
   if (NumElts == 0)
     return Result;
-
+  
   SILBasicBlock *InstBB = Inst->getParent();
-
+  
   // The vastly most common case is memory allocations that are not tuples,
   // so special case this with a more efficient algorithm.
   if (TheMemory.NumElements == 1) {
-    return getLivenessAtNonTupleInst(Inst, InstBB, Result);
+    
+    // If there is a store in the current block, scan the block to see if the
+    // store is before or after the load.  If it is before, it produces the value
+    // we are looking for.
+    if (getBlockInfo(InstBB).HasNonLoadUse) {
+      for (auto BBI = Inst->getIterator(), E = InstBB->begin(); BBI != E;) {
+        --BBI;
+        SILInstruction *TheInst = &*BBI;
+
+        // If this instruction is unrelated to the memory, ignore it.
+        if (!NonLoadUses.count(TheInst))
+          continue;
+        
+        // If we found the allocation itself, then we are loading something that
+        // is not defined at all yet.  Otherwise, we've found a definition, or
+        // something else that will require that the memory is initialized at
+        // this point.
+        Result.set(0,
+                   TheInst == TheMemory.MemoryInst ? DIKind::No : DIKind::Yes);
+        return Result;
+      }
+    }
+
+    getOutAvailability(InstBB, Result);
+
+    // If the result element wasn't computed, we must be analyzing code within
+    // an unreachable cycle that is not dominated by "TheMemory".  Just force
+    // the unset element to yes so that clients don't have to handle this.
+    if (!Result.getConditional(0))
+      Result.set(0, DIKind::Yes);
+
+    return Result;
   }
 
   // Check locally to see if any elements are satisfied within the block, and
@@ -2770,41 +2544,29 @@ int LifetimeChecker::getAnyUninitializedMemberAtInst(SILInstruction *Inst,
   return -1;
 }
 
-/// getSelfInitializedAtInst - Check if the self box in an initializer has
-/// a fully initialized value at the specified instruction.
-///
-/// Possible outcomes:
-/// - 'Yes' -- 'self' is fully initialized, and should be destroyed in the
-///   usual manner in an error path
-///
-/// - 'No', and instruction is dominated by a SelfInit use -- this means
-///   'self' was consumed by a self.init or super.init call, and we're in
-///   an error path; there's nothing to clean up
-///
-/// - 'No', and instruction is not dominated by a SelfInit use -- this means
-///   we have to do a partial cleanup, for example deallocating a class
-///   instance without destroying its members
-///
-/// Also, the full range of conditional outcomes is possible above, if the
-/// result is 'Partial'.
+/// getSelfConsumedAtInst - Compute the liveness state for any number of tuple
+/// elements at the specified instruction.  The elements are returned as an
+/// AvailabilitySet.  Elements outside of the range specified may not be
+/// computed correctly.
 DIKind LifetimeChecker::
-getSelfInitializedAtInst(SILInstruction *Inst) {
-  DEBUG(llvm::dbgs() << "Get self initialized at " << *Inst);
+getSelfConsumedAtInst(SILInstruction *Inst) {
+  DEBUG(llvm::dbgs() << "Get self consumed at " << *Inst);
+
+  Optional<DIKind> Result;
 
   SILBasicBlock *InstBB = Inst->getParent();
   auto &BlockInfo = getBlockInfo(InstBB);
 
-  if (BlockInfo.LocalSelfInitialized.hasValue())
-    return *BlockInfo.LocalSelfInitialized;
+  if (BlockInfo.LocalSelfConsumed.hasValue())
+    return *BlockInfo.LocalSelfConsumed;
 
-  Optional<DIKind> Result;
-  getOutSelfInitialized(InstBB, Result);
+  getOutSelfConsumed(InstBB, Result);
 
   // If the result wasn't computed, we must be analyzing code within
   // an unreachable cycle that is not dominated by "TheMemory".  Just force
-  // the result to initialized so that clients don't have to handle this.
+  // the result to unconsumed so that clients don't have to handle this.
   if (!Result.hasValue())
-    Result = DIKind::Yes;
+    Result = DIKind::No;
 
   return *Result;
 }
@@ -2814,11 +2576,16 @@ getSelfInitializedAtInst(SILInstruction *Inst) {
 /// initialized at this point or not.
 bool LifetimeChecker::isInitializedAtUse(const DIMemoryUse &Use,
                                          bool *SuperInitDone,
-                                         bool *FailedSelfUse,
-                                         bool *FullyUninitialized) {
+                                         bool *FailedSelfUse) {
   if (FailedSelfUse) *FailedSelfUse = false;
   if (SuperInitDone) *SuperInitDone = true;
-  if (FullyUninitialized) *FullyUninitialized = true;
+  
+  // If the self.init() or super.init() call threw an error and
+  // we caught it, self is no longer available.
+  if (getSelfConsumedAtInst(Use.Inst) != DIKind::No) {
+    if (FailedSelfUse) *FailedSelfUse = true;
+    return false;
+  }
 
   // Determine the liveness states of the elements that we care about.
   AvailabilitySet Liveness =
@@ -2833,29 +2600,10 @@ bool LifetimeChecker::isInitializedAtUse(const DIMemoryUse &Use,
   }
 
   // Check all the results.
-  bool isFullyInitialized = true;
   for (unsigned i = Use.FirstElement, e = i+Use.NumElements;
-       i != e; ++i) {
+       i != e; ++i)
     if (Liveness.get(i) != DIKind::Yes)
-      isFullyInitialized = false;
-    if (FullyUninitialized && Liveness.get(i) != DIKind::No)
-      *FullyUninitialized = false;
-  }
-  if (!isFullyInitialized)
-    return false;
-
-  // If the self.init() or super.init() call threw an error and
-  // we caught it, self is no longer available.
-  if (TheMemory.isNonRootClassSelf()) {
-    if (getSelfInitializedAtInst(Use.Inst) != DIKind::Yes) {
-      auto SelfLiveness = getLivenessAtInst(Use.Inst,
-                                            0, TheMemory.NumElements);
-      if (SelfLiveness.isAllYes()) {
-        if (FailedSelfUse) *FailedSelfUse = true;
-        return false;
-      }
-    }
-  }
+      return false;
 
   return true;
 }

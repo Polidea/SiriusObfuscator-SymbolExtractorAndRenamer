@@ -6,7 +6,7 @@ import Foundation
 
 @objc protocol P {}
 
-@_optimize(none)
+@_semantics("optimize.sil.never")
 func takesP<T : P>(_: T) {}
 
 @inline(__always)

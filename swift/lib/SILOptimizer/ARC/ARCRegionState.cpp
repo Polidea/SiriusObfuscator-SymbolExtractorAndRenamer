@@ -170,8 +170,6 @@ static bool isARCSignificantTerminator(TermInst *TI) {
   // against the operand or can use the value in some way.
   case TermKind::ThrowInst:
   case TermKind::ReturnInst:
-  case TermKind::UnwindInst:
-  case TermKind::YieldInst:
   case TermKind::TryApplyInst:
   case TermKind::SwitchValueInst:
   case TermKind::SwitchEnumInst:
@@ -518,9 +516,9 @@ bool ARCRegionState::processTopDown(
 
 static bool isStrongEntranceInstruction(const SILInstruction &I) {
   switch (I.getKind()) {
-  case SILInstructionKind::AllocRefInst:
-  case SILInstructionKind::AllocRefDynamicInst:
-  case SILInstructionKind::AllocBoxInst:
+  case ValueKind::AllocRefInst:
+  case ValueKind::AllocRefDynamicInst:
+  case ValueKind::AllocBoxInst:
     return true;
   default:
     return false;

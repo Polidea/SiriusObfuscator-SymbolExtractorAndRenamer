@@ -331,11 +331,12 @@ class ConformanceLookupTable {
   bool VisitingSuperclass = false;
 
   /// Add a protocol.
-  bool addProtocol(ProtocolDecl *protocol, SourceLoc loc,
+  bool addProtocol(NominalTypeDecl *nominal,
+                   ProtocolDecl *protocol, SourceLoc loc,
                    ConformanceSource source);
 
   /// Add the protocols from the given list.
-  void addProtocols(ArrayRef<TypeLoc> inherited,
+  void addProtocols(NominalTypeDecl *nominal, ArrayRef<TypeLoc> inherited,
                     ConformanceSource source, LazyResolver *resolver);
 
   /// Expand the implied conformances for the given DeclContext.
@@ -362,16 +363,20 @@ class ConformanceLookupTable {
   ///
   /// \returns true if any conformance entries were superseded by this
   /// operation.
-  bool resolveConformances(ProtocolDecl *protocol);
+  bool resolveConformances(NominalTypeDecl *nominal,
+                           ProtocolDecl *protocol,
+                           LazyResolver *resolver);
 
   /// Retrieve the declaration context that provides the
   /// (non-inherited) conformance described by the given conformance
   /// entry.
   DeclContext *getConformingContext(NominalTypeDecl *nominal,
+                                    LazyResolver *resolver,
                                     ConformanceEntry *entry);
 
   /// Resolve the given conformance entry to an actual protocol conformance.
   ProtocolConformance *getConformance(NominalTypeDecl *nominal,
+                                      LazyResolver *resolver,
                                       ConformanceEntry *entry);
 
   /// Enumerate each of the unhandled contexts (nominal type
@@ -417,12 +422,14 @@ class ConformanceLookupTable {
 
   /// Load all of the protocol conformances for the given (serialized)
   /// declaration context.
-  void loadAllConformances(DeclContext *dc,
+  void loadAllConformances(NominalTypeDecl *nominal,
+                           DeclContext *dc,
                            ArrayRef<ProtocolConformance *> conformances);
 
 public:
   /// Create a new conformance lookup table.
-  ConformanceLookupTable(ASTContext &ctx, LazyResolver *resolver);
+  ConformanceLookupTable(ASTContext &ctx, NominalTypeDecl *nominal,
+                         LazyResolver *resolver);
 
   /// Destroy the conformance table.
   void destroy();

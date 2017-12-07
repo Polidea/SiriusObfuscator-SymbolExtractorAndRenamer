@@ -40,12 +40,8 @@ ObjCBoolBlock testObjCBoolFnToBlockTypedef(ObjCBoolFn);
 DarwinBooleanBlock testDarwinBooleanFnToBlockTypedef(DarwinBooleanFn);
 
 typedef __typeof(testCBoolFnToBlockTypedef) CBoolFnToBlockType;
-typedef __typeof(testObjCBoolFnToBlockTypedef) ObjCBoolFnToBlockType;
+typedef __typeof(testObjCBoolFnToBlockTypedef) ObjCCBoolFnToBlockType;
 typedef __typeof(testDarwinBooleanFnToBlockTypedef) DarwinBooleanFnToBlockType;
-
-extern ObjCBoolFnToBlockType *globalObjCBoolFnToBlockFP;
-extern ObjCBoolFnToBlockType *_Nonnull *_Nullable globalObjCBoolFnToBlockFPP;
-extern ObjCBoolFnToBlockType ^globalObjCBoolFnToBlockBP;
 
 extern CBoolFn globalCBoolFn;
 extern ObjCBoolFn globalObjCBoolFn;
@@ -72,10 +68,9 @@ extern DarwinBooleanBlock globalDarwinBooleanBlock;
 - (BOOL (^)(BOOL))testObjCBoolFnToBlock:(BOOL (*)(BOOL))fp;
 - (Boolean (^)(Boolean))testDarwinBooleanFnToBlock:(Boolean (*)(Boolean))fp;
 
-- (void)produceCBoolBlockTypedef:(CBoolBlock _Nullable *_Nonnull)outBlock;
-- (void)produceObjCBoolBlockTypedef:(ObjCBoolBlock _Nullable *_Nonnull)outBlock;
-- (void)produceDarwinBooleanBlockTypedef:
-    (DarwinBooleanBlock _Nullable *_Nonnull)outBlock;
+- (void)produceCBoolBlockTypedef:(CBoolBlock __nullable * __nonnull)outBlock;
+- (void)produceObjCBoolBlockTypedef:(ObjCBoolBlock __nullable * __nonnull)outBlock;
+- (void)produceDarwinBooleanBlockTypedef:(DarwinBooleanBlock __nullable * __nonnull)outBlock;
 
 - (instancetype)init;
 @end

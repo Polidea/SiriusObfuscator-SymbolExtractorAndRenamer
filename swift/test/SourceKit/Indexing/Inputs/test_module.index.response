@@ -44,18 +44,18 @@
         {
           key.kind: source.lang.swift.decl.var.instance,
           key.name: "value",
-          key.usr: "s:11test_module16ComputedPropertyC5valueSivp",
+          key.usr: "s:11test_module16ComputedPropertyC5valueSiv",
           key.entities: [
             {
               key.kind: source.lang.swift.decl.function.accessor.getter,
               key.name: "getter:value",
-              key.usr: "s:11test_module16ComputedPropertyC5valueSivg",
+              key.usr: "s:11test_module16ComputedPropertyC5valueSifg",
               key.is_dynamic: 1
             },
             {
               key.kind: source.lang.swift.decl.function.accessor.setter,
               key.name: "setter:value",
-              key.usr: "s:11test_module16ComputedPropertyC5valueSivs",
+              key.usr: "s:11test_module16ComputedPropertyC5valueSifs",
               key.is_dynamic: 1
             }
           ]
@@ -91,16 +91,16 @@
         {
           key.kind: source.lang.swift.decl.var.instance,
           key.name: "x",
-          key.usr: "s:11test_module7TwoIntsC1xSivp",
+          key.usr: "s:11test_module7TwoIntsC1xSiv",
           key.entities: [
             {
               key.kind: source.lang.swift.decl.function.accessor.getter,
-              key.usr: "s:11test_module7TwoIntsC1xSivg",
+              key.usr: "s:11test_module7TwoIntsC1xSifg",
               key.is_dynamic: 1
             },
             {
               key.kind: source.lang.swift.decl.function.accessor.setter,
-              key.usr: "s:11test_module7TwoIntsC1xSivs",
+              key.usr: "s:11test_module7TwoIntsC1xSifs",
               key.is_dynamic: 1
             }
           ]
@@ -108,16 +108,16 @@
         {
           key.kind: source.lang.swift.decl.var.instance,
           key.name: "y",
-          key.usr: "s:11test_module7TwoIntsC1ySivp",
+          key.usr: "s:11test_module7TwoIntsC1ySiv",
           key.entities: [
             {
               key.kind: source.lang.swift.decl.function.accessor.getter,
-              key.usr: "s:11test_module7TwoIntsC1ySivg",
+              key.usr: "s:11test_module7TwoIntsC1ySifg",
               key.is_dynamic: 1
             },
             {
               key.kind: source.lang.swift.decl.function.accessor.setter,
-              key.usr: "s:11test_module7TwoIntsC1ySivs",
+              key.usr: "s:11test_module7TwoIntsC1ySifs",
               key.is_dynamic: 1
             }
           ]

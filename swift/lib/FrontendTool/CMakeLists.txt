@@ -3,8 +3,7 @@ add_swift_library(swiftFrontendTool STATIC
   ImportedModules.cpp
   ReferenceDependencies.cpp
   TBD.cpp
-  DEPENDS
-    swift-syntax-generated-headers SwiftOptions
+  DEPENDS SwiftOptions
   LINK_LIBRARIES
     swiftIndex
     swiftIDE

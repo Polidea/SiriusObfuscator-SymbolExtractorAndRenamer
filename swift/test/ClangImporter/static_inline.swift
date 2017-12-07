@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 
 // Check if SIL printing+parsing of a clang imported function works.
 

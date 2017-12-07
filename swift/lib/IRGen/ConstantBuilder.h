@@ -94,6 +94,16 @@ public:
                             unsigned(reference.isIndirect()));
   }
 
+  void addFarRelativeAddress(llvm::Constant *target) {
+    addRelativeOffset(IGM().FarRelativeAddressTy, target);
+  }
+
+  void addFarRelativeAddress(ConstantReference reference) {
+    addTaggedRelativeOffset(IGM().FarRelativeAddressTy,
+                            reference.getValue(),
+                            unsigned(reference.isIndirect()));
+  }
+
   Size getNextOffsetFromGlobal() const {
     return Size(super::getNextOffsetFromGlobal().getQuantity());
   }

@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: mkdir -p %t
 // RUN: %target-build-swift %s -parse-stdlib -Xfrontend -disable-access-control -o %t/a.out
 // RUN: %target-run %t/a.out | %FileCheck %s
 // REQUIRES: executable_test

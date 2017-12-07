@@ -21,13 +21,11 @@ import SwiftShims
 @_versioned
 internal struct _ArrayBody {
   @_versioned
-  internal var _storage: _SwiftArrayBodyStorage
+  var _storage: _SwiftArrayBodyStorage
 
   @_inlineable
   @_versioned
-  internal init(
-    count: Int, capacity: Int, elementTypeIsBridgedVerbatim: Bool = false
-  ) {
+  init(count: Int, capacity: Int, elementTypeIsBridgedVerbatim: Bool = false) {
     _sanityCheck(count >= 0)
     _sanityCheck(capacity >= 0)
     
@@ -44,14 +42,14 @@ internal struct _ArrayBody {
   /// to update it immediately after construction.
   @_inlineable
   @_versioned
-  internal init() {
+  init() {
     _storage = _SwiftArrayBodyStorage(count: 0, _capacityAndFlags: 0)
   }
   
   /// The number of elements stored in this Array.
   @_inlineable
   @_versioned
-  internal var count: Int {
+  var count: Int {
     get {
       return _assumeNonNegative(_storage.count)
     }
@@ -64,7 +62,7 @@ internal struct _ArrayBody {
   /// reallocation.
   @_inlineable
   @_versioned
-  internal var capacity: Int {
+  var capacity: Int {
     return Int(_capacityAndFlags &>> 1)
   }
 
@@ -76,7 +74,7 @@ internal struct _ArrayBody {
   /// answer.
   @_inlineable
   @_versioned
-  internal var elementTypeIsBridgedVerbatim: Bool {
+  var elementTypeIsBridgedVerbatim: Bool {
     get {
       return (_capacityAndFlags & 0x1) != 0
     }
@@ -90,7 +88,7 @@ internal struct _ArrayBody {
   /// elementTypeIsBridgedVerbatim together.
   @_inlineable
   @_versioned
-  internal var _capacityAndFlags: UInt {
+  var _capacityAndFlags: UInt {
     get {
       return _storage._capacityAndFlags
     }

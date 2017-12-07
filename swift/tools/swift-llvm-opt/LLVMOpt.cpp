@@ -38,7 +38,6 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/CodeGen/CommandFlags.h"
-#include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/IRPrintingPasses.h"
@@ -184,16 +183,11 @@ static void runSpecificPasses(StringRef Binary, llvm::Module *M,
   Passes.add(createTargetTransformInfoWrapperPass(TM ? TM->getTargetIRAnalysis()
                                                      : TargetIRAnalysis()));
 
-  if (TM) {
-    // FIXME: We should dyn_cast this when supported.
-    auto &LTM = static_cast<LLVMTargetMachine &>(*TM);
-    Pass *TPC = LTM.createPassConfig(Passes);
-    Passes.add(TPC);
-  }
-
   for (const llvm::PassInfo *PassInfo : PassList) {
     llvm::Pass *P = nullptr;
-    if (PassInfo->getNormalCtor())
+    if (PassInfo->getTargetMachineCtor())
+      P = PassInfo->getTargetMachineCtor()(TM);
+    else if (PassInfo->getNormalCtor())
       P = PassInfo->getNormalCtor()();
     else
       errs() << Binary << ": cannot create pass: " << PassInfo->getPassName()
@@ -302,7 +296,7 @@ int main(int argc, char **argv) {
 
   if (Optimized) {
     IRGenOptions Opts;
-    Opts.OptMode = OptimizationMode::ForSpeed;
+    Opts.Optimize = true;
 
     // Then perform the optimizations.
     performLLVMOptimizations(Opts, M.get(), TM.get());

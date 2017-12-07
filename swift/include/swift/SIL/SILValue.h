@@ -18,7 +18,6 @@
 #define SWIFT_SIL_SILVALUE_H
 
 #include "swift/Basic/Range.h"
-#include "swift/SIL/SILNode.h"
 #include "swift/SIL/SILType.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
@@ -32,20 +31,19 @@ class DominanceInfo;
 class PostOrderFunctionInfo;
 class ReversePostOrderInfo;
 class Operand;
+class SILBasicBlock;
+class SILFunction;
 class SILInstruction;
 class SILLocation;
-class DeadEndBlocks;
+class SILModule;
+class TransitivelyUnreachableBlocksInfo;
 class ValueBaseUseIterator;
 class ValueUseIterator;
 
-/// An enumeration which contains values for all the concrete ValueBase
-/// subclasses.
-enum class ValueKind : std::underlying_type<SILNodeKind>::type {
-#define VALUE(ID, PARENT) \
-  ID = unsigned(SILNodeKind::ID),
-#define VALUE_RANGE(ID, FIRST, LAST) \
-  First_##ID = unsigned(SILNodeKind::First_##ID), \
-  Last_##ID = unsigned(SILNodeKind::Last_##ID),
+enum class ValueKind {
+#define VALUE(Id, Parent) Id,
+#define VALUE_RANGE(Id, FirstId, LastId)                                       \
+  First_##Id = FirstId, Last_##Id = LastId,
 #include "swift/SIL/SILNodes.def"
 };
 
@@ -109,17 +107,7 @@ struct ValueOwnershipKind {
     /// we
     /// use unqualified ownership. Expected to tighten over time.
     Any,
-
-    LastValueOwnershipKind = Any,
   } Value;
-
-  using UnderlyingType = std::underlying_type<innerty>::type;
-  static constexpr unsigned NumBits = 3;
-  static constexpr UnderlyingType MaxValue = (UnderlyingType(1) << NumBits);
-  static constexpr uint64_t Mask = MaxValue - 1;
-  static_assert(unsigned(ValueOwnershipKind::LastValueOwnershipKind) < MaxValue,
-                "LastValueOwnershipKind is larger than max representable "
-                "ownership value?!");
 
   ValueOwnershipKind(innerty NewValue) : Value(NewValue) {}
   ValueOwnershipKind(unsigned NewValue) : Value(innerty(NewValue)) {}
@@ -138,60 +126,47 @@ struct ValueOwnershipKind {
   bool isTrivialOr(ValueOwnershipKind Kind) const {
     return Value == Trivial || Value == Kind;
   }
-
-  /// Given that there is an aggregate value (like a struct or enum) with this
-  /// ownership kind, and a subobject of type Proj is being projected from the
-  /// aggregate, return Trivial if Proj has trivial type and the aggregate's
-  /// ownership kind otherwise.
-  ValueOwnershipKind getProjectedOwnershipKind(SILModule &M,
-                                               SILType Proj) const;
 };
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &os, ValueOwnershipKind Kind);
 
 /// This is the base class of the SIL value hierarchy, which represents a
-/// runtime computed value. Some examples of ValueBase are SILArgument and
-/// SingleValueInstruction.
-class ValueBase : public SILNode, public SILAllocated<ValueBase> {
-  friend class Operand;
-
+/// runtime computed value. Things like SILInstruction derive from this.
+class alignas(8) ValueBase : public SILAllocated<ValueBase> {
   SILType Type;
   Operand *FirstUse = nullptr;
+  friend class Operand;
+
+  const ValueKind Kind;
 
   ValueBase(const ValueBase &) = delete;
   ValueBase &operator=(const ValueBase &) = delete;
 
 protected:
-  ValueBase(ValueKind kind, SILType type, IsRepresentative isRepresentative)
-      : SILNode(SILNodeKind(kind), SILNodeStorageLocation::Value,
-                isRepresentative),
-        Type(type) {}
+  ValueBase(ValueKind Kind, SILType Ty)
+    : Type(Ty), Kind(Kind) {}
 
 public:
   ~ValueBase() {
     assert(use_empty() && "Cannot destroy a value that still has uses!");
   }
 
-  LLVM_ATTRIBUTE_ALWAYS_INLINE
-  ValueKind getKind() const { return ValueKind(SILNode::getKind()); }
+
+  ValueKind getKind() const { return Kind; }
+
+  /// True if the "value" is actually a value that can be used by other
+  /// instructions.
+  bool hasValue() const { return !Type.isNull(); }
 
   SILType getType() const {
     return Type;
   }
 
   /// Replace every use of a result of this instruction with the corresponding
-  /// result from RHS.
-  ///
-  /// The method assumes that both instructions have the same number of
-  /// results. To replace just one result use SILValue::replaceAllUsesWith.
+  /// result from RHS. The method assumes that both instructions have the same
+  /// number of results. To replace just one result use
+  /// SILValue::replaceAllUsesWith.
   void replaceAllUsesWith(ValueBase *RHS);
-
-  /// \brief Replace all uses of this instruction with an undef value of the
-  /// same type as the result of this instruction.
-  void replaceAllUsesWithUndef();
-
-  /// Is this value a direct result of the given instruction?
-  bool isResultOf(SILInstruction *I) const;
 
   /// Returns true if this value has no uses.
   /// To ignore debug-info instructions use swift::onlyHaveDebugUses instead
@@ -218,34 +193,36 @@ public:
   /// otherwise.
   inline Operand *getSingleUse() const;
 
-  template <class T>
-  inline T *getSingleUserOfType();
+  /// Pretty-print the value.
+  void dump() const;
+  void print(raw_ostream &OS) const;
 
-  /// Return the instruction that defines this value, or null if it is
-  /// not defined by an instruction.
-  const SILInstruction *getDefiningInstruction() const {
-    return const_cast<ValueBase*>(this)->getDefiningInstruction();
-  }
-  SILInstruction *getDefiningInstruction();
+  /// Pretty-print the value in context, preceded by its operands (if the
+  /// value represents the result of an instruction) and followed by its
+  /// users.
+  void dumpInContext() const;
+  void printInContext(raw_ostream &OS) const;
 
-  struct DefiningInstructionResult {
-    SILInstruction *Instruction;
-    size_t ResultIndex;
-  };
-
-  /// Return the instruction that defines this value and the appropriate
-  /// result index, or None if it is not defined by an instruction.
-  Optional<DefiningInstructionResult> getDefiningInstructionResult();
-
-  static bool classof(const SILNode *N) {
-    return N->getKind() >= SILNodeKind::First_ValueBase &&
-           N->getKind() <= SILNodeKind::Last_ValueBase;
-  }
   static bool classof(const ValueBase *V) { return true; }
 
-  /// This is supportable but usually suggests a logic mistake.
-  static bool classof(const SILInstruction *) = delete;
+  /// If this is a SILArgument or a SILInstruction get its parent basic block,
+  /// otherwise return null.
+  SILBasicBlock *getParentBlock() const;
+
+  /// If this is a SILArgument or a SILInstruction get its parent function,
+  /// otherwise return null.
+  SILFunction *getFunction() const;
+
+  /// If this is a SILArgument or a SILInstruction get its parent module,
+  /// otherwise return null.
+  SILModule *getModule() const;
 };
+
+inline llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
+                                     const ValueBase &V) {
+  V.print(OS);
+  return OS;
+}
 
 } // end namespace swift
 
@@ -275,7 +252,7 @@ class SILValue {
 
 public:
   SILValue(const ValueBase *V = nullptr)
-    : Value(const_cast<ValueBase *>(V)) { }
+    : Value((ValueBase *)V) { }
 
   ValueBase *operator->() const { return Value; }
   ValueBase &operator*() const { return *Value; }
@@ -290,9 +267,6 @@ public:
   /// Return true if underlying ValueBase of this SILValue is non-null. Return
   /// false otherwise.
   explicit operator bool() const { return Value != nullptr; }
-
-  /// Get a location for this value.
-  SILLocation getLoc() const;
 
   /// Convert this SILValue into an opaque pointer like type. For use with
   /// PointerLikeTypeTraits.
@@ -322,7 +296,7 @@ public:
 
   /// Verify that this SILValue and its uses respects ownership invariants.
   void verifyOwnership(SILModule &Mod,
-                       DeadEndBlocks *DEBlocks = nullptr) const;
+                       TransitivelyUnreachableBlocksInfo *TUB = nullptr) const;
 };
 
 /// A formal SIL reference to a value, suitable for use as a stored
@@ -544,19 +518,6 @@ inline Operand *ValueBase::getSingleUse() const {
 
   // Otherwise, the element that we accessed.
   return Op;
-}
-
-template <class T>
-inline T *ValueBase::getSingleUserOfType() {
-  T *Result = nullptr;
-  for (auto *Op : getUses()) {
-    if (auto *Tmp = dyn_cast<T>(Op->getUser())) {
-      if (Result)
-        return nullptr;
-      Result = Tmp;
-    }
-  }
-  return Result;
 }
 
 /// A constant-size list of the operands of an instruction.

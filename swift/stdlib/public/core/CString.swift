@@ -43,7 +43,6 @@ extension String {
   ///     // Prints "Caf�"
   ///
   /// - Parameter cString: A pointer to a null-terminated UTF-8 code sequence.
-  @_inlineable // FIXME(sil-serialize-all)
   public init(cString: UnsafePointer<CChar>) {
     let len = UTF8._nullCodeUnitOffset(in: cString)
     let (result, _) = cString.withMemoryRebound(to: UInt8.self, capacity: len) {
@@ -58,7 +57,6 @@ extension String {
   ///
   /// This is identical to init(cString: UnsafePointer<CChar> but operates on an
   /// unsigned sequence of bytes.
-  @_inlineable // FIXME(sil-serialize-all)
   public init(cString: UnsafePointer<UInt8>) {
     self = String.decodeCString(
       cString, as: UTF8.self, repairingInvalidCodeUnits: true)!.result
@@ -90,7 +88,6 @@ extension String {
   ///     // Prints "nil"
   ///
   /// - Parameter cString: A pointer to a null-terminated UTF-8 code sequence.
-  @_inlineable // FIXME(sil-serialize-all)
   public init?(validatingUTF8 cString: UnsafePointer<CChar>) {
     let len = UTF8._nullCodeUnitOffset(in: cString)
     guard let (result, _) =
@@ -146,7 +143,6 @@ extension String {
   /// - Returns: A tuple with the new string and a Boolean value that indicates
   ///   whether any repairs were made. If `isRepairing` is `false` and an
   ///   ill-formed sequence is detected, this method returns `nil`.
-  @_inlineable // FIXME(sil-serialize-all)
   public static func decodeCString<Encoding : _UnicodeEncoding>(
     _ cString: UnsafePointer<Encoding.CodeUnit>?,
     as encoding: Encoding.Type,
@@ -169,12 +165,11 @@ extension String {
 /// From a non-`nil` `UnsafePointer` to a null-terminated string
 /// with possibly-transient lifetime, create a null-terminated array of 'C' char.
 /// Returns `nil` if passed a null pointer.
-@_inlineable // FIXME(sil-serialize-all)
 public func _persistCString(_ p: UnsafePointer<CChar>?) -> [CChar]? {
   guard let s = p else {
     return nil
   }
-  let count = Int(_stdlib_strlen(s))
+  let count = Int(_swift_stdlib_strlen(s))
   var result = [CChar](repeating: 0, count: count + 1)
   for i in 0..<count {
     result[i] = s[i]
@@ -186,9 +181,7 @@ public func _persistCString(_ p: UnsafePointer<CChar>?) -> [CChar]? {
 /// the given pointer using the specified encoding.
 ///
 /// This internal helper takes the string length as an argument.
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
-internal func _decodeCString<Encoding : _UnicodeEncoding>(
+func _decodeCString<Encoding : _UnicodeEncoding>(
   _ cString: UnsafePointer<Encoding.CodeUnit>,
   as encoding: Encoding.Type, length: Int,
   repairingInvalidCodeUnits isRepairing: Bool = true)
@@ -201,5 +194,19 @@ internal func _decodeCString<Encoding : _UnicodeEncoding>(
     buffer, encoding: encoding, repairIllFormedSequences: isRepairing)
   return stringBuffer.map {
     (result: String(_storage: $0), repairsMade: hadError)
+  }
+}
+
+extension String {
+  @available(*, unavailable, message: "Please use String.init?(validatingUTF8:) instead. Note that it no longer accepts NULL as a valid input. Also consider using String(cString:), that will attempt to repair ill-formed code units.")
+  public static func fromCString(_ cs: UnsafePointer<CChar>) -> String? {
+    Builtin.unreachable()
+  }
+
+  @available(*, unavailable, message: "Please use String.init(cString:) instead. Note that it no longer accepts NULL as a valid input. See also String.decodeCString if you need more control.")
+  public static func fromCStringRepairingIllFormedUTF8(
+    _ cs: UnsafePointer<CChar>
+  ) -> (String?, hadError: Bool) {
+    Builtin.unreachable()
   }
 }

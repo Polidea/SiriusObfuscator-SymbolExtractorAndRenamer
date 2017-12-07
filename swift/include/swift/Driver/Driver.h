@@ -19,7 +19,6 @@
 
 #include "swift/AST/IRGenOptions.h"
 #include "swift/Basic/LLVM.h"
-#include "swift/Basic/OptionSet.h"
 #include "swift/Basic/Sanitizers.h"
 #include "swift/Driver/Types.h"
 #include "swift/Driver/Util.h"
@@ -44,7 +43,6 @@ namespace opt {
 namespace swift {
   class DiagnosticEngine;
 namespace driver {
-  class Action;
   class Compilation;
   class Job;
   class JobAction;
@@ -110,7 +108,7 @@ public:
   /// (If empty, this implies no SDK.)
   std::string SDKPath;
 
-  OptionSet<SanitizerKind> SelectedSanitizers;
+  SanitizerKind SelectedSanitizer;
 };
 
 class Driver {
@@ -212,18 +210,19 @@ public:
   /// Construct the list of Actions to perform for the given arguments,
   /// which are only done for a single architecture.
   ///
-  /// \param[out] TopLevelActions The main Actions to build Jobs for.
   /// \param TC the default host tool chain.
+  /// \param Args The input arguments.
+  /// \param Inputs The inputs for which Actions should be generated.
   /// \param OI The OutputInfo for which Actions should be generated.
   /// \param OFM The OutputFileMap for the compilation; used to find any
   /// cross-build information.
   /// \param OutOfDateMap If present, information used to decide which files
   /// need to be rebuilt.
-  /// \param C The Compilation to which Actions should be added.
-  void buildActions(SmallVectorImpl<const Action *> &TopLevelActions,
-                    const ToolChain &TC, const OutputInfo &OI,
+  /// \param[out] Actions The list in which to store the resulting Actions.
+  void buildActions(const ToolChain &TC, const llvm::opt::DerivedArgList &Args,
+                    const InputFileList &Inputs, const OutputInfo &OI,
                     const OutputFileMap *OFM, const InputInfoMap *OutOfDateMap,
-                    Compilation &C) const;
+                    ActionList &Actions) const;
 
   /// Construct the OutputFileMap for the driver from the given arguments.
   std::unique_ptr<OutputFileMap>
@@ -232,13 +231,12 @@ public:
   /// Add top-level Jobs to Compilation \p C for the given \p Actions and
   /// OutputInfo.
   ///
-  /// \param TopLevelActions The main Actions to build Jobs for.
+  /// \param Actions The Actions for which Jobs should be generated.
   /// \param OI The OutputInfo for which Jobs should be generated.
   /// \param OFM The OutputFileMap for which Jobs should be generated.
   /// \param TC The ToolChain to build Jobs with.
-  /// \param C The Compilation containing the Actions for which Jobs should be
-  /// created.
-  void buildJobs(ArrayRef<const Action *> TopLevelActions, const OutputInfo &OI,
+  /// \param[out] C The Compilation to which Jobs should be added.
+  void buildJobs(const ActionList &Actions, const OutputInfo &OI,
                  const OutputFileMap *OFM, const ToolChain &TC,
                  Compilation &C) const;
 
@@ -269,8 +267,8 @@ public:
   /// \return Whether any compilation should be built for this invocation
   bool handleImmediateArgs(const llvm::opt::ArgList &Args, const ToolChain &TC);
 
-  /// Print the list of Actions in a Compilation.
-  void printActions(const Compilation &C) const;
+  /// Print the list of Actions.
+  void printActions(const ActionList &Actions) const;
 
   /// Print the list of Jobs in a Compilation.
   void printJobs(const Compilation &C) const;

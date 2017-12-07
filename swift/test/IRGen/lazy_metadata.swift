@@ -80,22 +80,22 @@ public func needPrivateConformance(_ x: Any) -> Bool {
 }
 
 @inline(never)
-@_optimize(none)
+@_semantics("optimize.sil.never")
 func consume1<T>(_ t: T) {
 }
 
 @inline(never)
-@_optimize(none)
+@_semantics("optimize.sil.never")
 func consume2<T: Proto>(_ t: T) {
   t.abc()
 }
 @inline(never)
-@_optimize(none)
+@_semantics("optimize.sil.never")
 func consume3(_ p: Proto) {
   p.abc()
 }
 @inline(never)
-@_optimize(none)
+@_semantics("optimize.sil.never")
 func consume4(_ t: StructD) {
   t.abc()
 }

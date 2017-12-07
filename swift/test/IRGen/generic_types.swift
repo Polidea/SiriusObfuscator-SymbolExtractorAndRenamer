@@ -1,6 +1,8 @@
-// RUN: %target-swift-frontend %s -emit-ir | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-runtime
+// RUN: %target-swift-frontend -assume-parsing-unqualified-ownership-sil %s -emit-ir | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-runtime
 
 // REQUIRES: CPU=x86_64
+
+import Swift
 
 // CHECK: [[A:%T13generic_types1AC]] = type <{ [[REF:%swift.refcounted]], [[INT:%TSi]] }>
 // CHECK: [[INT]] = type <{ i64 }>
@@ -13,8 +15,7 @@
 // CHECK-native-SAME: i32 160,
 // CHECK-objc-SAME:   i32 344,
 // CHECK-SAME:   i16 1,
-// CHECK-native-SAME: i16 24,
-// CHECK-objc-SAME:   i16 208,
+// CHECK-SAME:   i16 16,
 // CHECK-SAME:   [{{[0-9]+}} x i8*] zeroinitializer,
 // CHECK-SAME:   void ([[A]]*)* @_T013generic_types1ACfD,
 // CHECK-SAME:   i8** @_T0BoWV,
@@ -31,17 +32,16 @@
 // CHECK-SAME:   i16 0,
 // CHECK-SAME:   i32 152,
 // CHECK-SAME:   i32 16,
-// CHECK-SAME:   i8* null,
-// CHECK-SAME:   i8* null,
-// CHECK-SAME:   i8* null
+// CHECK-SAME:   %swift.type* null,
+// CHECK-SAME:   void (%swift.opaque*, [[A]]*)* @_T013generic_types1AC3run{{[_0-9a-zA-Z]*}}F
+// CHECK-SAME:   %T13generic_types1AC* (i64, %T13generic_types1AC*)* @_T013generic_types1ACACyxGSi1y_tcfc
 // CHECK-SAME: }
 // CHECK-LABEL: @_T013generic_types1BCMP = internal global
 // CHECK-SAME:   %swift.type* (%swift.type_pattern*, i8**)* @create_generic_metadata_B,
 // CHECK-native-SAME: i32 152,
 // CHECK-objc-SAME:   i32 336,
 // CHECK-SAME:   i16 1,
-// CHECK-native-SAME: i16 24,
-// CHECK-objc-SAME:   i16 208,
+// CHECK-SAME:   i16 16,
 // CHECK-SAME:   [{{[0-9]+}} x i8*] zeroinitializer,
 // CHECK-SAME:   void ([[B]]*)* @_T013generic_types1BCfD,
 // CHECK-SAME:   i8** @_T0BoWV,
@@ -69,6 +69,7 @@
 // CHECK-objc-SAME:   %swift.opaque* @_objc_empty_cache,
 // CHECK-SAME:   %swift.opaque* null,
 // CHECK-SAME:   i64 1,
+// CHECK-SAME:   void (%swift.opaque*, [[A]]*)* @_T013generic_types1AC3run{{[_0-9a-zA-Z]*}}F
 // CHECK-SAME: }
 // CHECK-LABEL: @_T013generic_types1DCMP = internal global
 // CHECK-SAME:   void ([[D]]*)* @_T013generic_types1DCfD,
@@ -79,6 +80,7 @@
 // CHECK-objc-SAME:   %swift.opaque* @_objc_empty_cache,
 // CHECK-SAME:   %swift.opaque* null,
 // CHECK-SAME:   i64 1,
+// CHECK-SAME:   void (%TSi*, [[D]]*)* @_T013generic_types1DC3runySiFAA1ACADyxFTV
 // CHECK-SAME: }
 
 // CHECK-LABEL: define{{( protected)?}} private %swift.type* @create_generic_metadata_A(%swift.type_pattern*, i8**) {{.*}} {
@@ -122,7 +124,7 @@ class B<T> {
     self.ptr = ptr
   }
   deinit {
-    ptr.deinitialize(count: 1)
+    ptr.deinitialize()
   }
 }
 

@@ -64,8 +64,8 @@ llvm::Value *irgen::emitArchetypeTypeMetadataRef(IRGenFunction &IGF,
            "type metadata for primary archetype was not bound in context");
 
     CanArchetypeType parent(archetype->getParent());
-    AssociatedType association(archetype->getAssocType());
-    metadata = emitAssociatedTypeMetadataRef(IGF, parent, association);
+    metadata = emitAssociatedTypeMetadataRef(IGF, parent,
+                                             archetype->getAssocType());
 
     setTypeMetadataName(IGF.IGM, metadata, archetype);
 
@@ -90,19 +90,6 @@ class OpaqueArchetypeTypeInfo
 public:
   static const OpaqueArchetypeTypeInfo *create(llvm::Type *type) {
     return new OpaqueArchetypeTypeInfo(type);
-  }
-
-  void collectArchetypeMetadata(
-      IRGenFunction &IGF,
-      llvm::MapVector<CanType, llvm::Value *> &typeToMetadataVec,
-      SILType T) const override {
-    auto canType = T.getSwiftRValueType();
-    if (typeToMetadataVec.find(canType) != typeToMetadataVec.end()) {
-      return;
-    }
-    auto *metadata = IGF.emitTypeMetadataRef(canType);
-    assert(metadata && "Expected Type Metadata Ref");
-    typeToMetadataVec.insert(std::make_pair(canType, metadata));
   }
 };
 
@@ -183,7 +170,8 @@ llvm::Value *irgen::emitArchetypeWitnessTableRef(IRGenFunction &IGF,
   // TODO: maybe Sema shouldn't ever do this?
   if (Type classBound = archetype->getSuperclass()) {
     auto conformance =
-      IGF.IGM.getSwiftModule()->lookupConformance(classBound, protocol);
+      IGF.IGM.getSwiftModule()->lookupConformance(classBound, protocol,
+                                                  nullptr);
     if (conformance && conformance->isConcrete()) {
       return emitWitnessTableRef(IGF, archetype, *conformance);
     }
@@ -221,10 +209,10 @@ llvm::Value *irgen::emitArchetypeWitnessTableRef(IRGenFunction &IGF,
   // to this conformance from concrete sources.
 
   auto signature = environment->getGenericSignature()->getCanonicalSignature();
-  auto archetypeDepType = archetype->getInterfaceType();
+  auto archetypeDepType = environment->mapTypeOutOfContext(archetype);
 
-  auto astPath = signature->getConformanceAccessPath(archetypeDepType,
-                                                     protocol);
+  auto astPath = signature->getConformanceAccessPath(archetypeDepType, protocol,
+                                                     *IGF.IGM.getSwiftModule());
 
   auto i = astPath.begin(), e = astPath.end();
   assert(i != e && "empty path!");
@@ -254,8 +242,8 @@ llvm::Value *irgen::emitArchetypeWitnessTableRef(IRGenFunction &IGF,
 
     // Otherwise, it's an associated conformance requirement.
     } else {
-      AssociatedConformance association(lastProtocol, depType, requirement);
-      WitnessIndex index = lastPI.getAssociatedConformanceIndex(association);
+      WitnessIndex index =
+        lastPI.getAssociatedConformanceIndex(depType, requirement);
       path.addAssociatedConformanceComponent(index);
     }
 
@@ -275,16 +263,15 @@ llvm::Value *irgen::emitArchetypeWitnessTableRef(IRGenFunction &IGF,
 
 llvm::Value *irgen::emitAssociatedTypeMetadataRef(IRGenFunction &IGF,
                                                   CanArchetypeType origin,
-                                                  AssociatedType association) {
+                                               AssociatedTypeDecl *associate) {
   // Find the conformance of the origin to the associated type's protocol.
   llvm::Value *wtable = emitArchetypeWitnessTableRef(IGF, origin,
-                                               association.getSourceProtocol());
+                                                     associate->getProtocol());
 
   // Find the origin's type metadata.
   llvm::Value *originMetadata = emitArchetypeTypeMetadataRef(IGF, origin);
 
-  return emitAssociatedTypeMetadataRef(IGF, originMetadata, wtable,
-                                       association);
+  return emitAssociatedTypeMetadataRef(IGF, originMetadata, wtable, associate);
 }
 
 const TypeInfo *TypeConverter::convertArchetypeType(ArchetypeType *archetype) {
@@ -331,9 +318,7 @@ const TypeInfo *TypeConverter::convertArchetypeType(ArchetypeType *archetype) {
   // representation.
   if (layout && layout->isFixedSizeTrivial()) {
     Size size(layout->getTrivialSizeInBytes());
-    auto layoutAlignment = layout->getAlignmentInBytes();
-    assert(layoutAlignment && "layout constraint alignment should not be 0");
-    Alignment align(layoutAlignment);
+    Alignment align(layout->getTrivialSizeInBytes());
     auto spareBits =
       SpareBitVector::getConstant(size.getValueInBits(), false);
     // Get an integer type of the required size.

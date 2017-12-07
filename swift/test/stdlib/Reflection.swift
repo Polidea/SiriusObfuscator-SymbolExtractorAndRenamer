@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t  &&  mkdir -p %t
 // RUN: %target-build-swift -parse-stdlib %s -module-name Reflection -o %t/a.out
 // RUN: %S/timeout.sh 360 %target-run %t/a.out | %FileCheck %s
 // REQUIRES: executable_test
@@ -184,8 +184,8 @@ dump(randomUnsafeMutablePointerString)
 var sanePointerString = UnsafeMutablePointer<String>.allocate(capacity: 1)
 sanePointerString.initialize(to: "Hello panda")
 dump(sanePointerString.pointee)
-sanePointerString.deinitialize(count: 1)
-sanePointerString.deallocate()
+sanePointerString.deinitialize()
+sanePointerString.deallocate(capacity: 1)
 
 // Don't crash on types with opaque metadata. rdar://problem/19791252
 // CHECK-NEXT: (Opaque Value)
@@ -194,3 +194,4 @@ dump(rawPointer)
 
 // CHECK-LABEL: and now our song is done
 print("and now our song is done")
+

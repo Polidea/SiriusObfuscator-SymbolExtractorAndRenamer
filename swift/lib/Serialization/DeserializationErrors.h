@@ -150,7 +150,7 @@ class XRefTracePath {
 public:
   explicit XRefTracePath(ModuleDecl &M) : baseM(M) {}
 
-  void addValue(DeclBaseName name) {
+  void addValue(Identifier name) {
     path.push_back({ PathPiece::Kind::Value, name });
   }
 
@@ -216,7 +216,6 @@ public:
     DesignatedInitializer = 1 << 0,
     NeedsVTableEntry = 1 << 1,
     NeedsAllocatingVTableEntry = 1 << 2,
-    NeedsFieldOffsetVectorEntry = 1 << 3,
   };
   using Flags = OptionSet<Flag>;
 
@@ -237,9 +236,6 @@ public:
   }
   bool needsAllocatingVTableEntry() const {
     return flags.contains(Flag::NeedsAllocatingVTableEntry);
-  }
-  bool needsFieldOffsetVectorEntry() const {
-    return flags.contains(Flag::NeedsFieldOffsetVectorEntry);
   }
 
   bool isA(const void *const ClassID) const override {
@@ -311,30 +307,6 @@ public:
 
   void log(raw_ostream &OS) const override {
     OS << "could not deserialize type for '" << name << "'";
-    if (underlyingReason) {
-      OS << ": ";
-      underlyingReason->log(OS);
-    }
-  }
-
-  std::error_code convertToErrorCode() const override {
-    return llvm::inconvertibleErrorCode();
-  }
-};
-
-class ExtensionError : public llvm::ErrorInfo<ExtensionError> {
-  friend ErrorInfo;
-  static const char ID;
-  void anchor() override;
-
-  std::unique_ptr<ErrorInfoBase> underlyingReason;
-
-public:
-  explicit ExtensionError(std::unique_ptr<ErrorInfoBase> reason)
-      : underlyingReason(std::move(reason)) {}
-
-  void log(raw_ostream &OS) const override {
-    OS << "could not deserialize extension";
     if (underlyingReason) {
       OS << ": ";
       underlyingReason->log(OS);

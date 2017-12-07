@@ -9,24 +9,12 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-///
-/// \file
-///
-/// This file defines SILGenBuilder, a subclass of SILBuilder that provides APIs
-/// that traffic in ManagedValue. The intention is that if one is using a
-/// SILGenBuilder, the SILGenBuilder will handle preserving ownership invariants
-/// (or assert upon failure) freeing the implementor of such concerns.
-///
-//===----------------------------------------------------------------------===//
 
 #ifndef SWIFT_SILGEN_SILGENBUILDER_H
 #define SWIFT_SILGEN_SILGENBUILDER_H
 
-#include "Cleanup.h"
 #include "JumpDest.h"
 #include "ManagedValue.h"
-#include "RValue.h"
-#include "swift/Basic/ProfileCounter.h"
 #include "swift/SIL/SILBuilder.h"
 
 namespace swift {
@@ -101,14 +89,10 @@ public:
                             SILType loweredConcreteType,
                             ArrayRef<ProtocolConformanceRef> conformances);
 
-  InitExistentialValueInst *
-  createInitExistentialValue(SILLocation loc, SILType existentialType,
-                             CanType formalConcreteType, SILValue concrete,
-                             ArrayRef<ProtocolConformanceRef> conformances);
-  ManagedValue
-  createInitExistentialValue(SILLocation loc, SILType existentialType,
-                             CanType formalConcreteType, ManagedValue concrete,
-                             ArrayRef<ProtocolConformanceRef> conformances);
+  InitExistentialOpaqueInst *
+  createInitExistentialOpaque(SILLocation Loc, SILType ExistentialType,
+                              CanType FormalConcreteType, SILValue Concrete,
+                              ArrayRef<ProtocolConformanceRef> Conformances);
 
   InitExistentialMetatypeInst *
   createInitExistentialMetatype(SILLocation loc, SILValue metatype,
@@ -135,15 +119,10 @@ public:
   //
 
   using SILBuilder::createStructExtract;
-  ManagedValue createStructExtract(SILLocation loc, ManagedValue base,
-                                   VarDecl *decl);
-
-  using SILBuilder::createRefElementAddr;
-  ManagedValue createRefElementAddr(SILLocation loc, ManagedValue operand,
-                                    VarDecl *field, SILType resultTy);
-
   using SILBuilder::createCopyValue;
   using SILBuilder::createCopyUnownedValue;
+  ManagedValue createStructExtract(SILLocation loc, ManagedValue base,
+                                   VarDecl *decl);
 
   /// Emit a +1 copy on \p originalValue that lives until the end of the current
   /// lexical scope.
@@ -174,7 +153,6 @@ public:
   ManagedValue createUnsafeCopyUnownedValue(SILLocation loc,
                                             ManagedValue originalValue);
   ManagedValue createOwnedPHIArgument(SILType type);
-  ManagedValue createGuaranteedPHIArgument(SILType type);
 
   using SILBuilder::createMarkUninitialized;
   ManagedValue createMarkUninitialized(ValueDecl *decl, ManagedValue operand,
@@ -191,9 +169,6 @@ public:
                         bool objc, ArrayRef<SILType> elementTypes,
                         ArrayRef<ManagedValue> elementCountOperands);
 
-  using SILBuilder::createTuple;
-  ManagedValue createTuple(SILLocation loc, SILType type,
-                           ArrayRef<ManagedValue> elements);
   using SILBuilder::createTupleExtract;
   ManagedValue createTupleExtract(SILLocation loc, ManagedValue value,
                                   unsigned index, SILType type);
@@ -208,14 +183,6 @@ public:
   using SILBuilder::createLoadBorrow;
   ManagedValue createLoadBorrow(SILLocation loc, ManagedValue base);
   ManagedValue createFormalAccessLoadBorrow(SILLocation loc, ManagedValue base);
-
-  using SILBuilder::createStoreBorrow;
-  void createStoreBorrow(SILLocation loc, ManagedValue value, SILValue address);
-
-  /// Create a store_borrow if we have a non-trivial value and a store [trivial]
-  /// otherwise.
-  void createStoreBorrowOrTrivial(SILLocation loc, ManagedValue value,
-                                  SILValue address);
 
   /// Prepares a buffer to receive the result of an expression, either using the
   /// 'emit into' initialization buffer if available, or allocating a temporary
@@ -259,6 +226,7 @@ public:
   using SILBuilder::createUnconditionalCheckedCastValue;
   ManagedValue
   createUnconditionalCheckedCastValue(SILLocation loc,
+                                      CastConsumptionKind consumption,
                                       ManagedValue operand, SILType type);
   using SILBuilder::createUnconditionalCheckedCast;
   ManagedValue createUnconditionalCheckedCast(SILLocation loc,
@@ -269,9 +237,7 @@ public:
   void createCheckedCastBranch(SILLocation loc, bool isExact,
                                ManagedValue operand, SILType type,
                                SILBasicBlock *trueBlock,
-                               SILBasicBlock *falseBlock,
-                               ProfileCounter Target1Count,
-                               ProfileCounter Target2Count);
+                               SILBasicBlock *falseBlock);
 
   using SILBuilder::createCheckedCastValueBranch;
   void createCheckedCastValueBranch(SILLocation loc, ManagedValue operand,
@@ -286,61 +252,13 @@ public:
   ManagedValue createUncheckedRefCast(SILLocation loc, ManagedValue original,
                                       SILType type);
 
-  using SILBuilder::createUncheckedBitCast;
-  ManagedValue createUncheckedBitCast(SILLocation loc, ManagedValue original,
-                                      SILType type);
-
   using SILBuilder::createOpenExistentialRef;
   ManagedValue createOpenExistentialRef(SILLocation loc, ManagedValue arg,
                                         SILType openedType);
 
-  using SILBuilder::createOpenExistentialValue;
-  ManagedValue createOpenExistentialValue(SILLocation loc,
-                                          ManagedValue original, SILType type);
-
-  using SILBuilder::createOpenExistentialBoxValue;
-  ManagedValue createOpenExistentialBoxValue(SILLocation loc,
-                                          ManagedValue original, SILType type);
-
-  /// Convert a @convention(block) value to AnyObject.
-  ManagedValue createBlockToAnyObject(SILLocation loc, ManagedValue block,
-                                      SILType type);
-
   using SILBuilder::createOptionalSome;
   ManagedValue createOptionalSome(SILLocation Loc, ManagedValue Arg);
   ManagedValue createManagedOptionalNone(SILLocation Loc, SILType Type);
-
-  /// Forward \p value into \p address.
-  ///
-  /// This will forward value's cleanup (if it has one) into the equivalent
-  /// cleanup on address. In practice this means if the value is non-trivial,
-  /// the memory location will at end of scope have a destroy_addr applied to
-  /// it.
-  ManagedValue createStore(SILLocation loc, ManagedValue value,
-                           SILValue address, StoreOwnershipQualifier qualifier);
-
-  using SILBuilder::createSuperMethod;
-  ManagedValue createSuperMethod(SILLocation loc, ManagedValue operand,
-                                 SILDeclRef member, SILType methodTy);
-
-  using SILBuilder::createObjCSuperMethod;
-  ManagedValue createObjCSuperMethod(SILLocation loc, ManagedValue operand,
-                                     SILDeclRef member, SILType methodTy);
-
-  using SILBuilder::createValueMetatype;
-  ManagedValue createValueMetatype(SILLocation loc, SILType metatype,
-                                   ManagedValue base);
-
-  using SILBuilder::createBridgeObjectToRef;
-  ManagedValue createBridgeObjectToRef(SILLocation loc, ManagedValue mv,
-                                       SILType destType);
-
-  using SILBuilder::createBranch;
-  BranchInst *createBranch(SILLocation Loc, SILBasicBlock *TargetBlock,
-                           ArrayRef<ManagedValue> Args);
-
-  using SILBuilder::createReturn;
-  ReturnInst *createReturn(SILLocation Loc, ManagedValue ReturnValue);
 };
 
 class SwitchCaseFullExpr;
@@ -366,13 +284,11 @@ private:
     SILBasicBlock *block;
     NullablePtr<SILBasicBlock> contBlock;
     NormalCaseHandler handler;
-    ProfileCounter count;
 
     NormalCaseData(EnumElementDecl *decl, SILBasicBlock *block,
                    NullablePtr<SILBasicBlock> contBlock,
-                   NormalCaseHandler handler, ProfileCounter count)
-        : decl(decl), block(block), contBlock(contBlock), handler(handler),
-          count(count) {}
+                   NormalCaseHandler handler)
+        : decl(decl), block(block), contBlock(contBlock), handler(handler) {}
     ~NormalCaseData() = default;
   };
 
@@ -381,13 +297,12 @@ private:
     NullablePtr<SILBasicBlock> contBlock;
     DefaultCaseHandler handler;
     DefaultDispatchTime dispatchTime;
-    ProfileCounter count;
 
     DefaultCaseData(SILBasicBlock *block, NullablePtr<SILBasicBlock> contBlock,
                     DefaultCaseHandler handler,
-                    DefaultDispatchTime dispatchTime, ProfileCounter count)
+                    DefaultDispatchTime dispatchTime)
         : block(block), contBlock(contBlock), handler(handler),
-          dispatchTime(dispatchTime), count(count) {}
+          dispatchTime(dispatchTime) {}
     ~DefaultCaseData() = default;
   };
 
@@ -402,25 +317,40 @@ public:
                     ManagedValue optional)
       : builder(builder), loc(loc), optional(optional) {}
 
-  void addDefaultCase(
-      SILBasicBlock *defaultBlock, NullablePtr<SILBasicBlock> contBlock,
-      DefaultCaseHandler handle,
-      DefaultDispatchTime dispatchTime = DefaultDispatchTime::AfterNormalCases,
-      ProfileCounter count = ProfileCounter()) {
-    defaultBlockData.emplace(defaultBlock, contBlock, handle, dispatchTime,
-                             count);
+  void addDefaultCase(SILBasicBlock *defaultBlock,
+                      NullablePtr<SILBasicBlock> contBlock,
+                      DefaultCaseHandler handle,
+                      DefaultDispatchTime dispatchTime =
+                          DefaultDispatchTime::AfterNormalCases) {
+    defaultBlockData.emplace(defaultBlock, contBlock, handle, dispatchTime);
   }
 
   void addCase(EnumElementDecl *decl, SILBasicBlock *caseBlock,
-               NullablePtr<SILBasicBlock> contBlock, NormalCaseHandler handle,
-               ProfileCounter count = ProfileCounter()) {
-    caseDataArray.emplace_back(decl, caseBlock, contBlock, handle, count);
+               NullablePtr<SILBasicBlock> contBlock, NormalCaseHandler handle) {
+    caseDataArray.emplace_back(decl, caseBlock, contBlock, handle);
   }
 
   void emit() &&;
 
 private:
   SILGenFunction &getSGF() const { return builder.getSILGenFunction(); }
+};
+
+class CleanupCloner {
+  SILGenFunction &SGF;
+  bool hasCleanup;
+  bool isLValue;
+  ValueOwnershipKind ownershipKind;
+
+public:
+  CleanupCloner(SILGenFunction &SGF, ManagedValue mv)
+      : SGF(SGF), hasCleanup(mv.hasCleanup()), isLValue(mv.isLValue()),
+        ownershipKind(mv.getOwnershipKind()) {}
+
+  CleanupCloner(SILGenBuilder &builder, ManagedValue mv)
+      : CleanupCloner(builder.getSILGenFunction(), mv) {}
+
+  ManagedValue clone(SILValue value) const;
 };
 
 } // namespace Lowering

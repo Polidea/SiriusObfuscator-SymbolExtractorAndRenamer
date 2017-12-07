@@ -58,16 +58,42 @@ public struct IndexSet : ReferenceConvertible, Equatable, BidirectionalCollectio
         
         fileprivate var indexSet: IndexSet
         
+        // Range of element values
+        private var intersectingRange : Range<IndexSet.Element>?
+        
         fileprivate init(indexSet : IndexSet, intersecting range : Range<IndexSet.Element>?) {
+            self.indexSet = indexSet
+            self.intersectingRange = range
+            
             if let r = range {
-                let otherIndexes = IndexSet(integersIn: r)
-                self.indexSet = indexSet.intersection(otherIndexes)
+                if r.lowerBound == r.upperBound {
+                    startIndex = 0
+                    endIndex = 0
+                } else {
+                    let minIndex = indexSet._indexOfRange(containing: r.lowerBound)
+                    let maxIndex = indexSet._indexOfRange(containing: r.upperBound)
+                    
+                    switch (minIndex, maxIndex) {
+                    case (nil, nil):
+                        startIndex = 0
+                        endIndex = 0
+                    case (nil, .some(let max)):
+                        // Start is before our first range
+                        startIndex = 0
+                        endIndex = max + 1
+                    case (.some(let min), nil):
+                        // End is after our last range
+                        startIndex = min
+                        endIndex = indexSet._rangeCount
+                    case (.some(let min), .some(let max)):
+                        startIndex = min
+                        endIndex = max + 1
+                    }
+                }
             } else {
-                self.indexSet = indexSet
+                startIndex = 0
+                endIndex = indexSet._rangeCount
             }
-
-            self.startIndex = 0
-            self.endIndex = self.indexSet._rangeCount
         }
         
         public func makeIterator() -> IndexingIterator<RangeView> {
@@ -76,11 +102,15 @@ public struct IndexSet : ReferenceConvertible, Equatable, BidirectionalCollectio
         
         public subscript(index : Index) -> CountableRange<IndexSet.Element> {
             let indexSetRange = indexSet._range(at: index)
-            return indexSetRange.lowerBound..<indexSetRange.upperBound
+            if let intersectingRange = intersectingRange {
+                return Swift.max(intersectingRange.lowerBound, indexSetRange.lowerBound)..<Swift.min(intersectingRange.upperBound, indexSetRange.upperBound)
+            } else {
+                return indexSetRange.lowerBound..<indexSetRange.upperBound
+            }
         }
         
-        public subscript(bounds: Range<Index>) -> Slice<RangeView> {
-            return Slice(base: self, bounds: bounds)
+        public subscript(bounds: Range<Index>) -> BidirectionalSlice<RangeView> {
+            return BidirectionalSlice(base: self, bounds: bounds)
         }
 
         public func index(after i: Index) -> Index {
@@ -237,8 +267,8 @@ public struct IndexSet : ReferenceConvertible, Equatable, BidirectionalCollectio
         return index.value
     }
 
-    public subscript(bounds: Range<Index>) -> Slice<IndexSet> {
-        return Slice(base: self, bounds: bounds)
+    public subscript(bounds: Range<Index>) -> BidirectionalSlice<IndexSet> {
+        return BidirectionalSlice(base: self, bounds: bounds)
     }
 
     // We adopt the default implementation of subscript(range: Range<Index>) from MutableCollection
@@ -371,7 +401,7 @@ public struct IndexSet : ReferenceConvertible, Equatable, BidirectionalCollectio
     public func intersects(integersIn range: CountableClosedRange<Element>) -> Bool { return self.intersects(integersIn: Range(range)) }
 
     // MARK: -
-    // Collection
+    // Indexable
     
     public func index(after i: Index) -> Index {
         if i.value + 1 == i.extent.upperBound {

@@ -76,7 +76,7 @@ bool Devirtualizer::devirtualizeAppliesInFunction(SILFunction &F,
 
     auto *AI = Apply.getInstruction();
     if (!isa<TryApplyInst>(AI))
-      cast<SingleValueInstruction>(AI)->replaceAllUsesWith(NewInstPair.first);
+      AI->replaceAllUsesWith(NewInstPair.first);
 
     DeadApplies.push_back(AI);
     NewApplies.push_back(NewInstPair.second);

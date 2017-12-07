@@ -15,10 +15,6 @@ import Foundation
 
 
 // A micro benchmark for checking the speed of string-based enums.
-public let OpenClose = BenchmarkInfo(
-  name: "OpenClose",
-  runFunction: run_OpenClose,
-  tags: [.validation, .api, .String])
 
 enum MyState : String {
     case Closed = "Closed"

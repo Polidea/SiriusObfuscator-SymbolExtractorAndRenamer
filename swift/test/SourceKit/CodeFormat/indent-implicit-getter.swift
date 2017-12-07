@@ -24,6 +24,7 @@ class var foo: Int {
   return 1
   }
 }
+// REQUIRES: disabled
 // FIXME: may be crashing non-deterministically
 
 // RUN: %sourcekitd-test -req=format -line=1 -length=1 %s >%t.response

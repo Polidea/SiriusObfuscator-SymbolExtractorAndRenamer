@@ -56,7 +56,7 @@ public:
     auto result = new (Ctx) Nominal(SourceLoc(), Ctx.getIdentifier(name),
                                     SourceLoc(), /*inherited*/{},
                                     genericParams, FileForLookups);
-    result->setAccess(AccessLevel::Internal);
+    result->setAccessibility(Accessibility::Internal);
     return result;
   }
 };

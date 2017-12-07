@@ -5,22 +5,12 @@
 # built for each variant.
 set(SWIFT_CONFIGURED_SDKS)
 
-include(SwiftWindowsSupport)
-
 # Report the given SDK to the user.
 function(_report_sdk prefix)
   message(STATUS "${SWIFT_SDK_${prefix}_NAME} SDK:")
   if("${prefix}" STREQUAL "WINDOWS")
-    message(STATUS "  UCRT Version: $ENV{UCRTVersion}")
-    message(STATUS "  UCRT SDK Dir: $ENV{UniversalCRTSdkDir}")
-    message(STATUS "  VC Dir: $ENV{VCToolsInstallDir}")
-
-    foreach(arch ${SWIFT_SDK_${prefix}_ARCHITECTURES})
-      swift_windows_include_for_arch(${arch} ${arch}_INCLUDE)
-      swift_windows_lib_for_arch(${arch} ${arch}_LIB)
-      message(STATUS "  ${arch} INCLUDE: ${${arch}_INCLUDE}")
-      message(STATUS "  ${arch} LIB: ${${arch}_LIB}")
-    endforeach()
+    message(STATUS "  INCLUDE: $ENV{INCLUDE}")
+    message(STATUS "  LIB: $ENV{LIB}")
   else()
     message(STATUS "  Path: ${SWIFT_SDK_${prefix}_PATH}")
   endif()
@@ -179,13 +169,8 @@ macro(configure_sdk_windows prefix sdk_name environment architectures)
   set(SWIFT_SDK_${prefix}_OBJECT_FORMAT "COFF")
 
   foreach(arch ${architectures})
-    if(arch STREQUAL armv7)
-      set(SWIFT_SDK_${prefix}_ARCH_${arch}_TRIPLE
-          "thumbv7-unknown-windows-${environment}")
-    else()
-      set(SWIFT_SDK_${prefix}_ARCH_${arch}_TRIPLE
-          "${arch}-unknown-windows-${environment}")
-    endif()
+    set(SWIFT_SDK_${prefix}_ARCH_${arch}_TRIPLE
+        "${arch}-unknown-windows-${environment}")
   endforeach()
 
   # Add this to the list of known SDKs.

@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 
 
 // Test with a single output file

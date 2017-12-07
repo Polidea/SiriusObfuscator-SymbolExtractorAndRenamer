@@ -33,12 +33,11 @@ public:
                          SourceKit::UIdent SetterAccessLevel,
                          unsigned NameOffset, unsigned NameLength,
                          unsigned BodyOffset, unsigned BodyLength,
-                         unsigned DocOffset, unsigned DocLength,
                          llvm::StringRef DisplayName, llvm::StringRef TypeName,
                          llvm::StringRef RuntimeName,
                          llvm::StringRef SelectorName,
                          llvm::ArrayRef<llvm::StringRef> InheritedTypes,
-                         llvm::ArrayRef<std::tuple<SourceKit::UIdent, unsigned, unsigned>> Attrs);
+                         llvm::ArrayRef<SourceKit::UIdent> Attrs);
 
   void addElement(SourceKit::UIdent Kind, unsigned Offset, unsigned Length);
 

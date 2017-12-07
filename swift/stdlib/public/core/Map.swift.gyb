@@ -13,7 +13,8 @@
 %{
 from gyb_stdlib_support import (
     TRAVERSALS,
-    collectionForTraversal
+    collectionForTraversal,
+    sliceTypeName
 )
 }%
 
@@ -103,6 +104,7 @@ public struct LazyMapSequence<Base : Sequence, Element>
 
 % for Traversal in TRAVERSALS:
 %   Self = "LazyMap" + collectionForTraversal(Traversal)
+%   Slice = sliceTypeName(traversal=Traversal, mutable=False, rangeReplaceable=False)
 
 /// A `Collection` whose elements consist of those in a `Base`
 /// `Collection` passed through a transform function returning `Element`.
@@ -148,12 +150,20 @@ public struct ${Self}<
     return _transform(_base[position])
   }
 
-  public typealias SubSequence = ${Self}<Base.SubSequence, Element>
-
   @_inlineable
-  public subscript(bounds: Range<Base.Index>) -> SubSequence {
-    return SubSequence(_base: _base[bounds], transform: _transform)
+  public subscript(bounds: Range<Base.Index>) -> ${Slice}<${Self}> {
+    return ${Slice}(base: self, bounds: bounds)
   }
+
+  // FIXME(ABI)#46 (Associated Types with where clauses): we actually want to add:
+  //
+  //   typealias SubSequence = ${Self}<Base.SubSequence, Element>
+  //
+  // so that all slicing optimizations of the base collection can kick in.
+  //
+  // We can't do that right now though, because that would force a lot of
+  // constraints on `Base.SubSequence`, limiting the possible contexts where
+  // the `.lazy.map` API can be used.
 
   public typealias IndexDistance = Base.IndexDistance
 
@@ -275,19 +285,20 @@ extension LazyCollectionProtocol
 
 % end
 
+@available(*, unavailable, renamed: "LazyMapIterator")
+public struct LazyMapGenerator<Base : IteratorProtocol, Element> {}
+
+extension LazyMapSequence {
+  @available(*, unavailable, message: "use '.lazy.map' on the sequence")
+  public init(_ base: Base, transform: (Base.Element) -> Element) {
+    Builtin.unreachable()
+  }
+}
+
 extension LazyMapCollection {
-  // This overload is needed to re-enable Swift 3 source compatibility related
-  // to a bugfix in ranking behavior of the constraint solver.
-  @available(swift, obsoleted: 4.0)
-  public static func + <
-    Other : LazyCollectionProtocol
-  >(lhs: LazyMapCollection, rhs: Other) -> [Element]
-  where Other.Element == Element, Other.IndexDistance == IndexDistance {
-    var result: [Element] = []
-    result.reserveCapacity(numericCast(lhs.count + rhs.count))
-    result.append(contentsOf: lhs)
-    result.append(contentsOf: rhs)
-    return result
+  @available(*, unavailable, message: "use '.lazy.map' on the collection")
+  public init(_ base: Base, transform: (Base.Element) -> Element) {
+    Builtin.unreachable()
   }
 }
 

@@ -10,13 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import TestsUtils
-
-public let ClassArrayGetter = BenchmarkInfo(
-  name: "ClassArrayGetter",
-  runFunction: run_ClassArrayGetter,
-  tags: [.validation, .api, .Array])
-
 class Box {
   var v: Int
   init(v: Int) { self.v = v }

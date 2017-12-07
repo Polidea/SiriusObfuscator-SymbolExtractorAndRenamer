@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 
 // RUN: %target-swiftc_driver -emit-module -module-name test %s -o %t/a.swiftmodule
 // RUN: %target-swiftc_driver -emit-sib -module-name test %s -o - | %target-swiftc_driver -emit-module -module-name test -o %t/b.swiftmodule -

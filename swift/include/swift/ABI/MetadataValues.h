@@ -106,62 +106,6 @@ inline ClassFlags &operator|=(ClassFlags &a, ClassFlags b) {
   return a = (a | b);
 }
 
-/// Flags that go in a MethodDescriptor structure.
-class MethodDescriptorFlags {
-public:
-  typedef uint32_t int_type;
-  enum class Kind {
-    Method,
-    Init,
-    Getter,
-    Setter,
-    MaterializeForSet,
-  };
-
-private:
-  enum : int_type {
-    KindMask = 0x0F,                // 16 kinds should be enough for anybody
-    IsInstanceMask = 0x10,
-    IsDynamicMask = 0x20,
-  };
-
-  int_type Value;
-
-public:
-  MethodDescriptorFlags(Kind kind) : Value(unsigned(kind)) {}
-
-  MethodDescriptorFlags withIsInstance(bool isInstance) const {
-    auto copy = *this;
-    if (isInstance) {
-      copy.Value |= IsInstanceMask;
-    } else {
-      copy.Value &= ~IsInstanceMask;
-    }
-    return copy;
-  }
-
-  MethodDescriptorFlags withIsDynamic(bool isDynamic) const {
-    auto copy = *this;
-    if (isDynamic)
-      copy.Value |= IsDynamicMask;
-    else
-      copy.Value &= ~IsDynamicMask;
-    return copy;
-  }
-
-  Kind getKind() const { return Kind(Value & KindMask); }
-
-  /// Is the method marked 'dynamic'?
-  bool isDynamic() const { return Value & IsDynamicMask; }
-
-  /// Is the method an instance member?
-  ///
-  /// Note that 'init' is not considered an instance member.
-  bool isInstance() const { return Value & IsInstanceMask; }
-
-  int_type getIntValue() const { return Value; }
-};
-
 enum : unsigned {
   /// Number of words reserved in generic metadata patterns.
   NumGenericMetadataPrivateDataWords = 16,
@@ -212,10 +156,6 @@ enum class ProtocolConformanceReferenceKind : unsigned {
   /// A function pointer that can be called to access the protocol witness
   /// table.
   WitnessTableAccessor,
-  /// A function pointer that can be called to access the protocol witness
-  /// table whose conformance is conditional on additional requirements that
-  /// must first be evaluated and then provided to the accessor function.
-  ConditionalWitnessTableAccessor,
 };
 
 // Type metadata record discriminant
@@ -249,7 +189,7 @@ public:
 struct ProtocolConformanceFlags : public TypeMetadataRecordFlags {
 private:
   enum : int_type {
-    ConformanceKindMask = 0x00000030U,
+    ConformanceKindMask = 0x00000010U,
     ConformanceKindShift = 4,
   };
 
@@ -309,9 +249,10 @@ enum class ProtocolDispatchStrategy: uint8_t {
 
 /// Flags in a generic nominal type descriptor.
 class GenericParameterDescriptorFlags {
-  typedef uint16_t int_type;
+  typedef uint32_t int_type;
   enum : int_type {
-    HasVTable        = 0x0004,
+    HasParent        = 0x01,
+    HasGenericParent = 0x02,
   };
   int_type Data;
   
@@ -319,16 +260,31 @@ class GenericParameterDescriptorFlags {
 public:
   constexpr GenericParameterDescriptorFlags() : Data(0) {}
 
-  constexpr GenericParameterDescriptorFlags withHasVTable(bool b) const {
-    return GenericParameterDescriptorFlags(b ? (Data | HasVTable)
-                                             : (Data & ~HasVTable));
+  constexpr GenericParameterDescriptorFlags withHasParent(bool b) const {
+    return GenericParameterDescriptorFlags(b ? (Data | HasParent)
+                                             : (Data & ~HasParent));
   }
 
-  /// If this type is a class, does it have a vtable?  If so, the number
-  /// of vtable entries immediately follows the generic requirement
-  /// descriptor.
-  bool hasVTable() const {
-    return Data & HasVTable;
+  constexpr GenericParameterDescriptorFlags withHasGenericParent(bool b) const {
+    return GenericParameterDescriptorFlags(b ? (Data | HasGenericParent)
+                                             : (Data & ~HasGenericParent));
+  }
+
+  /// Does this type have a lexical parent type?
+  ///
+  /// For class metadata, if this is true, the storage for the parent type
+  /// appears immediately prior to the first generic argument.  Other
+  /// metadata always have a slot for their parent type.
+  bool hasParent() const {
+    return Data & HasParent;
+  }
+
+  /// Given that this type has a parent type, is that type generic?  If so,
+  /// it forms part of the key distinguishing this metadata from other
+  /// metadata, and the parent metadata will be the first argument to
+  /// the generic metadata access function.
+  bool hasGenericParent() const {
+    return Data & HasGenericParent;
   }
 
   int_type getIntValue() const {
@@ -438,52 +394,6 @@ public:
   }
 };
 
-/// Flags that go in a ProtocolRequirement structure.
-class ProtocolRequirementFlags {
-public:
-  typedef uint32_t int_type;
-  enum class Kind {
-    BaseProtocol,
-    Method,
-    Init,
-    Getter,
-    Setter,
-    MaterializeForSet,
-    AssociatedTypeAccessFunction,
-    AssociatedConformanceAccessFunction,
-  };
-
-private:
-  enum : int_type {
-    KindMask = 0x0F,                // 16 kinds should be enough for anybody
-    IsInstanceMask = 0x10,
-  };
-
-  int_type Value;
-
-public:
-  ProtocolRequirementFlags(Kind kind) : Value(unsigned(kind)) {}
-
-  ProtocolRequirementFlags withIsInstance(bool isInstance) const {
-    auto copy = *this;
-    if (isInstance) {
-      copy.Value |= IsInstanceMask;
-    } else {
-      copy.Value &= ~IsInstanceMask;
-    }
-    return copy;
-  }
-
-  Kind getKind() const { return Kind(Value & KindMask); }
-
-  /// Is the method an instance member?
-  ///
-  /// Note that 'init' is not considered an instance member.
-  bool isInstance() const { return Value & IsInstanceMask; }
-
-  int_type getIntValue() const { return Value; }
-};
-
 /// Flags in an existential type metadata record.
 class ExistentialTypeFlags {
   typedef size_t int_type;
@@ -553,15 +463,11 @@ enum class FunctionMetadataConvention: uint8_t {
 /// Flags in a function type metadata record.
 template <typename int_type>
 class TargetFunctionTypeFlags {
-  // If we were ever to run out of space for function flags (8 bits)
-  // one of the flag bits could be used to identify that the rest of
-  // the flags is going to be stored somewhere else in the metadata.
   enum : int_type {
-    NumParametersMask = 0x0000FFFFU,
-    ConventionMask    = 0x00FF0000U,
-    ConventionShift   = 16U,
-    ThrowsMask        = 0x01000000U,
-    ParamFlagsMask    = 0x02000000U,
+    NumArgumentsMask = 0x00FFFFFFU,
+    ConventionMask   = 0x0F000000U,
+    ConventionShift  = 24U,
+    ThrowsMask       = 0x10000000U,
   };
   int_type Data;
   
@@ -569,9 +475,8 @@ class TargetFunctionTypeFlags {
 public:
   constexpr TargetFunctionTypeFlags() : Data(0) {}
 
-  constexpr TargetFunctionTypeFlags
-  withNumParameters(unsigned numParams) const {
-    return TargetFunctionTypeFlags((Data & ~NumParametersMask) | numParams);
+  constexpr TargetFunctionTypeFlags withNumArguments(unsigned numArguments) const {
+    return TargetFunctionTypeFlags((Data & ~NumArgumentsMask) | numArguments);
   }
   
   constexpr TargetFunctionTypeFlags<int_type>
@@ -585,15 +490,11 @@ public:
     return TargetFunctionTypeFlags<int_type>((Data & ~ThrowsMask) |
                                              (throws ? ThrowsMask : 0));
   }
-
-  constexpr TargetFunctionTypeFlags<int_type>
-  withParameterFlags(bool hasFlags) const {
-    return TargetFunctionTypeFlags<int_type>((Data & ~ParamFlagsMask) |
-                                             (hasFlags ? ParamFlagsMask : 0));
+  
+  unsigned getNumArguments() const {
+    return Data & NumArgumentsMask;
   }
-
-  unsigned getNumParameters() const { return Data & NumParametersMask; }
-
+  
   FunctionMetadataConvention getConvention() const {
     return FunctionMetadataConvention((Data&ConventionMask) >> ConventionShift);
   }
@@ -601,9 +502,7 @@ public:
   bool throws() const {
     return bool(Data & ThrowsMask);
   }
-
-  bool hasParameterFlags() const { return bool(Data & ParamFlagsMask); }
-
+  
   int_type getIntValue() const {
     return Data;
   }
@@ -620,56 +519,6 @@ public:
   }
 };
 using FunctionTypeFlags = TargetFunctionTypeFlags<size_t>;
-
-template <typename int_type>
-class TargetParameterTypeFlags {
-  enum : int_type {
-    InOutMask    = 1 << 0,
-    SharedMask   = 1 << 1,
-    VariadicMask = 1 << 2,
-  };
-  int_type Data;
-
-  constexpr TargetParameterTypeFlags(int_type Data) : Data(Data) {}
-
-public:
-  constexpr TargetParameterTypeFlags() : Data(0) {}
-
-  constexpr TargetParameterTypeFlags<int_type> withInOut(bool isInOut) const {
-    return TargetParameterTypeFlags<int_type>((Data & ~InOutMask) |
-                                              (isInOut ? InOutMask : 0));
-  }
-
-  constexpr TargetParameterTypeFlags<int_type> withShared(bool isShared) const {
-    return TargetParameterTypeFlags<int_type>((Data & ~SharedMask) |
-                                              (isShared ? SharedMask : 0));
-  }
-
-  constexpr TargetParameterTypeFlags<int_type>
-  withVariadic(bool isVariadic) const {
-    return TargetParameterTypeFlags<int_type>((Data & ~VariadicMask) |
-                                              (isVariadic ? VariadicMask : 0));
-  }
-
-  bool isNone() const { return Data == 0; }
-  bool isInOut() const { return Data & InOutMask; }
-  bool isShared() const { return Data & SharedMask; }
-  bool isVariadic() const { return Data & VariadicMask; }
-
-  int_type getIntValue() const { return Data; }
-
-  static TargetParameterTypeFlags<int_type> fromIntValue(int_type Data) {
-    return TargetParameterTypeFlags(Data);
-  }
-
-  bool operator==(TargetParameterTypeFlags<int_type> other) const {
-    return Data == other.Data;
-  }
-  bool operator!=(TargetParameterTypeFlags<int_type> other) const {
-    return Data != other.Data;
-  }
-};
-using ParameterFlags = TargetParameterTypeFlags<uint32_t>;
 
 /// Field types and flags as represented in a nominal type's field/case type
 /// vector.

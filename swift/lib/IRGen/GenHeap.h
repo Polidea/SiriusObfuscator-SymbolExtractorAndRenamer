@@ -134,10 +134,11 @@ Address emitProjectBox(IRGenFunction &IGF, llvm::Value *box,
 
 /// Allocate a boxed value based on the boxed type. Returns the address of the
 /// storage for the value.
-Address
-emitAllocateExistentialBoxInBuffer(IRGenFunction &IGF, SILType boxedType,
-                                   Address destBuffer, GenericEnvironment *env,
-                                   const llvm::Twine &name, bool isOutlined);
+Address emitAllocateExistentialBoxInBuffer(IRGenFunction &IGF,
+                                           SILType boxedType,
+                                           Address destBuffer,
+                                           GenericEnvironment *env,
+                                           const llvm::Twine &name);
 
 } // end namespace irgen
 } // end namespace swift

@@ -194,9 +194,6 @@ def driver_time_compilation : Flag<["-"], "driver-time-compilation">,
 def stats_output_dir: Separate<["-"], "stats-output-dir">,
   Flags<[FrontendOption, HelpHidden]>,
   HelpText<"Directory to write unified compilation-statistics files to">;
-def trace_stats_events: Flag<["-"], "trace-stats-events">,
-  Flags<[FrontendOption, HelpHidden]>,
-  HelpText<"Trace changes to stats in -stats-output-dir">;
 
 def emit_dependencies : Flag<["-"], "emit-dependencies">,
   Flags<[FrontendOption, NoInteractiveOption, DoesNotAffectIncrementalBuild]>,
@@ -281,11 +278,6 @@ def disable_swift_bridge_attr : Flag<["-"], "disable-swift-bridge-attr">,
   Flags<[FrontendOption, HelpHidden]>,
   HelpText<"Disable using the swift bridge attribute">;
 
-def enable_experimental_conditional_conformances : Flag<["-"],
-  "enable-experimental-conditional-conformances">,
-  Flags<[FrontendOption]>,
-HelpText<"Enable experimental implementation of SE-0143: Conditional Conformances">;
-
 def enable_bridging_pch : Flag<["-"], "enable-bridging-pch">,
   Flags<[HelpHidden]>,
   HelpText<"Enable automatic generation of bridging PCH files">;
@@ -325,23 +317,6 @@ def typo_correction_limit : Separate<["-"], "typo-correction-limit">,
 def warn_swift3_objc_inference : Flag<["-"], "warn-swift3-objc-inference">,
   Alias<warn_swift3_objc_inference_complete>,
   Flags<[FrontendOption, DoesNotAffectIncrementalBuild, HelpHidden]>;
-
-def Rpass_EQ : Joined<["-"], "Rpass=">,
-  Flags<[FrontendOption]>,
-  HelpText<"Report performed transformations by optimization passes whose "
-           "name matches the given POSIX regular expression">;
-
-def Rpass_missed_EQ : Joined<["-"], "Rpass-missed=">,
-  Flags<[FrontendOption]>,
-  HelpText<"Report missed transformations by optimization passes whose "
-           "name matches the given POSIX regular expression">;
-
-def save_optimization_record : Flag<["-"], "save-optimization-record">,
-  Flags<[FrontendOption]>, HelpText<"Generate a YAML optimization record file">;
-def save_optimization_record_path :
-  Separate<["-"], "save-optimization-record-path">,
-  Flags<[FrontendOption]>,
-  HelpText<"Specify the file name of any generated YAML optimization record">;
 
 // Platform options.
 def enable_app_extension : Flag<["-"], "application-extension">,
@@ -408,9 +383,6 @@ def Oplayground : Flag<["-"], "Oplayground">, Group<O_Group>,
   Flags<[HelpHidden, FrontendOption]>,
   HelpText<"Compile with optimizations appropriate for a playground">;
 
-def RemoveRuntimeAsserts : Flag<["-"], "remove-runtime-asserts">,
-  Flags<[FrontendOption]>,
-  HelpText<"Remove runtime safety checks.">;
 def AssumeSingleThreaded : Flag<["-"], "assume-single-threaded">,
   Flags<[FrontendOption, HelpHidden]>,
   HelpText<"Assume that code will be executed in a single-threaded "
@@ -665,10 +637,6 @@ def target_cpu : Separate<["-"], "target-cpu">, Flags<[FrontendOption]>,
 def profile_generate : Flag<["-"], "profile-generate">,
   Flags<[FrontendOption, NoInteractiveOption]>,
   HelpText<"Generate instrumented code to collect execution counts">;
-
-def profile_use : CommaJoined<["-"], "profile-use=">,
-  Flags<[FrontendOption, NoInteractiveOption]>, MetaVarName<"<profdata>">,
-  HelpText<"Supply a profdata file to enable profile-guided optimization">;
 
 def profile_coverage_mapping : Flag<["-"], "profile-coverage-mapping">,
   Flags<[FrontendOption, NoInteractiveOption]>,

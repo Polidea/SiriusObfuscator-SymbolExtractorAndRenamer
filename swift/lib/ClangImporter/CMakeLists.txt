@@ -1,8 +1,12 @@
 set(SWIFT_GYB_FLAGS
     "-DCFDatabaseFile=${SWIFT_SOURCE_DIR}/lib/ClangImporter/CFDatabase.def")
 
-add_gyb_target(generated_sorted_cf_database
-    SortedCFDatabase.def.gyb)
+set(generated_include_sources SortedCFDatabase.def.gyb)
+
+handle_gyb_sources(
+    generated_include_targets
+    generated_include_sources
+    "")
 
 add_swift_library(swiftClangImporter STATIC
   CFTypeInfo.cpp
@@ -25,5 +29,5 @@ add_swift_library(swiftClangImporter STATIC
 # standalone builds, so it can always be safely passed.
 get_property(CLANG_TABLEGEN_TARGETS GLOBAL PROPERTY CLANG_TABLEGEN_TARGETS)
 add_dependencies(swiftClangImporter
-  generated_sorted_cf_database
-  ${CLANG_TABLEGEN_TARGETS})
+                "${generated_include_targets}"
+                ${CLANG_TABLEGEN_TARGETS})

@@ -78,29 +78,15 @@ SILValue SILSSAUpdater::GetValueAtEndOfBlock(SILBasicBlock *BB) {
 
 /// Are all available values identicalTo each other.
 bool areIdentical(AvailableValsTy &Avails) {
-  if (auto *First = dyn_cast<SingleValueInstruction>(Avails.begin()->second)) {
-    for (auto Avail : Avails) {
-      auto *Inst = dyn_cast<SingleValueInstruction>(Avail.second);
-      if (!Inst)
-        return false;
-      if (!Inst->isIdenticalTo(First))
-        return false;
-    }
-    return true;
-  }
-
-  auto *MVIR = dyn_cast<MultipleValueInstructionResult>(Avails.begin()->second);
-  if (!MVIR)
+  auto *First = dyn_cast<SILInstruction>(Avails.begin()->second);
+  if (!First)
     return false;
-
   for (auto Avail : Avails) {
-    auto *Result = dyn_cast<MultipleValueInstructionResult>(Avail.second);
-    if (!Result)
+    auto *Inst = dyn_cast<SILInstruction>(Avail.second);
+    if (!Inst)
       return false;
-    if (!Result->getParent()->isIdenticalTo(MVIR->getParent()) ||
-        Result->getIndex() != MVIR->getIndex()) {
+    if (!Inst->isIdenticalTo(First))
       return false;
-    }
   }
   return true;
 }
@@ -114,7 +100,7 @@ void SILSSAUpdater::RewriteUse(Operand &Op) {
     assert(areIdentical(getAvailVals(AV)) &&
            "The function_refs need to have the same value");
     SILInstruction *User = Op.getUser();
-    auto *NewFR = cast<FunctionRefInst>(FR->clone(User));
+    auto *NewFR = FR->clone(User);
     Op.set(NewFR);
     return;
   } else if (auto *IL = dyn_cast<IntegerLiteralInst>(Op.get()))
@@ -122,7 +108,7 @@ void SILSSAUpdater::RewriteUse(Operand &Op) {
       // Some llvm intrinsics don't like phi nodes as their constant inputs (e.g
       // ctlz).
       SILInstruction *User = Op.getUser();
-      auto *NewIL = cast<IntegerLiteralInst>(IL->clone(User));
+      auto *NewIL = IL->clone(User);
       Op.set(NewIL);
       return;
     }
@@ -545,7 +531,7 @@ replaceBBArgWithStruct(SILPHIArgument *Arg,
 /// detection like induction variable analysis to succeed.
 ///
 /// If Arg is replaced, return the cast instruction. Otherwise return nullptr.
-SILValue swift::replaceBBArgWithCast(SILPHIArgument *Arg) {
+SILInstruction *swift::replaceBBArgWithCast(SILPHIArgument *Arg) {
   SmallVector<SILValue, 4> ArgValues;
   Arg->getIncomingValues(ArgValues);
   if (isa<StructInst>(ArgValues[0]))

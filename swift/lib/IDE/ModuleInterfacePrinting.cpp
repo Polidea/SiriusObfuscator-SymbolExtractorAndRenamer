@@ -12,7 +12,6 @@
 
 #include "swift/IDE/ModuleInterfacePrinting.h"
 #include "swift/IDE/Utils.h"
-#include "swift/Sema/IDETypeChecking.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTPrinter.h"
 #include "swift/AST/Decl.h"
@@ -363,9 +362,9 @@ void swift::ide::printSubmoduleInterface(
 
     // Skip declarations that are not accessible.
     if (auto *VD = dyn_cast<ValueDecl>(D)) {
-      if (Options.AccessFilter > AccessLevel::Private &&
-          VD->hasAccess() &&
-          VD->getFormalAccess() < Options.AccessFilter)
+      if (Options.AccessibilityFilter > Accessibility::Private &&
+          VD->hasAccessibility() &&
+          VD->getFormalAccess() < Options.AccessibilityFilter)
         continue;
     }
 
@@ -494,7 +493,7 @@ void swift::ide::printSubmoduleInterface(
   });
 
   // If the group name is specified, we sort them according to their source order,
-  // which is the order preserved by getTopLevelDecls.
+  // which is the order preserved by getTopLeveDecls.
   if (GroupNames.empty()) {
     std::sort(SwiftDecls.begin(), SwiftDecls.end(),
       [&](Decl *LHS, Decl *RHS) -> bool {
@@ -523,7 +522,7 @@ void swift::ide::printSubmoduleInterface(
 
   auto PrintDecl = [&](Decl *D) -> bool {
     ASTPrinter &Printer = *PrinterToUse;
-    if (!AdjustedOptions.shouldPrint(D)) {
+    if (!shouldPrint(D, AdjustedOptions)) {
       Printer.callAvoidPrintDeclPost(D);
       return false;
     }
@@ -565,7 +564,7 @@ void swift::ide::printSubmoduleInterface(
           // Print Ext and add sub-types of Ext.
           for (auto Ext : NTD->getExtensions()) {
             if (!PrintSynthesizedExtensions) {
-              if (!AdjustedOptions.shouldPrint(Ext)) {
+              if (!shouldPrint(Ext, AdjustedOptions)) {
                 Printer.callAvoidPrintDeclPost(Ext);
                 continue;
               }
@@ -773,7 +772,7 @@ void swift::ide::printHeaderInterface(
 
   for (auto *D : ClangDecls) {
     ASTPrinter &Printer = *PrinterToUse;
-    if (!AdjustedOptions.shouldPrint(D)) {
+    if (!shouldPrint(D, AdjustedOptions)) {
       Printer.callAvoidPrintDeclPost(D);
       continue;
     }

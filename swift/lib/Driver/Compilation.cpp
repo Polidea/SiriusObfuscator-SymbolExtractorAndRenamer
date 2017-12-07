@@ -709,6 +709,7 @@ Job *Compilation::addJob(std::unique_ptr<Job> J) {
   return result;
 }
 
+
 static void checkForOutOfDateInputs(DiagnosticEngine &diags,
                                     const InputInfoMap &inputs) {
   for (const auto &inputPair : inputs) {
@@ -934,8 +935,7 @@ int Compilation::performJobs() {
         (void)llvm::sys::fs::remove(pathPair.getKey());
     }
   }
-  if (Stats)
-    Stats->noteCurrentProcessExitStatus(result);
+
   return result;
 }
 

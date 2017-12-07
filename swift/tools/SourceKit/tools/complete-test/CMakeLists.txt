@@ -1,16 +1,16 @@
 if(SWIFT_SOURCEKIT_USE_INPROC_LIBRARY)
-  set(SOURCEKITD_TEST_LINK_LIBS sourcekitdInProc)
+  set(SOURCEKITD_TEST_DEPEND sourcekitdInProc)
 else()
-  set(SOURCEKITD_TEST_LINK_LIBS sourcekitd)
+  set(SOURCEKITD_TEST_DEPEND sourcekitd)
 endif()
 
 if(SOURCEKIT_NEED_EXPLICIT_LIBDISPATCH)
-  set(SOURCEKITD_TEST_LINK_LIBS ${SOURCEKITD_TEST_LINK_LIBS} dispatch)
+  set(SOURCEKITD_TEST_DEPEND ${SOURCEKITD_TEST_DEPEND} dispatch swiftCore)
 endif()
 
 add_sourcekit_executable(complete-test
   complete-test.cpp
-  LINK_LIBS ${SOURCEKITD_TEST_LINK_LIBS}
+  DEPENDS ${SOURCEKITD_TEST_DEPEND}
   LLVM_COMPONENT_DEPENDS support option coverage lto
 )
 

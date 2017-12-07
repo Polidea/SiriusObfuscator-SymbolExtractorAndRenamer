@@ -31,26 +31,21 @@ struct HeapObject;
 }
 
 SWIFT_CC(swift) SWIFT_RUNTIME_EXPORT LLVM_ATTRIBUTE_NOINLINE LLVM_ATTRIBUTE_USED
-void _swift_leaks_startTrackingObjects(const char *);
+void swift_leaks_startTrackingObjects(const char *);
 SWIFT_CC(swift) SWIFT_RUNTIME_EXPORT LLVM_ATTRIBUTE_NOINLINE LLVM_ATTRIBUTE_USED
-int _swift_leaks_stopTrackingObjects(const char *);
+int swift_leaks_stopTrackingObjects(const char *);
 SWIFT_RUNTIME_EXPORT LLVM_ATTRIBUTE_NOINLINE LLVM_ATTRIBUTE_USED
-void _swift_leaks_startTrackingObject(swift::HeapObject *);
+void swift_leaks_startTrackingObject(swift::HeapObject *);
 SWIFT_RUNTIME_EXPORT LLVM_ATTRIBUTE_NOINLINE LLVM_ATTRIBUTE_USED
-void _swift_leaks_stopTrackingObject(swift::HeapObject *);
+void swift_leaks_stopTrackingObject(swift::HeapObject *);
 
 #define SWIFT_LEAKS_START_TRACKING_OBJECT(obj)                                 \
-  _swift_leaks_startTrackingObject(obj)
+  swift_leaks_startTrackingObject(obj)
 #define SWIFT_LEAKS_STOP_TRACKING_OBJECT(obj)                                  \
-  _swift_leaks_stopTrackingObject(obj)
-
-// SWIFT_RUNTIME_ENABLE_LEAK_CHECKER
+  swift_leaks_stopTrackingObject(obj)
 #else
-// not SWIFT_RUNTIME_ENABLE_LEAK_CHECKER
-
 #define SWIFT_LEAKS_START_TRACKING_OBJECT(obj)
 #define SWIFT_LEAKS_STOP_TRACKING_OBJECT(obj)
-
 #endif
 
 #endif

@@ -32,15 +32,4 @@ UnavailableDefaultInit * _Nonnull MakeUnavailableDefaultInit(void);
 __attribute__((swift_name("UnavailableDefaultInitSub.init()")))
 UnavailableDefaultInitSub * _Nonnull MakeUnavailableDefaultInitSub(void);
 
-#pragma clang assume_nonnull begin
-
-extern NSString * PKPandaCutenessFactor __attribute__((swift_name("Panda.cutenessFactor")));
-extern NSString * _Nullable PKPandaCuddlynessFactor __attribute__((swift_name("Panda.cuddlynessFactor")));
-
-__attribute__((swift_name("Panda")))
-@interface PKPanda : NSObject
-@end
-
-#pragma clang assume_nonnull end
-
 #endif

@@ -19,7 +19,6 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/GenericSignatureBuilder.h"
 #include "swift/AST/Initializer.h"
-#include "swift/AST/LazyResolver.h"
 #include "swift/AST/NameLookup.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/AST/SubstitutionMap.h"
@@ -126,14 +125,14 @@ static bool isDeclVisibleInLookupMode(ValueDecl *Member, LookupState LS,
                                       LazyResolver *TypeResolver) {
   if (TypeResolver) {
     TypeResolver->resolveDeclSignature(Member);
-    TypeResolver->resolveAccessControl(Member);
+    TypeResolver->resolveAccessibility(Member);
   }
 
-  // Check access when relevant.
+  // Check accessibility when relevant.
   if (!Member->getDeclContext()->isLocalContext() &&
       !isa<GenericTypeParamDecl>(Member) && !isa<ParamDecl>(Member) &&
       FromContext->getASTContext().LangOpts.EnableAccessControl) {
-    if (Member->isInvalid() && !Member->hasAccess())
+    if (Member->isInvalid() && !Member->hasAccessibility())
       return false;
     if (!Member->isAccessibleFrom(FromContext))
       return false;
@@ -493,7 +492,7 @@ static void lookupVisibleMemberDeclsImpl(
     GenericSignatureBuilder *GSB, VisitedSet &Visited) {
   // Just look through l-valueness.  It doesn't affect name lookup.
   assert(BaseTy && "lookup into null type");
-  assert(!BaseTy->hasLValueType());
+  assert(!BaseTy->isLValueType());
 
   // Handle metatype references, as in "some_type.some_member".  These are
   // special and can't have extensions.
@@ -565,26 +564,26 @@ static void lookupVisibleMemberDeclsImpl(
   // If we're looking into a type parameter and we have a generic signature
   // builder, use the GSB to resolve where we should look.
   if (BaseTy->isTypeParameter() && GSB) {
-    auto EquivClass =
-      GSB->resolveEquivalenceClass(BaseTy,
-                                   ArchetypeResolutionKind::CompleteWellFormed);
-    if (!EquivClass) return;
+    auto PA = GSB->resolveArchetype(
+                BaseTy,
+                ArchetypeResolutionKind::CompleteWellFormed);
+    if (!PA) return;
 
-    if (EquivClass->concreteType) {
-      BaseTy = EquivClass->concreteType;
+    if (auto Concrete = PA->getConcreteType()) {
+      BaseTy = Concrete;
     } else {
       // Conformances
-      for (const auto &Conforms : EquivClass->conformsTo) {
+      for (auto Proto : PA->getConformsTo()) {
         lookupVisibleProtocolMemberDecls(
-            BaseTy, Conforms.first->getDeclaredType(), Consumer, CurrDC,
-            LS, getReasonForSuper(Reason), TypeResolver, GSB, Visited);
+            BaseTy, Proto->getDeclaredType(), Consumer, CurrDC, LS,
+            getReasonForSuper(Reason), TypeResolver, GSB, Visited);
       }
 
       // Superclass.
-      if (EquivClass->superclass) {
-        lookupVisibleMemberDeclsImpl(EquivClass->superclass, Consumer, CurrDC,
-                                     LS, getReasonForSuper(Reason),
-                                     TypeResolver, GSB, Visited);
+      if (auto Superclass = PA->getSuperclass()) {
+        lookupVisibleMemberDeclsImpl(Superclass, Consumer, CurrDC, LS,
+                                     getReasonForSuper(Reason), TypeResolver,
+                                     GSB, Visited);
       }
       return;
     }
@@ -723,16 +722,13 @@ public:
   Type BaseTy;
   const DeclContext *DC;
   LazyResolver *TypeResolver;
-  bool IsTypeLookup = false;
 
   OverrideFilteringConsumer(Type BaseTy, const DeclContext *DC,
                             LazyResolver *resolver)
       : BaseTy(BaseTy), DC(DC), TypeResolver(resolver) {
-    assert(!BaseTy->hasLValueType());
-    if (auto *MetaTy = BaseTy->getAs<AnyMetatypeType>()) {
+    assert(!BaseTy->isLValueType());
+    if (auto *MetaTy = BaseTy->getAs<AnyMetatypeType>())
       BaseTy = MetaTy->getInstanceType();
-      IsTypeLookup = true;
-    }
     assert(DC && BaseTy);
   }
 
@@ -749,7 +745,7 @@ public:
 
     if (TypeResolver) {
       TypeResolver->resolveDeclSignature(VD);
-      TypeResolver->resolveAccessControl(VD);
+      TypeResolver->resolveAccessibility(VD);
     }
 
     if (VD->isInvalid()) {
@@ -785,7 +781,7 @@ public:
 
     // Don't pass UnboundGenericType here. If you see this assertion
     // being hit, fix the caller, don't remove it.
-    assert(IsTypeLookup || !BaseTy->hasUnboundGenericType());
+    assert(!BaseTy->hasUnboundGenericType());
 
     // If the base type is AnyObject, we might be doing a dynamic
     // lookup, so the base type won't match the type of the member's

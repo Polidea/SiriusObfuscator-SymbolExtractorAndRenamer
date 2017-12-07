@@ -99,10 +99,9 @@ bool UsePrespecialized::replaceByPrespecialized(SILFunction &F) {
     if (SpecType->hasArchetype())
       continue;
 
-    // Create a name of the specialization. All external pre-specializations
-    // are serialized without bodies. Thus use IsNotSerialized here.
+    // Create a name of the specialization.
     Mangle::GenericSpecializationMangler NewGenericMangler(ReferencedF,
-                                              Subs, IsNotSerialized,
+                                              Subs, ReferencedF->isSerialized(),
                                               /*isReAbstracted*/ true);
     std::string ClonedName = NewGenericMangler.mangle();
       
@@ -141,13 +140,7 @@ bool UsePrespecialized::replaceByPrespecialized(SILFunction &F) {
                        << " : " << NewF->getName() << "\n");
 
     auto NewAI = replaceWithSpecializedFunction(AI, NewF, ReInfo);
-    if (auto oldApply = dyn_cast<ApplyInst>(AI)) {
-      oldApply->replaceAllUsesWith(cast<ApplyInst>(NewAI));
-    } else if (auto oldPApply = dyn_cast<PartialApplyInst>(AI)) {
-      oldPApply->replaceAllUsesWith(cast<PartialApplyInst>(NewAI));
-    } else {
-      assert(isa<TryApplyInst>(NewAI));
-    }
+    AI.getInstruction()->replaceAllUsesWith(NewAI.getInstruction());
     recursivelyDeleteTriviallyDeadInstructions(AI.getInstruction(), true);
     Changed = true;
   }

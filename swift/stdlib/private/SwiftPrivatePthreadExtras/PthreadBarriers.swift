@@ -12,7 +12,7 @@
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Cygwin) || os(Haiku)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
 import Glibc
 #endif
 
@@ -43,7 +43,7 @@ public var _stdlib_PTHREAD_BARRIER_SERIAL_THREAD: CInt {
 }
 
 public struct _stdlib_pthread_barrier_t {
-#if os(Cygwin) || os(FreeBSD)
+#if CYGWIN || os(FreeBSD)
   var mutex: UnsafeMutablePointer<pthread_mutex_t?>?
   var cond: UnsafeMutablePointer<pthread_cond_t?>?
 #else
@@ -97,10 +97,10 @@ public func _stdlib_pthread_barrier_destroy(
     // FIXME: leaking memory.
     return -1
   }
-  barrier.pointee.cond!.deinitialize(count: 1)
-  barrier.pointee.cond!.deallocate()
-  barrier.pointee.mutex!.deinitialize(count: 1)
-  barrier.pointee.mutex!.deallocate()
+  barrier.pointee.cond!.deinitialize()
+  barrier.pointee.cond!.deallocate(capacity: 1)
+  barrier.pointee.mutex!.deinitialize()
+  barrier.pointee.mutex!.deallocate(capacity: 1)
   return 0
 }
 

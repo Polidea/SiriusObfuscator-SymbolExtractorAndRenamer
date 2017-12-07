@@ -19,13 +19,8 @@ using namespace swift;
 using namespace swift::PatternMatch;
 
 #if !defined(NDEBUG)
-static bool inSCC(ValueBase *value, IVInfo::SCCType &SCC) {
-  SILNode *valueNode = value->getRepresentativeSILNodeInObject();
-  for (SILNode *node : SCC) {
-    if (node->getRepresentativeSILNodeInObject() == valueNode)
-      return true;
-  }
-  return false;
+static bool inSCC(ValueBase *Value, IVInfo::SCCType &SCC) {
+  return std::find(SCC.begin(), SCC.end(), Value) != SCC.end();
 }
 #endif
 
@@ -53,11 +48,9 @@ SILArgument *IVInfo::isInductionSequence(SCCType &SCC) {
       continue;
     }
 
-    // TODO: MultiValueInstruction
-
     auto *I = cast<SILInstruction>(SCC[i]);
     switch (I->getKind()) {
-    case SILInstructionKind::BuiltinInst: {
+    case ValueKind::BuiltinInst: {
       if (FoundBuiltin)
         return nullptr;
 
@@ -76,7 +69,7 @@ SILArgument *IVInfo::isInductionSequence(SCCType &SCC) {
       break;
     }
 
-    case SILInstructionKind::TupleExtractInst: {
+    case ValueKind::TupleExtractInst: {
       assert(inSCC(cast<TupleExtractInst>(I)->getOperand(), SCC) &&
              "TupleExtract operand not an induction var");
       break;
@@ -100,8 +93,6 @@ void IVInfo::visit(SCCType &SCC) {
   if (!(IV = isInductionSequence(SCC)))
     return;
 
-  for (auto node : SCC) {
-    if (auto value = dyn_cast<ValueBase>(node))
-      InductionVariableMap[value] = IV;
-  }
+  for (auto V : SCC)
+    InductionVariableMap[V] = IV;
 }

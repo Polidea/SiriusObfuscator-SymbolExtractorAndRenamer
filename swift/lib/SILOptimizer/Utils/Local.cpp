@@ -15,7 +15,6 @@
 #include "swift/SILOptimizer/Analysis/Analysis.h"
 #include "swift/SILOptimizer/Analysis/ARCAnalysis.h"
 #include "swift/SILOptimizer/Analysis/DominanceAnalysis.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/AST/SubstitutionMap.h"
 #include "swift/SIL/DynamicCasts.h"
 #include "swift/SIL/SILArgument.h"
@@ -25,7 +24,6 @@
 #include "swift/SIL/TypeLowering.h"
 #include "swift/SIL/DebugUtils.h"
 #include "swift/SIL/InstructionUtils.h"
-#include "swift/SIL/BasicBlockUtils.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -36,18 +34,11 @@
 
 using namespace swift;
 
-static llvm::cl::opt<bool> EnableExpandAll("enable-expand-all",
-                                           llvm::cl::init(false));
-
 /// Creates an increment on \p Ptr before insertion point \p InsertPt that
 /// creates a strong_retain if \p Ptr has reference semantics itself or a
 /// retain_value if \p Ptr is a non-trivial value without reference-semantics.
-NullablePtr<SILInstruction>
+SILInstruction *
 swift::createIncrementBefore(SILValue Ptr, SILInstruction *InsertPt) {
-  // If we have a trivial type, just bail, there is no work to do.
-  if (Ptr->getType().isTrivial(InsertPt->getModule()))
-    return nullptr;
-
   // Set up the builder we use to insert at our insertion point.
   SILBuilder B(InsertPt);
   auto Loc = RegularLocation(SourceLoc());
@@ -64,11 +55,8 @@ swift::createIncrementBefore(SILValue Ptr, SILInstruction *InsertPt) {
 /// Creates a decrement on \p Ptr before insertion point \p InsertPt that
 /// creates a strong_release if \p Ptr has reference semantics itself or
 /// a release_value if \p Ptr is a non-trivial value without reference-semantics.
-NullablePtr<SILInstruction>
+SILInstruction *
 swift::createDecrementBefore(SILValue Ptr, SILInstruction *InsertPt) {
-  if (Ptr->getType().isTrivial(InsertPt->getModule()))
-    return nullptr;
-
   // Setup the builder we will use to insert at our insertion point.
   SILBuilder B(InsertPt);
   auto Loc = RegularLocation(SourceLoc());
@@ -88,12 +76,11 @@ bool
 swift::isInstructionTriviallyDead(SILInstruction *I) {
   // At Onone, consider all uses, including the debug_info.
   // This way, debug_info is preserved at Onone.
-  if (I->hasUsesOfAnyResult() &&
-      I->getFunction()->getEffectiveOptimizationMode() <=
-        OptimizationMode::NoOptimization)
+  if (!I->use_empty() &&
+      I->getModule().getOptions().Optimization <= SILOptions::SILOptMode::None)
     return false;
 
-  if (!onlyHaveDebugUsesOfAllResults(I) || isa<TermInst>(I))
+  if (!onlyHaveDebugUses(I) || isa<TermInst>(I))
     return false;
 
   if (auto *BI = dyn_cast<BuiltinInst>(I)) {
@@ -194,7 +181,7 @@ recursivelyDeleteTriviallyDeadInstructions(ArrayRef<SILInstruction *> IA,
 
         // If the operand is an instruction that is only used by the instruction
         // being deleted, delete it.
-        if (auto *OpValInst = OpVal->getDefiningInstruction())
+        if (auto *OpValInst = dyn_cast<SILInstruction>(OpVal))
           if (!DeadInsts.count(OpValInst) &&
               isInstructionTriviallyDead(OpValInst))
             NextInsts.insert(OpValInst);
@@ -234,32 +221,28 @@ void swift::recursivelyDeleteTriviallyDeadInstructions(SILInstruction *I,
 
 void swift::eraseUsesOfInstruction(SILInstruction *Inst,
                                    CallbackTy Callback) {
-  for (auto result : Inst->getResults()) {
-    while (!result->use_empty()) {
-      auto UI = result->use_begin();
-      auto *User = UI->getUser();
-      assert(User && "User should never be NULL!");
+  for (auto UI = Inst->use_begin(), E = Inst->use_end(); UI != E;) {
+    auto *User = UI->getUser();
+    UI++;
 
-      // If the instruction itself has any uses, recursively zap them so that
-      // nothing uses this instruction.
-      eraseUsesOfInstruction(User, Callback);
+    // If the instruction itself has any uses, recursively zap them so that
+    // nothing uses this instruction.
+    eraseUsesOfInstruction(User, Callback);
 
-      // Walk through the operand list and delete any random instructions that
-      // will become trivially dead when this instruction is removed.
+    // Walk through the operand list and delete any random instructions that
+    // will become trivially dead when this instruction is removed.
 
-      for (auto &Op : User->getAllOperands()) {
-        if (auto *OpI = Op.get()->getDefiningInstruction()) {
-          // Don't recursively delete the instruction we're working on.
-          // FIXME: what if we're being recursively invoked?
-          if (OpI != Inst) {
-            Op.drop();
-            recursivelyDeleteTriviallyDeadInstructions(OpI, false, Callback);
-          }
+    for (auto &Op : User->getAllOperands()) {
+      if (auto *OpI = dyn_cast<SILInstruction>(Op.get())) {
+        // Don't recursively delete the pointer we're getting in.
+        if (OpI != Inst) {
+          Op.drop();
+          recursivelyDeleteTriviallyDeadInstructions(OpI, false, Callback);
         }
       }
-      Callback(User);
-      User->eraseFromParent();
     }
+    Callback(User);
+    User->eraseFromParent();
   }
 }
 
@@ -272,8 +255,7 @@ collectUsesOfValue(SILValue V, llvm::SmallPtrSetImpl<SILInstruction *> &Insts) {
       continue;
 
     // Collect the users of this instruction.
-    for (auto result : User->getResults())
-      collectUsesOfValue(result, Insts);
+    collectUsesOfValue(User, Insts);
   }
 }
 
@@ -286,7 +268,7 @@ void swift::eraseUsesOfValue(SILValue V) {
   // Its not safe to do recursively delete here as some of the SILInstruction
   // maybe tracked by this set.
   for (auto I : Insts) {
-    I->replaceAllUsesOfAllResultsWithUndef();
+    I->replaceAllUsesWithUndef();
     I->eraseFromParent();
   }
 }
@@ -294,13 +276,19 @@ void swift::eraseUsesOfValue(SILValue V) {
 // Devirtualization of functions with covariant return types produces
 // a result that is not an apply, but takes an apply as an
 // argument. Attempt to dig the apply out from this result.
-FullApplySite swift::findApplyFromDevirtualizedResult(SILValue V) {
-  if (auto Apply = FullApplySite::isa(V))
+FullApplySite swift::findApplyFromDevirtualizedResult(SILInstruction *I) {
+  if (!I)
+    return FullApplySite();
+
+  if (auto Apply = FullApplySite::isa(I))
     return Apply;
 
-  if (isa<UpcastInst>(V) || isa<EnumInst>(V) || isa<UncheckedRefCastInst>(V))
+  if (!I->getNumOperands())
+    return FullApplySite();
+
+  if (isa<UpcastInst>(I) || isa<EnumInst>(I) || isa<UncheckedRefCastInst>(I))
     return findApplyFromDevirtualizedResult(
-             cast<SingleValueInstruction>(V)->getOperand(0));
+        dyn_cast<SILInstruction>(I->getOperand(0)));
 
   return FullApplySite();
 }
@@ -332,15 +320,16 @@ SILValue swift::isPartialApplyOfReabstractionThunk(PartialApplyInst *PAI) {
 void swift::replaceDeadApply(ApplySite Old, ValueBase *New) {
   auto *OldApply = Old.getInstruction();
   if (!isa<TryApplyInst>(OldApply))
-    cast<SingleValueInstruction>(OldApply)->replaceAllUsesWith(New);
+    OldApply->replaceAllUsesWith(New);
   recursivelyDeleteTriviallyDeadInstructions(OldApply, true);
 }
 
 bool swift::hasArchetypes(SubstitutionList Subs) {
   // Check whether any of the substitutions are dependent.
-  return llvm::any_of(Subs, [](const Substitution &S) {
-    return S.getReplacement()->hasArchetype();
-  });
+  for (auto &sub : Subs)
+    if (sub.getReplacement()->hasArchetype())
+      return true;
+  return false;
 }
 
 bool swift::mayBindDynamicSelf(SILFunction *F) {
@@ -399,7 +388,9 @@ TermInst *swift::addArgumentToBranch(SILValue Val, SILBasicBlock *Dest,
       assert(FalseArgs.size() == Dest->getNumArguments());
     }
 
-    return Builder.createCondBranch(CBI->getLoc(), CBI->getCondition(), CBI->getTrueBB(), TrueArgs, CBI->getFalseBB(), FalseArgs, CBI->getTrueBBCount(), CBI->getFalseBBCount());
+    return Builder.createCondBranch(CBI->getLoc(), CBI->getCondition(),
+                                    CBI->getTrueBB(), TrueArgs,
+                                    CBI->getFalseBB(), FalseArgs);
   }
 
   if (auto *BI = dyn_cast<BranchInst>(Branch)) {
@@ -425,7 +416,11 @@ SILLinkage swift::getSpecializedLinkage(SILFunction *F, SILLinkage L) {
     return SILLinkage::Private;
   }
 
-  return SILLinkage::Shared;
+  // Treat stdlib_binary_only specially. We don't serialize the body of
+  // stdlib_binary_only functions so we can't mark them as Shared (making
+  // their visibility in the dylib hidden).
+  return F->hasSemanticsAttr("stdlib_binary_only") ? SILLinkage::Public
+                                                   : SILLinkage::Shared;
 }
 
 /// Remove all instructions in the body of \p BB in safe manner by using
@@ -438,7 +433,7 @@ void swift::clearBlockBody(SILBasicBlock *BB) {
     auto *Inst = &BB->back();
 
     // Replace any still-remaining uses with undef values and erase.
-    Inst->replaceAllUsesOfAllResultsWithUndef();
+    Inst->replaceAllUsesWithUndef();
     Inst->eraseFromParent();
   }
 }
@@ -667,7 +662,7 @@ public:
   /// concatenation of string literals.
   ///
   /// Returns a new instruction if optimization was possible.
-  SingleValueInstruction *optimize();
+  SILInstruction *optimize();
 };
 
 } // end anonymous namespace
@@ -828,7 +823,7 @@ bool StringConcatenationOptimizer::isAscii() const{
   return IsAsciiLeft && IsAsciiRight;
 }
 
-SingleValueInstruction *StringConcatenationOptimizer::optimize() {
+SILInstruction *StringConcatenationOptimizer::optimize() {
   // Bail out if string literals concatenation optimization is
   // not possible.
   if (!extractStringConcatOperands())
@@ -874,8 +869,7 @@ SingleValueInstruction *StringConcatenationOptimizer::optimize() {
 }
 
 /// Top level entry point
-SingleValueInstruction *
-swift::tryToConcatenateStrings(ApplyInst *AI, SILBuilder &B) {
+SILInstruction *swift::tryToConcatenateStrings(ApplyInst *AI, SILBuilder &B) {
   return StringConcatenationOptimizer(AI, B).optimize();
 }
 
@@ -885,23 +879,17 @@ swift::tryToConcatenateStrings(ApplyInst *AI, SILBuilder &B) {
 
 static bool useDoesNotKeepClosureAlive(const SILInstruction *I) {
   switch (I->getKind()) {
-  case SILInstructionKind::StrongRetainInst:
-  case SILInstructionKind::StrongReleaseInst:
-  case SILInstructionKind::CopyValueInst:
-  case SILInstructionKind::DestroyValueInst:
-  case SILInstructionKind::RetainValueInst:
-  case SILInstructionKind::ReleaseValueInst:
-  case SILInstructionKind::DebugValueInst:
+  case ValueKind::StrongRetainInst:
+  case ValueKind::StrongReleaseInst:
+  case ValueKind::CopyValueInst:
+  case ValueKind::DestroyValueInst:
+  case ValueKind::RetainValueInst:
+  case ValueKind::ReleaseValueInst:
+  case ValueKind::DebugValueInst:
     return true;
   default:
     return false;
   }
-}
-
-static bool useHasTransitiveOwnership(const SILInstruction *I) {
-  // convert_function is used to add the @noescape attribute. It does not change
-  // ownership of the function value.
-  return isa<ConvertFunctionInst>(I);
 }
 
 static SILValue createLifetimeExtendedAllocStack(
@@ -1079,7 +1067,7 @@ static bool releaseCapturedArgsOfDeadPartialApply(PartialApplyInst *PAI,
 }
 
 /// TODO: Generalize this to general objects.
-bool swift::tryDeleteDeadClosure(SingleValueInstruction *Closure,
+bool swift::tryDeleteDeadClosure(SILInstruction *Closure,
                                  InstModCallbacks Callbacks) {
   // We currently only handle locally identified values that do not escape. We
   // also assume that the partial apply does not capture any addresses.
@@ -1090,7 +1078,9 @@ bool swift::tryDeleteDeadClosure(SingleValueInstruction *Closure,
   // object is dead. This should be expanded in the future. This also ensures
   // that we are locally identified and non-escaping since we only allow for
   // specific ARC users.
-  ReleaseTracker Tracker(useDoesNotKeepClosureAlive, useHasTransitiveOwnership);
+  ReleaseTracker Tracker([](const SILInstruction *I) -> bool {
+    return useDoesNotKeepClosureAlive(I);
+  });
 
   // Find the ARC Users and the final retain, release.
   if (!getFinalReleasesForValue(SILValue(Closure), Tracker))
@@ -1105,14 +1095,11 @@ bool swift::tryDeleteDeadClosure(SingleValueInstruction *Closure,
       return false;
   }
 
-  // Then delete all user instructions in reverse so that leaf uses are deleted
-  // first.
-  for (auto *User : reverse(Tracker.getTrackedUsers())) {
-    assert(User->getResults().empty()
-           || useHasTransitiveOwnership(User)
-                  && "We expect only ARC operations without "
-                     "results. This is true b/c of "
-                     "isARCOperationRemovableIfObjectIsDead");
+  // Then delete all user instructions.
+  for (auto *User : Tracker.getTrackedUsers()) {
+    assert(!User->hasValue() && "We expect only ARC operations without "
+                                "results. This is true b/c of "
+                                "isARCOperationRemovableIfObjectIsDead");
     Callbacks.DeleteInst(User);
   }
 
@@ -1131,7 +1118,6 @@ void ValueLifetimeAnalysis::propagateLiveness() {
 
   auto DefBB = DefValue->getParentBlock();
   llvm::SmallVector<SILBasicBlock *, 64> Worklist;
-  int NumUsersBeforeDef = 0;
 
   // Find the initial set of blocks where the value is live, because
   // it is used in those blocks.
@@ -1139,17 +1125,6 @@ void ValueLifetimeAnalysis::propagateLiveness() {
     SILBasicBlock *UserBlock = User->getParent();
     if (LiveBlocks.insert(UserBlock))
       Worklist.push_back(UserBlock);
-
-    // A user in the DefBB could potentially be located before the DefValue.
-    if (UserBlock == DefBB)
-      NumUsersBeforeDef++;
-  }
-  // Don't count any users in the DefBB which are actually located _after_
-  // the DefValue.
-  auto InstIter = DefValue->getIterator();
-  while (NumUsersBeforeDef > 0 && ++InstIter != DefBB->end()) {
-    if (UserSet.count(&*InstIter))
-      NumUsersBeforeDef--;
   }
 
   // Now propagate liveness backwards until we hit the block that defines the
@@ -1158,7 +1133,7 @@ void ValueLifetimeAnalysis::propagateLiveness() {
     auto *BB = Worklist.pop_back_val();
 
     // Don't go beyond the definition.
-    if (BB == DefBB && NumUsersBeforeDef == 0)
+    if (BB == DefBB)
       continue;
 
     for (SILBasicBlock *Pred : BB->getPredecessorBlocks()) {
@@ -1181,11 +1156,7 @@ SILInstruction *ValueLifetimeAnalysis:: findLastUserInBlock(SILBasicBlock *BB) {
   llvm_unreachable("Expected to find use of value in block!");
 }
 
-bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
-                                            DeadEndBlocks *DEBlocks) {
-  assert(!isAliveAtBeginOfBlock(DefValue->getFunction()->getEntryBlock()) &&
-         "Can't compute frontier for def which does not dominate all uses");
-
+bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode) {
   bool NoCriticalEdges = true;
 
   // Exit-blocks from the lifetime region. The value is live at the end of
@@ -1198,15 +1169,12 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
 
   /// The lifetime ends if we have a live block and a not-live successor.
   for (SILBasicBlock *BB : LiveBlocks) {
-    if (DEBlocks && DEBlocks->isDeadEnd(BB))
-      continue;
-
     bool LiveInSucc = false;
     bool DeadInSucc = false;
     for (const SILSuccessor &Succ : BB->getSuccessors()) {
       if (isAliveAtBeginOfBlock(Succ)) {
         LiveInSucc = true;
-      } else if (!DEBlocks || !DEBlocks->isDeadEnd(Succ)) {
+      } else {
         DeadInSucc = true;
       }
     }
@@ -1223,10 +1191,7 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
       // frontier (see below).
       assert(DeadInSucc && "The final using TermInst must have successors");
     }
-    if (DeadInSucc) {
-      if (mode == UsersMustPostDomDef)
-        return false;
-
+    if (DeadInSucc && mode != IgnoreExitEdges) {
       // The value is not live in some of the successor blocks.
       LiveOutBlocks.insert(BB);
       for (const SILSuccessor &Succ : BB->getSuccessors()) {
@@ -1240,7 +1205,6 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
   // Handle "exit" edges from the lifetime region.
   llvm::SmallPtrSet<SILBasicBlock *, 16> UnhandledFrontierBlocks;
   for (SILBasicBlock *FrontierBB: FrontierBlocks) {
-    assert(mode != UsersMustPostDomDef);
     bool needSplit = false;
     // If the value is live only in part of the predecessor blocks we have to
     // split those predecessor edges.
@@ -1263,7 +1227,6 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
   // Split critical edges from the lifetime region to not yet handled frontier
   // blocks.
   for (SILBasicBlock *FrontierPred : LiveOutBlocks) {
-    assert(mode != UsersMustPostDomDef);
     auto *T = FrontierPred->getTerminator();
     // Cache the successor blocks because splitting critical edges invalidates
     // the successor list iterator of T.
@@ -1273,7 +1236,6 @@ bool ValueLifetimeAnalysis::computeFrontier(Frontier &Fr, Mode mode,
 
     for (unsigned i = 0, e = SuccBlocks.size(); i != e; ++i) {
       if (UnhandledFrontierBlocks.count(SuccBlocks[i])) {
-        assert(mode == AllowToModifyCFG);
         assert(isCriticalEdge(T, i) && "actually not a critical edge?");
         SILBasicBlock *NewBlock = splitEdge(T, i);
         // The single terminator instruction is part of the frontier.
@@ -1454,10 +1416,9 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
       Builder.setInsertionPoint(CastSuccessBB);
       SrcOp = CastSuccessBB->getArgument(0);
     } else {
-      auto cast = Builder.createUnconditionalCheckedCast(Loc, Load,
-                                                         SILBridgedTy);
-      NewI = cast;
-      SrcOp = cast;
+      NewI = Builder.createUnconditionalCheckedCast(Loc, Load,
+                                                    SILBridgedTy);
+      SrcOp = NewI;
     }
   } else {
     SrcOp = Src;
@@ -1472,7 +1433,7 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
   auto BridgedProto =
       M.getASTContext().getProtocol(KnownProtocolKind::ObjectiveCBridgeable);
   auto Conf =
-      *M.getSwiftModule()->lookupConformance(Target, BridgedProto);
+      *M.getSwiftModule()->lookupConformance(Target, BridgedProto, nullptr);
 
   auto ParamTypes = BridgedFunc->getLoweredFunctionType()->getParameters();
 
@@ -1526,8 +1487,11 @@ optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
   auto *AI = Builder.createApply(Loc, FuncRef, Subs, Args, false);
 
   // If the source of a cast should be destroyed, emit a release.
-  if (isa<UnconditionalCheckedCastAddrInst>(Inst)) {
-    Builder.createReleaseValue(Loc, SrcOp, Builder.getDefaultAtomicity());
+  if (auto *UCCAI = dyn_cast<UnconditionalCheckedCastAddrInst>(Inst)) {
+    assert(UCCAI->getConsumptionKind() == CastConsumptionKind::TakeAlways);
+    if (UCCAI->getConsumptionKind() == CastConsumptionKind::TakeAlways) {
+      Builder.createReleaseValue(Loc, SrcOp, Builder.getDefaultAtomicity());
+    }
   }
 
   if (auto *CCABI = dyn_cast<CheckedCastAddrBranchInst>(Inst)) {
@@ -1600,7 +1564,7 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
       M.getASTContext().getProtocol(KnownProtocolKind::ObjectiveCBridgeable);
 
   auto Conf =
-      M.getSwiftModule()->lookupConformance(Source, BridgedProto);
+      M.getSwiftModule()->lookupConformance(Source, BridgedProto, nullptr);
 
   assert(Conf && "_ObjectiveCBridgeable conformance should exist");
   (void) Conf;
@@ -1687,81 +1651,79 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
   // and the inserted conversion function.
   bool needRetainBeforeCall = false;
   bool needReleaseAfterCall = false;
-  bool needReleaseInSuccess = false;
+  bool needReleaseInSucc = false;
   switch (ParamTypes[0].getConvention()) {
     case ParameterConvention::Direct_Guaranteed:
-    case ParameterConvention::Indirect_In_Guaranteed:
+      assert(!AddressOnlyType &&
+             "AddressOnlyType with Direct_Guaranteed is not supported");
       switch (ConsumptionKind) {
-      case CastConsumptionKind::TakeAlways:
-        needReleaseAfterCall = true;
-        break;
-      case CastConsumptionKind::TakeOnSuccess:
-        needReleaseInSuccess = true;
-        break;
-      case CastConsumptionKind::CopyOnSuccess:
-        // Conservatively insert a retain/release pair around the conversion
-        // function because the conversion function could decrement the
-        // (global) reference count of the source object.
-        //
-        // %src = load %global_var
-        // apply %conversion_func(@guaranteed %src)
-        //
-        // sil conversion_func {
-        //    %old_value = load %global_var
-        //    store %something_else, %global_var
-        //    strong_release %old_value
-        // }
-        needRetainBeforeCall = true;
-        needReleaseAfterCall = true;
-        break;
+        case CastConsumptionKind::TakeAlways:
+          needReleaseAfterCall = true;
+          break;
+        case CastConsumptionKind::TakeOnSuccess:
+          needReleaseInSucc = true;
+          break;
+        case CastConsumptionKind::CopyOnSuccess:
+          // Conservatively insert a retain/release pair around the conversion
+          // function because the conversion function could decrement the
+          // (global) reference count of the source object.
+          //
+          // %src = load %global_var
+          // apply %conversion_func(@guaranteed %src)
+          //
+          // sil conversion_func {
+          //    %old_value = load %global_var
+          //    store %something_else, %global_var
+          //    strong_release %old_value
+          // }
+          needRetainBeforeCall = true;
+          needReleaseAfterCall = true;
+          break;
       }
       break;
     case ParameterConvention::Direct_Owned:
-    case ParameterConvention::Indirect_In:
-    case ParameterConvention::Indirect_In_Constant:
-      // Currently this
+      // The Direct_Owned case is only handled for completeness. Currently this
       // cannot appear, because the _bridgeToObjectiveC protocol witness method
       // always receives the this pointer (= the source) as guaranteed.
-      // If it became possible (perhaps with the advent of ownership and
-      // explicit +1 annotations), the implementation should look something
-      // like this:
-      /*
+      assert(!AddressOnlyType &&
+             "AddressOnlyType with Direct_Owned is not supported");
       switch (ConsumptionKind) {
         case CastConsumptionKind::TakeAlways:
           break;
         case CastConsumptionKind::TakeOnSuccess:
           needRetainBeforeCall = true;
-          needReleaseInSuccess = true;
+          needReleaseInSucc = true;
           break;
         case CastConsumptionKind::CopyOnSuccess:
           needRetainBeforeCall = true;
           break;
       }
       break;
-       */
-      llvm_unreachable("this should never happen so is currently untestable");
     case ParameterConvention::Direct_Unowned:
       assert(!AddressOnlyType &&
              "AddressOnlyType with Direct_Unowned is not supported");
       break;
+    case ParameterConvention::Indirect_In_Guaranteed:
+      // Source as-is, we don't need to copy it due to guarantee
+      break;
+    case ParameterConvention::Indirect_In_Constant:
+    case ParameterConvention::Indirect_In: {
+      assert(substConv.isSILIndirect(ParamTypes[0])
+             && "unsupported convention for bridging conversion");
+      // Need to make a copy of the source, can be changed in ObjC
+      auto BridgeStack = Builder.createAllocStack(Loc, Src->getType());
+      Src = Builder.createCopyAddr(Loc, Src, BridgeStack, IsNotTake,
+                                   IsInitialization);
+      break;
+    }
     case ParameterConvention::Indirect_Inout:
     case ParameterConvention::Indirect_InoutAliasable:
       // TODO handle remaining indirect argument types
       return nullptr;
   }
 
-  bool needStackAllocatedTemporary = false;
-  if (needRetainBeforeCall) {
-    if (AddressOnlyType) {
-      needStackAllocatedTemporary = true;
-      auto NewSrc = Builder.createAllocStack(Loc, Src->getType());
-      Builder.createCopyAddr(Loc, Src, NewSrc,
-                             IsNotTake, IsInitialization);
-      Src = NewSrc;
-    } else {
-      Builder.createRetainValue(Loc, Src, Builder.getDefaultAtomicity());
-    }
-  }
+  if (needRetainBeforeCall)
+    Builder.createRetainValue(Loc, Src, Builder.getDefaultAtomicity());
 
   SmallVector<Substitution, 4> Subs;
   if (auto *Sig = Source->getAnyNominal()->getGenericSignature())
@@ -1770,41 +1732,12 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
   // Generate a code to invoke the bridging function.
   auto *NewAI = Builder.createApply(Loc, FnRef, Subs, Src, false);
 
-  auto releaseSrc = [&](SILBuilder &Builder) {
-    if (AddressOnlyType) {
-      Builder.createDestroyAddr(Loc, Src);
-    } else {
-      Builder.createReleaseValue(Loc, Src, Builder.getDefaultAtomicity());
-    }
-  };
-  
-  Optional<SILBuilder> SuccBuilder;
-  if (needReleaseInSuccess || needStackAllocatedTemporary)
-    SuccBuilder.emplace(SuccessBB->begin());
-  
   if (needReleaseAfterCall) {
-    releaseSrc(Builder);
-  } else if (needReleaseInSuccess) {
-    if (SuccessBB) {
-      releaseSrc(*SuccBuilder);
-    } else {
-      // For an unconditional cast, success is the only defined path
-      releaseSrc(Builder);
-    }
+    Builder.createReleaseValue(Loc, Src, Builder.getDefaultAtomicity());
+  } else if (needReleaseInSucc) {
+    SILBuilder SuccBuilder(SuccessBB->begin());
+    SuccBuilder.createReleaseValue(Loc, Src, SuccBuilder.getDefaultAtomicity());
   }
-  
-  // Pop the temporary stack slot for a copied temporary.
-  if (needStackAllocatedTemporary) {
-    assert((bool)SuccessBB == (bool)FailureBB);
-    if (SuccessBB) {
-      SuccBuilder->createDeallocStack(Loc, Src);
-      SILBuilder FailBuilder(FailureBB->begin());
-      FailBuilder.createDeallocStack(Loc, Src);
-    } else {
-      Builder.createDeallocStack(Loc, Src);
-    }
-  }
-  
   SILInstruction *NewI = NewAI;
 
   if (Dest) {
@@ -1812,16 +1745,15 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
     auto ConvTy = NewAI->getType();
     auto DestTy = Dest->getType().getObjectType();
     SILValue CastedValue;
-    if (ConvTy == DestTy) {
-      CastedValue = NewAI;
-    } else if (DestTy.isExactSuperclassOf(ConvTy)) {
-      CastedValue = Builder.createUpcast(Loc, NewAI, DestTy);
+    if ((ConvTy == DestTy || DestTy.isExactSuperclassOf(ConvTy))) {
+      CastedValue = SILValue(
+          (ConvTy == DestTy) ? NewI : Builder.createUpcast(Loc, NewAI, DestTy));
     } else if (ConvTy.isExactSuperclassOf(DestTy)) {
       // The downcast from a base class to derived class may fail.
       if (isConditional) {
         // In case of a conditional cast, we should handle it gracefully.
         auto CondBrSuccessBB =
-            NewAI->getFunction()->createBasicBlock(NewAI->getParent());
+            NewAI->getFunction()->createBasicBlock(NewAI->getParentBlock());
         CondBrSuccessBB->createPHIArgument(DestTy, ValueOwnershipKind::Owned,
                                            nullptr);
         Builder.createCheckedCastBranch(Loc, /* isExact*/ false, NewAI, DestTy,
@@ -1848,7 +1780,7 @@ optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
     }
     NewI = Builder.createStore(Loc, CastedValue, Dest,
                                StoreOwnershipQualifier::Unqualified);
-    if (isConditional && NewI->getParent() != NewAI->getParent()) {
+    if (isConditional && NewI->getParentBlock() != NewAI->getParentBlock()) {
       Builder.createBranch(Loc, SuccessBB);
     }
   }
@@ -2026,10 +1958,6 @@ simplifyCheckedCastAddrBranchInst(CheckedCastAddrBranchInst *Inst) {
     // The unconditional_addr_cast can be skipped, if the result of a cast
     // is not used afterwards.
     if (ResultNotUsed) {
-      if (shouldTakeOnSuccess(Inst->getConsumptionKind())) {
-        auto &srcTL = Builder.getModule().getTypeLowering(Src->getType());
-        srcTL.emitDestroyAddress(Builder, Loc, Src);
-      }
       EraseInstAction(Inst);
       Builder.setInsertionPoint(BB);
       auto *NewI = Builder.createBranch(Loc, SuccessBB);
@@ -2040,17 +1968,10 @@ simplifyCheckedCastAddrBranchInst(CheckedCastAddrBranchInst *Inst) {
     // Since it is an addr cast, only address types are handled here.
     if (!Src->getType().isAddress() || !Dest->getType().isAddress()) {
       return nullptr;
-    }
-    // For CopyOnSuccess casts, we could insert an explicit copy here, but this
-    // case does not happen in practice.
-    // Both TakeOnSuccess and TakeAlways can be reduced to an
-    // UnconditionalCheckedCast, since the failure path is irrelevant.
-    if (Inst->getConsumptionKind() == CastConsumptionKind::CopyOnSuccess)
-      return nullptr;
-
-    if (!emitSuccessfulIndirectUnconditionalCast(
-          Builder, Mod.getSwiftModule(), Loc, Src, SourceType, Dest,
-          TargetType, Inst)) {
+    } else if (!emitSuccessfulIndirectUnconditionalCast(
+                   Builder, Mod.getSwiftModule(), Loc,
+                   Inst->getConsumptionKind(), Src, SourceType, Dest,
+                   TargetType, Inst)) {
       // No optimization was possible.
       return nullptr;
     }
@@ -2141,6 +2062,7 @@ CastOptimizer::simplifyCheckedCastBranchInst(CheckedCastBranchInst *Inst) {
         Src, Dest, SourceType, TargetType, nullptr, nullptr);
 
     if (BridgedI) {
+      CastedValue = BridgedI;
       llvm_unreachable(
         "Bridged casts cannot be expressed by checked_cast_br yet");
     } else {
@@ -2229,6 +2151,7 @@ SILInstruction *CastOptimizer::simplifyCheckedCastValueBranchInst(
         Src, Dest, SourceType, TargetType, nullptr, nullptr);
 
     if (BridgedI) {
+      CastedValue = BridgedI;
       llvm_unreachable(
           "Bridged casts cannot be expressed by checked_cast_value_br yet");
     } else {
@@ -2257,7 +2180,7 @@ SILInstruction *CastOptimizer::simplifyCheckedCastValueBranchInst(
     }
     if (!CastedValue)
       CastedValue = Builder.createUnconditionalCheckedCastValue(
-          Loc, Op, LoweredTargetType);
+          Loc, CastConsumptionKind::TakeAlways, Op, LoweredTargetType);
   } else {
     // No need to cast.
     CastedValue = Op;
@@ -2327,9 +2250,8 @@ SILInstruction *CastOptimizer::optimizeCheckedCastAddrBranchInst(
                 Inst->getTargetType())) {
           SILBuilderWithScope B(Inst);
           auto NewI = B.createCheckedCastBranch(
-              Loc, false /*isExact*/, MI, Dest->getType().getObjectType(),
-              SuccessBB, FailureBB, Inst->getTrueBBCount(),
-              Inst->getFalseBBCount());
+              Loc, false /*isExact*/, MI,
+              Dest->getType().getObjectType(), SuccessBB, FailureBB);
           SuccessBB->createPHIArgument(Dest->getType().getObjectType(),
                                        ValueOwnershipKind::Owned);
           B.setInsertionPoint(SuccessBB->begin());
@@ -2375,9 +2297,10 @@ CastOptimizer::optimizeCheckedCastBranchInst(CheckedCastBranchInst *Inst) {
   if (auto *IEMI = dyn_cast<InitExistentialMetatypeInst>(Op)) {
     if (auto *MI = dyn_cast<MetatypeInst>(IEMI->getOperand())) {
       SILBuilderWithScope B(Inst);
-      auto *NewI = B.createCheckedCastBranch(
-          Loc, /* isExact */ false, MI, LoweredTargetType, SuccessBB, FailureBB,
-          Inst->getTrueBBCount(), Inst->getFalseBBCount());
+      auto *NewI = B.createCheckedCastBranch(Loc, /* isExact */ false, MI,
+                                LoweredTargetType,
+                                SuccessBB,
+                                FailureBB);
       EraseInstAction(Inst);
       return NewI;
     }
@@ -2443,9 +2366,10 @@ CastOptimizer::optimizeCheckedCastBranchInst(CheckedCastBranchInst *Inst) {
             FoundIEI->getTypeDependentOperands());
         auto *MI = B.createMetatype(FoundIEI->getLoc(), SILMetaTy);
 
-        auto *NewI = B.createCheckedCastBranch(
-            Loc, /* isExact */ false, MI, LoweredTargetType, SuccessBB,
-            FailureBB, Inst->getTrueBBCount(), Inst->getFalseBBCount());
+        auto *NewI = B.createCheckedCastBranch(Loc, /* isExact */ false, MI,
+                                  LoweredTargetType,
+                                  SuccessBB,
+                                  FailureBB);
         EraseInstAction(Inst);
         return NewI;
       }
@@ -2502,9 +2426,10 @@ CastOptimizer::optimizeCheckedCastBranchInst(CheckedCastBranchInst *Inst) {
             FoundIERI->getTypeDependentOperands());
         auto *MI = B.createMetatype(FoundIERI->getLoc(), SILMetaTy);
 
-        auto *NewI = B.createCheckedCastBranch(
-            Loc, /* isExact */ false, MI, LoweredTargetType, SuccessBB,
-            FailureBB, Inst->getTrueBBCount(), Inst->getFalseBBCount());
+        auto *NewI = B.createCheckedCastBranch(Loc, /* isExact */ false, MI,
+                                  LoweredTargetType,
+                                  SuccessBB,
+                                  FailureBB);
         EraseInstAction(Inst);
         return NewI;
       }
@@ -2569,12 +2494,10 @@ optimizeUnconditionalCheckedCastInst(UnconditionalCheckedCastInst *Inst) {
                                    false, Src, SILValue(), SourceType,
                                    TargetType, nullptr, nullptr);
   if (NewI) {
-    // FIXME: I'm not sure why this is true!
-    auto newValue = cast<SingleValueInstruction>(NewI);
-    ReplaceInstUsesAction(Inst, newValue);
+    ReplaceInstUsesAction(Inst, NewI);
     EraseInstAction(Inst);
     WillSucceedAction();
-    return newValue;
+    return NewI;
   }
 
   // If the cast may succeed or fail and can't be optimized into a bridging
@@ -2604,6 +2527,8 @@ optimizeUnconditionalCheckedCastInst(UnconditionalCheckedCastInst *Inst) {
   EraseInstAction(Inst);
   WillSucceedAction();
   return Result;
+
+  return nullptr;
 }
 
 /// Deletes all instructions after \p UnreachableInst except dealloc_stack
@@ -2621,7 +2546,7 @@ void CastOptimizer::deleteInstructionsAfterUnreachable(
         DeallocStack->moveBefore(TrapInst);
         continue;
       }
-    CurInst->replaceAllUsesOfAllResultsWithUndef();
+    CurInst->replaceAllUsesWithUndef();
     EraseInstAction(CurInst);
   }
 }
@@ -2658,7 +2583,7 @@ static bool optimizeStaticallyKnownProtocolConformance(
 
     auto Proto = dyn_cast<ProtocolDecl>(TargetType->getAnyNominal());
     if (Proto) {
-      auto Conformance = SM->lookupConformance(SourceType, Proto);
+      auto Conformance = SM->lookupConformance(SourceType, Proto, nullptr);
       if (Conformance.hasValue()) {
         // SourceType is a non-existential type conforming to a
         // protocol represented by the TargetType.
@@ -2681,13 +2606,17 @@ static bool optimizeStaticallyKnownProtocolConformance(
               Conformances);
           B.createCopyAddr(
               Loc, Src, ExistentialAddr,
-              IsTake_t::IsTake,
+              (Inst->getConsumptionKind() != CastConsumptionKind::CopyOnSuccess)
+                  ? IsTake_t::IsTake
+                  : IsTake_t::IsNotTake,
               IsInitialization_t::IsInitialization);
           break;
         }
         case ExistentialRepresentation::Class: {
           auto Value = B.createLoad(Loc, Src,
                                     swift::LoadOwnershipQualifier::Unqualified);
+          if (Inst->getConsumptionKind() == CastConsumptionKind::CopyOnSuccess)
+            B.createRetainValue(Loc, Value, B.getDefaultAtomicity());
           auto Existential =
               B.createInitExistentialRef(Loc, Dest->getType().getObjectType(),
                                          SourceType, Value, Conformances);
@@ -2702,6 +2631,8 @@ static bool optimizeStaticallyKnownProtocolConformance(
               B.createProjectExistentialBox(Loc, Src->getType(), AllocBox);
           auto Value = B.createLoad(Loc, Src,
                                     swift::LoadOwnershipQualifier::Unqualified);
+          if (Inst->getConsumptionKind() == CastConsumptionKind::CopyOnSuccess)
+            B.createRetainValue(Loc, Value, B.getDefaultAtomicity());
           B.createStore(Loc, Value, Projection,
                         swift::StoreOwnershipQualifier::Unqualified);
           B.createStore(Loc, AllocBox, Dest,
@@ -2710,6 +2641,7 @@ static bool optimizeStaticallyKnownProtocolConformance(
         }
         };
 
+        Inst->replaceAllUsesWithUndef();
         return true;
       }
     }
@@ -2755,6 +2687,7 @@ optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst)
                           StoreOwnershipQualifier::Unqualified);
     }
     auto *TrapI = Builder.createBuiltinTrap(Loc);
+    Inst->replaceAllUsesWithUndef();
     EraseInstAction(Inst);
     Builder.setInsertionPoint(std::next(SILBasicBlock::iterator(TrapI)));
     auto *UnreachableInst =
@@ -2791,8 +2724,16 @@ optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst)
     }
 
     if (ResultNotUsed) {
-      SILBuilder B(Inst);
-      B.createDestroyAddr(Inst->getLoc(), Inst->getSrc());
+      switch (Inst->getConsumptionKind()) {
+        case CastConsumptionKind::TakeAlways:
+        case CastConsumptionKind::TakeOnSuccess: {
+          SILBuilder B(Inst);
+          B.createDestroyAddr(Inst->getLoc(), Inst->getSrc());
+          break;
+        }
+        case CastConsumptionKind::CopyOnSuccess:
+          break;
+      }
       if (DestroyDestInst)
         EraseInstAction(DestroyDestInst);
       EraseInstAction(Inst);
@@ -2801,7 +2742,7 @@ optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst)
     }
 
     // Try to apply the bridged casts optimizations.
-    auto NewI = optimizeBridgedCasts(Inst, CastConsumptionKind::TakeAlways,
+    auto NewI = optimizeBridgedCasts(Inst, Inst->getConsumptionKind(),
                                      false, Src, Dest, SourceType,
                                      TargetType, nullptr, nullptr);
     if (NewI) {
@@ -2824,13 +2765,14 @@ optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst)
       return nullptr;
 
     SILBuilderWithScope Builder(Inst);
-    if (!emitSuccessfulIndirectUnconditionalCast(Builder, Mod.getSwiftModule(),
-                                                 Loc, Src, SourceType, Dest,
-                                                 TargetType, Inst)) {
+    if (!emitSuccessfulIndirectUnconditionalCast(
+            Builder, Mod.getSwiftModule(), Loc, Inst->getConsumptionKind(), Src,
+            SourceType, Dest, TargetType, Inst)) {
       // No optimization was possible.
       return nullptr;
     }
 
+    Inst->replaceAllUsesWithUndef();
     EraseInstAction(Inst);
     WillSucceedAction();
   }
@@ -2838,42 +2780,25 @@ optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst)
   return nullptr;
 }
 
-bool swift::simplifyUsers(SingleValueInstruction *I) {
+bool swift::simplifyUsers(SILInstruction *I) {
   bool Changed = false;
 
   for (auto UI = I->use_begin(), UE = I->use_end(); UI != UE; ) {
     SILInstruction *User = UI->getUser();
     ++UI;
 
-    auto SVI = dyn_cast<SingleValueInstruction>(User);
-    if (!SVI) continue;
-
-    SILValue S = simplifyInstruction(SVI);
+    if (!User->hasValue())
+      continue;
+    SILValue S = simplifyInstruction(User);
     if (!S)
       continue;
 
-    SVI->replaceAllUsesWith(S);
-    SVI->eraseFromParent();
+    User->replaceAllUsesWith(S);
+    User->eraseFromParent();
     Changed = true;
   }
 
   return Changed;
-}
-
-/// True if a type can be expanded
-/// without a significant increase to code size.
-bool swift::shouldExpand(SILModule &Module, SILType Ty) {
-  if (EnableExpandAll) {
-    return true;
-  }
-  if (Ty.isAddressOnly(Module)) {
-    return false;
-  }
-  unsigned numFields = Module.Types.countNumberOfFields(Ty);
-  if (numFields > 6) {
-    return false;
-  }
-  return true;
 }
 
 /// Some support functions for the global-opt and let-properties-opts
@@ -2903,55 +2828,56 @@ bool swift::isSimpleType(SILType SILTy, SILModule& Module) {
 bool
 swift::analyzeStaticInitializer(SILValue V,
                                 SmallVectorImpl<SILInstruction *> &Insns) {
-  // Save every instruction we see.
-  // TODO: MultiValueInstruction?
-  if (auto I = dyn_cast<SingleValueInstruction>(V))
-    Insns.push_back(I);
+  auto I = dyn_cast<SILInstruction>(V);
+  if (!I)
+    return false;
 
-  if (auto *SI = dyn_cast<StructInst>(V)) {
-    // If it is not a struct which is a simple type, bail.
-    if (!isSimpleType(SI->getType(), SI->getModule()))
-      return false;
-    for (auto &Op: SI->getAllOperands()) {
-      // If one of the struct instruction operands is not
-      // a simple initializer, bail.
-      if (!analyzeStaticInitializer(Op.get(), Insns))
+  while (true) {
+    if (!isa<AllocGlobalInst>(I))
+      Insns.push_back(I);
+    if (auto *SI = dyn_cast<StructInst>(I)) {
+      // If it is not a struct which is a simple type, bail.
+      if (!isSimpleType(SI->getType(), I->getModule()))
         return false;
-    }
-    return true;
-  }
-
-  if (auto *TI = dyn_cast<TupleInst>(V)) {
-    // If it is not a tuple which is a simple type, bail.
-    if (!isSimpleType(TI->getType(), TI->getModule()))
-      return false;
-    for (auto &Op: TI->getAllOperands()) {
-      // If one of the struct instruction operands is not
-      // a simple initializer, bail.
-      if (!analyzeStaticInitializer(Op.get(), Insns))
-        return false;
-    }
-    return true;
-  }
-
-  if (auto *bi = dyn_cast<BuiltinInst>(V)) {
-    switch (bi->getBuiltinInfo().ID) {
-    case BuiltinValueKind::FPTrunc:
-      if (auto *LI = dyn_cast<LiteralInst>(bi->getArguments()[0])) {
-        return analyzeStaticInitializer(LI, Insns);
+      for (auto &Op: SI->getAllOperands()) {
+        // If one of the struct instruction operands is not
+        // a simple initializer, bail.
+        if (!analyzeStaticInitializer(Op.get(), Insns))
+          return false;
       }
-      return false;
-    default:
+      return true;
+    } if (auto *TI = dyn_cast<TupleInst>(I)) {
+      // If it is not a tuple which is a simple type, bail.
+      if (!isSimpleType(TI->getType(), I->getModule()))
+        return false;
+      for (auto &Op: TI->getAllOperands()) {
+        // If one of the struct instruction operands is not
+        // a simple initializer, bail.
+        if (!analyzeStaticInitializer(Op.get(), Insns))
+          return false;
+      }
+      return true;
+    } else {
+      if (auto *bi = dyn_cast<BuiltinInst>(I)) {
+        switch (bi->getBuiltinInfo().ID) {
+        case BuiltinValueKind::FPTrunc:
+          if (auto *LI = dyn_cast<LiteralInst>(bi->getArguments()[0])) {
+            I = LI;
+            continue;
+          }
+          break;
+        default:
+          return false;
+        }
+      }
+
+      if (I->getKind() == ValueKind::IntegerLiteralInst
+          || I->getKind() == ValueKind::FloatLiteralInst
+          || I->getKind() == ValueKind::StringLiteralInst)
+        return true;
       return false;
     }
   }
-
-  if (isa<IntegerLiteralInst>(V)
-      || isa<FloatLiteralInst>(V)
-      || isa<StringLiteralInst>(V)) {
-    return true;
-  }
-
   return false;
 }
 
@@ -2961,7 +2887,7 @@ swift::analyzeStaticInitializer(SILValue V,
 /// starting with the innermost struct_element_addr
 /// Move into utils.
 void swift::replaceLoadSequence(SILInstruction *I,
-                                SILValue Value,
+                                SILInstruction *Value,
                                 SILBuilder &B) {
   if (auto *LI = dyn_cast<LoadInst>(I)) {
     LI->replaceAllUsesWith(Value);
@@ -3008,32 +2934,32 @@ bool swift::calleesAreStaticallyKnowable(SILModule &M, SILDeclRef Decl) {
   if (AFD->isDynamic())
     return false;
 
-  if (!AFD->hasAccess())
+  if (!AFD->hasAccessibility())
     return false;
 
   // Only consider 'private' members, unless we are in whole-module compilation.
   switch (AFD->getEffectiveAccess()) {
-  case AccessLevel::Open:
+  case Accessibility::Open:
     return false;
-  case AccessLevel::Public:
+  case Accessibility::Public:
     if (isa<ConstructorDecl>(AFD)) {
       // Constructors are special: a derived class in another module can
       // "override" a constructor if its class is "open", although the
       // constructor itself is not open.
       auto *ND = AFD->getDeclContext()
           ->getAsNominalTypeOrNominalTypeExtensionContext();
-      if (ND->getEffectiveAccess() == AccessLevel::Open)
+      if (ND->getEffectiveAccess() == Accessibility::Open)
         return false;
     }
     LLVM_FALLTHROUGH;
-  case AccessLevel::Internal:
+  case Accessibility::Internal:
     return M.isWholeModule();
-  case AccessLevel::FilePrivate:
-  case AccessLevel::Private:
+  case Accessibility::FilePrivate:
+  case Accessibility::Private:
     return true;
   }
 
-  llvm_unreachable("Unhandled access level in switch.");
+  llvm_unreachable("Unhandled Accessibility in switch.");
 }
 
 void swift::hoistAddressProjections(Operand &Op, SILInstruction *InsertBefore,
@@ -3066,7 +2992,7 @@ void swift::hoistAddressProjections(Operand &Op, SILInstruction *InsertBefore,
       case ValueKind::RefElementAddrInst:
       case ValueKind::RefTailAddrInst:
       case ValueKind::UncheckedTakeEnumDataAddrInst: {
-        auto *Inst = cast<SingleValueInstruction>(V);
+        auto *Inst = cast<SILInstruction>(V);
         // We are done once the current projection dominates the insert point.
         if (DomTree->dominates(Inst->getParent(), InsertBefore->getParent()))
           return;

@@ -16,7 +16,6 @@
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/Comment.h"
 #include "swift/AST/Initializer.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/AST/LazyResolver.h"
 #include "swift/AST/NameLookup.h"
 #include "swift/AST/ParameterList.h"
@@ -39,6 +38,7 @@
 #include "clang/AST/Decl.h"
 #include "clang/Basic/Module.h"
 #include "clang/Index/USRGeneration.h"
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Compiler.h"
@@ -285,7 +285,7 @@ void getSwiftDocKeyword(const Decl* D, CommandWordsPairs &Words) {
 
 static bool shouldHideDeclFromCompletionResults(const ValueDecl *D) {
   // Hide private stdlib declarations.
-  if (D->isPrivateStdlibDecl(/*treatNonBuiltinProtocolsAsPublic*/false) ||
+  if (D->isPrivateStdlibDecl(/*whitelistProtocols*/false) ||
       // ShowInInterfaceAttr is for decls to show in interface as exception but
       // they are not intended to be used directly.
       D->getAttrs().hasAttribute<ShowInInterfaceAttr>())
@@ -1290,6 +1290,7 @@ class CodeCompletionCallbacksImpl : public CodeCompletionCallbacks {
   SourceLoc DotLoc;
   TypeLoc ParsedTypeLoc;
   DeclContext *CurDeclContext = nullptr;
+  Decl *CStyleForLoopIterationVariable = nullptr;
   DeclAttrKind AttrKind;
   int AttrParamIndex;
   bool IsInSil;
@@ -1308,33 +1309,36 @@ class CodeCompletionCallbacksImpl : public CodeCompletionCallbacks {
     auto *DC = CurDeclContext->getInnermostTypeContext();
     if (!DC)
       return;
-    auto *CD = DC->getAsClassOrClassExtensionContext();
-    if (CD == nullptr)
+    Type DT = DC->getDeclaredTypeOfContext();
+    if (DT.isNull() || DT->is<ErrorType>())
       return;
-    Type ST = CD->getSuperclass();
+    Type ST = DT->getSuperclass();
     if (ST.isNull() || ST->is<ErrorType>())
       return;
-
-    CodeCompletionResultBuilder Builder(Sink,
-                                        CodeCompletionResult::ResultKind::Keyword,
-                                        SemanticContextKind::CurrentNominal,
-                                        {});
-    Builder.setKeywordKind(CodeCompletionKeywordKind::kw_super);
-    Builder.addTextChunk("super");
-    Builder.addTypeAnnotation(ST.getString());
+    if (ST->getNominalOrBoundGenericNominal()) {
+      CodeCompletionResultBuilder Builder(Sink,
+                                          CodeCompletionResult::ResultKind::Keyword,
+                                          SemanticContextKind::CurrentNominal,
+                                          {});
+      Builder.setKeywordKind(CodeCompletionKeywordKind::kw_super);
+      Builder.addTextChunk("super");
+      ST = ST->getReferenceStorageReferent();
+      assert(!ST->isVoid() && "Cannot get type name.");
+      Builder.addTypeAnnotation(ST.getString());
+    }
   }
 
   /// \brief Set to true when we have delivered code completion results
   /// to the \c Consumer.
   bool DeliveredResults = false;
 
-  bool typecheckContext(DeclContext *DC) {
+  bool typecheckContextImpl(DeclContext *DC) {
     // Nothing to type check in module context.
     if (DC->isModuleScopeContext())
       return true;
 
     // Type check the parent context.
-    if (!typecheckContext(DC->getParent()))
+    if (!typecheckContextImpl(DC->getParent()))
       return false;
 
     // Type-check this context.
@@ -1369,6 +1373,17 @@ class CodeCompletionCallbacksImpl : public CodeCompletionCallbacks {
     }
 
     llvm_unreachable("Unhandled DeclContextKind in switch.");
+  }
+
+  /// \returns true on success, false on failure.
+  bool typecheckContext() {
+    return typecheckContextImpl(CurDeclContext);
+  }
+
+  /// \returns true on success, false on failure.
+  bool typecheckParsedDecl() {
+    assert(ParsedDecl && "should have a parsed decl");
+    return typeCheckCompletionDecl(ParsedDecl);
   }
 
   Optional<std::pair<Type, ConcreteDeclRef>> typeCheckParsedExpr() {
@@ -1534,18 +1549,20 @@ protocolForLiteralKind(CodeCompletionLiteralKind kind) {
 /// that is of type () -> ().
 static bool hasTrivialTrailingClosure(const FuncDecl *FD,
                                       AnyFunctionType *funcType) {
-  SmallVector<bool, 4> defaultMap;
-  computeDefaultMap(funcType->getInput(), FD,
-                    /*level*/ FD->isInstanceMember() ? 1 : 0, defaultMap);
-  
-  bool OneArg = defaultMap.size() == 1;
-  if (defaultMap.size() > 1) {
-    auto NonDefault = std::count(defaultMap.begin(), defaultMap.end() - 1, false);
-    OneArg = (NonDefault == 0);
+  unsigned level = FD->isInstanceMember() ? 1 : 0;
+  auto Args = decomposeParamType(funcType->getInput(), FD, level);
+  bool OneArg = Args.size() == 1;
+  if (Args.size() > 1) {
+    unsigned NonDefault =
+        std::count_if(Args.begin(), Args.end() - 1, [](const CallArgParam &P) {
+          return !P.HasDefaultArgument;
+        });
+
+    OneArg = NonDefault == 0;
   }
 
   if (OneArg)
-    if (auto Fn = funcType->getParams().back().getType()->getAs<AnyFunctionType>())
+    if (auto Fn = Args.back().Ty->getAs<AnyFunctionType>())
       return Fn->getInput()->isVoid() && Fn->getResult()->isVoid();
 
   return false;
@@ -1608,6 +1625,9 @@ class CompletionLookup final : public swift::VisibleDeclConsumer {
 
   /// \brief Innermost method that the code completion point is in.
   const AbstractFunctionDecl *CurrentMethod = nullptr;
+
+  /// \brief Declarations that should get ExpressionSpecific semantic context.
+  llvm::SmallSet<const Decl *, 4> ExpressionSpecificDecls;
 
   Optional<SemanticContextKind> ForcedSemanticContext = None;
   bool IsUnresolvedMember = false;
@@ -1779,6 +1799,10 @@ public:
     IncludeInstanceMembers = true;
   }
 
+  void addExpressionSpecificDecl(const Decl *D) {
+    ExpressionSpecificDecls.insert(D);
+  }
+
   void addSubModuleNames(std::vector<std::pair<std::string, bool>>
       &SubModuleNameVisibilityPairs) {
     for (auto &Pair : SubModuleNameVisibilityPairs) {
@@ -1866,6 +1890,8 @@ public:
     case DeclVisibilityKind::LocalVariable:
     case DeclVisibilityKind::FunctionParameter:
     case DeclVisibilityKind::GenericParameter:
+      if (ExpressionSpecificDecls.count(D))
+        return SemanticContextKind::ExpressionSpecific;
       return SemanticContextKind::Local;
 
     case DeclVisibilityKind::MemberOfCurrentNominal:
@@ -1957,7 +1983,7 @@ public:
       }
 
       if (t->isTypeParameter()) {
-        auto protos = genericSig->getConformsTo(t);
+        auto protos = genericSig->getConformsTo(t, *M);
         if (!protos.empty())
           return buildProtocolComposition(protos);
       }
@@ -2031,7 +2057,7 @@ public:
       if (auto NTD = BaseTy->getAnyNominal()) {
         auto *Module = NTD->getParentModule();
         auto Conformance = Module->lookupConformance(
-            BaseTy, ATD->getProtocol());
+            BaseTy, ATD->getProtocol(), TypeResolver.get());
         if (Conformance && Conformance->isConcrete()) {
           return Conformance->getConcrete()
               ->getTypeWitness(const_cast<AssociatedTypeDecl *>(ATD),
@@ -2044,7 +2070,7 @@ public:
 
   void addVarDeclRef(const VarDecl *VD, DeclVisibilityKind Reason) {
     if (!VD->hasName() ||
-        (VD->hasAccess() && !VD->isAccessibleFrom(CurrDeclContext)) ||
+        (VD->hasAccessibility() && !VD->isAccessibleFrom(CurrDeclContext)) ||
         shouldHideDeclFromCompletionResults(VD))
       return;
 
@@ -2088,8 +2114,7 @@ public:
         type = ParamDecl::getVarargBaseTy(type);
 
       Builder.addCallParameter(param->getArgumentName(), type,
-                               param->isVariadic(), /*Outermost*/true,
-                               param->isInOut());
+                               param->isVariadic(), true);
     }
   }
 
@@ -2123,8 +2148,7 @@ public:
       else if (IsTopLevel)
         Builder.addAnnotatedLeftParen();
       Builder.addCallParameter(Identifier(), PT->getUnderlyingType(),
-                               /*IsVarArg*/false, IsTopLevel,
-                               PT->getParameterFlags().isInOut());
+                               /*IsVarArg*/false, IsTopLevel);
       if (IsTopLevel)
         Builder.addRightParen();
       return;
@@ -2135,7 +2159,7 @@ public:
     else if (IsTopLevel)
       Builder.addAnnotatedLeftParen();
 
-    Builder.addCallParameter(Label, T, IsVarArg, IsTopLevel, /*isInOut*/false);
+    Builder.addCallParameter(Label, T, IsVarArg, IsTopLevel);
     if (IsTopLevel)
       Builder.addRightParen();
   }
@@ -2200,7 +2224,7 @@ public:
 
         case DefaultArgumentKind::Normal:
         case DefaultArgumentKind::Inherited:
-        case DefaultArgumentKind::NilLiteral:
+        case DefaultArgumentKind::Nil:
         case DefaultArgumentKind::EmptyArray:
         case DefaultArgumentKind::EmptyDictionary:
           return !includeDefaultArgs;
@@ -2240,10 +2264,9 @@ public:
           auto argName = BodyParams->get(i)->getArgumentName();
           auto bodyName = BodyParams->get(i)->getName();
           Builder.addCallParameter(argName, bodyName, ParamType, TupleElt.isVararg(),
-                                   true, TupleElt.isInOut());
+                                   true);
         } else {
-          Builder.addCallParameter(Name, ParamType, TupleElt.isVararg(),
-                                   /*TopLevel*/true, TupleElt.isInOut());
+          Builder.addCallParameter(Name, ParamType, TupleElt.isVararg(), true);
         }
         modifiedBuilder = true;
         NeedComma = true;
@@ -2251,11 +2274,9 @@ public:
     } else if (!shouldSkipArg(0)) {
       // If it's not a tuple, it could be a unary function.
       Type T = AFT->getInput();
-      bool isInOut = false;
       if (auto *PT = dyn_cast<ParenType>(T.getPointer())) {
         // Only unwrap the paren sugar, if it exists.
         T = PT->getUnderlyingType();
-        isInOut = PT->getParameterFlags().isInOut();
       }
 
       modifiedBuilder = true;
@@ -2263,10 +2284,9 @@ public:
         auto argName = BodyParams->get(0)->getArgumentName();
         auto bodyName = BodyParams->get(0)->getName();
         Builder.addCallParameter(argName, bodyName, T,
-                                 /*IsVarArg*/false, /*Toplevel*/true, isInOut);
+                                 /*IsVarArg*/false, true);
       } else
-        Builder.addCallParameter(Identifier(), T, /*IsVarArg*/false,
-                                 /*TopLevel*/true, isInOut);
+        Builder.addCallParameter(Identifier(), T, /*IsVarArg*/false, true);
     }
 
     return modifiedBuilder;
@@ -2451,16 +2471,12 @@ public:
       Type FirstInputType = FunctionType->castTo<AnyFunctionType>()->getInput();
 
       if (IsImplicitlyCurriedInstanceMethod) {
-        bool isInOut = false;
-        if (auto PT = dyn_cast<ParenType>(FirstInputType.getPointer())) {
+        if (auto PT = dyn_cast<ParenType>(FirstInputType.getPointer()))
           FirstInputType = PT->getUnderlyingType();
-          isInOut = PT->getParameterFlags().isInOut();
-        }
 
         Builder.addLeftParen();
         Builder.addCallParameter(Ctx.Id_self, FirstInputType,
-                                 /*IsVarArg*/ false, /*TopLevel*/true,
-                                 isInOut);
+                                 /*IsVarArg*/ false, true);
         Builder.addRightParen();
       } else if (trivialTrailingClosure) {
         Builder.addBraceStmtWithCursor(" { code }");
@@ -2527,7 +2543,7 @@ public:
     }
 
     // If we won't be able to provide a result, bail out.
-    if (MemberType->hasError() && addName.empty() && !needInit)
+    if (MemberType->is<ErrorType>() && addName.empty() && !needInit)
       return;
 
     // Add the constructor, possibly including any default arguments.
@@ -2698,7 +2714,7 @@ public:
                          DeclVisibilityKind Reason,
                          bool HasTypeContext) {
     if (!EED->hasName() ||
-        (EED->hasAccess() && !EED->isAccessibleFrom(CurrDeclContext)) ||
+        (EED->hasAccessibility() && !EED->isAccessibleFrom(CurrDeclContext)) ||
         shouldHideDeclFromCompletionResults(EED))
       return;
 
@@ -3278,9 +3294,7 @@ public:
     builder.addEqual();
     builder.addWhitespace(" ");
     assert(RHSType && resultType);
-    builder.addCallParameter(Identifier(), Identifier(), RHSType,
-                             /*IsVarArg*/false, /*TopLevel*/true,
-                             /*IsInOut*/false);
+    builder.addCallParameter(Identifier(), Identifier(), RHSType, false, true);
     addTypeAnnotation(builder, resultType);
   }
 
@@ -3303,7 +3317,7 @@ public:
     builder.addWhitespace(" ");
     if (RHSType)
       builder.addCallParameter(Identifier(), Identifier(), RHSType, false,
-                               true, /*IsInOut*/false);
+                               true);
     if (resultType)
       addTypeAnnotation(builder, resultType);
   }
@@ -3455,7 +3469,7 @@ public:
     }
 
     if (leadingSequence.empty() && LHS->getType() &&
-        LHS->getType()->hasLValueType()) {
+        LHS->getType()->isLValueType()) {
       addAssignmentOperator(LHS->getType()->getRValueType(),
                             CurrDeclContext->getASTContext().TheEmptyTupleType);
     }
@@ -3555,16 +3569,16 @@ public:
       builder.addTextChunk("#colorLiteral");
       builder.addLeftParen();
       builder.addCallParameter(context.getIdentifier("red"),
-                               floatType, false, true, /*IsInOut*/false);
+                               floatType, false, true);
       builder.addComma();
       builder.addCallParameter(context.getIdentifier("green"), floatType,
-                               false, true, /*IsInOut*/false);
+                               false, true);
       builder.addComma();
       builder.addCallParameter(context.getIdentifier("blue"), floatType,
-                               false, true, /*IsInOut*/false);
+                               false, true);
       builder.addComma();
       builder.addCallParameter(context.getIdentifier("alpha"), floatType,
-                               false, true, /*IsInOut*/false);
+                               false, true);
       builder.addRightParen();
     });
 
@@ -3573,7 +3587,7 @@ public:
       builder.addTextChunk("#imageLiteral");
       builder.addLeftParen();
       builder.addCallParameter(context.getIdentifier("resourceName"),
-                               stringType, false, true, /*IsInOut*/false);
+                               stringType, false, true);
       builder.addRightParen();
     });
 
@@ -3732,8 +3746,7 @@ public:
         for (auto Ex : NTD->getExtensions()) {
           handleDeclRange(Ex->getMembers(), Reason);
         }
-      } else if (!VD->getBaseName().isSpecial() &&
-                 isNameHit(VD->getBaseName().getIdentifier().str())) {
+      } else if (isNameHit(VD->getNameStr())) {
         if (VD->hasInterfaceType())
           unboxType(VD->getInterfaceType());
       }
@@ -4135,12 +4148,12 @@ public:
   void addAccessControl(const ValueDecl *VD,
                         CodeCompletionResultBuilder &Builder) {
     assert(CurrDeclContext->getAsNominalTypeOrNominalTypeExtensionContext());
-    auto AccessOfContext =
+    auto AccessibilityOfContext =
       CurrDeclContext->getAsNominalTypeOrNominalTypeExtensionContext()
         ->getFormalAccess();
-    auto Access = std::min(VD->getFormalAccess(), AccessOfContext);
+    auto Access = std::min(VD->getFormalAccess(), AccessibilityOfContext);
     // Only emit 'public', not needed otherwise.
-    if (Access >= AccessLevel::Public)
+    if (Access >= Accessibility::Public)
       Builder.addAccessControlKeyword(Access);
   }
 
@@ -4429,6 +4442,8 @@ void CodeCompletionCallbacksImpl::completeStmtOrExpr() {
   assert(P.Tok.is(tok::code_complete));
   Kind = CompletionKind::StmtOrExpr;
   CurDeclContext = P.CurDeclContext;
+  CStyleForLoopIterationVariable =
+      CodeCompletionCallbacks::CStyleForLoopIterationVariable;
 }
 
 void CodeCompletionCallbacksImpl::completePostfixExprBeginning(CodeCompletionExpr *E) {
@@ -4449,6 +4464,8 @@ void CodeCompletionCallbacksImpl::completePostfixExprBeginning(CodeCompletionExp
 
 
   CurDeclContext = P.CurDeclContext;
+  CStyleForLoopIterationVariable =
+      CodeCompletionCallbacks::CStyleForLoopIterationVariable;
   CodeCompleteTokenExpr = E;
 }
 
@@ -5105,13 +5122,14 @@ void CodeCompletionCallbacksImpl::doneParsing() {
   // Add keywords even if type checking fails completely.
   addKeywords(CompletionContext.getResultSink(), MaybeFuncBody);
 
-  if (auto *DC = dyn_cast_or_null<DeclContext>(ParsedDecl)) {
-    if (DC->isChildContextOf(CurDeclContext))
-      CurDeclContext = DC;
-  }
-
-  if (!typecheckContext(CurDeclContext))
+  if (!typecheckContext())
     return;
+
+  if (ParsedDecl && !typecheckParsedDecl())
+    return;
+
+  if (auto *DC = dyn_cast_or_null<DeclContext>(ParsedDecl))
+    CurDeclContext = DC;
 
   Optional<Type> ExprType;
   ConcreteDeclRef ReferencedDecl = nullptr;
@@ -5147,6 +5165,8 @@ void CodeCompletionCallbacksImpl::doneParsing() {
     Lookup.setPreferFunctionReferencesToCalls();
 
   auto DoPostfixExprBeginning = [&] (){
+    if (CStyleForLoopIterationVariable)
+      Lookup.addExpressionSpecificDecl(CStyleForLoopIterationVariable);
     SourceLoc Loc = P.Context.SourceMgr.getCodeCompletionLoc();
     Lookup.getValueCompletionsInDeclContext(Loc);
   };

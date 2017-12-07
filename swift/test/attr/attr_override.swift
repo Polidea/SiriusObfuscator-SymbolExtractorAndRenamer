@@ -1,4 +1,4 @@
-// RUN: %target-typecheck-verify-swift -swift-version 5
+// RUN: %target-typecheck-verify-swift
 
 @override // expected-error {{'override' can only be specified on class members}} {{1-11=}} expected-error {{'override' is a declaration modifier, not an attribute}} {{1-2=}}
 func virtualAttributeCanNotBeUsedInSource() {}
@@ -38,7 +38,6 @@ class A {
   }
   var v8: Int = 0  // expected-note {{attempt to override property here}}
   var v9: Int { return 5 } // expected-note{{attempt to override property here}}
-  var v10: Int { return 5 } // expected-note{{attempt to override property here}}
 
   subscript (i: Int) -> String { // expected-note{{potential overridden subscript 'subscript' here}}
     get {
@@ -95,7 +94,6 @@ class B : A {
   // Stored properties
   override var v8: Int { return 5 } // expected-error {{cannot override mutable property with read-only property 'v8'}}
   override var v9: Int // expected-error{{cannot override with a stored property 'v9'}}
-  lazy override var v10: Int = 5 // expected-error{{cannot override with a stored property 'v10'}}
 
   override subscript (i: Int) -> String {
     get {
@@ -140,7 +138,7 @@ class B : A {
 }
 
 extension B {
-  override func overriddenInExtension() {} // expected-error{{overriding declarations in extensions is not supported}}
+  override func overriddenInExtension() {} // expected-error{{declarations in extensions cannot override yet}}
 }
 
 struct S {
@@ -327,7 +325,7 @@ class MismatchOptional : MismatchOptionalBase {
   override func compositionParam(x: P1 & P2) {} // expected-error {{cannot override instance method parameter of type '(P1 & P2)?' with non-optional type 'P1 & P2'}} {{37-37=(}} {{44-44=)?}}
 
   override func nameAndTypeMismatch(_: Int) {}
-  // expected-error@-1 {{argument labels for method 'nameAndTypeMismatch' do not match those of overridden method 'nameAndTypeMismatch(label:)'}} {{37-37=label }}
+  // expected-error@-1 {{argument names for method 'nameAndTypeMismatch' do not match those of overridden method 'nameAndTypeMismatch(label:)'}} {{37-37=label }}
   // expected-error@-2 {{cannot override instance method parameter of type 'Int?' with non-optional type 'Int'}} {{43-43=?}}
 
   override func ambiguousOverride(a: Int?, b: Int?) {} // expected-error {{declaration 'ambiguousOverride(a:b:)' cannot override more than one superclass declaration}} {{none}}

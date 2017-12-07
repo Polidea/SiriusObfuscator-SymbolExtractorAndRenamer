@@ -302,18 +302,18 @@ AliasResult AliasAnalysis::aliasAddressProjection(SILValue V1, SILValue V2,
 /// TBAA to know what the real types associated with the SILInstruction are.
 static bool isTypedAccessOracle(SILInstruction *I) {
   switch (I->getKind()) {
-  case SILInstructionKind::RefElementAddrInst:
-  case SILInstructionKind::RefTailAddrInst:
-  case SILInstructionKind::StructElementAddrInst:
-  case SILInstructionKind::TupleElementAddrInst:
-  case SILInstructionKind::UncheckedTakeEnumDataAddrInst:
-  case SILInstructionKind::LoadInst:
-  case SILInstructionKind::StoreInst:
-  case SILInstructionKind::AllocStackInst:
-  case SILInstructionKind::AllocBoxInst:
-  case SILInstructionKind::ProjectBoxInst:
-  case SILInstructionKind::DeallocStackInst:
-  case SILInstructionKind::DeallocBoxInst:
+  case ValueKind::RefElementAddrInst:
+  case ValueKind::RefTailAddrInst:
+  case ValueKind::StructElementAddrInst:
+  case ValueKind::TupleElementAddrInst:
+  case ValueKind::UncheckedTakeEnumDataAddrInst:
+  case ValueKind::LoadInst:
+  case ValueKind::StoreInst:
+  case ValueKind::AllocStackInst:
+  case ValueKind::AllocBoxInst:
+  case ValueKind::ProjectBoxInst:
+  case ValueKind::DeallocStackInst:
+  case ValueKind::DeallocBoxInst:
     return true;
   default:
     return false;
@@ -352,8 +352,7 @@ static bool isAddressRootTBAASafe(SILValue V) {
 static SILType findTypedAccessType(SILValue V) {
   // First look at the origin of V and see if we have any instruction that is a
   // typed oracle.
-  // TODO: MultiValueInstruction
-  if (auto *I = dyn_cast<SingleValueInstruction>(V))
+  if (auto *I = dyn_cast<SILInstruction>(V))
     if (isTypedAccessOracle(I))
       return V->getType();
 

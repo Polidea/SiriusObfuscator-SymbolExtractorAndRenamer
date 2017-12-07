@@ -377,11 +377,8 @@ public:
     /// NodeType::Return.
     CGNode *ReturnNode = nullptr;
 
-    /// The list of use points.
-    llvm::SmallVector<SILNode *, 16> UsePointTable;
-
     /// Mapping of use points to bit indices in CGNode::UsePoints.
-    llvm::DenseMap<SILNode *, int> UsePoints;
+    llvm::DenseMap<ValueBase *, int> UsePoints;
 
     /// The allocator for nodes.
     llvm::SpecificBumpPtrAllocator<CGNode> NodeAllocator;
@@ -486,16 +483,13 @@ public:
     }
 
     /// Adds an argument/instruction in which the node's value is used.
-    int addUsePoint(CGNode *Node, SILNode *User) {
+    int addUsePoint(CGNode *Node, ValueBase *V) {
       if (Node->getEscapeState() >= EscapeState::Global)
         return -1;
 
-      User = User->getRepresentativeSILNodeInObject();
       int Idx = (int)UsePoints.size();
-      assert(UsePoints.count(User) == 0 && "value is already a use-point");
-      UsePoints[User] = Idx;
-      UsePointTable.push_back(User);
-      assert(UsePoints.size() == UsePointTable.size());
+      assert(UsePoints.count(V) == 0 && "value is already a use-point");
+      UsePoints[V] = Idx;
       Node->setUsePointBit(Idx);
       return Idx;
     }
@@ -568,15 +562,11 @@ public:
       return Node->UsePoints.count();
     }
 
-    /// Returns true if \p UsePoint is a use of \p Node, i.e. UsePoint may
-    /// (indirectly) somehow refer to the Node's value.
+    /// Returns true if \p V is a use of \p Node, i.e. V may (indirectly)
+    /// somehow refer to the Node's value.
     /// Use-points are only values which are relevant for lifeness computation,
     /// e.g. release or apply instructions.
-    bool isUsePoint(SILNode *UsePoint, CGNode *Node);
-
-    /// Returns all use points of \p Node in \p UsePoints.
-    void getUsePoints(CGNode *Node,
-                      llvm::SmallVectorImpl<SILNode *> &UsePoints);
+    bool isUsePoint(ValueBase *V, CGNode *Node);
 
     /// Computes the use point information.
     void computeUsePoints();
@@ -667,14 +657,14 @@ private:
 
   /// Callee analysis, used for determining the callees at call sites.
   BasicCalleeAnalysis *BCA;
-
-  /// Returns true if \p V may encapsulate a "pointer" value.
+  
+  /// Returns true if \p V is a "pointer" value.
   /// See EscapeAnalysis::NodeType::Value.
   bool isPointer(ValueBase *V);
 
-  /// If \p pointer is a pointer, set it to global escaping.
-  void setEscapesGlobal(ConnectionGraph *ConGraph, ValueBase *pointer) {
-    if (CGNode *Node = ConGraph->getNode(pointer, this))
+  /// If V is a pointer, set it to global escaping.
+  void setEscapesGlobal(ConnectionGraph *ConGraph, ValueBase *V) {
+    if (CGNode *Node = ConGraph->getNode(V, this))
       ConGraph->setEscapesGlobal(Node);
   }
 
@@ -741,7 +731,7 @@ private:
 
   /// Returns true if the value \p V can escape to the \p UsePoint, where
   /// \p UsePoint is either a release-instruction or a function call.
-  bool canEscapeToUsePoint(SILValue V, SILNode *UsePoint,
+  bool canEscapeToUsePoint(SILValue V, ValueBase *UsePoint,
                            ConnectionGraph *ConGraph);
 
   friend struct ::CGForDotView;
@@ -819,7 +809,7 @@ public:
   /// Notify the analysis about changed witness or vtables.
   virtual void invalidateFunctionTables() override { }
 
-  virtual void handleDeleteNotification(SILNode *N) override;
+  virtual void handleDeleteNotification(ValueBase *I) override;
 
   virtual bool needsNotifications() override { return true; }
 

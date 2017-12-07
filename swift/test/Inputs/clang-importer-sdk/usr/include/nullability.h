@@ -3,9 +3,9 @@
 
 @import Foundation;
 
-_Nullable id getId1(void);
+__nullable id getId1(void);
 
-extern _Nullable id global_id;
+extern __nullable id global_id;
 
 @interface SomeClass
 - (nonnull id)methodA:(nullable SomeClass *)obj;

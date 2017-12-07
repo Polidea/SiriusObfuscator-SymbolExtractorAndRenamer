@@ -15,11 +15,6 @@
 //         http://en.wikipedia.org/wiki/SHA-1
 import TestsUtils
 
-public let HashTest = BenchmarkInfo(
-  name: "HashTest",
-  runFunction: run_HashTest,
-  tags: [.validation, .algorithm])
-
 class Hash {
   /// \brief C'tor.
   init(_ bs: Int) {

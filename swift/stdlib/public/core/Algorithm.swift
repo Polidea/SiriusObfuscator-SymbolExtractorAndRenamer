@@ -90,7 +90,9 @@ public func max<T : Comparable>(_ x: T, _ y: T, _ z: T, _ rest: T...) -> T {
 /// To create an instance of `EnumeratedIterator`, call
 /// `enumerated().makeIterator()` on a sequence or collection.
 @_fixed_layout
-public struct EnumeratedIterator<Base: IteratorProtocol> {
+public struct EnumeratedIterator<
+  Base : IteratorProtocol
+> : IteratorProtocol, Sequence {
   @_versioned
   internal var _base: Base
   @_versioned
@@ -103,9 +105,7 @@ public struct EnumeratedIterator<Base: IteratorProtocol> {
     self._base = _base
     self._count = 0
   }
-}
 
-extension EnumeratedIterator: IteratorProtocol, Sequence {
   /// The type of element returned by `next()`.
   public typealias Element = (offset: Int, element: Base.Element)
 
@@ -139,7 +139,7 @@ extension EnumeratedIterator: IteratorProtocol, Sequence {
 ///     // Prints "0: foo"
 ///     // Prints "1: bar"
 @_fixed_layout
-public struct EnumeratedSequence<Base: Sequence> {
+public struct EnumeratedSequence<Base : Sequence> : Sequence {
   @_versioned
   internal var _base: Base
 
@@ -149,13 +149,31 @@ public struct EnumeratedSequence<Base: Sequence> {
   internal init(_base: Base) {
     self._base = _base
   }
-}
 
-extension EnumeratedSequence: Sequence {
   /// Returns an iterator over the elements of this sequence.
   @_inlineable
   public func makeIterator() -> EnumeratedIterator<Base.Iterator> {
     return EnumeratedIterator(_base: _base.makeIterator())
+  }
+}
+
+@available(*, unavailable, renamed: "EnumeratedIterator")
+public struct EnumerateGenerator<Base : IteratorProtocol> { }
+
+@available(*, unavailable, renamed: "EnumeratedSequence")
+public struct EnumerateSequence<Base : Sequence> {}
+
+extension EnumeratedIterator {
+  @available(*, unavailable, message: "use the 'enumerated()' method on the sequence")
+  public init(_ base: Base) {
+    Builtin.unreachable()
+  }
+}
+
+extension EnumeratedSequence {
+  @available(*, unavailable, message: "use the 'enumerated()' method on the sequence")
+  public init(_ base: Base) {
+    Builtin.unreachable()
   }
 }
 

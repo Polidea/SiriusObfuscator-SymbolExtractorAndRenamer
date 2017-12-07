@@ -6,8 +6,7 @@
         ((x (dir-locals-find-file default-directory))
          (this-directory (if (listp x) (car x) (file-name-directory x))))
         (unless (or (featurep 'swift-project-settings) 
-                    (and (fboundp 'tramp-tramp-file-p)
-                         (tramp-tramp-file-p this-directory)))
+                    (tramp-tramp-file-p this-directory))
           (add-to-list 'load-path
                        (concat this-directory "utils")
                        :append)

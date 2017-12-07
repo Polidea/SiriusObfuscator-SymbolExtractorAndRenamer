@@ -1,5 +1,7 @@
+#include "swift/Syntax/ExprSyntax.h"
+#include "swift/Syntax/GenericSyntax.h"
 #include "swift/Syntax/SyntaxFactory.h"
-#include "swift/Syntax/SyntaxBuilders.h"
+#include "swift/Syntax/UnknownSyntax.h"
 #include "llvm/ADT/SmallString.h"
 #include "gtest/gtest.h"
 
@@ -12,14 +14,12 @@ using namespace swift::syntax;
 SymbolicReferenceExprSyntax getCannedSymbolicRef() {
   // First, make a symbolic reference to an 'Array<Int>'
   auto Array = SyntaxFactory::makeIdentifier("Array", {}, {});
-  auto Int = SyntaxFactory::makeIdentifier("Int", {}, {});
-  auto IntType = SyntaxFactory::makeSimpleTypeIdentifier(Int, None);
-  auto IntArg = SyntaxFactory::makeGenericArgument(IntType, None);
-  GenericArgumentClauseSyntaxBuilder ArgBuilder;
+  auto IntType = SyntaxFactory::makeTypeIdentifier("Int", {}, {});
+  GenericArgumentClauseBuilder ArgBuilder;
   ArgBuilder
     .useLeftAngleBracket(SyntaxFactory::makeLeftAngleToken({}, {}))
     .useRightAngleBracket(SyntaxFactory::makeRightAngleToken({}, {}))
-    .addGenericArgument(IntArg);
+    .addGenericArgument(llvm::None, IntType);
 
   return SyntaxFactory::makeSymbolicReferenceExpr(Array, ArgBuilder.build());
 }
@@ -30,10 +30,9 @@ FunctionCallExprSyntax getCannedFunctionCall() {
 
   auto Label = SyntaxFactory::makeIdentifier("elements", {}, {});
   auto Colon = SyntaxFactory::makeColonToken({}, Trivia::spaces(1));
-  auto OneDigits = SyntaxFactory::makeIntegerLiteral("1", {}, {});
+  auto OneDigits = SyntaxFactory::makeIntegerLiteralToken("1", {}, {});
   auto NoSign = TokenSyntax::missingToken(tok::oper_prefix, "");
-  auto One = SyntaxFactory::makePrefixOperatorExpr(NoSign,
-    SyntaxFactory::makeIntegerLiteralExpr(OneDigits));
+  auto One = SyntaxFactory::makeIntegerLiteralExpr(NoSign, OneDigits);
   auto NoComma = TokenSyntax::missingToken(tok::comma, ",");
 
   auto Arg = SyntaxFactory::makeFunctionCallArgument(Label, Colon, One,
@@ -56,7 +55,12 @@ TEST(UnknownSyntaxTests, UnknownSyntaxMakeAPIs) {
 
     // Wrap that symbolic reference as an UnknownSyntax. This has the same
     // RawSyntax layout but with the Unknown Kind.
-    auto Unknown = make<UnknownSyntax>(SymbolicRef.getRaw());
+    auto UnknownSymbolicRefData = UnknownSyntaxData::make(SymbolicRef.getRaw());
+
+    auto Unknown = UnknownSyntax {
+      UnknownSymbolicRefData,
+      UnknownSymbolicRefData.get()
+    };
 
     // Print the unknown syntax. It should also print as "Array<Int>".
     SmallString<48> UnknownScratch;
@@ -80,8 +84,13 @@ TEST(UnknownSyntaxTests, UnknownSyntaxGetAPIs) {
     GottenExpr.print(KnownOS);
 
     // Wrap that call as an UnknownExprSyntax. This has the same
-    // RawSyntax layout but with the UnknownExpr Kind.;
-    auto Unknown = make<UnknownExprSyntax>(Call.getRaw());
+    // RawSyntax layout but with the UnknownExpr Kind.
+    auto UnknownCallData = UnknownExprSyntaxData::make(Call.getRaw());
+
+    auto Unknown = UnknownExprSyntax {
+      UnknownCallData,
+      UnknownCallData.get()
+    };
 
     ASSERT_EQ(Unknown.getNumChildren(), size_t(2));
 
@@ -111,7 +120,12 @@ TEST(UnknownSyntaxTests, UnknownSyntaxGetAPIs) {
 
     // Wrap that symbolic reference as an UnknownSyntax. This has the same
     // RawSyntax layout but with the Unknown Kind.
-    auto Unknown = make<UnknownSyntax>(Call.getRaw());
+    auto UnknownCallData = UnknownSyntaxData::make(Call.getRaw());
+
+    auto Unknown = UnknownSyntax {
+      UnknownCallData,
+      UnknownCallData.get()
+    };
 
     ASSERT_EQ(Unknown.getNumChildren(), size_t(2));
 
@@ -148,8 +162,13 @@ TEST(UnknownSyntaxTests, EmbedUnknownExpr) {
   // Let's make a function call expression where the called expression is
   // actually unknown. It should print the same and have the same structure
   // as one with a known called expression.
-  auto UnknownSymbolicRef = make<UnknownExprSyntax>(SymbolicRef.getRaw())
-                              .castTo<ExprSyntax>();
+  auto UnknownSymbolicRefData =
+    UnknownExprSyntaxData::make(SymbolicRef.getRaw());
+
+  auto UnknownSymbolicRef = UnknownExprSyntax {
+    UnknownSymbolicRefData,
+    UnknownSymbolicRefData.get()
+  }.castTo<ExprSyntax>();
 
   SmallString<48> UnknownScratch;
   llvm::raw_svector_ostream UnknownOS(UnknownScratch);

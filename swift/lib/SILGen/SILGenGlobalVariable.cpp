@@ -14,7 +14,6 @@
 #include "ManagedValue.h"
 #include "Scope.h"
 #include "swift/AST/ASTMangler.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/SIL/FormalLinkage.h"
 
 using namespace swift;
@@ -26,14 +25,11 @@ SILGlobalVariable *SILGenModule::getSILGlobalVariable(VarDecl *gDecl,
   // First, get a mangled name for the declaration.
   std::string mangledName;
 
-  {
-    auto SILGenName = gDecl->getAttrs().getAttribute<SILGenNameAttr>();
-    if (SILGenName && !SILGenName->Name.empty()) {
-      mangledName = SILGenName->Name;
-    } else {
-      Mangle::ASTMangler NewMangler;
-      mangledName = NewMangler.mangleGlobalVariableFull(gDecl);
-    }
+  if (auto SILGenName = gDecl->getAttrs().getAttribute<SILGenNameAttr>()) {
+    mangledName = SILGenName->Name;
+  } else {
+    Mangle::ASTMangler NewMangler;
+    mangledName = NewMangler.mangleGlobalVariableFull(gDecl);
   }
 
   // Check if it is already created, and update linkage if necessary.
@@ -50,7 +46,10 @@ SILGlobalVariable *SILGenModule::getSILGlobalVariable(VarDecl *gDecl,
   SILLinkage link = getSILLinkage(getDeclLinkage(gDecl), forDef);
   SILType silTy = M.Types.getLoweredTypeOfGlobal(gDecl);
 
-  auto *silGlobal = SILGlobalVariable::create(M, link, IsNotSerialized,
+  auto *silGlobal = SILGlobalVariable::create(M, link,
+                                              isMakeModuleFragile()
+                                                ? IsSerialized
+                                                : IsNotSerialized,
                                               mangledName, silTy,
                                               None, gDecl);
   silGlobal->setDeclaration(!forDef);
@@ -224,7 +223,9 @@ void SILGenModule::emitGlobalInitialization(PatternBindingDecl *pd,
   // TODO: include the module in the onceToken's name mangling.
   // Then we can make it fragile.
   auto onceToken = SILGlobalVariable::create(M, SILLinkage::Private,
-                                             IsNotSerialized,
+                                             isMakeModuleFragile()
+                                               ? IsSerialized
+                                               : IsNotSerialized,
                                              onceTokenBuffer, onceSILTy);
   onceToken->setDeclaration(false);
 
@@ -245,8 +246,6 @@ void SILGenModule::emitGlobalInitialization(PatternBindingDecl *pd,
 
 void SILGenFunction::emitLazyGlobalInitializer(PatternBindingDecl *binding,
                                                unsigned pbdEntry) {
-  MagicFunctionName = SILGenModule::getMagicFunctionName(binding->getDeclContext());
-
   {
     Scope scope(Cleanups, binding);
 
@@ -259,23 +258,23 @@ void SILGenFunction::emitLazyGlobalInitializer(PatternBindingDecl *binding,
   B.createReturn(ImplicitReturnLocation::getImplicitReturnLoc(binding), ret);
 }
 
-static void emitOnceCall(SILGenFunction &SGF, VarDecl *global,
+static void emitOnceCall(SILGenFunction &gen, VarDecl *global,
                          SILGlobalVariable *onceToken, SILFunction *onceFunc) {
   SILType rawPointerSILTy
-    = SGF.getLoweredLoadableType(SGF.getASTContext().TheRawPointerType);
+    = gen.getLoweredLoadableType(gen.getASTContext().TheRawPointerType);
 
   // Emit a reference to the global token.
-  SILValue onceTokenAddr = SGF.B.createGlobalAddr(global, onceToken);
-  onceTokenAddr = SGF.B.createAddressToPointer(global, onceTokenAddr,
+  SILValue onceTokenAddr = gen.B.createGlobalAddr(global, onceToken);
+  onceTokenAddr = gen.B.createAddressToPointer(global, onceTokenAddr,
                                                rawPointerSILTy);
 
   // Emit a reference to the function to execute.
-  SILValue onceFuncRef = SGF.B.createFunctionRef(global, onceFunc);
+  SILValue onceFuncRef = gen.B.createFunctionRef(global, onceFunc);
 
   // Call Builtin.once.
   SILValue onceArgs[] = {onceTokenAddr, onceFuncRef};
-  SGF.B.createBuiltin(global, SGF.getASTContext().getIdentifier("once"),
-                      SGF.SGM.Types.getEmptyTupleType(), {}, onceArgs);
+  gen.B.createBuiltin(global, gen.getASTContext().getIdentifier("once"),
+                      gen.SGM.Types.getEmptyTupleType(), {}, onceArgs);
 }
 
 void SILGenFunction::emitGlobalAccessor(VarDecl *global,

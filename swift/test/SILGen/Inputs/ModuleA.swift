@@ -1,14 +1,11 @@
-@_versioned
-internal var gg = nonTrivialInit()
 
-@_inlineable
+private var gg = nonTrivialInit()
+
 public func get_gg_a() -> Int {
   return gg
 }
 
-@_inlineable
-@_versioned
 @inline(never)
-internal func nonTrivialInit() -> Int {
+private func nonTrivialInit() -> Int {
   return 27
 }

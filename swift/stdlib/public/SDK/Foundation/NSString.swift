@@ -22,8 +22,9 @@ public class NSSimpleCString {}
 @available(*, unavailable, message: "Please use String or NSString")
 public class NSConstantString {}
 
-// Called by the SwiftObject implementation.
-public func _convertStringToNSString(_ string: String) -> NSString {
+@_silgen_name("swift_convertStringToNSString")
+public // COMPILER_INTRINSIC
+func _convertStringToNSString(_ string: String) -> NSString {
   return string._bridgeToObjectiveC()
 }
 

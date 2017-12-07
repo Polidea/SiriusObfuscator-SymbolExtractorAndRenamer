@@ -40,7 +40,7 @@ SILValue swift::getUnderlyingAddressRoot(SILValue V) {
       case ValueKind::StructElementAddrInst:
       case ValueKind::TupleElementAddrInst:
       case ValueKind::UncheckedTakeEnumDataAddrInst:
-        V2 = cast<SingleValueInstruction>(V2)->getOperand(0);
+        V2 = cast<SILInstruction>(V2)->getOperand(0);
         break;
       default:
         break;
@@ -63,15 +63,16 @@ SILValue swift::getUnderlyingObjectStopAtMarkDependence(SILValue V) {
 
 static bool isRCIdentityPreservingCast(ValueKind Kind) {
   switch (Kind) {
-  case ValueKind::UpcastInst:
-  case ValueKind::UncheckedRefCastInst:
-  case ValueKind::UnconditionalCheckedCastInst:
-  case ValueKind::UnconditionalCheckedCastValueInst:
-  case ValueKind::RefToBridgeObjectInst:
-  case ValueKind::BridgeObjectToRefInst:
-    return true;
-  default:
-    return false;
+    case ValueKind::UpcastInst:
+    case ValueKind::UncheckedRefCastInst:
+    case ValueKind::UncheckedRefCastAddrInst:
+    case ValueKind::UnconditionalCheckedCastInst:
+    case ValueKind::UnconditionalCheckedCastValueInst:
+    case ValueKind::RefToBridgeObjectInst:
+    case ValueKind::BridgeObjectToRefInst:
+      return true;
+    default:
+      return false;
   }
 }
 
@@ -126,7 +127,7 @@ SILValue swift::stripCastsWithoutMarkDependence(SILValue V) {
     auto K = V->getKind();
     if (isRCIdentityPreservingCast(K) ||
         K == ValueKind::UncheckedTrivialBitCastInst) {
-      V = cast<SingleValueInstruction>(V)->getOperand(0);
+      V = cast<SILInstruction>(V)->getOperand(0);
       continue;
     }
 
@@ -142,7 +143,7 @@ SILValue swift::stripCasts(SILValue V) {
     if (isRCIdentityPreservingCast(K)
         || K == ValueKind::UncheckedTrivialBitCastInst
         || K == ValueKind::MarkDependenceInst) {
-      V = cast<SingleValueInstruction>(V)->getOperand(0);
+      V = cast<SILInstruction>(V)->getOperand(0);
       continue;
     }
     
@@ -156,8 +157,8 @@ SILValue swift::stripUpCasts(SILValue V) {
   
   V = stripSinglePredecessorArgs(V);
   
-  while (auto upcast = dyn_cast<UpcastInst>(V))
-    V = stripSinglePredecessorArgs(upcast->getOperand());
+  while (isa<UpcastInst>(V))
+    V = stripSinglePredecessorArgs(cast<UpcastInst>(V)->getOperand());
   
   return V;
 }
@@ -183,7 +184,7 @@ SILValue swift::stripAddressProjections(SILValue V) {
     V = stripSinglePredecessorArgs(V);
     if (!Projection::isAddressProjection(V))
       return V;
-    V = cast<SingleValueInstruction>(V)->getOperand(0);
+    V = cast<SILInstruction>(V)->getOperand(0);
   }
 }
 
@@ -192,7 +193,7 @@ SILValue swift::stripUnaryAddressProjections(SILValue V) {
     V = stripSinglePredecessorArgs(V);
     if (!Projection::isAddressProjection(V))
       return V;
-    auto *Inst = cast<SingleValueInstruction>(V);
+    auto *Inst = cast<SILInstruction>(V);
     if (Inst->getNumOperands() > 1)
       return V;
     V = Inst->getOperand(0);
@@ -204,7 +205,7 @@ SILValue swift::stripValueProjections(SILValue V) {
     V = stripSinglePredecessorArgs(V);
     if (!Projection::isObjectProjection(V))
       return V;
-    V = cast<SingleValueInstruction>(V)->getOperand(0);
+    V = cast<SILInstruction>(V)->getOperand(0);
   }
 }
 
@@ -225,12 +226,6 @@ SILValue swift::stripExpectIntrinsic(SILValue V) {
   return BI->getArguments()[0];
 }
 
-SILValue swift::stripBorrow(SILValue V) {
-  if (auto *BBI = dyn_cast<BeginBorrowInst>(V))
-    return BBI->getOperand();
-  return V;
-}
-
 namespace {
 
 enum class OwnershipQualifiedKind {
@@ -241,7 +236,7 @@ enum class OwnershipQualifiedKind {
 
 struct OwnershipQualifiedKindVisitor : SILInstructionVisitor<OwnershipQualifiedKindVisitor, OwnershipQualifiedKind> {
 
-  OwnershipQualifiedKind visitSILInstruction(SILInstruction *I) {
+  OwnershipQualifiedKind visitValueBase(ValueBase *V) {
     return OwnershipQualifiedKind::NotApplicable;
   }
 

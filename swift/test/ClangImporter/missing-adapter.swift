@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // RUN: %target-swift-frontend -emit-module -parse-as-library %S/Inputs/adapter.swift -sdk %S/Inputs -I %S/Inputs/custom-modules -module-name ClangModuleWithAdapter -o %t
 // RUN: %target-swift-frontend %s -sdk %S/Inputs -I %S/Inputs/custom-modules -I %t -typecheck

@@ -121,8 +121,3 @@ module CoreMedia {
   header "CoreMedia.h"
   export *
 }
-
-module OtherSubscripts {
-  header "OtherSubscripts.h"
-  export *
-}

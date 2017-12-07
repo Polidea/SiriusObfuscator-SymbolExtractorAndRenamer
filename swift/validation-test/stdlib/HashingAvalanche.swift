@@ -41,7 +41,7 @@ func avalancheTest(
         chiSquaredUniform2(testsInBatch, bitFlips[outputBit], pValue),
         "inputBit: \(inputBit), outputBit: \(outputBit)")
     }
-    bitFlips.deallocate()
+    bitFlips.deallocate(capacity: bits)
   }
 }
 
@@ -56,3 +56,4 @@ HashingTestSuite.test("_mixUInt32/avalanche") {
 }
 
 runAllTests()
+

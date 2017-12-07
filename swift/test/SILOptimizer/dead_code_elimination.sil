@@ -61,15 +61,11 @@ bb3:
 // loops.
 // CHECK-LABEL: sil @dead3
 sil @dead3 : $@convention(thin) () -> () {
-bb0:
 // CHECK: bb0
-  br bb1
-// CHECK: bb1
-bb1:
+bb0:
 // CHECK: integer_literal $Builtin.Int32, 0
-// CHECK: br bb1
   %0 = integer_literal $Builtin.Int32, 0
-  br bb1
+  br bb0
 }
 
 // CHECK-LABEL: sil hidden @test_dce_bbargs

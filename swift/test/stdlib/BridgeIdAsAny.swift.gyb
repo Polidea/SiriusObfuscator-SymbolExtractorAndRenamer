@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t  &&  mkdir -p %t
 //
 // RUN: %gyb %s -o %t/BridgeIdAsAny.swift
 // RUN: %target-build-swift -g -module-name a %t/BridgeIdAsAny.swift -o %t.out

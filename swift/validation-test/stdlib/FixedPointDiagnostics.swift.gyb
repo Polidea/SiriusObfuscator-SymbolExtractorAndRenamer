@@ -1,5 +1,4 @@
-// RUN: %empty-directory(%t)
-// RUN: %gyb %s -o %t/main.swift
+// RUN: rm -rf %t && mkdir -p %t && %gyb %s -o %t/main.swift
 // RUN: %line-directive %t/main.swift -- %target-swift-frontend -typecheck -verify -swift-version 3 %t/main.swift
 
 func testUnaryMinusInUnsigned() {

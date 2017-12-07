@@ -1,5 +1,5 @@
-// RUN: %target-swift-frontend %s -O -emit-sil | %FileCheck %s
-// RUN: %target-swift-frontend %s -O -emit-sil -enable-testing | %FileCheck -check-prefix=CHECK-TESTING %s
+// RUN: %target-swift-frontend %s -O -emit-sil -sil-serialize-witness-tables | %FileCheck %s
+// RUN: %target-swift-frontend %s -O -emit-sil -sil-serialize-witness-tables -enable-testing | %FileCheck -check-prefix=CHECK-TESTING %s
 
 // Check if cycles are removed.
 
@@ -59,7 +59,7 @@ class Derived : Base {
 	}
 
 	@inline(never)
-	@_optimize(none) // avoid devirtualization
+	@_semantics("optimize.sil.never") // avoid devirtualization
 	override func calledWithSuper() {
 		super.calledWithSuper()
 	}
@@ -84,13 +84,13 @@ class Other : Derived {
 }
 
 @inline(never)
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 func testClasses(_ b: Base) {
 	b.aliveMethod()
 }
 
 @inline(never)
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 func testWithDerived(_ d: Derived) {
 	d.baseNotCalled()
 	d.notInDerived()
@@ -98,7 +98,7 @@ func testWithDerived(_ d: Derived) {
 }
 
 @inline(never)
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 func testWithOther(_ o: Other) {
 	o.notInOther()
 }
@@ -143,18 +143,18 @@ struct Adopt : Prot {
 }
 
 @inline(never)
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 func testProtocols(_ p: Prot) {
 	p.aliveWitness()
 }
 
 @inline(never)
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 func testDefaultWitnessMethods(_ p: Prot) {
 	p.aliveDefaultWitness()
 }
 
-@_optimize(none) // avoid devirtualization
+@_semantics("optimize.sil.never") // avoid devirtualization
 public func callTest() {
 	testClasses(Base())
 	testClasses(Derived())
@@ -163,7 +163,7 @@ public func callTest() {
 	testProtocols(Adopt())
 }
 
-@_optimize(none) // make sure not eliminated 
+@_semantics("optimize.sil.never") // make sure not eliminated 
 internal func donotEliminate() {
   return
 }
@@ -190,7 +190,7 @@ internal func donotEliminate() {
 // CHECK: notInDerived
 // CHECK-NOT: notInOther
 
-// CHECK-TESTING-LABEL: sil_vtable [serialized] Base
+// CHECK-TESTING-LABEL: sil_vtable Base
 // CHECK-TESTING: DeadMethod
 
 // CHECK-LABEL: sil_vtable Derived
@@ -200,7 +200,7 @@ internal func donotEliminate() {
 // CHECK: notInDerived
 // CHECK: notInOther
 
-// CHECK-TESTING-LABEL: sil_vtable [serialized] Derived
+// CHECK-TESTING-LABEL: sil_vtable Derived
 // CHECK-TESTING: DeadMethod
 
 // CHECK-LABEL: sil_vtable Other

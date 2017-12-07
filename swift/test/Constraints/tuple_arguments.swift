@@ -623,7 +623,7 @@ do {
 }
 
 enum Enum {
-  case two(Int, Int) // expected-note 6 {{'two' declared here}}
+  case two(Int, Int) // expected-note 5 {{'two' declared here}}
   case tuple((Int, Int))
   case labeledTuple(x: (Int, Int))
 }
@@ -631,7 +631,6 @@ enum Enum {
 do {
   _ = Enum.two(3, 4)
   _ = Enum.two((3, 4)) // expected-error {{missing argument for parameter #2 in call}}
-  _ = Enum.two(3 > 4 ? 3 : 4) // expected-error {{missing argument for parameter #2 in call}}
 
   _ = Enum.tuple(3, 4) // expected-error {{enum element 'tuple' expects a single parameter of type '(Int, Int)'}} {{18-18=(}} {{22-22=)}}
   _ = Enum.tuple((3, 4))
@@ -1576,10 +1575,6 @@ func rdar33159366(s: AnySequence<Int>) {
   _ = a.flatMap(itsFalse)
 }
 
-func sr5429<T>(t: T) {
-  _ = AnySequence([t]).first(where: { (t: T) in true })
-}
-
 extension Concrete {
   typealias T = (Int, Int)
   typealias F = (T) -> ()
@@ -1620,11 +1615,4 @@ func rdar33239714() {
   Generic<(Int, Int)>().optAliasT { (x, y) in }
   Generic<(Int, Int)>().optAliasF { x, y in }
   Generic<(Int, Int)>().optAliasF { (x, y) in }
-}
-
-// rdar://problem/35198459 - source-compat-suite failure: Moya (toType->hasUnresolvedType() && "Should have handled this above"
-do {
-  func foo(_: (() -> Void)?) {}
-  func bar() -> ((()) -> Void)? { return nil }
-  foo(bar()) // expected-error {{cannot convert value of type '((()) -> Void)?' to expected argument type '(() -> Void)?'}}
 }

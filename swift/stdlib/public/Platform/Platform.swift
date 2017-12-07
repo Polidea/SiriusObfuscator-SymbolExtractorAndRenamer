@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import SwiftShims
-
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 //===----------------------------------------------------------------------===//
 // MacTypes.h
@@ -77,12 +75,18 @@ func _convertDarwinBooleanToBool(_ x: DarwinBoolean) -> Bool {
 // sys/errno.h
 //===----------------------------------------------------------------------===//
 
+@_silgen_name("_swift_Platform_getErrno")
+func _swift_Platform_getErrno() -> Int32
+
+@_silgen_name("_swift_Platform_setErrno")
+func _swift_Platform_setErrno(_: Int32)
+
 public var errno : Int32 {
   get {
-    return _stdlib_getErrno()
+    return _swift_Platform_getErrno()
   }
   set(val) {
-    return _stdlib_setErrno(val)
+    return _swift_Platform_setErrno(val)
   }
 }
 
@@ -137,52 +141,94 @@ public func snprintf(ptr: UnsafeMutablePointer<Int8>, _ len: Int, _ format: Unsa
 // fcntl.h
 //===----------------------------------------------------------------------===//
 
+#if !os(Windows) || CYGWIN
+@_silgen_name("_swift_Platform_open")
+func _swift_Platform_open(
+  _ path: UnsafePointer<CChar>,
+  _ oflag: Int32,
+  _ mode: mode_t
+) -> Int32
+#else
+@_silgen_name("_swift_Platform_open")
+func _swift_Platform_open(
+  _ path: UnsafePointer<CChar>,
+  _ oflag: Int32,
+  _ mode: Int32
+) -> Int32
+#endif
+
+#if !os(Windows) || CYGWIN
+@_silgen_name("_swift_Platform_openat")
+func _swift_Platform_openat(
+  _ fd: Int32,
+  _ path: UnsafePointer<CChar>,
+  _ oflag: Int32,
+  _ mode: mode_t
+) -> Int32
+#endif
+
 public func open(
   _ path: UnsafePointer<CChar>,
   _ oflag: Int32
 ) -> Int32 {
-  return _stdlib_open(path, oflag, 0)
+  return _swift_Platform_open(path, oflag, 0)
 }
 
-#if os(Windows)
+#if !os(Windows) || CYGWIN
 public func open(
   _ path: UnsafePointer<CChar>,
   _ oflag: Int32,
-  _ mode: Int32
+  _ mode: mode_t
 ) -> Int32 {
-  return _stdlib_open(path, oflag, mode)
+  return _swift_Platform_open(path, oflag, mode)
+}
+
+public func openat(
+  _ fd: Int32,
+  _ path: UnsafePointer<CChar>,
+  _ oflag: Int32
+) -> Int32 {
+  return _swift_Platform_openat(fd, path, oflag, 0)
+}
+
+public func openat(
+  _ fd: Int32,
+  _ path: UnsafePointer<CChar>,
+  _ oflag: Int32,
+  _ mode: mode_t
+) -> Int32 {
+  return _swift_Platform_openat(fd, path, oflag, mode)
 }
 #else
 public func open(
   _ path: UnsafePointer<CChar>,
   _ oflag: Int32,
-  _ mode: mode_t
+  _ mode: Int32
 ) -> Int32 {
-  return _stdlib_open(path, oflag, mode)
+  return _swift_Platform_open(path, oflag, mode)
 }
+#endif
 
-public func openat(
+#if !os(Windows) || CYGWIN
+@_silgen_name("_swift_Platform_fcntl")
+internal func _swift_Platform_fcntl(
   _ fd: Int32,
-  _ path: UnsafePointer<CChar>,
-  _ oflag: Int32
-) -> Int32 {
-  return _stdlib_openat(fd, path, oflag, 0)
-}
+  _ cmd: Int32,
+  _ value: Int32
+) -> Int32
 
-public func openat(
+@_silgen_name("_swift_Platform_fcntlPtr")
+internal func _swift_Platform_fcntlPtr(
   _ fd: Int32,
-  _ path: UnsafePointer<CChar>,
-  _ oflag: Int32,
-  _ mode: mode_t
-) -> Int32 {
-  return _stdlib_openat(fd, path, oflag, mode)
-}
+  _ cmd: Int32,
+  _ ptr: UnsafeMutableRawPointer
+) -> Int32
 
 public func fcntl(
   _ fd: Int32,
   _ cmd: Int32
 ) -> Int32 {
-  return _stdlib_fcntl(fd, cmd, 0)
+  return _swift_Platform_fcntl(fd, cmd, 0)
 }
 
 public func fcntl(
@@ -190,7 +236,7 @@ public func fcntl(
   _ cmd: Int32,
   _ value: Int32
 ) -> Int32 {
-  return _stdlib_fcntl(fd, cmd, value)
+  return _swift_Platform_fcntl(fd, cmd, value)
 }
 
 public func fcntl(
@@ -198,24 +244,11 @@ public func fcntl(
   _ cmd: Int32,
   _ ptr: UnsafeMutableRawPointer
 ) -> Int32 {
-  return _stdlib_fcntlPtr(fd, cmd, ptr)
+  return _swift_Platform_fcntlPtr(fd, cmd, ptr)
 }
-
-// !os(Windows)
 #endif
 
-#if os(Windows)
-public var S_IFMT: Int32 { return Int32(0xf000) }
-
-public var S_IFREG: Int32 { return Int32(0x8000) }
-public var S_IFDIR: Int32 { return Int32(0x4000) }
-public var S_IFCHR: Int32 { return Int32(0x2000) }
-public var S_IFIFO: Int32 { return Int32(0x1000) }
-
-public var S_IREAD: Int32  { return Int32(0x0100) }
-public var S_IWRITE: Int32 { return Int32(0x0080) }
-public var S_IEXEC: Int32  { return Int32(0x0040) }
-#else
+#if !os(Windows) || CYGWIN
 public var S_IFMT: mode_t   { return mode_t(0o170000) }
 public var S_IFIFO: mode_t  { return mode_t(0o010000) }
 public var S_IFCHR: mode_t  { return mode_t(0o020000) }
@@ -253,20 +286,44 @@ public var S_IREAD: mode_t  { return S_IRUSR }
 public var S_IWRITE: mode_t { return S_IWUSR }
 public var S_IEXEC: mode_t  { return S_IXUSR }
 #endif
+#else
+public var S_IFMT: Int32 { return Int32(0xf000) }
+
+public var S_IFREG: Int32 { return Int32(0x8000) }
+public var S_IFDIR: Int32 { return Int32(0x4000) }
+public var S_IFCHR: Int32 { return Int32(0x2000) }
+public var S_IFIFO: Int32 { return Int32(0x1000) }
+
+public var S_IREAD: Int32  { return Int32(0x0100) }
+public var S_IWRITE: Int32 { return Int32(0x0080) }
+public var S_IEXEC: Int32  { return Int32(0x0040) }
 #endif
 
 //===----------------------------------------------------------------------===//
 // ioctl.h
 //===----------------------------------------------------------------------===//
 
-#if !os(Windows)
+#if !os(Windows) || CYGWIN
+@_silgen_name("_swift_Platform_ioctl")
+internal func _swift_Platform_ioctl(
+  _ fd: CInt,
+  _ request: UInt,
+  _ value: CInt
+) -> CInt
+
+@_silgen_name("_swift_Platform_ioctlPtr")
+internal func _swift_Platform_ioctlPtr(
+  _ fd: CInt,
+  _ request: UInt,
+  _ ptr: UnsafeMutableRawPointer
+) -> CInt
 
 public func ioctl(
   _ fd: CInt,
   _ request: UInt,
   _ value: CInt
 ) -> CInt {
-  return _stdlib_ioctl(fd, request, value)
+  return _swift_Platform_ioctl(fd, request, value)
 }
 
 public func ioctl(
@@ -274,17 +331,15 @@ public func ioctl(
   _ request: UInt,
   _ ptr: UnsafeMutableRawPointer
 ) -> CInt {
-  return _stdlib_ioctlPtr(fd, request, ptr)
+  return _swift_Platform_ioctlPtr(fd, request, ptr)
 }
 
 public func ioctl(
   _ fd: CInt,
   _ request: UInt
 ) -> CInt {
-  return _stdlib_ioctl(fd, request, 0)
+  return _swift_Platform_ioctl(fd, request, 0)
 }
-
-// !os(Windows)
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -312,7 +367,7 @@ public var SIG_DFL: sig_t? { return nil }
 public var SIG_IGN: sig_t { return unsafeBitCast(1, to: sig_t.self) }
 public var SIG_ERR: sig_t { return unsafeBitCast(-1, to: sig_t.self) }
 public var SIG_HOLD: sig_t { return unsafeBitCast(5, to: sig_t.self) }
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Haiku)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android)
 public typealias sighandler_t = __sighandler_t
 
 public var SIG_DFL: sighandler_t? { return nil }
@@ -325,7 +380,8 @@ public var SIG_ERR: sighandler_t {
 public var SIG_HOLD: sighandler_t {
   return unsafeBitCast(2, to: sighandler_t.self)
 }
-#elseif os(Cygwin)
+#elseif os(Windows)
+#if CYGWIN
 public typealias sighandler_t = _sig_func_ptr
 
 public var SIG_DFL: sighandler_t? { return nil }
@@ -338,7 +394,7 @@ public var SIG_ERR: sighandler_t {
 public var SIG_HOLD: sighandler_t {
   return unsafeBitCast(2, to: sighandler_t.self)
 }
-#elseif os(Windows)
+#else
 public var SIG_DFL: _crt_signal_t? { return nil }
 public var SIG_IGN: _crt_signal_t {
   return unsafeBitCast(1, to: _crt_signal_t.self)
@@ -346,6 +402,7 @@ public var SIG_IGN: _crt_signal_t {
 public var SIG_ERR: _crt_signal_t {
   return unsafeBitCast(-1, to: _crt_signal_t.self)
 }
+#endif
 #else
 internal var _ignore = _UnsupportedPlatformError()
 #endif
@@ -354,13 +411,13 @@ internal var _ignore = _UnsupportedPlatformError()
 // semaphore.h
 //===----------------------------------------------------------------------===//
 
-#if !os(Windows) 
+#if !os(Windows) || CYGWIN
 /// The value returned by `sem_open()` in the case of failure.
 public var SEM_FAILED: UnsafeMutablePointer<sem_t>? {
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
   // The value is ABI.  Value verified to be correct for OS X, iOS, watchOS, tvOS.
   return UnsafeMutablePointer<sem_t>(bitPattern: -1)
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Cygwin) || os(Haiku)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
   // The value is ABI.  Value verified to be correct on Glibc.
   return UnsafeMutablePointer<sem_t>(bitPattern: 0)
 #else
@@ -368,12 +425,25 @@ public var SEM_FAILED: UnsafeMutablePointer<sem_t>? {
 #endif
 }
 
+@_silgen_name("_swift_Platform_sem_open2")
+internal func _swift_Platform_sem_open2(
+  _ name: UnsafePointer<CChar>,
+  _ oflag: Int32
+) -> UnsafeMutablePointer<sem_t>?
+
+@_silgen_name("_swift_Platform_sem_open4")
+internal func _swift_Platform_sem_open4(
+  _ name: UnsafePointer<CChar>,
+  _ oflag: Int32,
+  _ mode: mode_t,
+  _ value: CUnsignedInt
+) -> UnsafeMutablePointer<sem_t>?
+
 public func sem_open(
   _ name: UnsafePointer<CChar>,
   _ oflag: Int32
 ) -> UnsafeMutablePointer<sem_t>? {
-  return _stdlib_sem_open2(name, oflag)
-    .assumingMemoryBound(to: sem_t.self)
+  return _swift_Platform_sem_open2(name, oflag)
 }
 
 public func sem_open(
@@ -382,8 +452,7 @@ public func sem_open(
   _ mode: mode_t,
   _ value: CUnsignedInt
 ) -> UnsafeMutablePointer<sem_t>? {
-  return _stdlib_sem_open4(name, oflag, mode, value)
-    .assumingMemoryBound(to: sem_t.self)
+  return _swift_Platform_sem_open4(name, oflag, mode, value)
 }
 #endif
 
@@ -391,13 +460,14 @@ public func sem_open(
 // Misc.
 //===----------------------------------------------------------------------===//
 
-// Some platforms don't have `extern char** environ` imported from C.
-#if os(OSX) || os(iOS) || os(watchOS) || os(tvOS) || os(FreeBSD) || os(PS4)
+// FreeBSD defines extern char **environ differently than Linux.
+#if os(FreeBSD) || os(PS4)
+@_silgen_name("_swift_FreeBSD_getEnv")
+func _swift_FreeBSD_getEnv(
+) -> UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>>
+
 public var environ: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?> {
-  return _stdlib_getEnviron()
-}
-#elseif os(Linux)
-public var environ: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?> {
-  return __environ
+  return _swift_FreeBSD_getEnv().pointee
 }
 #endif
+

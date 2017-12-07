@@ -27,8 +27,6 @@ namespace llvm {
 }
 
 namespace swift {
-  class AssociatedConformance;
-  class AssociatedType;
   class CanType;
   class FuncDecl;
   class ProtocolConformanceRef;
@@ -39,7 +37,7 @@ namespace swift {
 namespace irgen {
   class Address;
   class Explosion;
-  class FunctionPointer;
+  class CallEmission;
   class IRGenFunction;
   class IRGenModule;
   class MetadataPath;
@@ -55,12 +53,12 @@ namespace irgen {
   
   /// Extract the method pointer from an archetype's witness table
   /// as a function value.
-  FunctionPointer emitWitnessMethodValue(IRGenFunction &IGF,
-                                         CanType baseTy,
-                                         llvm::Value **baseMetadataCache,
-                                         SILDeclRef member,
-                                         ProtocolConformanceRef conformance,
-                                         CanSILFunctionType fnType);
+  void emitWitnessMethodValue(IRGenFunction &IGF,
+                              CanType baseTy,
+                              llvm::Value **baseMetadataCache,
+                              SILDeclRef member,
+                              ProtocolConformanceRef conformance,
+                              Explosion &out);
 
   /// Given a type T and an associated type X of some protocol P to
   /// which T conforms, return the type metadata for T.X.
@@ -71,13 +69,7 @@ namespace irgen {
   llvm::Value *emitAssociatedTypeMetadataRef(IRGenFunction &IGF,
                                              llvm::Value *parentMetadata,
                                              llvm::Value *wtable,
-                                             AssociatedType associatedType);
-
-  // Return the offset one should do on a witness table pointer to retrieve the
-  // `index`th piece of private data.
-  inline int privateWitnessTableIndexToTableOffset(unsigned index) {
-    return -1 - (int)index;
-  }
+                                           AssociatedTypeDecl *associatedType);
 
   /// Add the witness parameters necessary for calling a function with
   /// the given generics clause.
@@ -129,7 +121,7 @@ namespace irgen {
                                 WitnessMetadata *witnessMetadata,
                                 Explosion &args);
 
-  /// Bind the polymorphic parameter inside of a partial apply forwarding thunk.
+  /// Bind the polymorphic paramater inside of a partial apply forwarding thunk.
   void bindPolymorphicParameter(IRGenFunction &IGF,
                                 CanSILFunctionType &OrigFnType,
                                 CanSILFunctionType &SubstFnType,

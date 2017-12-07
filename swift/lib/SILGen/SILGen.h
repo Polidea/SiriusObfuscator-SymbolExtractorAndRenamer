@@ -19,13 +19,11 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/AnyFunctionRef.h"
 #include "swift/AST/DiagnosticEngine.h"
-#include "swift/Basic/ProfileCounter.h"
 #include "swift/SIL/SILDebugScope.h"
 #include "swift/SIL/SILFunction.h"
 #include "swift/SIL/SILModule.h"
 #include "swift/SIL/TypeLowering.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ProfileData/InstrProfReader.h"
 #include <deque>
 
 namespace swift {
@@ -61,24 +59,6 @@ public:
   /// The profiler for instrumentation based profiling, or null if profiling is
   /// disabled.
   std::unique_ptr<SILGenProfiling> Profiler;
-
-  /// The indexed profile data to be used for PGO, or nullptr.
-  std::unique_ptr<llvm::IndexedInstrProfReader> PGOReader;
-
-  /// Load the profiled execution count corresponding to \p N, if one is
-  /// available.
-  ProfileCounter loadProfilerCount(ASTNode N) {
-    if (PGOReader && Profiler && Profiler->hasRegionCounters())
-      return Profiler->getExecutionCount(N);
-    return ProfileCounter();
-  }
-
-  /// Get the PGO's node parent
-  Optional<ASTNode> getPGOParent(ASTNode Node) {
-    if (PGOReader && Profiler && Profiler->hasRegionCounters())
-      return Profiler->getPGOParent(Node);
-    return None;
-  }
 
   /// Mapping from SILDeclRefs to emitted SILFunctions.
   llvm::DenseMap<SILDeclRef, SILFunction*> emittedFunctions;
@@ -121,9 +101,13 @@ public:
   NormalProtocolConformance *lastEmittedConformance = nullptr;
 
   SILFunction *emitTopLevelFunction(SILLocation Loc);
-
+  
   size_t anonymousSymbolCounter = 0;
-
+  
+  /// If true, all functions and globals are made fragile. Currently only used
+  /// for compiling the stdlib.
+  bool isMakeModuleFragile() const { return M.getOptions().SILSerializeAll; }
+  
   Optional<SILDeclRef> StringToNSStringFn;
   Optional<SILDeclRef> NSStringToStringFn;
   Optional<SILDeclRef> ArrayToNSArrayFn;
@@ -181,25 +165,16 @@ public:
   /// Get the function for a SILDeclRef, creating it if necessary.
   SILFunction *getFunction(SILDeclRef constant,
                            ForDefinition_t forDefinition);
-
-  /// Get the function for a dispatch thunk, creating it if necessary.
-  SILFunction *getDispatchThunk(SILDeclRef constant,
-                                ForDefinition_t forDefinition);
-
-  /// Emit a native Swift class or protocol method dispatch thunk, used for
-  /// resilient method dispatch.
-  SILFunction *emitDispatchThunk(SILDeclRef constant);
-
+  
   /// Get the dynamic dispatch thunk for a SILDeclRef.
   SILFunction *getDynamicThunk(SILDeclRef constant,
-                               CanSILFunctionType constantTy);
-
+                               SILConstantInfo constantInfo);
+  
   /// Emit a vtable thunk for a derived method if its natural abstraction level
   /// diverges from the overridden base method. If no thunking is needed,
   /// returns a static reference to the derived method.
-  Optional<SILVTable::Entry> emitVTableMethod(ClassDecl *theClass,
-                                              SILDeclRef derived,
-                                              SILDeclRef base);
+  SILVTable::Entry emitVTableMethod(SILDeclRef derived,
+                                    SILDeclRef base);
 
   /// True if a function has been emitted for a given SILDeclRef.
   bool hasFunction(SILDeclRef constant);
@@ -217,6 +192,7 @@ public:
   /// Get or create the declaration of a reabstraction thunk with the
   /// given signature.
   SILFunction *getOrCreateReabstractionThunk(
+                                           GenericEnvironment *genericEnv,
                                            CanSILFunctionType thunkType,
                                            CanSILFunctionType fromType,
                                            CanSILFunctionType toType,
@@ -294,9 +270,9 @@ public:
   /// Emits the stored property initializer for the given pattern.
   void emitStoredPropertyInitialization(PatternBindingDecl *pd, unsigned i);
 
-  /// Emits default argument generators for the given parameter list.
+  /// Emits the default argument generator for the given function.
   void emitDefaultArgGenerators(SILDeclRef::Loc decl,
-                                ParameterList *paramList);
+                                ArrayRef<ParameterList*> paramLists);
 
   /// Emits the curry thunk between two uncurry levels of a function.
   void emitCurryThunk(SILDeclRef thunk);
@@ -339,11 +315,13 @@ public:
   SILWitnessTable *getWitnessTable(ProtocolConformance *conformance);
   
   /// Emit a protocol witness entry point.
-  SILFunction *
-  emitProtocolWitness(ProtocolConformanceRef conformance, SILLinkage linkage,
-                      IsSerialized_t isSerialized, SILDeclRef requirement,
-                      SILDeclRef witnessRef, IsFreeFunctionWitness_t isFree,
-                      Witness witness);
+  SILFunction *emitProtocolWitness(ProtocolConformance *conformance,
+                                   SILLinkage linkage,
+                                   IsSerialized_t isSerialized,
+                                   SILDeclRef requirement,
+                                   SILDeclRef witnessRef,
+                                   IsFreeFunctionWitness_t isFree,
+                                   Witness witness);
 
   /// Emit the default witness table for a resilient protocol.
   void emitDefaultWitnessTable(ProtocolDecl *protocol);

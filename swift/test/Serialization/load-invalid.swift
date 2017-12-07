@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // RUN: touch %t/new_module.swiftmodule
 // RUN: %target-swift-frontend %s -typecheck -I %t -verify -show-diagnostics-after-fatal

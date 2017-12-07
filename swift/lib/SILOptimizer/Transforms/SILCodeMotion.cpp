@@ -73,8 +73,10 @@ static void createRefCountOpForPayload(SILBuilder &Builder, SILInstruction *I,
 
   ++NumRefCountOpsSimplified;
 
+  auto *RCI = cast<RefCountingInst>(I);
+
   // If we have a retain value...
-  if (auto RCI = dyn_cast<RetainValueInst>(I)) {
+  if (isa<RetainValueInst>(I)) {
     // And our payload is refcounted, insert a strong_retain onto the
     // payload.
     if (UEDITy.isReferenceCounted(Mod)) {
@@ -91,7 +93,6 @@ static void createRefCountOpForPayload(SILBuilder &Builder, SILInstruction *I,
   // payload.
   assert(isa<ReleaseValueInst>(I) && "If I is not a retain value here, it must "
          "be a release value since enums do not have reference semantics.");
-  auto *RCI = cast<ReleaseValueInst>(I);
 
   // If our payload has reference semantics, insert the strong release.
   if (UEDITy.isReferenceCounted(Mod)) {
@@ -153,7 +154,7 @@ static const int SinkSearchWindow = 6;
 
 /// \brief Returns True if we can sink this instruction to another basic block.
 static bool canSinkInstruction(SILInstruction *Inst) {
-  return !Inst->hasUsesOfAnyResult() && !isa<TermInst>(Inst);
+  return Inst->use_empty() && !isa<TermInst>(Inst);
 }
 
 /// \brief Returns true if this instruction is a skip barrier, which means that
@@ -321,15 +322,15 @@ cheaperToPassOperandsAsArguments(SILInstruction *First,
   if (!FirstStruct || !SecondStruct)
     return None;
 
-  assert(FirstStruct->getNumOperands() == SecondStruct->getNumOperands() &&
-         FirstStruct->getType() == SecondStruct->getType() &&
+  assert(First->getNumOperands() == Second->getNumOperands() &&
+         First->getType() == Second->getType() &&
          "Types should be identical");
 
   llvm::Optional<unsigned> DifferentOperandIndex;
 
   // Check operands.
   for (unsigned i = 0, e = First->getNumOperands(); i != e; ++i) {
-    if (FirstStruct->getOperand(i) != SecondStruct->getOperand(i)) {
+    if (First->getOperand(i) != Second->getOperand(i)) {
       // Only track one different operand for now
       if (DifferentOperandIndex)
         return None;
@@ -343,7 +344,7 @@ cheaperToPassOperandsAsArguments(SILInstruction *First,
   // Found a different operand, now check to see if its type is something
   // cheap enough to sink.
   // TODO: Sink more than just integers.
-  SILType ArgTy = FirstStruct->getOperand(*DifferentOperandIndex)->getType();
+  const auto &ArgTy = First->getOperand(*DifferentOperandIndex)->getType();
   if (!ArgTy.is<BuiltinIntegerType>())
     return None;
 
@@ -407,16 +408,15 @@ static bool sinkArgument(SILBasicBlock *BB, unsigned ArgNum) {
   SILBasicBlock *FirstPred = *BB->pred_begin();
   TermInst *FirstTerm = FirstPred->getTerminator();
   auto FirstPredArg = FirstTerm->getOperand(ArgNum);
-  auto *FSI = dyn_cast<SingleValueInstruction>(FirstPredArg);
-  // TODO: MultiValueInstruction?
+  auto *FSI = dyn_cast<SILInstruction>(FirstPredArg);
+
+  // The list of identical instructions.
+  SmallVector<SILValue, 8> Clones;
+  Clones.push_back(FirstPredArg);
 
   // We only move instructions with a single use.
   if (!FSI || !hasOneNonDebugUse(FSI))
     return false;
-
-  // The list of identical instructions.
-  SmallVector<SingleValueInstruction*, 8> Clones;
-  Clones.push_back(FSI);
 
   // Don't move instructions that are sensitive to their location.
   //
@@ -443,18 +443,9 @@ static bool sinkArgument(SILBasicBlock *BB, unsigned ArgNum) {
 
     // Find the Nth argument passed to BB.
     SILValue Arg = TI->getOperand(ArgNum);
-
-    // If it's not the same basic kind of node, neither isIdenticalTo nor
-    // cheaperToPassOperandsAsArguments will return true.
-    if (Arg->getKind() != FSI->getValueKind())
+    auto *SI = dyn_cast<SILInstruction>(Arg);
+    if (!SI || !hasOneNonDebugUse(SI))
       return false;
-
-    // Since it's the same kind, Arg must also be a single-value instruction.
-    auto *SI = cast<SingleValueInstruction>(Arg);
-
-    if (!hasOneNonDebugUse(SI))
-      return false;
-
     if (SI->isIdenticalTo(FSI)) {
       Clones.push_back(SI);
       continue;
@@ -475,7 +466,10 @@ static bool sinkArgument(SILBasicBlock *BB, unsigned ArgNum) {
     Clones.push_back(SI);
   }
 
-  auto *Undef = SILUndef::get(FSI->getType(), BB->getModule());
+  if (!FSI)
+    return false;
+
+  auto *Undef = SILUndef::get(FirstPredArg->getType(), BB->getModule());
 
   // Delete the debug info of the instruction that we are about to sink.
   deleteAllDebugUses(FSI);
@@ -501,8 +495,7 @@ static bool sinkArgument(SILBasicBlock *BB, unsigned ArgNum) {
       assert((isa<BranchInst>(TI) || isa<CondBranchInst>(TI)) &&
              "Branch instruction required");
 
-      // TODO: MultiValueInstruction
-      auto *CloneInst = *CloneIt;
+      auto *CloneInst = dyn_cast<SILInstruction>(*CloneIt);
       TI->setOperand(ArgNum, CloneInst->getOperand(*DifferentOperandIndex));
       // Now delete the clone as we only needed it operand.
       if (CloneInst != FSI)
@@ -518,9 +511,9 @@ static bool sinkArgument(SILBasicBlock *BB, unsigned ArgNum) {
   }
 
   // Sink one of the copies of the instruction.
-  FSI->replaceAllUsesWithUndef();
+  FirstPredArg->replaceAllUsesWith(Undef);
   FSI->moveBefore(&*BB->begin());
-  BB->getArgument(ArgNum)->replaceAllUsesWith(FSI);
+  BB->getArgument(ArgNum)->replaceAllUsesWith(FirstPredArg);
 
   // The argument is no longer in use. Replace all incoming inputs with undef
   // and try to delete the instruction.
@@ -680,7 +673,7 @@ static bool sinkCodeFromPredecessors(SILBasicBlock *BB) {
         }
         Changed = true;
         for (auto I : Dups) {
-          I->replaceAllUsesPairwiseWith(&*InstToSink);
+          I->replaceAllUsesWith(&*InstToSink);
           I->eraseFromParent();
           NumSunk++;
         }
@@ -977,7 +970,7 @@ public:
 
   void clear() { ValueToCaseMap.clear(); }
 
-  bool visitSILInstruction(SILInstruction *I) { return false; }
+  bool visitValueBase(ValueBase *V) { return false; }
 
   bool visitEnumInst(EnumInst *EI) {
     DEBUG(llvm::dbgs() << "    Storing enum into map: " << *EI);

@@ -2,6 +2,9 @@
 
 // REQUIRES: objc_interop
 
+// FIXME: https://bugs.swift.org/browse/SR-2808
+// XFAIL: resilient_stdlib
+
 // Check that casts between bridged types are replaced by more 
 // efficient code sequences.
 // 
@@ -904,8 +907,7 @@ var anyHashable: AnyHashable = 0
 // CHECK-LABEL: _T021bridged_casts_folding29testUncondCastSwiftToSubclassAA08NSObjectI0CyF
 // CHECK: [[GLOBAL:%[0-9]+]] = global_addr @_T021bridged_casts_folding11anyHashables03AnyE0Vv
 // CHECK: function_ref @_T0s11AnyHashableV10FoundationE19_bridgeToObjectiveCSo8NSObjectCyF
-// CHECK-NEXT: apply %3(%1)
-// CHECK-NEXT: destroy_addr %1
+// CHECK-NEXT: apply
 // CHECK-NEXT: unconditional_checked_cast {{%.*}} : $NSObject to $NSObjectSubclass
 @inline(never)
 public func testUncondCastSwiftToSubclass() -> NSObjectSubclass {

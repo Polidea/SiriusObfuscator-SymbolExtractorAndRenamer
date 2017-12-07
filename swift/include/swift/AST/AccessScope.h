@@ -60,14 +60,14 @@ public:
   }
 
   /// Returns the associated access level for diagnostic purposes.
-  AccessLevel accessLevelForDiagnostics() const;
+  Accessibility accessibilityForDiagnostics() const;
 
   /// Returns the minimum access level required to access
   /// associated DeclContext for diagnostic purposes.
-  AccessLevel requiredAccessForDiagnostics() const {
+  Accessibility requiredAccessibilityForDiagnostics() const {
     return isFileScope()
-      ? AccessLevel::FilePrivate
-      : accessLevelForDiagnostics();
+      ? Accessibility::FilePrivate
+      : accessibilityForDiagnostics();
   }
 
   /// Returns the narrowest access scope if this and the specified access scope

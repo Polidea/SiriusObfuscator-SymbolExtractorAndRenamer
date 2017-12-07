@@ -32,7 +32,7 @@ static SWIFT_CC(swift) void destroyTestObject(SWIFT_CONTEXT HeapObject *_object)
 static const FullMetadata<ClassMetadata> TestClassObjectMetadata = {
   { { &destroyTestObject }, { &VALUE_WITNESS_SYM(Bo) } },
   { { { MetadataKind::Class } }, 0, /*rodata*/ 1,
-  ClassFlags::UsesSwift1Refcounting, 0, 0, 0, 0, 0, 0 }
+  ClassFlags::UsesSwift1Refcounting, nullptr, 0, 0, 0, 0, 0 }
 };
 
 /// Create an object that, when deallocated, stores the given value to
@@ -270,10 +270,8 @@ TEST(RefcountingTest, nonatomic_retain_release_n) {
   size_t value = 0;
   auto object = allocTestObject(&value, 1);
   EXPECT_EQ(0u, value);
-  auto res = swift_nonatomic_retain_n(object, 32);
-  EXPECT_EQ(object, res);
-  res = swift_nonatomic_retain(object);
-  EXPECT_EQ(object, res);
+  swift_nonatomic_retain_n(object, 32);
+  swift_nonatomic_retain(object);
   EXPECT_EQ(0u, value);
   EXPECT_EQ(34u, swift_retainCount(object));
   swift_nonatomic_release_n(object, 31);
@@ -291,10 +289,8 @@ TEST(RefcountingTest, nonatomic_unknown_retain_release_n) {
   size_t value = 0;
   auto object = allocTestObject(&value, 1);
   EXPECT_EQ(0u, value);
-  auto res = swift_nonatomic_unknownRetain_n(object, 32);
-  EXPECT_EQ(object, res);
-  res = swift_nonatomic_unknownRetain(object);
-  EXPECT_EQ(object, res);
+  swift_nonatomic_unknownRetain_n(object, 32);
+  swift_nonatomic_unknownRetain(object);
   EXPECT_EQ(0u, value);
   EXPECT_EQ(34u, swift_retainCount(object));
   swift_nonatomic_unknownRelease_n(object, 31);

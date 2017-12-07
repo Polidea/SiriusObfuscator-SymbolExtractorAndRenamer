@@ -15,7 +15,6 @@
 #include "swift/SILOptimizer/PassManager/Transforms.h"
 #include "swift/SILOptimizer/Analysis/RCIdentityAnalysis.h"
 #include "swift/SIL/SILBuilder.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/AST/SubstitutionMap.h"
 #include "llvm/ADT/Statistic.h"
 

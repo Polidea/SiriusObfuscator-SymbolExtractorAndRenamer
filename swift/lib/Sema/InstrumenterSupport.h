@@ -17,8 +17,6 @@
 
 #include "TypeChecker.h"
 
-#include "swift/AST/ASTWalker.h"
-
 namespace swift {
 namespace instrumenter_support {
 

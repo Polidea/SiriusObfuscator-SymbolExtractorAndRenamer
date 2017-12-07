@@ -337,10 +337,9 @@ bool DeclAttribute::printImpl(ASTPrinter &Printer, const PrintOptions &Options,
 #define SIMPLE_DECL_ATTR(X, CLASS, ...) case DAK_##CLASS:
 #include "swift/AST/Attr.def"
   case DAK_Inline:
-  case DAK_AccessControl:
+  case DAK_Accessibility:
   case DAK_Ownership:
   case DAK_Effects:
-  case DAK_Optimize:
     if (DeclAttribute::isDeclModifier(getKind())) {
       Printer.printKeyword(getAttrName());
     } else {
@@ -348,7 +347,7 @@ bool DeclAttribute::printImpl(ASTPrinter &Printer, const PrintOptions &Options,
     }
     return true;
 
-  case DAK_SetterAccess:
+  case DAK_SetterAccessibility:
     Printer.printKeyword(getAttrName());
     Printer << "(set)";
     return true;
@@ -414,7 +413,12 @@ bool DeclAttribute::printImpl(ASTPrinter &Printer, const PrintOptions &Options,
     Printer << ")";
     break;
   }
-
+  case DAK_AutoClosure:
+    Printer.printAttrName("@autoclosure");
+    if (cast<AutoClosureAttr>(this)->isEscaping())
+      Printer << "(escaping)";
+    break;
+      
   case DAK_CDecl:
     Printer << "@_cdecl(\"" << cast<CDeclAttr>(this)->Name << "\")";
     break;
@@ -564,6 +568,8 @@ StringRef DeclAttribute::getAttrName() const {
     return "_semantics";
   case DAK_Available:
     return "availability";
+  case DAK_AutoClosure:
+    return "autoclosure";
   case DAK_ObjC:
   case DAK_ObjCRuntimeName:
     return "objc";
@@ -578,18 +584,6 @@ StringRef DeclAttribute::getAttrName() const {
     }
     llvm_unreachable("Invalid inline kind");
   }
-  case DAK_Optimize: {
-    switch (cast<OptimizeAttr>(this)->getMode()) {
-    case OptimizationMode::NoOptimization:
-      return "_optimize(none)";
-    case OptimizationMode::ForSpeed:
-      return "_optimize(speed)";
-    case OptimizationMode::ForSize:
-      return "_optimize(size)";
-    default:
-      llvm_unreachable("Invalid optimization kind");
-    }
-  }
   case DAK_Effects:
     switch (cast<EffectsAttr>(this)->getKind()) {
       case EffectsKind::ReadNone:
@@ -601,21 +595,21 @@ StringRef DeclAttribute::getAttrName() const {
       case EffectsKind::Unspecified:
         return "effects(unspecified)";
     }
-  case DAK_AccessControl:
-  case DAK_SetterAccess:
-    switch (cast<AbstractAccessControlAttr>(this)->getAccess()) {
-    case AccessLevel::Private:
+  case DAK_Accessibility:
+  case DAK_SetterAccessibility:
+    switch (cast<AbstractAccessibilityAttr>(this)->getAccess()) {
+    case Accessibility::Private:
       return "private";
-    case AccessLevel::FilePrivate:
+    case Accessibility::FilePrivate:
       return "fileprivate";
-    case AccessLevel::Internal:
+    case Accessibility::Internal:
       return "internal";
-    case AccessLevel::Public:
+    case Accessibility::Public:
       return "public";
-    case AccessLevel::Open:
+    case Accessibility::Open:
       return "open";
     }
-    llvm_unreachable("bad access level");
+    llvm_unreachable("bad accessibility kind");
 
   case DAK_Ownership:
     switch (cast<OwnershipAttr>(this)->get()) {
@@ -684,7 +678,7 @@ ObjCAttr *ObjCAttr::createNullary(ASTContext &Ctx, SourceLoc AtLoc,
                                   SourceLoc NameLoc, Identifier Name,
                                   SourceLoc RParenLoc) {
   void *mem = Ctx.Allocate(totalSizeToAlloc<SourceLoc>(3), alignof(ObjCAttr));
-  return new (mem) ObjCAttr(AtLoc, SourceRange(ObjCLoc, RParenLoc),
+  return new (mem) ObjCAttr(AtLoc, SourceRange(ObjCLoc),
                             ObjCSelector(Ctx, 0, Name),
                             SourceRange(LParenLoc, RParenLoc),
                             NameLoc);
@@ -703,7 +697,7 @@ ObjCAttr *ObjCAttr::createSelector(ASTContext &Ctx, SourceLoc AtLoc,
   assert(NameLocs.size() == Names.size());
   void *mem = Ctx.Allocate(totalSizeToAlloc<SourceLoc>(NameLocs.size() + 2),
                            alignof(ObjCAttr));
-  return new (mem) ObjCAttr(AtLoc, SourceRange(ObjCLoc, RParenLoc),
+  return new (mem) ObjCAttr(AtLoc, SourceRange(ObjCLoc),
                             ObjCSelector(Ctx, Names.size(), Names),
                             SourceRange(LParenLoc, RParenLoc),
                             NameLocs);

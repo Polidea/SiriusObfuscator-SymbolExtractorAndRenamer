@@ -11,38 +11,29 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "patternmatch-silgen"
+#include "SILGen.h"
+#include "Scope.h"
 #include "Cleanup.h"
 #include "ExitableFullExpr.h"
 #include "Initialization.h"
 #include "RValue.h"
-#include "SILGen.h"
-#include "Scope.h"
+#include "llvm/ADT/MapVector.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/FormattedStream.h"
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/DiagnosticsSIL.h"
 #include "swift/AST/Pattern.h"
 #include "swift/AST/SILOptions.h"
 #include "swift/AST/Types.h"
-#include "swift/Basic/ProfileCounter.h"
 #include "swift/Basic/STLExtras.h"
 #include "swift/SIL/DynamicCasts.h"
 #include "swift/SIL/SILArgument.h"
 #include "swift/SIL/SILUndef.h"
 #include "swift/SIL/TypeLowering.h"
-#include "llvm/ADT/MapVector.h"
 #include "llvm/Support/Compiler.h"
-#include "llvm/Support/Debug.h"
-#include "llvm/Support/FormattedStream.h"
 
 using namespace swift;
 using namespace Lowering;
-
-//===----------------------------------------------------------------------===//
-//                             Pattern Utilities
-//===----------------------------------------------------------------------===//
-
-// TODO: These routines should probably be refactored into their own file since
-// they have nothing to do with the implementation of SILGenPattern
-// specifically.
 
 /// Shallow-dump a pattern node one level deep for debug purposes.
 static void dumpPattern(const Pattern *p, llvm::raw_ostream &os) {
@@ -299,10 +290,6 @@ static Pattern *getSimilarSpecializingPattern(Pattern *p, Pattern *first) {
   llvm_unreachable("Unhandled PatternKind in switch.");
 }
 
-//===----------------------------------------------------------------------===//
-//                           SILGenPattern Emission
-//===----------------------------------------------------------------------===//
-
 namespace {
 
 /// A row which we intend to specialize.
@@ -315,9 +302,6 @@ struct RowToSpecialize {
 
   /// Whether the row will be irrefutable after this specialization.
   bool Irrefutable;
-
-  /// Profile Count of hte row we intend to specialize.
-  ProfileCounter Count;
 };
 
 /// Changes that we wish to apply to a row which we have specialized.
@@ -474,8 +458,7 @@ private:
   void emitEnumElementDispatch(ArrayRef<RowToSpecialize> rows,
                                ConsumableManagedValue src,
                                const SpecializationHandler &handleSpec,
-                               const FailureHandler &failure,
-                               ProfileCounter defaultCaseCount);
+                               const FailureHandler &failure);
   void emitBoolDispatch(ArrayRef<RowToSpecialize> rows,
                         ConsumableManagedValue src,
                         const SpecializationHandler &handleSpec,
@@ -484,10 +467,6 @@ private:
 
 /// A handle to a row in a clause matrix. Does not own memory; use of the
 /// ClauseRow must be dominated by its originating ClauseMatrix.
-///
-/// TODO: This should be refactored into a more general formulation that uses a
-/// child template pattern to inject our logic. This will then allow us to
-/// inject "mock" objects in a unittest file.
 class ClauseRow {
   friend class ClauseMatrix;
   
@@ -893,7 +872,7 @@ public:
       assert(operand.getFinalConsumption() !=
                  CastConsumptionKind::TakeOnSuccess &&
              "When compiling with sil ownership take on success is disabled");
-      // No unforwarding is needed, we always borrow/copy.
+      // No unforwarding is needed, we always copy.
       return false;
     }
 
@@ -968,7 +947,6 @@ chooseNecessaryColumn(const ClauseMatrix &matrix, unsigned firstRow) {
   for (unsigned c = 0; c != numColumns; ++c) {
     unsigned constructorPrefix = getConstructorPrefix(matrix, firstRow, c);
     if (constructorPrefix > longestConstructorPrefix) {
-      longestConstructorPrefix = constructorPrefix;
       bestColumn = c;
     }
   }
@@ -1227,12 +1205,12 @@ void PatternMatchEmission::bindVariable(SILLocation loc, VarDecl *var,
   // If this binding is one of multiple patterns, each individual binding
   // will just be let, and then the chosen value will get forwarded into
   // a var box in the final shared case block.
-  bool forcedLet = var->isLet();
-  if (hasMultipleItems && !var->isLet())
-    forcedLet = true;
+  bool forcedLet = hasMultipleItems && !var->isLet();
+  if (forcedLet)
+    var->setLet(true);
   
   // Initialize the variable value.
-  InitializationPtr init = SGF.emitInitializationForVarDecl(var, forcedLet);
+  InitializationPtr init = SGF.emitInitializationForVarDecl(var);
 
   RValue rv(SGF, loc, formalValueType, value.getFinalManagedValue());
   if (shouldTake(value, isIrrefutable)) {
@@ -1240,6 +1218,9 @@ void PatternMatchEmission::bindVariable(SILLocation loc, VarDecl *var,
   } else {
     std::move(rv).copyInto(SGF, loc, init.get());
   }
+  
+  if (forcedLet)
+    var->setLet(false);
 }
 
 /// Evaluate a guard expression and, if it returns false, branch to
@@ -1329,15 +1310,9 @@ void PatternMatchEmission::emitSpecializedDispatch(ClauseMatrix &clauses,
   auto addRowToSpecialize = [&](Pattern *pattern, unsigned rowIndex) {
     assert(getSpecializingPattern(clauses[rowIndex][column]) == pattern);
     bool irrefutable = clauses[rowIndex].isIrrefutableAfterSpecializing(column);
-    auto caseBlock = clauses[rowIndex].getClientData<CaseStmt>();
-    ProfileCounter count = ProfileCounter();
-    if (caseBlock) {
-      count = SGF.SGM.loadProfilerCount(caseBlock);
-    }
-    rowsToSpecialize.push_back({pattern, rowIndex, irrefutable, count});
+    rowsToSpecialize.push_back({pattern, rowIndex, irrefutable});
   };
 
-  ProfileCounter defaultCaseCount = ProfileCounter();
   Pattern *firstSpecializer = getSpecializingPattern(clauses[firstRow][column]);
   assert(firstSpecializer && "specializing unspecializable row?");
   addRowToSpecialize(firstSpecializer, firstRow);
@@ -1346,13 +1321,7 @@ void PatternMatchEmission::emitSpecializedDispatch(ClauseMatrix &clauses,
   for (++lastRow; lastRow != clauses.rows(); ++lastRow) {
     Pattern *specializer =
       getSimilarSpecializingPattern(clauses[lastRow][column], firstSpecializer);
-    if (!specializer) {
-      auto caseBlock = clauses[lastRow].getClientData<CaseStmt>();
-      if (caseBlock) {
-        defaultCaseCount = SGF.SGM.loadProfilerCount(caseBlock);
-      }
-      break;
-    }
+    if (!specializer) break;
     addRowToSpecialize(specializer, lastRow);
   }
   assert(lastRow - firstRow == rowsToSpecialize.size());
@@ -1397,8 +1366,7 @@ void PatternMatchEmission::emitSpecializedDispatch(ClauseMatrix &clauses,
     return emitIsDispatch(rowsToSpecialize, arg, handler, failure);
   case PatternKind::EnumElement:
   case PatternKind::OptionalSome:
-    return emitEnumElementDispatch(rowsToSpecialize, arg, handler, failure,
-                                   defaultCaseCount);
+    return emitEnumElementDispatch(rowsToSpecialize, arg, handler, failure);
   case PatternKind::Bool:
     return emitBoolDispatch(rowsToSpecialize, arg, handler, failure);
   }
@@ -1412,14 +1380,12 @@ static ConsumableManagedValue
 getManagedSubobject(SILGenFunction &SGF, SILValue value,
                     const TypeLowering &valueTL,
                     CastConsumptionKind consumption) {
-  if (consumption == CastConsumptionKind::CopyOnSuccess) {
+  if (consumption != CastConsumptionKind::CopyOnSuccess) {
+    return {SGF.emitManagedRValueWithCleanup(value, valueTL),
+             consumption};
+  } else {
     return {ManagedValue::forUnmanaged(value), consumption};
   }
-
-  assert((!SGF.F.getModule().getOptions().EnableSILOwnership ||
-          consumption != CastConsumptionKind::TakeOnSuccess) &&
-         "TakeOnSuccess should never be used when sil ownership is enabled");
-  return {SGF.emitManagedRValueWithCleanup(value, valueTL), consumption};
 }
 
 static ConsumableManagedValue
@@ -1586,12 +1552,9 @@ emitCastOperand(SILGenFunction &SGF, SILLocation loc,
     // Okay, if all we need to do is drop the value in an address,
     // this is easy.
     if (!hasAbstraction) {
-      ManagedValue finalValue = src.getFinalManagedValue();
-      if (finalValue.getOwnershipKind() == ValueOwnershipKind::Guaranteed)
-        finalValue = finalValue.copy(SGF, loc);
-      SGF.B.emitStoreValueOperation(loc, finalValue.forward(SGF),
-                                    init->getAddress(),
-                                    StoreOwnershipQualifier::Init);
+      SGF.B.emitStoreValueOperation(
+          loc, src.getFinalManagedValue().forward(SGF), init->getAddress(),
+          StoreOwnershipQualifier::Init);
       init->finishInitialization(SGF);
       ConsumableManagedValue result =
         { init->getManagedAddress(), src.getFinalConsumption() };
@@ -1666,7 +1629,7 @@ void PatternMatchEmission::emitIsDispatch(ArrayRef<RowToSpecialize> rows,
         assert(!SGF.B.hasValidInsertionPoint() && "did not end block");
       },
       // Failure block: branch out to the continuation block.
-      [&] { (*innerFailure)(loc); }, rows[0].Count);
+      [&] { (*innerFailure)(loc); });
 }
 
 /// Perform specialized dispatch for a sequence of EnumElementPattern or an
@@ -1896,8 +1859,8 @@ void PatternMatchEmission::emitEnumElementDispatchWithOwnership(
 /// OptionalSomePattern.
 void PatternMatchEmission::emitEnumElementDispatch(
     ArrayRef<RowToSpecialize> rows, ConsumableManagedValue src,
-    const SpecializationHandler &handleCase, const FailureHandler &outerFailure,
-    ProfileCounter defaultCaseCount) {
+    const SpecializationHandler &handleCase,
+    const FailureHandler &outerFailure) {
   // If sil ownership is enabled and we have that our source type is an object,
   // use the dispatch code path.
   if (SGF.getOptions().EnableSILOwnership && src.getType().isObject()) {
@@ -1922,7 +1885,6 @@ void PatternMatchEmission::emitEnumElementDispatch(
   // instructions want only the first information, so we split them up.
   SmallVector<std::pair<EnumElementDecl*, SILBasicBlock*>, 4> caseBBs;
   SmallVector<CaseInfo, 4> caseInfos;
-  SmallVector<ProfileCounter, 4> caseCounts;
   SILBasicBlock *defaultBB = nullptr;
 
   caseBBs.reserve(rows.size());
@@ -1954,7 +1916,6 @@ void PatternMatchEmission::emitEnumElementDispatch(
         caseInfos.resize(caseInfos.size() + 1);
         caseInfos.back().FormalElement = formalElt;
         caseInfos.back().FirstMatcher = row.Pattern;
-        caseCounts.push_back(row.Count);
       }
       assert(caseToIndex[elt] == index);
       assert(caseBBs[index].first == elt);
@@ -1988,8 +1949,9 @@ void PatternMatchEmission::emitEnumElementDispatch(
       enumDecl = SGF.getASTContext().getOptionalDecl();
     }
 
+    // FIXME: Get expansion from SILFunction
     if (enumDecl->hasFixedLayout(SGF.SGM.M.getSwiftModule(),
-                                 SGF.F.getResilienceExpansion())) {
+                                 ResilienceExpansion::Maximal)) {
       exhaustive = true;
 
       for (auto elt : enumDecl->getAllElements()) {
@@ -2038,13 +2000,10 @@ void PatternMatchEmission::emitEnumElementDispatch(
   SILValue srcValue = src.getFinalManagedValue().forward(SGF);
   SILLocation loc = PatternMatchStmt;
   loc.setDebugLoc(rows[0].Pattern);
-  ArrayRef<ProfileCounter> caseCountsArrayRef = caseCounts;
   if (addressOnlyEnum) {
-    SGF.B.createSwitchEnumAddr(loc, srcValue, defaultBB, caseBBs,
-                               caseCountsArrayRef, defaultCaseCount);
+    SGF.B.createSwitchEnumAddr(loc, srcValue, defaultBB, caseBBs);
   } else {
-    SGF.B.createSwitchEnum(loc, srcValue, defaultBB, caseBBs,
-                           caseCountsArrayRef, defaultCaseCount);
+    SGF.B.createSwitchEnum(loc, srcValue, defaultBB, caseBBs);
   }
 
   // Okay, now emit all the cases.
@@ -2414,13 +2373,12 @@ void PatternMatchEmission::emitSharedCaseBlocks() {
         if (V->isLet()) {
           // Just emit a let with cleanup.
           SGF.VarLocs[V].value = caseBB->getArgument(argIndex++);
-          SGF.emitInitializationForVarDecl(V, V->isLet())
-            ->finishInitialization(SGF);
+          SGF.emitInitializationForVarDecl(V)->finishInitialization(SGF);
         } else {
           // The pattern variables were all emitted as lets and one got passed in,
           // now we finally alloc a box for the var and forward in the chosen value.
           SGF.VarLocs.erase(V);
-          auto newVar = SGF.emitInitializationForVarDecl(V, V->isLet());
+          auto newVar = SGF.emitInitializationForVarDecl(V);
           auto loc = SGF.CurrentSILLoc;
           auto value =
               ManagedValue::forUnmanaged(caseBB->getArgument(argIndex++));
@@ -2557,19 +2515,6 @@ void SILGenFunction::emitSwitchStmt(SwitchStmt *S) {
   DEBUG(llvm::dbgs() << "emitting switch stmt\n";
         S->print(llvm::dbgs());
         llvm::dbgs() << '\n');
-  auto failure = [&](SILLocation location) {
-    // If we fail to match anything, we can just emit unreachable.
-    // This will be a dataflow error if we can reach here.
-    B.createUnreachable(S);
-  };
-  
-  // If the subject expression is uninhabited, we're already dead.
-  // Emit an unreachable in place of the switch statement.
-  if (S->getSubjectExpr()->getType()->isStructurallyUninhabited()) {
-    emitIgnoredExpr(S->getSubjectExpr());
-    return failure(SILLocation(S));
-  }
-  
   SILBasicBlock *contBB = createBasicBlock();
   emitProfilerIncrement(S);
   JumpDest contDest(contBB, Cleanups.getCleanupsDepth(), CleanupLocation(S));
@@ -2671,7 +2616,7 @@ void SILGenFunction::emitSwitchStmt(SwitchStmt *S) {
   // We use std::vector because it supports emplace_back; moving a ClauseRow is
   // expensive.
   std::vector<ClauseRow> clauseRows;
-  clauseRows.reserve(S->getRawCases().size());
+  clauseRows.reserve(S->getCases().size());
   bool hasFallthrough = false;
   for (auto caseBlock : S->getCases()) {
     for (auto &labelItem : caseBlock->getCaseLabelItems()) {
@@ -2686,6 +2631,12 @@ void SILGenFunction::emitSwitchStmt(SwitchStmt *S) {
 
   // Set up an initial clause matrix.
   ClauseMatrix clauses(clauseRows);
+
+  auto failure = [&](SILLocation location) {
+    // If we fail to match anything, we can just emit unreachable.
+    // This will be a dataflow error if we can reach here.
+    B.createUnreachable(S);
+  };
 
   // Recursively specialize and emit the clause matrix.
   emission.emitDispatch(clauses, subject, failure);

@@ -34,7 +34,6 @@ class SILBasicBlock :
 public llvm::ilist_node<SILBasicBlock>, public SILAllocated<SILBasicBlock> {
   friend class SILSuccessor;
   friend class SILFunction;
-  friend class SILGlobalVariable;
 public:
   using InstListType = llvm::iplist<SILInstruction>;
 private:
@@ -144,9 +143,6 @@ public:
   /// builds, an assert verifies that this is true.
   void moveAfter(SILBasicBlock *After);
 
-  /// \brief Moves the instruction to the iterator in this basic block.
-  void moveTo(SILBasicBlock::iterator To, SILInstruction *I);
-
   //===--------------------------------------------------------------------===//
   // SILBasicBlock Argument List Inspection and Manipulation
   //===--------------------------------------------------------------------===//
@@ -227,7 +223,7 @@ public:
   void dropAllArguments() { ArgumentList.clear(); }
 
   //===--------------------------------------------------------------------===//
-  // Successors
+  // Predecessors and Successors
   //===--------------------------------------------------------------------===//
 
   using SuccessorListTy = TermInst::SuccessorListTy;
@@ -242,62 +238,80 @@ public:
     return getTerminator()->getSuccessors();
   }
 
-  using const_succ_iterator = TermInst::const_succ_iterator;
-  using succ_iterator = TermInst::succ_iterator;
+  using const_succ_iterator = ConstSuccessorListTy::const_iterator;
+  using succ_iterator = SuccessorListTy::iterator;
 
-  bool succ_empty() const { return getTerminator()->succ_empty(); }
-  succ_iterator succ_begin() { return getTerminator()->succ_begin(); }
-  succ_iterator succ_end() { return getTerminator()->succ_end(); }
-  const_succ_iterator succ_begin() const {
-    return getTerminator()->succ_begin();
-  }
-  const_succ_iterator succ_end() const { return getTerminator()->succ_end(); }
+  bool succ_empty() const { return getSuccessors().empty(); }
+  succ_iterator succ_begin() { return getSuccessors().begin(); }
+  succ_iterator succ_end() { return getSuccessors().end(); }
+  const_succ_iterator succ_begin() const { return getSuccessors().begin(); }
+  const_succ_iterator succ_end() const { return getSuccessors().end(); }
 
-  using succblock_iterator = TermInst::succblock_iterator;
-  using const_succblock_iterator = TermInst::const_succblock_iterator;
-
+  using succblock_iterator =
+      TransformIterator<SILSuccessor *,
+                        std::function<SILBasicBlock *(const SILSuccessor &)>>;
+  using const_succblock_iterator = TransformIterator<
+      const SILSuccessor *,
+      std::function<const SILBasicBlock *(const SILSuccessor &)>>;
   succblock_iterator succblock_begin() {
-    return getTerminator()->succblock_begin();
+    using FuncTy = std::function<SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformIterator(getSuccessors().begin(), F);
   }
   succblock_iterator succblock_end() {
-    return getTerminator()->succblock_end();
+    using FuncTy = std::function<SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformIterator(getSuccessors().end(), F);
   }
   const_succblock_iterator succblock_begin() const {
-    return getTerminator()->succblock_begin();
+    using FuncTy = std::function<const SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformIterator(getSuccessors().begin(), F);
   }
   const_succblock_iterator succblock_end() const {
-    return getTerminator()->succblock_end();
+    using FuncTy = std::function<const SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformIterator(getSuccessors().end(), F);
   }
 
   SILBasicBlock *getSingleSuccessorBlock() {
-    return getTerminator()->getSingleSuccessorBlock();
+    if (succ_empty() || std::next(succ_begin()) != succ_end())
+      return nullptr;
+    return *succ_begin();
   }
 
   const SILBasicBlock *getSingleSuccessorBlock() const {
-    return getTerminator()->getSingleSuccessorBlock();
+    return const_cast<SILBasicBlock *>(this)->getSingleSuccessorBlock();
   }
 
   /// \brief Returns true if \p BB is a successor of this block.
-  bool isSuccessorBlock(SILBasicBlock *Block) const {
-    return getTerminator()->isSuccessorBlock(Block);
+  bool isSuccessorBlock(SILBasicBlock *BB) const {
+    auto Range = getSuccessorBlocks();
+    return any_of(Range, [&BB](const SILBasicBlock *SuccBB) -> bool {
+      return BB == SuccBB;
+    });
   }
 
-  using SuccessorBlockListTy = TermInst::SuccessorBlockListTy;
-  using ConstSuccessorBlockListTy = TermInst::ConstSuccessorBlockListTy;
+  using SuccessorBlockListTy =
+    TransformRange<SuccessorListTy,
+                   std::function<SILBasicBlock *(const SILSuccessor &)>>;
+  using ConstSuccessorBlockListTy =
+    TransformRange<ConstSuccessorListTy,
+                   std::function<const SILBasicBlock *(const SILSuccessor &)>>;
 
   /// Return the range of SILBasicBlocks that are successors of this block.
   SuccessorBlockListTy getSuccessorBlocks() {
-    return getTerminator()->getSuccessorBlocks();
+    using FuncTy = std::function<SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformRange(getSuccessors(), F);
   }
 
   /// Return the range of SILBasicBlocks that are successors of this block.
   ConstSuccessorBlockListTy getSuccessorBlocks() const {
-    return getTerminator()->getSuccessorBlocks();
+    using FuncTy = std::function<const SILBasicBlock *(const SILSuccessor &)>;
+    FuncTy F(&SILSuccessor::getBB);
+    return makeTransformRange(getSuccessors(), F);
   }
-
-  //===--------------------------------------------------------------------===//
-  // Predecessors
-  //===--------------------------------------------------------------------===//
 
   using pred_iterator = SILSuccessor::pred_iterator;
 
@@ -339,11 +353,6 @@ public:
   /// Returns true if this instruction only contains a branch instruction.
   bool isTrampoline() const;
 
-  /// Returns true if it is legal to hoist instructions into this block.
-  ///
-  /// Used by llvm::LoopInfo.
-  bool isLegalToHoistInto() const;
-
   //===--------------------------------------------------------------------===//
   // Debugging
   //===--------------------------------------------------------------------===//
@@ -370,8 +379,6 @@ public:
     for (SILInstruction &I : *this)
       I.dropAllReferences();
   }
-
-  void eraseInstructions();
 
 private:
   friend class SILArgument;
@@ -418,8 +425,11 @@ private:
 public:
   static void deleteNode(SILBasicBlock *BB) { BB->~SILBasicBlock(); }
 
+  void addNodeToList(SILBasicBlock *BB) {}
+
   void transferNodesFromList(ilist_traits<SILBasicBlock> &SrcTraits,
                              block_iterator First, block_iterator Last);
+
 private:
   static void createNode(const SILBasicBlock &);
 };

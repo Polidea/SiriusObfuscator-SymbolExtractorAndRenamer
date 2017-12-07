@@ -27,11 +27,32 @@
 #include "swift/AST/Expr.h"
 #include "swift/AST/Stmt.h"
 #include "swift/AST/Types.h"
-#include "swift/Basic/PrettyStackTrace.h"
 #include "swift/ClangImporter/ClangModule.h"
 
 using namespace swift;
 using namespace importer;
+
+Optional<clang::Module *>
+ClangImporter::Implementation::getClangSubmoduleForMacro(
+    const clang::MacroInfo *MI) {
+  auto *ExternalSource = getClangASTContext().getExternalSource();
+  return ExternalSource->getModule(MI->getOwningModuleID());
+}
+
+ClangModuleUnit *ClangImporter::Implementation::getClangModuleForMacro(
+    const clang::MacroInfo *MI) {
+  auto maybeModule = getClangSubmoduleForMacro(MI);
+  if (!maybeModule)
+    return nullptr;
+  if (!maybeModule.getValue())
+    return ImportedHeaderUnit;
+
+  // Get the parent module because currently we don't represent submodules with
+  // ClangModule.
+  auto *M = maybeModule.getValue()->getTopLevelModule();
+
+  return getWrapperForModule(M);
+}
 
 template <typename T = clang::Expr>
 static const T *
@@ -69,7 +90,7 @@ static ValueDecl *importNumericLiteral(ClangImporter::Implementation &Impl,
                                        Identifier name,
                                        const clang::Token *signTok,
                                        const clang::Token &tok,
-                                       ClangNode ClangN,
+                                       const clang::MacroInfo *ClangN,
                                        clang::QualType castType) {
   assert(tok.getKind() == clang::tok::numeric_constant &&
          "not a numeric token");
@@ -92,7 +113,7 @@ static ValueDecl *importNumericLiteral(ClangImporter::Implementation &Impl,
     auto clangTy = parsed->getType();
     auto literalType = Impl.importType(clangTy, ImportTypeKind::Value,
                                        isInSystemModule(DC),
-                                       Bridgeability::None);
+                                       /*isFullyBridgeable*/false);
     if (!literalType)
       return nullptr;
 
@@ -102,7 +123,7 @@ static ValueDecl *importNumericLiteral(ClangImporter::Implementation &Impl,
     } else {
       constantType = Impl.importType(castType, ImportTypeKind::Value,
                                      isInSystemModule(DC),
-                                     Bridgeability::None);
+                                     /*isFullyBridgeable*/false);
       if (!constantType)
         return nullptr;
     }
@@ -168,7 +189,11 @@ static ValueDecl *importStringLiteral(ClangImporter::Implementation &Impl,
                                       Identifier name,
                                       const clang::Token &tok,
                                       MappedStringLiteralKind kind,
-                                      ClangNode ClangN) {
+                                      const clang::MacroInfo *ClangN) {
+  DeclContext *dc = Impl.getClangModuleForMacro(MI);
+  if (!dc)
+    return nullptr;
+
   assert(isStringToken(tok));
 
   clang::ActionResult<clang::Expr*> result =
@@ -184,7 +209,7 @@ static ValueDecl *importStringLiteral(ClangImporter::Implementation &Impl,
   if (!importTy)
     return nullptr;
 
-  return Impl.createConstant(name, DC, importTy, parsed->getString(),
+  return Impl.createConstant(name, dc, importTy, parsed->getString(),
                              ConstantConvertKind::Coerce, /*static*/ false,
                              ClangN);
 }
@@ -194,7 +219,7 @@ static ValueDecl *importLiteral(ClangImporter::Implementation &Impl,
                                 const clang::MacroInfo *MI,
                                 Identifier name,
                                 const clang::Token &tok,
-                                ClangNode ClangN,
+                                const clang::MacroInfo *ClangN,
                                 clang::QualType castType) {
   switch (tok.getKind()) {
   case clang::tok::numeric_constant:
@@ -214,7 +239,7 @@ static ValueDecl *importLiteral(ClangImporter::Implementation &Impl,
 
 static ValueDecl *importNil(ClangImporter::Implementation &Impl,
                             DeclContext *DC, Identifier name,
-                            ClangNode clangN) {
+                            const clang::MacroInfo *clangN) {
   // We use a dummy type since we don't have a convenient type for 'nil'.  Any
   // use of this will be an error anyway.
   auto type = TupleType::getEmpty(Impl.SwiftContext);
@@ -279,7 +304,7 @@ static Optional<std::pair<llvm::APSInt, Type>>
       auto type  = impl.importType(literal->getType(),
                                    ImportTypeKind::Value,
                                    isInSystemModule(DC),
-                                   Bridgeability::None);
+                                   /*isFullyBridgeable*/false);
       return {{ value, type }};
     }
 
@@ -287,26 +312,10 @@ static Optional<std::pair<llvm::APSInt, Type>>
   } else if (token.is(clang::tok::identifier) &&
              token.getIdentifierInfo()->hasMacroDefinition()) {
 
-    auto rawID = token.getIdentifierInfo();
-    auto definition = impl.getClangPreprocessor().getMacroDefinition(rawID);
-    if (!definition)
-      return None;
-
-    ClangNode macroNode;
-    const clang::MacroInfo *macroInfo;
-    if (definition.getModuleMacros().empty()) {
-      macroInfo = definition.getMacroInfo();
-      macroNode = macroInfo;
-    } else {
-      // Follow MacroDefinition::getMacroInfo in preferring the last ModuleMacro
-      // rather than the first.
-      const clang::ModuleMacro *moduleMacro =
-          definition.getModuleMacros().back();
-      macroInfo = moduleMacro->getMacroInfo();
-      macroNode = moduleMacro;
-    }
+    auto rawID      = token.getIdentifierInfo();
+    auto macroInfo  = impl.getClangPreprocessor().getMacroInfo(rawID);
     auto importedID = impl.getNameImporter().importMacroName(rawID, macroInfo);
-    (void)impl.importMacro(importedID, macroNode);
+    impl.importMacro(importedID, macroInfo);
 
     auto searcher = impl.ImportedMacroConstants.find(macroInfo);
     if (searcher == impl.ImportedMacroConstants.end()) {
@@ -327,7 +336,7 @@ static ValueDecl *importMacro(ClangImporter::Implementation &impl,
                               DeclContext *DC,
                               Identifier name,
                               const clang::MacroInfo *macro,
-                              ClangNode ClangN,
+                              const clang::MacroInfo *ClangN,
                               clang::QualType castType) {
   if (name.empty()) return nullptr;
 
@@ -631,19 +640,13 @@ static ValueDecl *importMacro(ClangImporter::Implementation &impl,
 }
 
 ValueDecl *ClangImporter::Implementation::importMacro(Identifier name,
-                                                      ClangNode macroNode) {
-  const clang::MacroInfo *macro = macroNode.getAsMacro();
+                                                      clang::MacroInfo *macro) {
   if (!macro)
     return nullptr;
 
-  PrettyStackTraceStringAction stackRAII{"importing macro", name.str()};
-
   // Look for macros imported with the same name.
   auto known = ImportedMacros.find(name);
-  if (known == ImportedMacros.end()) {
-    // Push in a placeholder to break circularity.
-    ImportedMacros[name].push_back({macro, nullptr});
-  } else {
+  if (known != ImportedMacros.end()) {
     // Check whether this macro has already been imported.
     for (const auto &entry : known->second) {
       if (entry.first == macro) return entry.second;
@@ -656,45 +659,21 @@ ValueDecl *ClangImporter::Implementation::importMacro(Identifier name,
       // If the macro is equal to an existing macro, map down to the same
       // declaration.
       if (macro->isIdenticalTo(*entry.first, clangPP, true)) {
-        ValueDecl *result = entry.second;
-        known->second.push_back({macro, result});
-        return result;
+        known->second.push_back({macro, entry.second});
+        return entry.second;
       }
     }
-
-    // If not, push in a placeholder to break circularity.
-    known->second.push_back({macro, nullptr});
   }
 
   ImportingEntityRAII ImportingEntity(*this);
   // We haven't tried to import this macro yet. Do so now, and cache the
   // result.
 
-  DeclContext *DC;
-  if (const clang::Module *module = getClangOwningModule(macroNode)) {
-    // Get the parent module because currently we don't model Clang submodules
-    // in Swift.
-    DC = getWrapperForModule(module->getTopLevelModule());
-  } else {
-    DC = ImportedHeaderUnit;
-  }
+  DeclContext *DC = getClangModuleForMacro(macro);
+  if (!DC)
+    return nullptr;
 
-  auto valueDecl = ::importMacro(*this, DC, name, macro, macroNode,
-                                 /*castType*/{});
-
-  // Update the entry for the value we just imported.
-  // It's /probably/ the last entry in ImportedMacros[name], but there's an
-  // outside chance more macros with the same name have been imported
-  // re-entrantly since this method started.
-  if (valueDecl) {
-    auto entryIter = llvm::find_if(llvm::reverse(ImportedMacros[name]),
-        [macro](std::pair<const clang::MacroInfo *, ValueDecl *> entry) {
-      return entry.first == macro;
-    });
-    assert(entryIter != llvm::reverse(ImportedMacros[name]).end() &&
-           "placeholder not found");
-    entryIter->second = valueDecl;
-  }
-
+  auto valueDecl = ::importMacro(*this, DC, name, macro, macro, /*castType*/{});
+  ImportedMacros[name].push_back({macro, valueDecl});
   return valueDecl;
 }

@@ -11,31 +11,31 @@ GenericOption const GenericOptionMultithreaded NS_SWIFT_NAME(multithreaded);
 
 @interface GenericClass<T> : NSObject
 - (id)initWithThing:(T)thing;
-- (id)initWithArrayOfThings:(NSArray<T> *_Nonnull)things;
+- (id)initWithArrayOfThings:(NSArray<T> *__nonnull)things;
 - (id)initWithOptions:(nullable NSDictionary<GenericOption, id> *)options;
 - (void)dealloc;
-- (_Nullable T)thing;
+- (__nullable T)thing;
 - (int)count;
-+ (_Nullable T)classThing;
-- (_Nonnull NSArray<T> *)arrayOfThings;
-- (void)setArrayOfThings:(NSArray<T> *_Nonnull)things;
++ (__nullable T)classThing;
+- (__nonnull NSArray<T> *)arrayOfThings;
+- (void)setArrayOfThings:(NSArray<T> *__nonnull)things;
 
-- (T _Nonnull)objectAtIndexedSubscript:(uint16_t)i;
-- (void)setObject:(T _Nonnull)object atIndexedSubscript:(uint16_t)i;
+- (T __nonnull)objectAtIndexedSubscript:(uint16_t)i;
+- (void)setObject:(T __nonnull)object atIndexedSubscript:(uint16_t)i;
 
-- (void)performBlockOnThings:(T _Nonnull (^_Nonnull)(T _Nonnull))block;
-- (T _Nonnull (^_Nonnull)(T _Nonnull))blockForPerformingOnThings;
+- (void)performBlockOnThings: (T __nonnull (^ __nonnull)(T __nonnull))block;
+- (T __nonnull (^ __nonnull)(T __nonnull))blockForPerformingOnThings;
 
-@property(nonatomic) _Nullable T propertyThing;
-@property(nonatomic) _Nullable NSArray<T> *propertyArrayOfThings;
+@property (nonatomic) __nullable T propertyThing;
+@property (nonatomic) __nullable NSArray<T> *propertyArrayOfThings;
 @end
 
-@interface GenericClass<T>(Private)
-- (_Nullable T)otherThing;
-+ (_Nullable T)otherClassThing;
+@interface GenericClass<T> (Private)
+- (__nullable T)otherThing;
++ (__nullable T)otherClassThing;
 @end
 
-void takeGenericClass(_Nullable GenericClass<NSString *> *thing);
+void takeGenericClass(__nullable GenericClass<NSString *> *thing);
 
 @interface GenericSubclass<T> : GenericClass<T>
 @end
@@ -72,23 +72,23 @@ void takeGenericClass(_Nullable GenericClass<NSString *> *thing);
 @protocol Fungible
 @end
 
-@interface FungibleContainer<T : id<Fungible>> : NSObject
+@interface FungibleContainer<T: id<Fungible>> : NSObject
 @end
 
-@interface PettableContainer<T : id<Pettable>> : NSObject
+@interface PettableContainer<T: id<Pettable>> : NSObject
 @end
 
-@interface AnimalContainer<T : Animal *> : NSObject
+@interface AnimalContainer<T: Animal *> : NSObject
 @end
 
-@interface PettableAnimalContainer<T : Animal<Pettable> *> : NSObject
+@interface PettableAnimalContainer<T: Animal<Pettable> *> : NSObject
 @end
 
-@interface FungibleAnimalContainer<T : Animal<Fungible> *> : NSObject
+@interface FungibleAnimalContainer<T: Animal<Fungible> *> : NSObject
 @end
 
 @interface TestConstrainedTypeParam<T> : NSObject
-- (void)doThing:(_Nonnull T<Pettable>)thing;
+- (void)doThing:(__nonnull T<Pettable>)thing;
 @end
 
 typedef id <Fungible> FungibleObject;

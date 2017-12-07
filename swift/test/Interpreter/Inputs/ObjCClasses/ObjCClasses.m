@@ -172,13 +172,11 @@ static unsigned counter = 0;
 @end
 
 @implementation OuterType
-
 - (id)init {
   if ((self = [super init]) != nil) {
   }
   return self;
 }
-
 @end
 
 @implementation OuterTypeInnerType

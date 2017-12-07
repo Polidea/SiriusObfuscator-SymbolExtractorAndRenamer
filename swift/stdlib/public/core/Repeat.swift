@@ -26,15 +26,8 @@
 ///     // "Humperdinck"
 ///     // "Humperdinck"
 @_fixed_layout
-public struct Repeated<Element> {
-  /// The number of elements in this collection.
-  public let count: Int
+public struct Repeated<Element> : RandomAccessCollection {
 
-  /// The value of every element in this collection.
-  public let repeatedValue: Element
-}
-
-extension Repeated: RandomAccessCollection {
   public typealias Indices = CountableRange<Int>
 
   /// A type that represents a valid position in the collection.
@@ -82,6 +75,12 @@ extension Repeated: RandomAccessCollection {
     _precondition(position >= 0 && position < count, "Index out of range")
     return repeatedValue
   }
+
+  /// The number of elements in this collection.
+  public let count: Int
+
+  /// The value of every element in this collection.
+  public let repeatedValue: Element
 }
 
 /// Creates a collection containing the specified number of the given element.
@@ -107,4 +106,14 @@ extension Repeated: RandomAccessCollection {
 @_inlineable
 public func repeatElement<T>(_ element: T, count n: Int) -> Repeated<T> {
   return Repeated(_repeating: element, count: n)
+}
+
+@available(*, unavailable, renamed: "Repeated")
+public struct Repeat<Element> {}
+
+extension Repeated {
+  @available(*, unavailable, message: "Please use repeatElement(_:count:) function instead")
+  public init(count: Int, repeatedValue: Element) {
+    Builtin.unreachable()
+  }
 }

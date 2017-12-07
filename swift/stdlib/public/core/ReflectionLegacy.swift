@@ -68,7 +68,6 @@ public protocol _Mirror {
 /// An entry point that can be called from C++ code to get the summary string
 /// for an arbitrary object. The memory pointed to by "out" is initialized with
 /// the summary string.
-@_inlineable // FIXME(sil-serialize-all)
 @_silgen_name("swift_getSummary")
 public // COMPILER_INTRINSIC
 func _getSummary<T>(_ out: UnsafeMutablePointer<String>, x: T) {
@@ -77,101 +76,66 @@ func _getSummary<T>(_ out: UnsafeMutablePointer<String>, x: T) {
 
 /// Produce a mirror for any value.  The runtime produces a mirror that
 /// structurally reflects values of any type.
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_reflectAny")
 internal func _reflect<T>(_ x: T) -> _Mirror
 
 // -- Implementation details for the runtime's _Mirror implementation
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_MagicMirrorData_summary")
-internal func _swift_MagicMirrorData_summaryImpl(
+func _swift_MagicMirrorData_summaryImpl(
   _ metadata: Any.Type, _ result: UnsafeMutablePointer<String>
 )
 
 @_fixed_layout
 public struct _MagicMirrorData {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let owner: Builtin.NativeObject
-  @_versioned // FIXME(sil-serialize-all)
-  internal let ptr: Builtin.RawPointer
-  @_versioned // FIXME(sil-serialize-all)
-  internal let metadata: Any.Type
+  let owner: Builtin.NativeObject
+  let ptr: Builtin.RawPointer
+  let metadata: Any.Type
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any {
+  var value: Any {
     @_silgen_name("swift_MagicMirrorData_value")get
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type {
+  var valueType: Any.Type {
     @_silgen_name("swift_MagicMirrorData_valueType")get
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public var objcValue: Any {
     @_silgen_name("swift_MagicMirrorData_objcValue")get
   }
-  @_inlineable // FIXME(sil-serialize-all)
   public var objcValueType: Any.Type {
     @_silgen_name("swift_MagicMirrorData_objcValueType")get
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     let (_, result) = _withUninitializedString {
       _swift_MagicMirrorData_summaryImpl(self.metadata, $0)
     }
     return result
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func _loadValue<T>(ofType _: T.Type) -> T {
     return Builtin.load(ptr) as T
   }
 }
 
 @_versioned
-internal struct _OpaqueMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _OpaqueMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int { return 0 }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
+  var objectIdentifier: ObjectIdentifier? { return nil }
+  var count: Int { return 0 }
+  subscript(i: Int) -> (String, _Mirror) {
     _preconditionFailure("no children")
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String { return data.summary }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .aggregate }
+  var summary: String { return data.summary }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
+  var disposition: _MirrorDisposition { return .aggregate }
 }
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_TupleMirror_count")
-internal func _getTupleCount(_: _MagicMirrorData) -> Int
+func _getTupleCount(_: _MagicMirrorData) -> Int
 
 // Like the other swift_*Mirror_subscript functions declared here and
 // elsewhere, this is implemented in the runtime.  The Swift CC would
@@ -181,143 +145,82 @@ internal func _getTupleCount(_: _MagicMirrorData) -> Int
 // ABI rules on most platforms.  Therefore, we make this function generic,
 // which has the disadvantage of passing the String type metadata as an
 // extra argument, but does force the string to be returned indirectly.
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_TupleMirror_subscript")
-internal func _getTupleChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
+func _getTupleChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
 
 @_versioned
 internal struct _TupleMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
+  var objectIdentifier: ObjectIdentifier? { return nil }
+  var count: Int {
     return _getTupleCount(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     return _getTupleChild(i, data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String { return "(\(count) elements)" }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .tuple }
+  var summary: String { return "(\(count) elements)" }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
+  var disposition: _MirrorDisposition { return .tuple }
 }
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_StructMirror_count")
-internal func _getStructCount(_: _MagicMirrorData) -> Int
+func _getStructCount(_: _MagicMirrorData) -> Int
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_StructMirror_subscript")
-internal func _getStructChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
+func _getStructChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
 
 @_versioned
-internal struct _StructMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _StructMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
+  var objectIdentifier: ObjectIdentifier? { return nil }
+  var count: Int {
     return _getStructCount(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     return _getStructChild(i, data)
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     return _typeName(valueType)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .`struct` }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
+  var disposition: _MirrorDisposition { return .`struct` }
 }
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_EnumMirror_count")
-internal func _getEnumCount(_: _MagicMirrorData) -> Int
+func _getEnumCount(_: _MagicMirrorData) -> Int
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_EnumMirror_subscript")
-internal func _getEnumChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
+func _getEnumChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_EnumMirror_caseName")
-internal func _swift_EnumMirror_caseName(
+func _swift_EnumMirror_caseName(
     _ data: _MagicMirrorData) -> UnsafePointer<CChar>
 
 @_versioned
-internal struct _EnumMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _EnumMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
+  var objectIdentifier: ObjectIdentifier? { return nil }
+  var count: Int {
     return _getEnumCount(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var caseName: UnsafePointer<CChar> {
+  var caseName: UnsafePointer<CChar> {
     return _swift_EnumMirror_caseName(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     return _getEnumChild(i, data)
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     let maybeCaseName = String(validatingUTF8: self.caseName)
     let typeName = _typeName(valueType)
     if let caseName = maybeCaseName {
@@ -325,45 +228,28 @@ internal struct _EnumMirror : _Mirror {
     }
     return typeName
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .`enum` }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
+  var disposition: _MirrorDisposition { return .`enum` }
 }
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_ClassMirror_count")
-internal func _getClassCount(_: _MagicMirrorData) -> Int
+func _getClassCount(_: _MagicMirrorData) -> Int
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("swift_ClassMirror_subscript")
-internal func _getClassChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
+func _getClassChild<T>(_: Int, _: _MagicMirrorData) -> (T, _Mirror)
 
 #if _runtime(_ObjC)
-@_inlineable // FIXME(sil-serialize-all)
 @_silgen_name("swift_ClassMirror_quickLookObject")
 public func _swift_ClassMirror_quickLookObject(_: _MagicMirrorData) -> AnyObject
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 @_silgen_name("_swift_stdlib_NSObject_isKindOfClass")
 internal func _swift_NSObject_isImpl(_ object: AnyObject, kindOf: AnyObject) -> Bool
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
 internal func _is(_ object: AnyObject, kindOf `class`: String) -> Bool {
   return _swift_NSObject_isImpl(object, kindOf: `class` as AnyObject)
 }
 
-@_inlineable // FIXME(sil-serialize-all)
-@_versioned // FIXME(sil-serialize-all)
-internal func _getClassPlaygroundQuickLook(
-  _ object: AnyObject
-) -> PlaygroundQuickLook? {
+func _getClassPlaygroundQuickLook(_ object: AnyObject) -> PlaygroundQuickLook? {
   if _is(object, kindOf: "NSNumber") {
     let number: _NSNumber = unsafeBitCast(object, to: _NSNumber.self)
     switch UInt8(number.objCType[0]) {
@@ -401,39 +287,24 @@ internal func _getClassPlaygroundQuickLook(
 #endif
 
 @_versioned
-internal struct _ClassMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _ClassMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? {
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
+  var objectIdentifier: ObjectIdentifier? {
     return data._loadValue(ofType: ObjectIdentifier.self)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var count: Int {
     return _getClassCount(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     return _getClassChild(i, data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     return _typeName(valueType)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? {
+  var quickLookObject: PlaygroundQuickLook? {
 #if _runtime(_ObjC)
     let object = _swift_ClassMirror_quickLookObject(data)
     return _getClassPlaygroundQuickLook(object)
@@ -441,92 +312,56 @@ internal struct _ClassMirror : _Mirror {
     return nil
 #endif
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .`class` }
+  var disposition: _MirrorDisposition { return .`class` }
 }
 
 @_versioned
-internal struct _ClassSuperMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _ClassSuperMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
 
   // Suppress the value identifier for super mirrors.
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? {
+  var objectIdentifier: ObjectIdentifier? {
     return nil
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var count: Int {
     return _getClassCount(data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     return _getClassChild(i, data)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     return _typeName(data.metadata)
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .`class` }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
+  var disposition: _MirrorDisposition { return .`class` }
 }
 
 @_versioned
-internal struct _MetatypeMirror : _Mirror {
-  @_versioned // FIXME(sil-serialize-all)
-  internal let data: _MagicMirrorData
+struct _MetatypeMirror : _Mirror {
+  let data: _MagicMirrorData
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var value: Any { return data.value }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var valueType: Any.Type { return data.valueType }
+  var value: Any { return data.value }
+  var valueType: Any.Type { return data.valueType }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var objectIdentifier: ObjectIdentifier? {
+  var objectIdentifier: ObjectIdentifier? {
     return data._loadValue(ofType: ObjectIdentifier.self)
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var count: Int {
+  var count: Int {
     return 0
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal subscript(i: Int) -> (String, _Mirror) {
+  subscript(i: Int) -> (String, _Mirror) {
     _preconditionFailure("no children")
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var summary: String {
+  var summary: String {
     return _typeName(data._loadValue(ofType: Any.Type.self))
   }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var quickLookObject: PlaygroundQuickLook? { return nil }
+  var quickLookObject: PlaygroundQuickLook? { return nil }
 
   // Special disposition for types?
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
-  internal var disposition: _MirrorDisposition { return .aggregate }
+  var disposition: _MirrorDisposition { return .aggregate }
 }
 

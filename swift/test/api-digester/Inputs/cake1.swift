@@ -1,5 +1,3 @@
-import APINotesTest
-
 public struct S1 {
   public init(_ : Int) {}
   public func foo1() {}
@@ -15,7 +13,6 @@ public class C1 {
   public weak var CIIns1 : C1?
   public var CIIns2 : C1?
   public func foo3(a : Void?) {}
-  public func foo4(a : Void?) {}
 }
 
 public class C3 {}
@@ -23,8 +20,4 @@ public class C3 {}
 public struct Somestruct2 {
   public init(_ : C1) {}
   public static func foo1(_ a : C3) {}
-}
-
-public class C4: OldType {
-  public func foo() {}
 }

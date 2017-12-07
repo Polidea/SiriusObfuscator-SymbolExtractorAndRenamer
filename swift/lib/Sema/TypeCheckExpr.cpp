@@ -65,7 +65,7 @@ static void substituteInputSugarArgumentType(Type argTy, CanType resultTy,
   
   // Make sure this argument's sugar is consistent with the sugar we
   // already found.
-  if (argTy.getPointer() == resultSugarTy.getPointer())
+  if (argTy->isSpelledLike(resultSugarTy))
     return;
   uniqueSugarTy = false;
 }

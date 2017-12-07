@@ -25,7 +25,7 @@ namespace swift {
 
 class IVInfo : public SCCVisitor<IVInfo> {
 public:
-  typedef llvm::SmallVectorImpl<SILNode *> SCCType;
+  typedef llvm::SmallVectorImpl<ValueBase *> SCCType;
   friend SCCVisitor;
 
 public:

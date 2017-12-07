@@ -32,7 +32,6 @@ namespace swift {
 enum class DiagnosticKind : uint8_t {
   Error,
   Warning,
-  Remark,
   Note
 };
 

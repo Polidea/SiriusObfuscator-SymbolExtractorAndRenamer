@@ -31,6 +31,6 @@ endif()
 
 add_sourcekit_library(sourcekitdAPI
   ${sourcekitdAPI_sources}
-  LINK_LIBS
+  DEPENDS
       SourceKitSupport SourceKitSwiftLang
 )

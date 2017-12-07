@@ -73,7 +73,8 @@ public:
     }
 
     if (ParsedArgs.hasArg(OPT_UNKNOWN)) {
-      for (const Arg *A : ParsedArgs.filtered(OPT_UNKNOWN)) {
+      for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_UNKNOWN),
+                                     ParsedArgs.filtered_end())) {
         Diags.diagnose(SourceLoc(), diag::error_unknown_arg,
                        A->getAsString(ParsedArgs));
       }
@@ -88,7 +89,8 @@ public:
       return 1;
     }
 
-    for (const Arg *A : ParsedArgs.filtered(OPT_INPUT)) {
+    for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_INPUT),
+                                   ParsedArgs.filtered_end())) {
       InputFilenames.push_back(A->getValue());
     }
 

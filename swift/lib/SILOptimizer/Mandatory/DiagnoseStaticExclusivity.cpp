@@ -406,12 +406,6 @@ using StorageMap = llvm::SmallDenseMap<AccessedStorage, AccessInfo, 4>;
 
 /// Represents two accesses that conflict and their underlying storage.
 struct ConflictingAccess {
-private:
-
-  /// If true, always diagnose this conflict as a warning. This is useful for
-  /// staging in fixes for false negatives without affecting source
-  /// compatibility.
-  bool AlwaysDiagnoseAsWarning = false;
 public:
   /// Create a conflict for two begin_access instructions in the same function.
   ConflictingAccess(const AccessedStorage &Storage, const RecordedAccess &First,
@@ -421,11 +415,6 @@ public:
   const AccessedStorage Storage;
   const RecordedAccess FirstAccess;
   const RecordedAccess SecondAccess;
-
-  bool getAlwaysDiagnoseAsWarning() const { return AlwaysDiagnoseAsWarning; }
-  void setAlwaysDiagnoseAsWarning(bool AlwaysDiagnoseAsWarning) {
-    this->AlwaysDiagnoseAsWarning = AlwaysDiagnoseAsWarning;
-  }
 };
 
 } // end anonymous namespace
@@ -704,15 +693,10 @@ static void diagnoseExclusivityViolation(const ConflictingAccess &Violation,
   unsigned AccessKindForMain =
       static_cast<unsigned>(MainAccess.getAccessKind());
 
-  // For now, all exclusivity violations are warning in Swift 3 mode.
-  // Also treat some violations as warnings to allow them to be staged in.
-  bool DiagnoseAsWarning = Violation.getAlwaysDiagnoseAsWarning() ||
-      Ctx.LangOpts.isSwiftVersion3();
-
   if (const ValueDecl *VD = Storage.getStorageDecl()) {
     // We have a declaration, so mention the identifier in the diagnostic.
-    auto DiagnosticID = (DiagnoseAsWarning ?
-                         diag::exclusivity_access_required_warn :
+    auto DiagnosticID = (Ctx.LangOpts.isSwiftVersion3() ?
+                         diag::exclusivity_access_required_swift3 :
                          diag::exclusivity_access_required);
     SILType BaseType = FirstAccess.getInstruction()->getType().getAddressType();
     SILModule &M = FirstAccess.getInstruction()->getModule();
@@ -740,8 +724,8 @@ static void diagnoseExclusivityViolation(const ConflictingAccess &Violation,
       addSwapAtFixit(D, CallToReplace, Base, SwapIndex1, SwapIndex2,
                      Ctx.SourceMgr);
   } else {
-    auto DiagnosticID = (DiagnoseAsWarning ?
-                         diag::exclusivity_access_required_unknown_decl_warn :
+    auto DiagnosticID = (Ctx.LangOpts.isSwiftVersion3() ?
+                         diag::exclusivity_access_required_unknown_decl_swift3 :
                          diag::exclusivity_access_required_unknown_decl);
     diagnose(Ctx, MainAccess.getAccessLoc().getSourceLoc(), DiagnosticID,
              AccessKindForMain)
@@ -806,7 +790,7 @@ static AccessedStorage findAccessedStorage(SILValue Source) {
     case ValueKind::RefTailAddrInst:
     case ValueKind::TailAddrInst:
     case ValueKind::IndexAddrInst:
-      Iter = cast<SingleValueInstruction>(Iter)->getOperand(0);
+      Iter = cast<SILInstruction>(Iter)->getOperand(0);
       continue;
 
     // Base address producers.
@@ -918,7 +902,6 @@ findConflictingArgumentAccess(const AccessSummaryAnalysis::ArgumentSummary &AS,
 static void checkForViolationWithCall(
     const StorageMap &Accesses, SILFunction *Callee, unsigned StartingAtIndex,
     OperandValueArrayRef Arguments, AccessSummaryAnalysis *ASA,
-    bool DiagnoseAsWarning,
     llvm::SmallVectorImpl<ConflictingAccess> &ConflictingAccesses) {
   const AccessSummaryAnalysis::FunctionSummary &FS =
       ASA->getOrCreateSummary(Callee);
@@ -951,7 +934,6 @@ static void checkForViolationWithCall(
 
     const AccessInfo &Info = AccessIt->getSecond();
     if (auto Conflict = findConflictingArgumentAccess(AS, Storage, Info)) {
-      Conflict->setAlwaysDiagnoseAsWarning(DiagnoseAsWarning);
       ConflictingAccesses.push_back(*Conflict);
     }
   }
@@ -982,88 +964,34 @@ static PartialApplyInst *lookThroughForPartialApply(SILValue V) {
 /// via @block_storage convention. To enforce this case, we should statically
 /// recognize when the apply takes a block argument that has been initialized to
 /// a non-escaping closure.
-static void checkForViolationsInNoEscapeClosureArguments(
-    const StorageMap &Accesses, ApplySite AS, AccessSummaryAnalysis *ASA,
-    llvm::SmallVectorImpl<ConflictingAccess> &ConflictingAccesses,
-    bool DiagnoseAsWarning) {
+static void checkForViolationsInNoEscapeClosures(
+    const StorageMap &Accesses, FullApplySite FAS, AccessSummaryAnalysis *ASA,
+    llvm::SmallVectorImpl<ConflictingAccess> &ConflictingAccesses) {
+
+  SILFunction *Callee = FAS.getCalleeFunction();
+  if (Callee && !Callee->empty()) {
+    // Check for violation with directly called closure
+    checkForViolationWithCall(Accesses, Callee, 0, FAS.getArguments(), ASA,
+                              ConflictingAccesses);
+  }
 
   // Check for violation with closures passed as arguments
-  for (SILValue Argument : AS.getArguments()) {
-    auto ArgumentFnType = Argument->getType().getAs<SILFunctionType>();
-    if (!ArgumentFnType)
-      continue;
-
-    if (!ArgumentFnType->isNoEscape())
-      continue;
-
+  for (SILValue Argument : FAS.getArguments()) {
     auto *PAI = lookThroughForPartialApply(Argument);
     if (!PAI)
       continue;
 
-    SILFunction *Callee = PAI->getCalleeFunction();
-    if (!Callee)
-      continue;
-
-    if (Callee->isThunk() == IsReabstractionThunk) {
-      // For source compatibility reasons, treat conflicts found by
-      // looking through reabstraction thunks as warnings. A future compiler
-      // will upgrade these to errors;
-      bool WarnOnThunkConflict = true;
-      // Recursively check any arguments to the partial apply that are
-      // themselves noescape closures. This detects violations when a noescape
-      // closure is captured by a reabstraction thunk which is itself then passed
-      // to an apply.
-      checkForViolationsInNoEscapeClosureArguments(Accesses, PAI, ASA,
-                                                   ConflictingAccesses,
-                                                   WarnOnThunkConflict);
-      continue;
-    }
-    // The callee is not a reabstraction thunk, so check its captures directly.
-
-    if (Callee->empty())
+    SILFunction *Closure = PAI->getCalleeFunction();
+    if (!Closure || Closure->empty())
       continue;
 
     // Check the closure's captures, which are a suffix of the closure's
     // parameters.
     unsigned StartIndex =
-        Callee->getArguments().size() - PAI->getNumArguments();
-    checkForViolationWithCall(Accesses, Callee, StartIndex,
-                              PAI->getArguments(), ASA, DiagnoseAsWarning,
-                              ConflictingAccesses);
+        Closure->getArguments().size() - PAI->getNumCallArguments();
+    checkForViolationWithCall(Accesses, Closure, StartIndex,
+                              PAI->getArguments(), ASA, ConflictingAccesses);
   }
-}
-
-/// Given a full apply site, diagnose if the apply either calls a closure
-/// directly that conflicts with an in-progress access or takes a noescape
-/// argument that, when called, would conflict with an in-progress access.
-static void checkForViolationsInNoEscapeClosures(
-    const StorageMap &Accesses, FullApplySite FAS, AccessSummaryAnalysis *ASA,
-    llvm::SmallVectorImpl<ConflictingAccess> &ConflictingAccesses) {
-  // Check to make sure that calling a closure immediately will not result in
-  // a conflict. This diagnoses in cases where there is a conflict between an
-  // argument passed inout to the closure and an access inside the closure to a
-  // captured variable:
-  //
-  //  var i = 7
-  //  ({ (p: inout Int) in i = 8})(&i) // Overlapping access to 'i'
-  //
-  SILFunction *Callee = FAS.getCalleeFunction();
-  if (Callee && !Callee->empty()) {
-    // Check for violation with directly called closure
-    checkForViolationWithCall(Accesses, Callee, 0, FAS.getArguments(), ASA,
-                              /*DiagnoseAsWarning=*/false, ConflictingAccesses);
-  }
-
-  // Check to make sure that any arguments to the apply are not themselves
-  // noescape closures that -- when called -- might conflict with an in-progress
-  // access. For example, this will diagnose on the following:
-  //
-  // var i = 7
-  // takesInoutAndClosure(&i) { i = 8 } // Overlapping access to 'i'
-  //
-  checkForViolationsInNoEscapeClosureArguments(Accesses, FAS, ASA,
-                                               ConflictingAccesses,
-                                               /*DiagnoseAsWarning=*/false);
 }
 
 static void checkStaticExclusivity(SILFunction &Fn, PostOrderFunctionInfo *PO,

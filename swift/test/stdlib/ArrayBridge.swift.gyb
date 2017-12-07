@@ -10,7 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: %gyb %s -o %t/ArrayBridge.swift
 // RUN: %target-clang %S/Inputs/ArrayBridge/ArrayBridge.m -c -o %t/ArrayBridgeObjC.o -g

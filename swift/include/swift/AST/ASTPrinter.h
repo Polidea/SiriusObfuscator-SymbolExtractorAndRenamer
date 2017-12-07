@@ -305,6 +305,9 @@ public:
   }
 };
 
+bool shouldPrint(const Decl *D, PrintOptions &Options);
+bool shouldPrintPattern(const Pattern *P, PrintOptions &Options);
+
 void printContext(raw_ostream &os, DeclContext *dc);
 
 bool printRequirementStub(ValueDecl *Requirement, DeclContext *Adopter,
@@ -319,11 +322,6 @@ uint8_t getKeywordLen(tok keyword);
 /// Get <#code#>;
 StringRef getCodePlaceholder();
 
-/// Given an array of enum element decls, print them as case statements with
-/// placeholders as contents.
-void printEnumElementsAsCases(
-    llvm::DenseSet<EnumElementDecl *> &UnhandledElements,
-    llvm::raw_ostream &OS);
 } // namespace swift
 
 #endif // LLVM_SWIFT_AST_ASTPRINTER_H

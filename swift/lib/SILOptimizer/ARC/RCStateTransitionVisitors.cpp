@@ -65,7 +65,7 @@ BottomUpDataflowRCStateVisitor<ARCState>::BottomUpDataflowRCStateVisitor(
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
 BottomUpDataflowRCStateVisitor<ARCState>::
-visitAutoreleasePoolCall(SILNode *N) {
+visitAutoreleasePoolCall(ValueBase *V) {
   DataflowState.clear();
 
   // We just cleared our BB State so we have no more possible effects.
@@ -107,8 +107,8 @@ static bool isKnownSafe(BottomUpDataflowRCStateVisitor<ARCState> *State,
 
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
-BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
-  auto *I = dyn_cast<SILInstruction>(N);
+BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
+  auto *I = dyn_cast<SILInstruction>(V);
   if (!I)
     return DataflowResult();
 
@@ -137,8 +137,8 @@ BottomUpDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
 
 template <class ARCState>
 typename BottomUpDataflowRCStateVisitor<ARCState>::DataflowResult
-BottomUpDataflowRCStateVisitor<ARCState>::visitStrongIncrement(SILNode *N) {
-  auto *I = dyn_cast<SILInstruction>(N);
+BottomUpDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
+  auto *I = dyn_cast<SILInstruction>(V);
   if (!I)
     return DataflowResult();
 
@@ -191,7 +191,7 @@ TopDownDataflowRCStateVisitor<ARCState>::TopDownDataflowRCStateVisitor(
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
 TopDownDataflowRCStateVisitor<ARCState>::
-visitAutoreleasePoolCall(SILNode *N) {
+visitAutoreleasePoolCall(ValueBase *V) {
   DataflowState.clear();
   // We just cleared our BB State so we have no more possible effects.
   return DataflowResult(RCStateTransitionDataflowResultKind::NoEffects);
@@ -199,8 +199,8 @@ visitAutoreleasePoolCall(SILNode *N) {
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
-TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
-  auto *I = dyn_cast<SILInstruction>(N);
+TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(ValueBase *V) {
+  auto *I = dyn_cast<SILInstruction>(V);
   if (!I)
     return DataflowResult();
 
@@ -241,8 +241,8 @@ TopDownDataflowRCStateVisitor<ARCState>::visitStrongDecrement(SILNode *N) {
 
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
-TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(SILNode *N) {
-  auto *I = dyn_cast<SILInstruction>(N);
+TopDownDataflowRCStateVisitor<ARCState>::visitStrongIncrement(ValueBase *V) {
+  auto *I = dyn_cast<SILInstruction>(V);
   if (!I)
     return DataflowResult();
 
@@ -340,20 +340,20 @@ visitStrongAllocBox(AllocBoxInst *ABI) {
 template <class ARCState>
 typename TopDownDataflowRCStateVisitor<ARCState>::DataflowResult
 TopDownDataflowRCStateVisitor<ARCState>::
-visitStrongEntrance(SILNode *N) {
-  if (auto *Arg = dyn_cast<SILFunctionArgument>(N))
+visitStrongEntrance(ValueBase *V) {
+  if (auto *Arg = dyn_cast<SILFunctionArgument>(V))
     return visitStrongEntranceArgument(Arg);
 
-  if (auto *AI = dyn_cast<ApplyInst>(N))
+  if (auto *AI = dyn_cast<ApplyInst>(V))
     return visitStrongEntranceApply(AI);
 
-  if (auto *ARI = dyn_cast<AllocRefInst>(N))
+  if (auto *ARI = dyn_cast<AllocRefInst>(V))
     return visitStrongEntranceAllocRef(ARI);
 
-  if (auto *ARI = dyn_cast<AllocRefDynamicInst>(N))
+  if (auto *ARI = dyn_cast<AllocRefDynamicInst>(V))
     return visitStrongEntranceAllocRefDynamic(ARI);
 
-  if (auto *ABI = dyn_cast<AllocBoxInst>(N))
+  if (auto *ABI = dyn_cast<AllocBoxInst>(V))
     return visitStrongAllocBox(ABI);
 
   return DataflowResult();

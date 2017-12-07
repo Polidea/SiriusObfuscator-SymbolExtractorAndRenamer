@@ -40,23 +40,8 @@ static int Errors;
   } while (0)
 
 
-BOOL TestSwiftNativeNSBase_RetainCount(id object)
+void TestSwiftNativeNSBase(void)
 {
-  Errors = 0;
-  NSUInteger rc1 = [object retainCount];
-  id object2 = [object retain];
-  expectTrue(object == object2);
-  NSUInteger rc2 = [object retainCount];
-  expectTrue(rc2 > rc1);
-  [object release];
-  NSUInteger rc3 = [object retainCount];
-  expectTrue(rc3 < rc2);
-  return Errors == 0;
-}
-
-BOOL TestSwiftNativeNSBase_UnwantedCdtors()
-{
-  Errors = 0;
   printf("TestSwiftNativeNSBase\n");
 
   unsigned int classCount;
@@ -97,5 +82,5 @@ BOOL TestSwiftNativeNSBase_UnwantedCdtors()
 
   printf("TestSwiftNativeNSBase: %d error%s\n",
          Errors, Errors == 1 ? "" : "s");
-  return Errors == 0;
+  exit(Errors ? 1 : 0);
 }

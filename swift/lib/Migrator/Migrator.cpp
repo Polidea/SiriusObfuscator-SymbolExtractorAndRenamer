@@ -144,8 +144,8 @@ Migrator::performAFixItMigration(version::Version SwiftLanguageVersion) {
 
   const auto &OrigFrontendOpts = StartInvocation.getFrontendOptions();
 
-  auto InputBuffers = OrigFrontendOpts.Inputs.getInputBuffers();
-  auto InputFilenames = OrigFrontendOpts.Inputs.getInputFilenames();
+  auto InputBuffers = OrigFrontendOpts.InputBuffers;
+  auto InputFilenames = OrigFrontendOpts.InputFilenames;
 
   for (const auto &Buffer : InputBuffers) {
     Invocation.addInputBuffer(Buffer);
@@ -156,11 +156,12 @@ Migrator::performAFixItMigration(version::Version SwiftLanguageVersion) {
   }
 
   const unsigned PrimaryIndex =
-      Invocation.getFrontendOptions().Inputs.getInputBuffers().size();
+    Invocation.getFrontendOptions().InputBuffers.size();
 
   Invocation.addInputBuffer(InputBuffer.get());
-  Invocation.getFrontendOptions().Inputs.setPrimaryInput(
-      {PrimaryIndex, SelectedInput::InputKind::Buffer});
+  Invocation.getFrontendOptions().PrimaryInput = {
+    PrimaryIndex, SelectedInput::InputKind::Buffer
+  };
 
   auto Instance = llvm::make_unique<swift::CompilerInstance>();
   if (Instance->setup(Invocation)) {
@@ -447,8 +448,7 @@ const MigratorOptions &Migrator::getMigratorOptions() const {
 }
 
 const StringRef Migrator::getInputFilename() const {
-  auto PrimaryInput = StartInvocation.getFrontendOptions()
-                          .Inputs.getRequiredUniquePrimaryInput();
-  return StartInvocation.getFrontendOptions()
-      .Inputs.getInputFilenames()[PrimaryInput.Index];
+  auto PrimaryInput =
+    StartInvocation.getFrontendOptions().PrimaryInput.getValue();
+  return StartInvocation.getInputFilenames()[PrimaryInput.Index];
 }

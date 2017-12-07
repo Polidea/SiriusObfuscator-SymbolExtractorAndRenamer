@@ -12,11 +12,6 @@
 
 import TestsUtils
 
-public let StringInterpolation = BenchmarkInfo(
-  name: "StringInterpolation",
-  runFunction: run_StringInterpolation,
-  tags: [.validation, .api, .String])
-
 class RefTypePrintable : CustomStringConvertible {
   var description: String {
     return "01234567890123456789012345678901234567890123456789"

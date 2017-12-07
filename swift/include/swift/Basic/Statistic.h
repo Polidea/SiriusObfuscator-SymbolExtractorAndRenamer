@@ -15,7 +15,6 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
-#include "swift/Basic/SourceLoc.h"
 #include "swift/Basic/Timer.h"
 
 #define SWIFT_FUNC_STAT                                                 \
@@ -54,79 +53,99 @@ class UnifiedStatsReporter {
 public:
   struct AlwaysOnDriverCounters
   {
-#define DRIVER_STATISTIC(ID) size_t ID;
-#include "Statistics.def"
-#undef DRIVER_STATISTIC
+    size_t NumDriverJobsRun;
+    size_t NumDriverJobsSkipped;
+
+    size_t DriverDepCascadingTopLevel;
+    size_t DriverDepCascadingDynamic;
+    size_t DriverDepCascadingNominal;
+    size_t DriverDepCascadingMember;
+    size_t DriverDepCascadingExternal;
+
+    size_t DriverDepTopLevel;
+    size_t DriverDepDynamic;
+    size_t DriverDepNominal;
+    size_t DriverDepMember;
+    size_t DriverDepExternal;
+
+    size_t ChildrenMaxRSS;
   };
 
   struct AlwaysOnFrontendCounters
   {
-#define FRONTEND_STATISTIC(NAME, ID) size_t ID;
-#include "Statistics.def"
-#undef FRONTEND_STATISTIC
-  };
+    size_t NumSourceBuffers;
+    size_t NumSourceLines;
+    size_t NumSourceLinesPerSecond;
+    size_t NumLinkLibraries;
+    size_t NumLoadedModules;
+    size_t NumImportedExternalDefinitions;
+    size_t NumTotalClangImportedEntities;
+    size_t NumASTBytesAllocated;
+    size_t NumDependencies;
+    size_t NumReferencedTopLevelNames;
+    size_t NumReferencedDynamicNames;
+    size_t NumReferencedMemberNames;
+    size_t NumDecls;
+    size_t NumLocalTypeDecls;
+    size_t NumObjCMethods;
+    size_t NumInfixOperators;
+    size_t NumPostfixOperators;
+    size_t NumPrefixOperators;
+    size_t NumPrecedenceGroups;
+    size_t NumUsedConformances;
 
-  struct AlwaysOnFrontendRecursiveSharedTimers {
-    AlwaysOnFrontendRecursiveSharedTimers();
-#define FRONTEND_RECURSIVE_SHARED_TIMER(ID) RecursiveSharedTimer ID;
-#include "Statistics.def"
-#undef FRONTEND_RECURSIVE_SHARED_TIMER
+    size_t NumConformancesDeserialized;
+    size_t NumConstraintScopes;
+    size_t NumDeclsDeserialized;
+    size_t NumDeclsValidated;
+    size_t NumFunctionsTypechecked;
+    size_t NumGenericSignatureBuilders;
+    size_t NumLazyGenericEnvironments;
+    size_t NumLazyGenericEnvironmentsLoaded;
+    size_t NumLazyIterableDeclContexts;
+    size_t NumTypesDeserialized;
+    size_t NumTypesValidated;
+    size_t NumUnloadedLazyIterableDeclContexts;
 
-    int dummyInstanceVariableToGetConstructorToParse;
-  };
+    size_t NumSILGenFunctions;
+    size_t NumSILGenVtables;
+    size_t NumSILGenWitnessTables;
+    size_t NumSILGenDefaultWitnessTables;
+    size_t NumSILGenGlobalVariables;
 
-  struct FrontendStatsTracer
-  {
-    UnifiedStatsReporter *Reporter;
-    llvm::TimeRecord SavedTime;
-    StringRef Name;
-    SourceRange Range;
-    FrontendStatsTracer(StringRef Name,
-                        SourceRange const &Range,
-                        UnifiedStatsReporter *Reporter);
-    FrontendStatsTracer();
-    FrontendStatsTracer(FrontendStatsTracer&& other);
-    FrontendStatsTracer& operator=(FrontendStatsTracer&&);
-    ~FrontendStatsTracer();
-    FrontendStatsTracer(const FrontendStatsTracer&) = delete;
-    FrontendStatsTracer& operator=(const FrontendStatsTracer&) = delete;
-  };
+    size_t NumSILOptFunctions;
+    size_t NumSILOptVtables;
+    size_t NumSILOptWitnessTables;
+    size_t NumSILOptDefaultWitnessTables;
+    size_t NumSILOptGlobalVariables;
 
-  struct FrontendStatsEvent
-  {
-    uint64_t TimeUSec;
-    uint64_t LiveUSec;
-    bool IsEntry;
-    StringRef EventName;
-    StringRef CounterName;
-    size_t CounterDelta;
-    size_t CounterValue;
-    SourceRange SourceRange;
+    size_t NumIRGlobals;
+    size_t NumIRFunctions;
+    size_t NumIRAliases;
+    size_t NumIRIFuncs;
+    size_t NumIRNamedMetaData;
+    size_t NumIRValueSymbols;
+    size_t NumIRComdatSymbols;
+    size_t NumIRBasicBlocks;
+    size_t NumIRInsts;
+
+    size_t NumLLVMBytesOutput;
   };
 
 private:
-  bool currentProcessExitStatusSet;
-  int currentProcessExitStatus;
-  SmallString<128> StatsFilename;
-  SmallString<128> TraceFilename;
+  SmallString<128> Filename;
   llvm::TimeRecord StartedTime;
   std::unique_ptr<llvm::NamedRegionTimer> Timer;
-  SourceManager *SourceMgr;
+
   std::unique_ptr<AlwaysOnDriverCounters> DriverCounters;
   std::unique_ptr<AlwaysOnFrontendCounters> FrontendCounters;
-  std::unique_ptr<AlwaysOnFrontendCounters> LastTracedFrontendCounters;
-  std::vector<FrontendStatsEvent> FrontendStatsEvents;
-  std::unique_ptr<AlwaysOnFrontendRecursiveSharedTimers>
-      FrontendRecursiveSharedTimers;
 
   void publishAlwaysOnStatsToLLVM();
   void printAlwaysOnStatsAndTimers(llvm::raw_ostream &OS);
 
   UnifiedStatsReporter(StringRef ProgramName,
                        StringRef AuxName,
-                       StringRef Directory,
-                       SourceManager *SM,
-                       bool TraceEvents);
+                       StringRef Directory);
 public:
   UnifiedStatsReporter(StringRef ProgramName,
                        StringRef ModuleName,
@@ -134,19 +153,11 @@ public:
                        StringRef TripleName,
                        StringRef OutputType,
                        StringRef OptType,
-                       StringRef Directory,
-                       SourceManager *SM=nullptr,
-                       bool TraceEvents=false);
+                       StringRef Directory);
   ~UnifiedStatsReporter();
 
   AlwaysOnDriverCounters &getDriverCounters();
   AlwaysOnFrontendCounters &getFrontendCounters();
-  AlwaysOnFrontendRecursiveSharedTimers &getFrontendRecursiveSharedTimers();
-  void noteCurrentProcessExitStatus(int);
-  FrontendStatsTracer getStatsTracer(StringRef N,
-                                     SourceRange const &R);
-  void saveAnyFrontendStatsEvents(FrontendStatsTracer const& T,
-                                  bool IsEntry);
 };
 
 }

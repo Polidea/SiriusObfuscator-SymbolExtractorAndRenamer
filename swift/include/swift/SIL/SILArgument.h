@@ -22,7 +22,6 @@ namespace swift {
 
 class SILBasicBlock;
 class SILModule;
-class SILUndef;
 
 // Map an argument index onto a SILArgumentConvention.
 inline SILArgumentConvention
@@ -59,11 +58,9 @@ public:
 
   const ValueDecl *getDecl() const { return Decl; }
 
-  static bool classof(const SILInstruction *) = delete;
-  static bool classof(const SILUndef *) = delete;
-  static bool classof(const SILNode *node) {
-    return node->getKind() >= SILNodeKind::First_SILArgument &&
-           node->getKind() <= SILNodeKind::Last_SILArgument;
+  static bool classof(const ValueBase *V) {
+    return V->getKind() >= ValueKind::First_SILArgument &&
+           V->getKind() <= ValueKind::Last_SILArgument;
   }
 
   unsigned getIndex() const {
@@ -124,8 +121,7 @@ protected:
   explicit SILArgument(ValueKind SubClassKind, SILType Ty,
                        ValueOwnershipKind OwnershipKind,
                        const ValueDecl *D = nullptr)
-      : ValueBase(SubClassKind, Ty, IsRepresentative::Yes), ParentBB(nullptr),
-        Decl(D), OwnershipKind(OwnershipKind) {}
+      : ValueBase(SubClassKind, Ty), ParentBB(nullptr), Decl(D), OwnershipKind(OwnershipKind) {}
   void setParent(SILBasicBlock *P) { ParentBB = P; }
 
   friend SILBasicBlock;
@@ -169,10 +165,8 @@ public:
   /// payload argument is the enum itself (the operand of the switch_enum).
   SILValue getSingleIncomingValue() const;
 
-  static bool classof(const SILInstruction *) = delete;
-  static bool classof(const SILUndef *) = delete;
-  static bool classof(const SILNode *node) {
-    return node->getKind() == SILNodeKind::SILPHIArgument;
+  static bool classof(const ValueBase *V) {
+    return V->getKind() == ValueKind::SILPHIArgument;
   }
 
 private:
@@ -222,10 +216,8 @@ public:
     return getArgumentConvention() == P;
   }
 
-  static bool classof(const SILInstruction *) = delete;
-  static bool classof(const SILUndef *) = delete;
-  static bool classof(const SILNode *node) {
-    return node->getKind() == SILNodeKind::SILFunctionArgument;
+  static bool classof(const ValueBase *V) {
+    return V->getKind() == ValueKind::SILFunctionArgument;
   }
 
 private:

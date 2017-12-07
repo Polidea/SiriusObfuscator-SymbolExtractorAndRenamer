@@ -287,12 +287,12 @@ matchSizeOfMultiplication(SILValue I, MetatypeInst *RequiredType,
 /// Given an index_raw_pointer Ptr, size_of(Metatype) * Distance create an
 /// address_to_pointer (index_addr ptr, Distance : $*Metatype) : $RawPointer
 /// instruction.
-static SILValue createIndexAddrFrom(IndexRawPointerInst *I,
-                                    MetatypeInst *Metatype,
-                                    BuiltinInst *TruncOrBitCast,
-                                    SILValue Ptr, SILValue Distance,
-                                    SILType RawPointerTy,
-                                    SILBuilder &Builder) {
+static SILInstruction *createIndexAddrFrom(IndexRawPointerInst *I,
+                                           MetatypeInst *Metatype,
+                                           BuiltinInst *TruncOrBitCast,
+                                           SILValue Ptr, SILValue Distance,
+                                           SILType RawPointerTy,
+                                           SILBuilder &Builder) {
   Builder.setCurrentDebugScope(I->getDebugScope());
   SILType InstanceType =
     Metatype->getType().getMetatypeInstanceType(I->getModule());
@@ -408,11 +408,9 @@ SILInstruction *optimizeBitOp(BuiltinInst *BI,
          getBitOpArgs(Prev, op, prevBits)) {
     combine(bits, prevBits);
   }
-  if (isNeutral(bits)) {
+  if (isNeutral(bits))
     // The bit operation has no effect, e.g. x | 0 -> x
-    C->replaceInstUsesWith(*BI, op);
-    return BI;
-  }
+    return C->replaceInstUsesWith(*BI, op);
 
   if (isZero(bits))
     // The bit operation yields to a constant, e.g. x & 0 -> 0
@@ -435,12 +433,7 @@ SILInstruction *SILCombiner::visitBuiltinInst(BuiltinInst *I) {
     return optimizeBuiltinCanBeObjCClass(I);
   if (I->getBuiltinInfo().ID == BuiltinValueKind::TakeArrayFrontToBack ||
       I->getBuiltinInfo().ID == BuiltinValueKind::TakeArrayBackToFront ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::TakeArrayNoAlias ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::CopyArray ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::AssignCopyArrayNoAlias ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::AssignCopyArrayFrontToBack ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::AssignCopyArrayBackToFront ||
-      I->getBuiltinInfo().ID == BuiltinValueKind::AssignTakeArray)
+      I->getBuiltinInfo().ID == BuiltinValueKind::CopyArray)
     return optimizeBuiltinArrayOperation(I, Builder);
 
   if (I->getBuiltinInfo().ID == BuiltinValueKind::TruncOrBitCast) {

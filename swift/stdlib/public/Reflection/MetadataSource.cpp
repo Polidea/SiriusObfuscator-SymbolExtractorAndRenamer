@@ -87,6 +87,13 @@ public:
     closeForm();
   }
 
+  void
+  visitParentMetadataSource(const ParentMetadataSource *P) {
+    printHeader("parent_of");
+    printRec(P->getChild());
+    closeForm();
+  }
+
   void visitSelfMetadataSource(const SelfMetadataSource *S) {
     printHeader("self");
     closeForm();

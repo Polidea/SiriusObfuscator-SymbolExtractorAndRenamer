@@ -26,13 +26,11 @@
 #include "swift/SIL/SILFunction.h"
 #include "llvm/ADT/ilist_node.h"
 #include "llvm/ADT/ilist.h"
-#include "llvm/ADT/Optional.h"
 #include <algorithm>
 
 namespace swift {
 
 class ClassDecl;
-enum IsSerialized_t : unsigned char;
 class SILFunction;
 class SILModule;
 
@@ -45,27 +43,11 @@ public:
   // TODO: Entry should include substitutions needed to invoke an overridden
   // generic base class method.
   struct Entry {
-    enum Kind : uint8_t {
-      /// The vtable entry is for a method defined directly in this class.
-      Normal,
-      /// The vtable entry is inherited from the superclass.
-      Inherited,
-      /// The vtable entry is inherited from the superclass, and overridden
-      /// in this class.
-      Override,
-    };
 
-    Entry()
-      : Implementation(nullptr),
-        TheKind(Kind::Normal),
-        Linkage(SILLinkage::Private) { }
+    Entry() : Implementation(nullptr), Linkage(SILLinkage::Private) { }
 
-    Entry(SILDeclRef Method, SILFunction *Implementation,
-          Kind TheKind, SILLinkage Linkage)
-      : Method(Method),
-        Implementation(Implementation),
-        TheKind(TheKind),
-        Linkage(Linkage) { }
+    Entry(SILDeclRef Method, SILFunction *Implementation, SILLinkage Linkage) :
+      Method(Method), Implementation(Implementation), Linkage(Linkage) { }
 
     /// The declaration reference to the least-derived method visible through
     /// the class.
@@ -73,9 +55,6 @@ public:
 
     /// The function which implements the method for the class.
     SILFunction *Implementation;
-
-    /// The entry kind.
-    Kind TheKind;
 
     /// The linkage of the implementing function.
     ///
@@ -94,18 +73,14 @@ private:
   /// The ClassDecl mapped to this VTable.
   ClassDecl *Class;
 
-  /// Whether or not this vtable is serialized, which allows
-  /// devirtualization from another module.
-  bool Serialized : 1;
-
   /// The number of SILVTables entries.
-  unsigned NumEntries : 31;
+  unsigned NumEntries;
 
   /// Tail-allocated SILVTable entries.
   Entry Entries[1];
 
   /// Private constructor. Create SILVTables by calling SILVTable::create.
-  SILVTable(ClassDecl *c, IsSerialized_t serialized, ArrayRef<Entry> entries);
+  SILVTable(ClassDecl *c, ArrayRef<Entry> entries);
 
 public:
   ~SILVTable();
@@ -114,20 +89,16 @@ public:
   /// The SILDeclRef keys should reference the most-overridden members available
   /// through the class.
   static SILVTable *create(SILModule &M, ClassDecl *Class,
-                           IsSerialized_t Serialized,
                            ArrayRef<Entry> Entries);
 
   /// Return the class that the vtable represents.
   ClassDecl *getClass() const { return Class; }
 
-  /// Returns true if this vtable is going to be (or was) serialized.
-  IsSerialized_t isSerialized() const;
-
   /// Return all of the method entries.
   ArrayRef<Entry> getEntries() const { return {Entries, NumEntries}; }
 
   /// Look up the implementation function for the given method.
-  Optional<Entry> getEntry(SILModule &M, SILDeclRef method) const;
+  SILFunction *getImplementation(SILModule &M, SILDeclRef method) const;
 
   /// Removes entries from the vtable.
   /// \p predicate Returns true if the passed entry should be removed.

@@ -12,11 +12,6 @@
 
 import TestsUtils
 
-public let ErrorHandling = BenchmarkInfo(
-  name: "ErrorHandling",
-  runFunction: run_ErrorHandling,
-  tags: [.validation, .exceptions])
-
 enum PizzaError : Error {
   case Pepperoni, Olives, Anchovy
 }

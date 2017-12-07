@@ -84,9 +84,16 @@ bool swift::ArraySemanticsCall::isValidSignature() {
       auto *AllocBufferAI = dyn_cast<ApplyInst>(Arg0);
       if (!AllocBufferAI)
         return false;
+
       auto *AllocFn = AllocBufferAI->getReferencedFunction();
-      if (!AllocFn || AllocFn->getName() != "swift_bufferAllocate" ||
-          !hasOneNonDebugUse(AllocBufferAI))
+      if (!AllocFn)
+        return false;
+
+      StringRef AllocFuncName = AllocFn->getName();
+      if (AllocFuncName != "swift_bufferAllocate")
+        return false;
+
+      if (!hasOneNonDebugUse(AllocBufferAI))
         return false;
     }
     return true;
@@ -105,52 +112,27 @@ bool swift::ArraySemanticsCall::isValidSignature() {
 }
 
 /// Match array semantic calls.
-swift::ArraySemanticsCall::ArraySemanticsCall(SILValue V,
-                                              StringRef semanticName,
-                                              bool matchPartialName)
-    : SemanticsCall(nullptr) {
-  if (auto AI = dyn_cast<ApplyInst>(V))
-    initialize(AI, semanticName, matchPartialName);
-}
+swift::ArraySemanticsCall::ArraySemanticsCall(ValueBase *V,
+                                              StringRef SemanticStr,
+                                              bool MatchPartialName) {
+  if (auto *AI = dyn_cast<ApplyInst>(V))
+    if (auto *Fn = AI->getReferencedFunction())
+      if ((MatchPartialName &&
+           Fn->hasSemanticsAttrThatStartsWith(SemanticStr)) ||
+          (!MatchPartialName && Fn->hasSemanticsAttr(SemanticStr))) {
+        SemanticsCall = AI;
+        // Need a 'self' argument otherwise this is not a semantic call that
+        // we recognize.
+        if (getKind() < ArrayCallKind::kArrayInit && !hasSelf())
+          SemanticsCall = nullptr;
 
-/// Match array semantic calls.
-swift::ArraySemanticsCall::ArraySemanticsCall(SILInstruction *I,
-                                              StringRef semanticName,
-                                              bool matchPartialName)
-    : SemanticsCall(nullptr) {
-  if (auto AI = dyn_cast<ApplyInst>(I))
-    initialize(AI, semanticName, matchPartialName);
-}
-
-/// Match array semantic calls.
-swift::ArraySemanticsCall::ArraySemanticsCall(ApplyInst *AI,
-                                              StringRef semanticName,
-                                              bool matchPartialName)
-    : SemanticsCall(nullptr) {
-  initialize(AI, semanticName, matchPartialName);
-}
-
-void ArraySemanticsCall::initialize(ApplyInst *AI, StringRef semanticName,
-                                    bool matchPartialName) {
-  auto *fn = AI->getReferencedFunction();
-  if (!fn)
-    return;
-
-  if (!(matchPartialName
-          ? fn->hasSemanticsAttrThatStartsWith(semanticName)
-          : fn->hasSemanticsAttr(semanticName)))
-    return;
-
-  SemanticsCall = AI;
-
-  // Need a 'self' argument otherwise this is not a semantic call that
-  // we recognize.
-  if (getKind() < ArrayCallKind::kArrayInit && !hasSelf())
-    SemanticsCall = nullptr;
-
-  // A arguments must be passed reference count neutral except for self.
-  if (SemanticsCall && !isValidSignature())
-    SemanticsCall = nullptr;
+        // A arguments must be passed reference count neutral except for self.
+        if (SemanticsCall && !isValidSignature())
+          SemanticsCall = nullptr;
+        return;
+      }
+  // Otherwise, this is not the semantic call we are looking for.
+  SemanticsCall = nullptr;
 }
 
 /// Determine which kind of array semantics call this is.
@@ -365,7 +347,7 @@ static SILValue copyArrayLoad(SILValue ArrayStructValue,
     InsertPt = Inst;
   }
 
-  return cast<LoadInst>(LI->clone(InsertBefore));
+  return LI->clone(InsertBefore);
 }
 
 static ApplyInst *hoistOrCopyCall(ApplyInst *AI, SILInstruction *InsertBefore,

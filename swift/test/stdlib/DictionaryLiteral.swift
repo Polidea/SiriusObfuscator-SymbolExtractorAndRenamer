@@ -14,6 +14,7 @@
 
 // REQUIRES: objc_interop
 
+import SwiftExperimental
 import Foundation
 import StdlibUnittest
 

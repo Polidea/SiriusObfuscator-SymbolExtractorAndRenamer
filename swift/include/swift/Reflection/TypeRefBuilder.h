@@ -62,7 +62,7 @@ public:
   }
 
   size_t size() const {
-    return (const char *)End - (const char *)Begin;
+    return (char *)End - (char *)Begin;
   }
 };
 
@@ -73,36 +73,12 @@ using CaptureSection = ReflectionSection<CaptureDescriptorIterator>;
 using GenericSection = ReflectionSection<const void *>;
 
 struct ReflectionInfo {
-  struct {
-    FieldSection Metadata;
-    uintptr_t SectionOffset;
-  } Field;
-
-  struct {
-    AssociatedTypeSection Metadata;
-    uintptr_t SectionOffset;
-  } AssociatedType;
-
-  struct {
-    BuiltinTypeSection Metadata;
-    uintptr_t SectionOffset;
-  } Builtin;
-
-  struct {
-    CaptureSection Metadata;
-    uintptr_t SectionOffset;
-  } Capture;
-
-  struct {
-    GenericSection Metadata;
-    uintptr_t SectionOffset;
-  } TypeReference;
-
-  struct {
-    GenericSection Metadata;
-    uintptr_t SectionOffset;
-  } ReflectionString;
-
+  FieldSection fieldmd;
+  AssociatedTypeSection assocty;
+  BuiltinTypeSection builtin;
+  CaptureSection capture;
+  GenericSection typeref;
+  GenericSection reflstr;
   uintptr_t LocalStartAddress;
   uintptr_t RemoteStartAddress;
 };
@@ -202,20 +178,9 @@ public:
   }
 
   const NominalTypeRef *createNominalType(
-                                    const Optional<std::string> &mangledName) {
-    return NominalTypeRef::create(*this, *mangledName, nullptr);
-  }
-
-  const NominalTypeRef *createNominalType(
                                     const Optional<std::string> &mangledName,
                                     const TypeRef *parent) {
     return NominalTypeRef::create(*this, *mangledName, parent);
-  }
-
-  const BoundGenericTypeRef *
-  createBoundGenericType(const Optional<std::string> &mangledName,
-                         const std::vector<const TypeRef *> &args) {
-    return BoundGenericTypeRef::create(*this, *mangledName, args, nullptr);
   }
 
   const BoundGenericTypeRef *
@@ -233,10 +198,14 @@ public:
     return TupleTypeRef::create(*this, elements, isVariadic);
   }
 
-  const FunctionTypeRef *createFunctionType(
-      const std::vector<remote::FunctionParam<const TypeRef *>> &params,
-      const TypeRef *result, FunctionTypeFlags flags) {
-    return FunctionTypeRef::create(*this, params, result, flags);
+  const FunctionTypeRef *
+  createFunctionType(const std::vector<const TypeRef *> &args,
+                     const std::vector<bool> &inOutArgs,
+                     const TypeRef *result,
+                     FunctionTypeFlags flags) {
+    // FIXME: don't ignore inOutArgs
+    // and add test to unittests/Reflection/TypeRef.cpp
+    return FunctionTypeRef::create(*this, args, result, flags);
   }
 
   const ProtocolTypeRef *createProtocolType(const std::string &mangledName,
@@ -346,12 +315,10 @@ public:
   lookupSuperclass(const TypeRef *TR);
 
   /// Load unsubstituted field types for a nominal type.
-  std::pair<const FieldDescriptor *, uintptr_t>
-  getFieldTypeInfo(const TypeRef *TR);
+  const FieldDescriptor *getFieldTypeInfo(const TypeRef *TR);
 
   /// Get the parsed and substituted field types for a nominal type.
-  bool getFieldTypeRefs(const TypeRef *TR,
-                        const std::pair<const FieldDescriptor *, uintptr_t> &FD,
+  bool getFieldTypeRefs(const TypeRef *TR, const FieldDescriptor *FD,
                         std::vector<FieldTypeInfo> &Fields);
 
   /// Get the primitive type lowering for a builtin type.
@@ -362,8 +329,7 @@ public:
   const CaptureDescriptor *getCaptureDescriptor(uintptr_t RemoteAddress);
 
   /// Get the unsubstituted capture types for a closure context.
-  ClosureContextInfo getClosureContextInfo(const CaptureDescriptor &CD,
-                                           uintptr_t Offset);
+  ClosureContextInfo getClosureContextInfo(const CaptureDescriptor &CD);
 
   ///
   /// Dumping typerefs, field declarations, associated types

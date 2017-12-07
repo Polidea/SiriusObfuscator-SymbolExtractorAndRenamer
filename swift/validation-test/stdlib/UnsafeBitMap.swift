@@ -87,7 +87,7 @@ UnsafeBitMapTests.test("initializeToZero()")
   .forEach(in: sizes) {
   sizeInBits in
   let bitMap = make(sizeInBits: sizeInBits)
-  defer { bitMap.values.deallocate() }
+  defer { bitMap.values.deallocate(capacity: bitMap.numberOfWords) }
 
   bitMap.initializeToZero()
   for i in 0..<sizeInBits {
@@ -99,7 +99,7 @@ UnsafeBitMapTests.test("subscript")
   .forEach(in: sizes) {
   sizeInBits in
   let bitMap = make(sizeInBits: sizeInBits)
-  defer { bitMap.values.deallocate() }
+  defer { bitMap.values.deallocate(capacity: bitMap.numberOfWords) }
 
   if sizeInBits != 0 {
     bitMap.initializeToZero()
@@ -122,3 +122,4 @@ UnsafeBitMapTests.test("subscript")
 }
 
 runAllTests()
+

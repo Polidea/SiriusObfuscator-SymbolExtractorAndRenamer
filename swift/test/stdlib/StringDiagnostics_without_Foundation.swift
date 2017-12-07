@@ -23,3 +23,9 @@ func testStringCollectionTypes(s: String) {
   acceptsBidirectionalCollection(s)
   acceptsRandomAccessCollection(s) // expected-error{{argument type 'String' does not conform to expected type 'RandomAccessCollection'}}
 }
+
+struct NotLosslessStringConvertible {}
+
+func testStringInitT() {
+  _ = String(NotLosslessStringConvertible()) // expected-error{{'init' has been renamed to 'init(describing:)}}{{14-14=describing: }}
+}

@@ -8,5 +8,4 @@ extern int ANTGlobalValue;
 @protocol TypeWithMethod
   -(void) minusPrint;
   +(void) plusPrint;
-  -(int) getPropertyA;
 @end

@@ -10,13 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import TestsUtils
-
-public let ObserverPartiallyAppliedMethod = BenchmarkInfo(
-  name: "ObserverPartiallyAppliedMethod",
-  runFunction: run_ObserverPartiallyAppliedMethod,
-  tags: [.validation])
-
 class Observer {
   @inline(never)
   func receive(_ value: Int) {

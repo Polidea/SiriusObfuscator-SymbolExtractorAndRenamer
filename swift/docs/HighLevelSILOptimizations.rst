@@ -55,8 +55,7 @@ Annotation of code in the standard library
 
 We use the ``@_semantics`` attribute to annotate code in the standard library.
 These annotations can be used by the high-level SIL optimizer to perform
-domain-specific optimizations. The same function may have multiple ``@_semantics``
-attributes.
+domain-specific optimizations.
 
 This is an example of the ``@_semantics`` attribute::
 
@@ -117,13 +116,15 @@ Cloning code from the standard library
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The Swift compiler can copy code from the standard library into the
-application for functions marked @_inlineable. This allows the optimizer to
-inline calls from the stdlib and improve the performance of code that uses
-common operators such as '+=' or basic containers such as Array. However,
-importing code from the standard library can increase the binary size.
+application. This allows the optimizer to inline calls from stdlib and improve
+the performance of code that uses common operators such as '++' or basic
+containers such as Array. However, importing code from the standard library can
+increase the binary size. Marking functions with @_semantics("stdlib_binary_only")
+will prevent the copying of the marked function from the standard library into the
+user program.
 
-To prevent copying of functions from the standard library into the user
-program, make sure the function in question is not marked @_inlineable.
+Notice that this annotation is similar to the resilient annotation that will
+disallow the cloning of code into the user application.
 
 Array
 ~~~~~
@@ -352,13 +353,18 @@ The optimize attribute adds function-specific directives to the optimizer.
 
 The optimize attribute supports the following tags:
 
+sil.never
+
+   The sil optimizer should not optimize this function.
+
+  Example:
+  @_semantics("optimize.sil.never")
+  func miscompile() { ... }
+
 sil.specialize.generic.never
 
    The sil optimizer should never create generic specializations of this function. 
 
-optimize.sil.specialize.generic.partial.never
-
-   The sil optimizer should never create generic partial specializations of this function. 
 
 Availability checks
 ~~~~~~~~~~~~~~~~~~~

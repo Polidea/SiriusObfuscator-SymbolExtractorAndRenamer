@@ -29,11 +29,11 @@ SWIFT_RUNTIME_EXPORT
 BoxPair::Return (*_swift_allocBox)(Metadata const *type);
 
 SWIFT_RUNTIME_EXPORT
-HeapObject *(*_swift_retain)(HeapObject *object);
+void (*_swift_retain)(HeapObject *object);
 SWIFT_RUNTIME_EXPORT
-HeapObject *(*_swift_retain_n)(HeapObject *object, uint32_t n);
+void (*_swift_retain_n)(HeapObject *object, uint32_t n);
 SWIFT_RUNTIME_EXPORT
-HeapObject *(*_swift_nonatomic_retain)(HeapObject *object);
+void (*_swift_nonatomic_retain)(HeapObject *object);
 SWIFT_RUNTIME_EXPORT
 HeapObject *(*_swift_tryRetain)(HeapObject *object);
 SWIFT_RUNTIME_EXPORT

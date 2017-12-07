@@ -11,9 +11,7 @@
 //===----------------------------------------------------------------------===//
 extension String {
   /// A position of a character or code unit in a string.
-  @_fixed_layout // FIXME(sil-serialize-all)
   public struct Index {
-    @_versioned // FIXME(sil-serialize-all)
     internal var _compoundOffset : UInt64
     @_versioned
     internal var _cache: _Cache
@@ -31,46 +29,33 @@ extension String {
 
 /// Convenience accessors
 extension String.Index._Cache {
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  internal var utf16: Void? {
+  var utf16: Void? {
     if case .utf16 = self { return () } else { return nil }
   }
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  internal var utf8: String.Index._UTF8Buffer? {
+  var utf8: String.Index._UTF8Buffer? {
     if case .utf8(let r) = self { return r } else { return nil }
   }
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  internal var character: UInt16? {
+  var character: UInt16? {
     if case .character(let r) = self { return r } else { return nil }
   }
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  internal var unicodeScalar: UnicodeScalar? {
+  var unicodeScalar: UnicodeScalar? {
     if case .unicodeScalar(let r) = self { return r } else { return nil }
   }
 }
 
 extension String.Index : Equatable {
-  @_inlineable // FIXME(sil-serialize-all)
   public static func == (lhs: String.Index, rhs: String.Index) -> Bool {
     return lhs._compoundOffset == rhs._compoundOffset
   }
 }
 
 extension String.Index : Comparable {
-  @_inlineable // FIXME(sil-serialize-all)
   public static func < (lhs: String.Index, rhs: String.Index) -> Bool {
     return lhs._compoundOffset < rhs._compoundOffset
-  }
-}
-
-extension String.Index : Hashable {
-  @_inlineable // FIXME(sil-serialize-all)
-  public var hashValue: Int {
-    return _compoundOffset.hashValue
   }
 }
 
@@ -80,40 +65,30 @@ extension String.Index {
   /// Creates a new index at the specified UTF-16 offset.
   ///
   /// - Parameter offset: An offset in UTF-16 code units.
-  @_inlineable // FIXME(sil-serialize-all)
   public init(encodedOffset offset: Int) {
     _compoundOffset = UInt64(offset << _Self._strideBits)
     _cache = .utf16
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal init(encodedOffset o: Int, transcodedOffset: Int = 0, _ c: _Cache) {
     _compoundOffset = UInt64(o << _Self._strideBits | transcodedOffset)
     _cache = c
   }
   
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal static var _strideBits : Int { return 2 }
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal static var _mask : UInt64 { return (1 &<< _Self._strideBits) &- 1 }
   
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal mutating func _setEncodedOffset(_ x: Int) {
     _compoundOffset = UInt64(x << _Self._strideBits)
   }
   
   /// The offset into a string's UTF-16 encoding for this index.
-  @_inlineable // FIXME(sil-serialize-all)
   public var encodedOffset : Int {
-    return Int(_compoundOffset >> _Self._strideBits)
+    return Int(_compoundOffset >> numericCast(_Self._strideBits))
   }
 
   /// The offset of this index within whatever encoding this is being viewed as
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var _transcodedOffset : Int {
     get {
@@ -130,7 +105,6 @@ extension String.Index {
 
 // SPI for Foundation
 extension String.Index {
-  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2)
   @available(swift, obsoleted: 4.0)
   public // SPI(Foundation)    
@@ -138,7 +112,6 @@ extension String.Index {
     self.init(encodedOffset: _position)
   }
   
-  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2)
   @available(swift, obsoleted: 4.0)
   public // SPI(Foundation)    
@@ -146,7 +119,6 @@ extension String.Index {
     self.init(encodedOffset: _offset)
   }
   
-  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2)
   @available(swift, obsoleted: 4.0)
   public // SPI(Foundation)    
@@ -155,7 +127,6 @@ extension String.Index {
   }
   
   /// The integer offset of this index in UTF-16 code units.
-  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2)
   @available(swift, obsoleted: 4.0)
   public // SPI(Foundation)
@@ -164,7 +135,6 @@ extension String.Index {
   }
 
   /// The integer offset of this index in UTF-16 code units.
-  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2)
   @available(swift, obsoleted: 4.0)
   public // SPI(Foundation)
@@ -176,7 +146,6 @@ extension String.Index {
 
 // backward compatibility for index interchange.  
 extension Optional where Wrapped == String.Index {
-  @_inlineable // FIXME(sil-serialize-all)
   @available(
     swift, obsoleted: 4.0,
     message: "Any String view index conversion can fail in Swift 4; please unwrap the optional indices")
@@ -186,7 +155,6 @@ extension Optional where Wrapped == String.Index {
     return lhs! ..< rhs!
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   @available(
     swift, obsoleted: 4.0,
     message: "Any String view index conversion can fail in Swift 4; please unwrap the optional indices")

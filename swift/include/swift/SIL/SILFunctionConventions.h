@@ -45,13 +45,9 @@ class SILModuleConventions {
 
   static bool isIndirectSILParam(SILParameterInfo param, bool loweredAddresses);
 
-  static bool isIndirectSILYield(SILYieldInfo yield, bool loweredAddresses);
-
   static bool isIndirectSILResult(SILResultInfo result, bool loweredAddresses);
 
   static SILType getSILParamType(SILParameterInfo param, bool loweredAddresses);
-
-  static SILType getSILYieldType(SILYieldInfo yield, bool loweredAddresses);
 
   static SILType getSILResultType(SILResultInfo param, bool loweredAddresses);
 
@@ -81,20 +77,12 @@ public:
     return isIndirectSILParam(param, loweredAddresses);
   }
 
-  bool isSILIndirect(SILYieldInfo yield) const {
-    return isIndirectSILYield(yield, loweredAddresses);
-  }
-
   bool isSILIndirect(SILResultInfo result) const {
     return isIndirectSILResult(result, loweredAddresses);
   }
 
   SILType getSILType(SILParameterInfo param) const {
     return getSILParamType(param, loweredAddresses);
-  }
-
-  SILType getSILType(SILYieldInfo yield) const {
-    return getSILYieldType(yield, loweredAddresses);
   }
 
   SILType getSILType(SILResultInfo result) const {
@@ -127,20 +115,12 @@ public:
     return silConv.isSILIndirect(param);
   }
 
-  bool isSILIndirect(SILYieldInfo yield) const {
-    return silConv.isSILIndirect(yield);
-  }
-
   bool isSILIndirect(SILResultInfo result) const {
     return silConv.isSILIndirect(result);
   }
 
   SILType getSILType(SILParameterInfo param) const {
     return silConv.getSILType(param);
-  }
-
-  SILType getSILType(SILYieldInfo yield) const {
-    return silConv.getSILType(yield);
   }
 
   SILType getSILType(SILResultInfo result) const {
@@ -299,28 +279,6 @@ public:
   }
 
   //===--------------------------------------------------------------------===//
-  // SIL yield types.
-  //===--------------------------------------------------------------------===//
-
-  unsigned getNumYields() const { return funcTy->getNumYields(); }
-
-  ArrayRef<SILYieldInfo> getYields() const {
-    return funcTy->getYields();
-  }
-
-  using SILYieldTypeIter =
-      llvm::mapped_iterator<const SILYieldInfo *, SILParameterTypeFunc>;
-  using SILYieldTypeRange = IteratorRange<SILYieldTypeIter>;
-
-  SILYieldTypeRange getYieldSILTypes() const {
-    return makeIteratorRange(
-        SILYieldTypeIter(funcTy->getYields().begin(),
-                         SILParameterTypeFunc(silConv)),
-        SILYieldTypeIter(funcTy->getYields().end(),
-                         SILParameterTypeFunc(silConv)));
-  }
-
-  //===--------------------------------------------------------------------===//
   // SILArgument API, including indirect results and parameters.
   //
   // The argument indices below relate to full applies in which the caller and
@@ -405,11 +363,6 @@ inline bool SILModuleConventions::isIndirectSILParam(SILParameterInfo param,
   llvm_unreachable("covered switch isn't covered?!");
 }
 
-inline bool SILModuleConventions::isIndirectSILYield(SILYieldInfo yield,
-                                                     bool loweredAddresses) {
-  return isIndirectSILParam(yield, loweredAddresses);
-}
-
 inline bool SILModuleConventions::isIndirectSILResult(SILResultInfo result,
                                                       bool loweredAddresses) {
   switch (result.getConvention()) {
@@ -431,11 +384,6 @@ inline SILType SILModuleConventions::getSILParamType(SILParameterInfo param,
   return SILModuleConventions::isIndirectSILParam(param, loweredAddresses)
              ? SILType::getPrimitiveAddressType(param.getType())
              : SILType::getPrimitiveObjectType(param.getType());
-}
-
-inline SILType SILModuleConventions::getSILYieldType(SILYieldInfo yield,
-                                                     bool loweredAddresses) {
-  return getSILParamType(yield, loweredAddresses);
 }
 
 inline SILType SILModuleConventions::getSILResultType(SILResultInfo result,

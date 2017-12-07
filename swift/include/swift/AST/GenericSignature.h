@@ -132,7 +132,7 @@ class alignas(1 << TypeAlignInBits) GenericSignature final
                                    ArrayRef<Requirement> requirements);
 
   /// Retrieve the generic signature builder for the given generic signature.
-  GenericSignatureBuilder *getGenericSignatureBuilder();
+  GenericSignatureBuilder *getGenericSignatureBuilder(ModuleDecl &mod);
 
   friend class ArchetypeType;
 
@@ -159,6 +159,20 @@ public:
   /// Given a generic signature for a nested generic type, produce an
   /// array of the generic parameters for the innermost generic type.
   ArrayRef<GenericTypeParamType *> getInnermostGenericParams() const;
+
+  /// Create a text string that describes the bindings of generic parameters
+  /// that are relevant to the given set of types, e.g.,
+  /// "[with T = Bar, U = Wibble]".
+  ///
+  /// \param types The types that will be scanned for generic type parameters,
+  /// which will be used in the resulting type.
+  ///
+  /// \param substitutions The generic parameter -> generic argument
+  /// substitutions that will have been applied to these types.
+  /// These are used to produce the "parameter = argument" bindings in the test.
+  std::string
+  gatherGenericParamBindingsText(ArrayRef<Type> types,
+                                 TypeSubstitutionFn substitutions) const;
 
   /// Retrieve the requirements.
   ArrayRef<Requirement> getRequirements() const {
@@ -242,7 +256,7 @@ public:
   /// Create a new generic environment that provides fresh contextual types
   /// (archetypes) that correspond to the interface types in this generic
   /// signature.
-  GenericEnvironment *createGenericEnvironment();
+  GenericEnvironment *createGenericEnvironment(ModuleDecl &mod);
 
   /// Uniquing for the ASTContext.
   void Profile(llvm::FoldingSetNodeID &ID) {
@@ -250,61 +264,46 @@ public:
   }
   
   /// Determine whether the given dependent type is required to be a class.
-  bool requiresClass(Type type);
+  bool requiresClass(Type type, ModuleDecl &mod);
 
   /// Determine the superclass bound on the given dependent type.
-  Type getSuperclassBound(Type type);
+  Type getSuperclassBound(Type type, ModuleDecl &mod);
 
   using ConformsToArray = SmallVector<ProtocolDecl *, 2>;
   /// Determine the set of protocols to which the given dependent type
   /// must conform.
-  ConformsToArray getConformsTo(Type type);
+  ConformsToArray getConformsTo(Type type, ModuleDecl &mod);
 
   /// Determine whether the given dependent type conforms to this protocol.
-  bool conformsToProtocol(Type type, ProtocolDecl *proto);
+  bool conformsToProtocol(Type type, ProtocolDecl *proto, ModuleDecl &mod);
 
   /// Determine whether the given dependent type is equal to a concrete type.
-  bool isConcreteType(Type type);
+  bool isConcreteType(Type type, ModuleDecl &mod);
 
   /// Return the concrete type that the given dependent type is constrained to,
   /// or the null Type if it is not the subject of a concrete same-type
   /// constraint.
-  Type getConcreteType(Type type);
+  Type getConcreteType(Type type, ModuleDecl &mod);
 
   /// Return the layout constraint that the given dependent type is constrained
   /// to, or the null LayoutConstraint if it is not the subject of layout
   /// constraint.
-  LayoutConstraint getLayoutConstraint(Type type);
+  LayoutConstraint getLayoutConstraint(Type type, ModuleDecl &mod);
 
   /// Return whether two type parameters represent the same type under this
   /// generic signature.
   ///
   /// The type parameters must be known to not be concrete within the context.
-  bool areSameTypeParameterInContext(Type type1, Type type2);
-
-  /// Determine if \c sig can prove \c requirement, meaning that it can deduce
-  /// T: Foo or T == U (etc.) with the information it knows. This includes
-  /// checking against global state, if any/all of the types in the requirement
-  /// are concrete, not type parameters.
-  bool isRequirementSatisfied(Requirement requirement);
-
-  /// Return the requirements of this generic signature that are not also
-  /// satisfied by \c otherSig.
-  ///
-  /// \param otherSig Another generic signature whose generic parameters are
-  /// equivalent to or a subset of the generic parameters in this signature.
-  SmallVector<Requirement, 4> requirementsNotSatisfiedBy(
-                                               GenericSignature *otherSig);
+  bool areSameTypeParameterInContext(Type type1, Type type2, ModuleDecl &mod);
 
   /// Return the canonical version of the given type under this generic
   /// signature.
-  CanType getCanonicalTypeInContext(Type type);
-  bool isCanonicalTypeInContext(Type type);
+  CanType getCanonicalTypeInContext(Type type, ModuleDecl &mod);
+  bool isCanonicalTypeInContext(Type type, ModuleDecl &mod);
 
   /// Return the canonical version of the given type under this generic
   /// signature.
-  CanType getCanonicalTypeInContext(Type type,
-                                    GenericSignatureBuilder &builder);
+  CanType getCanonicalTypeInContext(Type type, GenericSignatureBuilder &builder);
   bool isCanonicalTypeInContext(Type type, GenericSignatureBuilder &builder);
 
   /// Retrieve the conformance access path used to extract the conformance of
@@ -320,7 +319,8 @@ public:
   ///
   /// \seealso ConformanceAccessPath
   ConformanceAccessPath getConformanceAccessPath(Type type,
-                                                 ProtocolDecl *protocol);
+                                                 ProtocolDecl *protocol,
+                                                 ModuleDecl &mod);
 
   static void Profile(llvm::FoldingSetNodeID &ID,
                       ArrayRef<GenericTypeParamType *> genericParams,

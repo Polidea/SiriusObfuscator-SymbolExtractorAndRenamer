@@ -97,9 +97,6 @@ class SILPassManager {
   /// same function.
   bool RestartPipeline = false;
 
-  /// If true, passes are also run for functions which have
-  /// OptimizationMode::NoOptimization.
-  bool isMandatoryPipeline = false;
 
   /// The IRGen SIL passes. These have to be dynamically added by IRGen.
   llvm::DenseMap<unsigned, SILTransform *> IRGenPasses;
@@ -107,17 +104,12 @@ class SILPassManager {
 public:
   /// C'tor. It creates and registers all analysis passes, which are defined
   /// in Analysis.def.
-  ///
-  /// If \p isMandatoryPipeline is true, passes are also run for functions
-  /// which have OptimizationMode::NoOptimization.
-  SILPassManager(SILModule *M, llvm::StringRef Stage = "",
-                 bool isMandatoryPipeline = false);
+  SILPassManager(SILModule *M, llvm::StringRef Stage = "");
 
   /// C'tor. It creates an IRGen pass manager. Passes can query for the
   /// IRGenModule.
   SILPassManager(SILModule *M, irgen::IRGenModule *IRMod,
-                 llvm::StringRef Stage = "",
-                 bool isMandatoryPipeline = false);
+                 llvm::StringRef Stage = "");
 
   const SILOptions &getOptions() const;
 
@@ -219,15 +211,8 @@ public:
   /// owned by the pass manager. Analysis passes will be kept.
   void resetAndRemoveTransformations();
 
-  /// \brief Set the name of the current optimization stage.
-  ///
-  /// This is useful for debugging.
+  // Sets the name of the current optimization stage used for debugging.
   void setStageName(llvm::StringRef NextStage = "");
-
-  /// \brief Get the name of the current optimization stage.
-  ///
-  /// This is useful for debugging.
-  StringRef getStageName() const;
 
   /// D'tor.
   ~SILPassManager();

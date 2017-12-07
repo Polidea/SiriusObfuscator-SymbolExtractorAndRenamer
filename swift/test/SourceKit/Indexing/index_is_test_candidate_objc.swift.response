@@ -105,11 +105,6 @@
           ]
         }
       ],
-      key.attributes: [
-        {
-          key.attribute: source.decl.attribute.private
-        }
-      ],
       key.is_test_candidate: 1
     },
     {
@@ -184,11 +179,6 @@
           key.line: 23,
           key.column: 16,
           key.is_dynamic: 1,
-          key.attributes: [
-            {
-              key.attribute: source.decl.attribute.private
-            }
-          ],
           key.is_test_candidate: 1
         },
         {
@@ -226,11 +216,6 @@
               key.attribute: source.decl.attribute.override
             }
           ]
-        }
-      ],
-      key.attributes: [
-        {
-          key.attribute: source.decl.attribute.public
         }
       ],
       key.is_test_candidate: 1

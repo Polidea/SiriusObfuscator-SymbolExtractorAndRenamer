@@ -97,7 +97,8 @@ extension NSRange {
         }
         
         
-        self.init(location: location, length: length)
+        self.location = location
+        self.length = length
     }
 }
 
@@ -142,15 +143,16 @@ extension NSRange {
   public init<R: RangeExpression>(_ region: R)
   where R.Bound: FixedWidthInteger, R.Bound.Stride : SignedInteger {
     let r = region.relative(to: 0..<R.Bound.max)
-    self.init(location: numericCast(r.lowerBound), length: numericCast(r.count))
+    location = numericCast(r.lowerBound)
+    length = numericCast(r.count)
   }
   
   public init<R: RangeExpression, S: StringProtocol>(_ region: R, in target: S)
   where R.Bound == S.Index, S.Index == String.Index {
     let r = region.relative(to: target)
     self = NSRange(
-      location: r.lowerBound.encodedOffset - target.startIndex.encodedOffset,
-      length: r.upperBound.encodedOffset - r.lowerBound.encodedOffset
+      location: r.lowerBound._utf16Index - target.startIndex._utf16Index,
+      length: r.upperBound._utf16Index - r.lowerBound._utf16Index
     )
   }
 

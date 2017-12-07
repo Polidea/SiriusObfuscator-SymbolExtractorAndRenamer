@@ -17,7 +17,28 @@
 /// `BidirectionalCollection` protocol instead, because it has a more complete
 /// interface.
 @available(*, deprecated, message: "it will be removed in Swift 4.0.  Please use 'BidirectionalCollection' instead")
-public typealias BidirectionalIndexable = BidirectionalCollection
+public typealias BidirectionalIndexable = _BidirectionalIndexable
+public protocol _BidirectionalIndexable : _Indexable {
+  // FIXME(ABI)#22 (Recursive Protocol Constraints): there is no reason for this protocol
+  // to exist apart from missing compiler features that we emulate with it.
+  // rdar://problem/20531108
+  //
+  // This protocol is almost an implementation detail of the standard
+  // library.
+
+  /// Returns the position immediately before the given index.
+  ///
+  /// - Parameter i: A valid index of the collection. `i` must be greater than
+  ///   `startIndex`.
+  /// - Returns: The index value immediately before `i`.
+  func index(before i: Index) -> Index
+
+  /// Replaces the given index with its predecessor.
+  ///
+  /// - Parameter i: A valid index of the collection. `i` must be greater than
+  ///   `startIndex`.
+  func formIndex(before i: inout Index)
+}
 
 /// A collection that supports backward as well as forward traversal.
 ///
@@ -44,20 +65,12 @@ public typealias BidirectionalIndexable = BidirectionalCollection
 ///   `c.index(before: c.index(after: i)) == i`.
 /// - If `i > c.startIndex && i <= c.endIndex`
 ///   `c.index(after: c.index(before: i)) == i`.
-public protocol BidirectionalCollection: Collection
-where SubSequence: BidirectionalCollection, Indices: BidirectionalCollection {
-  // FIXME(ABI): Associated type inference requires this.
-  associatedtype Element
+public protocol BidirectionalCollection : _BidirectionalIndexable, Collection 
+// FIXME(ABI) (Revert Where Clauses): Restore these 
+// where SubSequence: BidirectionalCollection, Indices: BidirectionalCollection
+{
 
-  // FIXME(ABI): Associated type inference requires this.
-  associatedtype Index
-
-  // FIXME(ABI): Associated type inference requires this.
-  associatedtype SubSequence = Slice<Self>
-
-  // FIXME(ABI): Associated type inference requires this.
-  associatedtype Indices = DefaultIndices<Self>
-
+// TODO: swift-3-indexing-model - replaces functionality in BidirectionalIndex
   /// Returns the position immediately before the given index.
   ///
   /// - Parameter i: A valid index of the collection. `i` must be greater than
@@ -70,6 +83,20 @@ where SubSequence: BidirectionalCollection, Indices: BidirectionalCollection {
   /// - Parameter i: A valid index of the collection. `i` must be greater than
   ///   `startIndex`.
   func formIndex(before i: inout Index)
+
+  /// A sequence that can represent a contiguous subrange of the collection's
+  /// elements.
+  associatedtype SubSequence
+  // FIXME(ABI) (Revert Where Clauses): Remove these conformances
+  : _BidirectionalIndexable, Collection
+    = BidirectionalSlice<Self>
+
+  /// A type that represents the indices that are valid for subscripting the
+  /// collection, in ascending order.
+  associatedtype Indices 
+  // FIXME(ABI) (Revert Where Clauses): Remove these conformances
+  : _BidirectionalIndexable, Collection
+    = DefaultBidirectionalIndices<Self>
 
   /// The indices that are valid for subscripting the collection, in ascending
   /// order.
@@ -126,27 +153,16 @@ where SubSequence: BidirectionalCollection, Indices: BidirectionalCollection {
   /// - Parameter bounds: A range of the collection's indices. The bounds of
   ///   the range must be valid indices of the collection.
   subscript(bounds: Range<Index>) -> SubSequence { get }
-
-  // FIXME(ABI): Associated type inference requires this.
-  subscript(position: Index) -> Element { get }
-
-  // FIXME(ABI): Associated type inference requires this.
-  var startIndex: Index { get }
-
-  // FIXME(ABI): Associated type inference requires this.
-  var endIndex: Index { get }
 }
 
 /// Default implementation for bidirectional collections.
-extension BidirectionalCollection {
+extension _BidirectionalIndexable {
 
-  @_inlineable // FIXME(sil-serialize-all)
   @inline(__always)
   public func formIndex(before i: inout Index) {
     i = index(before: i)
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(_ i: Index, offsetBy n: IndexDistance) -> Index {
     if n >= 0 {
       return _advanceForward(i, by: n)
@@ -158,7 +174,6 @@ extension BidirectionalCollection {
     return i
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(
     _ i: Index, offsetBy n: IndexDistance, limitedBy limit: Index
   ) -> Index? {
@@ -175,7 +190,6 @@ extension BidirectionalCollection {
     return i
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func distance(from start: Index, to end: Index) -> IndexDistance {
     var start = start
     var count: IndexDistance = 0
@@ -197,6 +211,16 @@ extension BidirectionalCollection {
   }
 }
 
+/// Supply the default "slicing" `subscript` for `BidirectionalCollection`
+/// models that accept the default associated `SubSequence`,
+/// `BidirectionalSlice<Self>`.
+extension BidirectionalCollection where SubSequence == BidirectionalSlice<Self> {
+  public subscript(bounds: Range<Index>) -> BidirectionalSlice<Self> {
+    _failEarlyRangeCheck(bounds, bounds: startIndex..<endIndex)
+    return BidirectionalSlice(base: self, bounds: bounds)
+  }
+}
+
 extension BidirectionalCollection where SubSequence == Self {
   /// Removes and returns the last element of the collection.
   ///
@@ -208,7 +232,6 @@ extension BidirectionalCollection where SubSequence == Self {
   ///   or more elements; otherwise, `nil`.
   ///
   /// - Complexity: O(1).
-  @_inlineable // FIXME(sil-serialize-all)
   public mutating func popLast() -> Element? {
     guard !isEmpty else { return nil }
     let element = last!
@@ -224,7 +247,6 @@ extension BidirectionalCollection where SubSequence == Self {
   /// - Returns: The last element of the collection.
   ///
   /// - Complexity: O(1)
-  @_inlineable // FIXME(sil-serialize-all)
   @discardableResult
   public mutating func removeLast() -> Element {
     let element = last!
@@ -241,7 +263,6 @@ extension BidirectionalCollection where SubSequence == Self {
   /// - Complexity: O(1) if the collection conforms to
   ///   `RandomAccessCollection`; otherwise, O(*n*), where *n* is the length
   ///   of the collection.
-  @_inlineable // FIXME(sil-serialize-all)
   public mutating func removeLast(_ n: Int) {
     if n == 0 { return }
     _precondition(n >= 0, "Number of elements to remove should be non-negative")
@@ -269,7 +290,6 @@ extension BidirectionalCollection {
   /// - Returns: A subsequence that leaves off `n` elements from the end.
   ///
   /// - Complexity: O(*n*), where *n* is the number of elements to drop.
-  @_inlineable // FIXME(sil-serialize-all)
   public func dropLast(_ n: Int) -> SubSequence {
     _precondition(
       n >= 0, "Can't drop a negative number of elements from a collection")
@@ -298,7 +318,6 @@ extension BidirectionalCollection {
   ///   most `maxLength` elements.
   ///
   /// - Complexity: O(*n*), where *n* is equal to `maxLength`.
-  @_inlineable // FIXME(sil-serialize-all)
   public func suffix(_ maxLength: Int) -> SubSequence {
     _precondition(
       maxLength >= 0,

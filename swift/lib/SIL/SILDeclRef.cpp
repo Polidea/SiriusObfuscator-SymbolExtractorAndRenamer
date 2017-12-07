@@ -15,8 +15,6 @@
 #include "swift/AST/AnyFunctionRef.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTMangler.h"
-#include "swift/AST/Initializer.h"
-#include "swift/AST/ParameterList.h"
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/ClangImporter/ClangModule.h"
 #include "swift/SIL/SILLinkage.h"
@@ -227,6 +225,29 @@ static bool hasLoweredLocalCaptures(AnyFunctionRef AFR,
   return false;
 }
 
+static unsigned getFuncNaturalUncurryLevel(AnyFunctionRef AFR) {
+  assert(AFR.getParameterLists().size() >= 1 && "no arguments for func?!");
+  return AFR.getParameterLists().size() - 1;
+}
+
+unsigned swift::getNaturalUncurryLevel(ValueDecl *vd) {
+  if (auto *func = dyn_cast<FuncDecl>(vd)) {
+    return getFuncNaturalUncurryLevel(func);
+  } else if (isa<ConstructorDecl>(vd)) {
+    return 1;
+  } else if (auto *ed = dyn_cast<EnumElementDecl>(vd)) {
+    return ed->hasAssociatedValues() ? 1 : 0;
+  } else if (isa<DestructorDecl>(vd)) {
+    return 0;
+  } else if (isa<ClassDecl>(vd)) {
+    return 1;
+  } else if (isa<VarDecl>(vd)) {
+    return 0;
+  } else {
+    llvm_unreachable("Unhandled ValueDecl for SILDeclRef");
+  }
+}
+
 SILDeclRef::SILDeclRef(ValueDecl *vd, SILDeclRef::Kind kind,
                        ResilienceExpansion expansion,
                        bool isCurried, bool isForeign)
@@ -375,8 +396,8 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
   // emitted by need and have shared linkage.
   if (isEnumElement() || isCurried) {
     switch (d->getEffectiveAccess()) {
-    case AccessLevel::Private:
-    case AccessLevel::FilePrivate:
+    case Accessibility::Private:
+    case Accessibility::FilePrivate:
       return maybeAddExternal(SILLinkage::Private);
 
     default:
@@ -388,8 +409,8 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
   // from which they come, and never get seen externally.
   if (isIVarInitializerOrDestroyer()) {
     switch (d->getEffectiveAccess()) {
-    case AccessLevel::Private:
-    case AccessLevel::FilePrivate:
+    case Accessibility::Private:
+    case Accessibility::FilePrivate:
       return maybeAddExternal(SILLinkage::Private);
     default:
       return maybeAddExternal(SILLinkage::Hidden);
@@ -418,7 +439,7 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
     // no way to reference one from another module except for this case.
     //
     // This is silly, and we need a proper resilience story here.
-    if (d->getEffectiveAccess() == AccessLevel::Public)
+    if (d->getEffectiveAccess() == Accessibility::Public)
       return maybeAddExternal(SILLinkage::Public);
 
     d = cast<NominalTypeDecl>(d->getDeclContext());
@@ -427,8 +448,8 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
     // property is private, we might reference the initializer from another
     // file.
     switch (d->getEffectiveAccess()) {
-    case AccessLevel::Private:
-    case AccessLevel::FilePrivate:
+    case Accessibility::Private:
+    case Accessibility::FilePrivate:
       return maybeAddExternal(SILLinkage::Private);
 
     default:
@@ -438,11 +459,11 @@ SILLinkage SILDeclRef::getLinkage(ForDefinition_t forDefinition) const {
 
   // Otherwise, we have external linkage.
   switch (d->getEffectiveAccess()) {
-    case AccessLevel::Private:
-    case AccessLevel::FilePrivate:
+    case Accessibility::Private:
+    case Accessibility::FilePrivate:
       return maybeAddExternal(SILLinkage::Private);
 
-    case AccessLevel::Internal:
+    case Accessibility::Internal:
       return maybeAddExternal(SILLinkage::Hidden);
 
     default:
@@ -484,12 +505,6 @@ FuncDecl *SILDeclRef::getFuncDecl() const {
   return dyn_cast<FuncDecl>(getDecl());
 }
 
-bool SILDeclRef::isSetter() const {
-  if (!hasFuncDecl())
-    return false;
-  return getFuncDecl()->isSetter();
-}
-
 AbstractFunctionDecl *SILDeclRef::getAbstractFunctionDecl() const {
   return dyn_cast<AbstractFunctionDecl>(getDecl());
 }
@@ -523,25 +538,12 @@ IsSerialized_t SILDeclRef::isSerialized() const {
     dc = closure->getLocalContext();
   else {
     auto *d = getDecl();
-
-    // Default argument generators are serialized if the function was
-    // type-checked in Swift 4 mode.
-    if (kind == SILDeclRef::Kind::DefaultArgGenerator) {
-      auto *afd = cast<AbstractFunctionDecl>(d);
-      switch (afd->getDefaultArgumentResilienceExpansion()) {
-      case ResilienceExpansion::Minimal:
-        return IsSerialized;
-      case ResilienceExpansion::Maximal:
-        return IsNotSerialized;
-      }
-    }
-
     dc = getDecl()->getInnermostDeclContext();
 
     // Enum element constructors are serialized if the enum is
     // @_versioned or public.
     if (isEnumElement())
-      if (d->getEffectiveAccess() >= AccessLevel::Public)
+      if (d->getEffectiveAccess() >= Accessibility::Public)
         return IsSerialized;
 
     // Currying thunks are serialized if referenced from an inlinable
@@ -549,7 +551,7 @@ IsSerialized_t SILDeclRef::isSerialized() const {
     // such a thunk is valid, since it must in turn reference a public
     // symbol, or dispatch via class_method or witness_method.
     if (isCurried)
-      if (d->getEffectiveAccess() >= AccessLevel::Public)
+      if (d->getEffectiveAccess() >= Accessibility::Public)
         return IsSerializable;
 
     if (isForeignToNativeThunk())
@@ -561,7 +563,7 @@ IsSerialized_t SILDeclRef::isSerialized() const {
       auto *ctor = cast<ConstructorDecl>(d);
       if (ctor->isDesignatedInit() &&
           ctor->getDeclContext()->getAsClassOrClassExtensionContext()) {
-        if (ctor->getEffectiveAccess() >= AccessLevel::Public &&
+        if (ctor->getEffectiveAccess() >= Accessibility::Public &&
             !ctor->hasClangNode())
           return IsSerialized;
       }
@@ -692,10 +694,6 @@ std::string SILDeclRef::mangle(ManglingKind MKind) const {
     case SILDeclRef::ManglingKind::DynamicThunk:
       SKind = ASTMangler::SymbolKind::DynamicThunk;
       break;
-    case SILDeclRef::ManglingKind::SwiftDispatchThunk:
-      assert(!isForeign && !isDirectReference && !isCurried);
-      SKind = ASTMangler::SymbolKind::SwiftDispatchThunk;
-      break;
   }
 
   switch (kind) {
@@ -707,8 +705,7 @@ std::string SILDeclRef::mangle(ManglingKind MKind) const {
     // Use the SILGen name only for the original non-thunked, non-curried entry
     // point.
     if (auto NameA = getDecl()->getAttrs().getAttribute<SILGenNameAttr>())
-      if (!NameA->Name.empty() &&
-          !isForeignToNativeThunk() && !isNativeToForeignThunk()
+      if (!isForeignToNativeThunk() && !isNativeToForeignThunk()
           && !isCurried) {
         return NameA->Name;
       }
@@ -760,7 +757,7 @@ std::string SILDeclRef::mangle(ManglingKind MKind) const {
     assert(!isCurried);
     return mangler.mangleAccessorEntity(AccessorKind::IsMutableAddressor,
                                         AddressorKind::Unsafe,
-                                        cast<AbstractStorageDecl>(getDecl()),
+                                        getDecl(),
                                         /*isStatic*/ false,
                                         SKind);
 
@@ -781,22 +778,6 @@ std::string SILDeclRef::mangle(ManglingKind MKind) const {
   }
 
   llvm_unreachable("bad entity kind!");
-}
-
-bool SILDeclRef::requiresNewVTableEntry() const {
-  if (cast<AbstractFunctionDecl>(getDecl())->needsNewVTableEntry())
-    return true;
-  if (kind == SILDeclRef::Kind::Allocator) {
-    auto *cd = cast<ConstructorDecl>(getDecl());
-    if (cd->isRequired()) {
-      auto *baseCD = cd->getOverriddenDecl();
-      if(!baseCD ||
-         !baseCD->isRequired() ||
-         baseCD->hasClangNode())
-        return true;
-    }
-  }
-  return false;
 }
 
 SILDeclRef SILDeclRef::getOverridden() const {
@@ -879,36 +860,25 @@ SubclassScope SILDeclRef::getSubclassScope() const {
          "class must be as visible as its members");
 
   switch (classType->getEffectiveAccess()) {
-  case AccessLevel::Private:
-  case AccessLevel::FilePrivate:
+  case Accessibility::Private:
+  case Accessibility::FilePrivate:
     return SubclassScope::NotApplicable;
-  case AccessLevel::Internal:
-  case AccessLevel::Public:
+  case Accessibility::Internal:
+  case Accessibility::Public:
     return SubclassScope::Internal;
-  case AccessLevel::Open:
+  case Accessibility::Open:
     return SubclassScope::External;
   }
 
-  llvm_unreachable("Unhandled access level in switch.");
+  llvm_unreachable("Unhandled Accessibility in switch.");
 }
 
-unsigned SILDeclRef::getParameterListCount() const {
-  if (isCurried || !hasDecl() || kind == Kind::DefaultArgGenerator)
-    return 1;
-
-  auto *vd = getDecl();
-
-  if (auto *func = dyn_cast<AbstractFunctionDecl>(vd)) {
-    return func->getParameterLists().size();
-  } else if (auto *ed = dyn_cast<EnumElementDecl>(vd)) {
-    return ed->hasAssociatedValues() ? 2 : 1;
-  } else if (isa<DestructorDecl>(vd)) {
-    return 1;
-  } else if (isa<ClassDecl>(vd)) {
-    return 2;
-  } else if (isa<VarDecl>(vd)) {
-    return 1;
-  } else {
-    llvm_unreachable("Unhandled ValueDecl for SILDeclRef");
-  }
+unsigned SILDeclRef::getUncurryLevel() const {
+  if (isCurried)
+    return 0;
+  if (!hasDecl())
+    return getFuncNaturalUncurryLevel(*getAnyFunctionRef());
+  if (kind == Kind::DefaultArgGenerator)
+    return 0;
+  return getNaturalUncurryLevel(getDecl());
 }

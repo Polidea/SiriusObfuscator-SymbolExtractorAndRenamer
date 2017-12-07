@@ -79,8 +79,6 @@ static StoredDiagnosticInfo storedDiagnosticInfos[] = {
   StoredDiagnosticInfo(DiagnosticKind::Warning, DiagnosticOptions::Options),
 #define NOTE(ID, Options, Text, Signature)                                     \
   StoredDiagnosticInfo(DiagnosticKind::Note, DiagnosticOptions::Options),
-#define REMARK(ID, Options, Text, Signature)                                   \
-  StoredDiagnosticInfo(DiagnosticKind::Remark, DiagnosticOptions::Options),
 #include "swift/AST/DiagnosticsAll.def"
 };
 static_assert(sizeof(storedDiagnosticInfos) / sizeof(StoredDiagnosticInfo) ==
@@ -91,7 +89,6 @@ static const char *diagnosticStrings[] = {
 #define ERROR(ID, Options, Text, Signature) Text,
 #define WARNING(ID, Options, Text, Signature) Text,
 #define NOTE(ID, Options, Text, Signature) Text,
-#define REMARK(ID, Options, Text, Signature) Text,
 #include "swift/AST/DiagnosticsAll.def"
     "<not a diagnostic>",
 };
@@ -581,8 +578,6 @@ static DiagnosticKind toDiagnosticKind(DiagnosticState::Behavior behavior) {
     return DiagnosticKind::Note;
   case DiagnosticState::Behavior::Warning:
     return DiagnosticKind::Warning;
-  case DiagnosticState::Behavior::Remark:
-    return DiagnosticKind::Remark;
   }
 
   llvm_unreachable("Unhandled DiagnosticKind in switch.");
@@ -646,8 +641,6 @@ DiagnosticState::Behavior DiagnosticState::determineBehavior(DiagID id) {
     return set(diagInfo.isFatal ? Behavior::Fatal : Behavior::Error);
   case DiagnosticKind::Warning:
     return set(Behavior::Warning);
-  case DiagnosticKind::Remark:
-    return set(Behavior::Remark);
   }
 
   llvm_unreachable("Unhandled DiagnosticKind in switch.");
@@ -759,7 +752,7 @@ void DiagnosticEngine::emitDiagnostic(const Diagnostic &diagnostic) {
           }
 
           if (auto value = dyn_cast<ValueDecl>(ppDecl)) {
-            bufferName += value->getBaseName().userFacingName();
+            bufferName += value->getNameStr();
           } else if (auto ext = dyn_cast<ExtensionDecl>(ppDecl)) {
             bufferName += ext->getExtendedType().getString();
           }

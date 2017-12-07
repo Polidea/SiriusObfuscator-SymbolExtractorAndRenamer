@@ -21,31 +21,16 @@
 #include "llvm/Support/GenericDomTree.h"
 #include "swift/SIL/CFG.h"
 
-extern template class llvm::DominatorTreeBase<swift::SILBasicBlock, false>;
-extern template class llvm::DominatorTreeBase<swift::SILBasicBlock, true>;
+extern template class llvm::DominatorTreeBase<swift::SILBasicBlock>;
+extern template class llvm::DominatorBase<swift::SILBasicBlock>;
 extern template class llvm::DomTreeNodeBase<swift::SILBasicBlock>;
-
-namespace llvm {
-namespace DomTreeBuilder {
-using SILDomTree = llvm::DomTreeBase<swift::SILBasicBlock>;
-using SILPostDomTree = llvm::PostDomTreeBase<swift::SILBasicBlock>;
-
-extern template void Calculate<SILDomTree, swift::SILFunction>(
-    SILDomTree &DT, swift::SILFunction &F);
-extern template void Calculate<SILPostDomTree, swift::SILFunction>(
-    SILPostDomTree &DT, swift::SILFunction &F);
-} // namespace DomTreeBuilder
-} // namespace llvm
 
 namespace swift {
 
-using DominatorTreeBase = llvm::DominatorTreeBase<swift::SILBasicBlock, false>;
-using PostDominatorTreeBase = llvm::DominatorTreeBase<swift::SILBasicBlock, true>;
 using DominanceInfoNode = llvm::DomTreeNodeBase<SILBasicBlock>;
 
 /// A class for computing basic dominance information.
-class DominanceInfo : public DominatorTreeBase {
-  using super = DominatorTreeBase;
+class DominanceInfo : public llvm::DominatorTreeBase<SILBasicBlock> {
 public:
   DominanceInfo(SILFunction *F);
 
@@ -79,7 +64,7 @@ public:
     return getNode(&F->front()) != nullptr;
   }
   void reset() {
-    super::reset();
+    llvm::DominatorTreeBase<SILBasicBlock>::reset();
   }
 };
 
@@ -139,8 +124,7 @@ public:
 };
 
 /// A class for computing basic post-dominance information.
-class PostDominanceInfo : public PostDominatorTreeBase {
-  using super = PostDominatorTreeBase;
+class PostDominanceInfo : public llvm::DominatorTreeBase<SILBasicBlock> {
 public:
   PostDominanceInfo(SILFunction *F);
 
@@ -176,7 +160,7 @@ public:
 
   bool isValid(SILFunction *F) const { return getNode(&F->front()) != nullptr; }
 
-  using super::properlyDominates;
+  using DominatorTreeBase::properlyDominates;
 };
 
 

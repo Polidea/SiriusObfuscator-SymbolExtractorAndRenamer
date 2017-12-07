@@ -49,10 +49,8 @@ bool swift::hasNonTrivialNonDebugUse(SILArgument *Arg) {
       return true;
 
     // Otherwise add all non-debug uses of I to the worklist.
-    for (auto result : U->getResults()) {
-      for (Operand *I : getNonDebugUses(result))
-        Worklist.push_back(I->getUser());
-    }
+    for (Operand *I : getNonDebugUses(SILValue(U)))
+      Worklist.push_back(I->getUser());
   }
   return false;
 }

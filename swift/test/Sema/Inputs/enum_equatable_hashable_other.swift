@@ -9,10 +9,3 @@ enum AlsoFromOtherFile : Int {
 enum YetAnotherFromOtherFile: Float {
   case A = 0.0
 }
-
-enum OtherFileNonconforming {
-  case A(Int)
-}
-enum YetOtherFileNonconforming {
-  case A(Int)
-}

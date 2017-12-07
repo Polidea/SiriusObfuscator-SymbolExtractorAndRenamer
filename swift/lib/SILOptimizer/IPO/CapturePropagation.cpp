@@ -94,7 +94,7 @@ namespace {
 class CapturePropagationCloner
   : public TypeSubstCloner<CapturePropagationCloner> {
   using SuperTy = TypeSubstCloner<CapturePropagationCloner>;
-  friend class SILInstructionVisitor<CapturePropagationCloner>;
+  friend class SILVisitor<CapturePropagationCloner>;
   friend class SILCloner<CapturePropagationCloner>;
 
   SILFunction *OrigF;
@@ -141,12 +141,12 @@ protected:
 void CapturePropagationCloner::cloneConstValue(SILValue Val) {
   assert(IsCloningConstant && "incorrect mode");
 
-  if (ValueMap.find(Val) != ValueMap.end())
+  auto Inst = dyn_cast<SILInstruction>(Val);
+  if (!Inst)
     return;
 
-  // TODO: MultiValueInstruction?
-  auto Inst = dyn_cast<SingleValueInstruction>(Val);
-  if (!Inst)
+  auto II = InstructionMap.find(Inst);
+  if (II != InstructionMap.end())
     return;
 
   if (Inst->getNumOperands() > 0) {
@@ -214,13 +214,14 @@ void CapturePropagationCloner::cloneBlocks(
 }
 
 CanSILFunctionType getPartialApplyInterfaceResultType(PartialApplyInst *PAI) {
+  SILFunction *OrigF = PAI->getReferencedFunction();
   // The new partial_apply will no longer take any arguments--they are all
   // expressed as literals. So its callee signature will be the same as its
   // return signature.
   auto FTy = PAI->getType().castTo<SILFunctionType>();
   assert(!PAI->hasSubstitutions() || !hasArchetypes(PAI->getSubstitutions()));
   FTy = cast<SILFunctionType>(
-    FTy->mapTypeOutOfContext()->getCanonicalType());
+    OrigF->mapTypeOutOfContext(FTy)->getCanonicalType());
   auto NewFTy = FTy;
   return NewFTy;
 }
@@ -257,12 +258,13 @@ SILFunction *CapturePropagation::specializeConstClosure(PartialApplyInst *PAI,
   if (NewFTy->getGenericSignature())
     GenericEnv = OrigF->getGenericEnvironment();
   SILFunction *NewF = OrigF->getModule().createFunction(
-      SILLinkage::Shared, Name, NewFTy, GenericEnv, OrigF->getLocation(),
-      OrigF->isBare(), OrigF->isTransparent(), Serialized,
-      OrigF->getEntryCount(), OrigF->isThunk(), OrigF->getClassSubclassScope(),
-      OrigF->getInlineStrategy(), OrigF->getEffectsKind(),
+      SILLinkage::Shared, Name, NewFTy,
+      GenericEnv, OrigF->getLocation(), OrigF->isBare(),
+      OrigF->isTransparent(), Serialized, OrigF->isThunk(),
+      OrigF->getClassSubclassScope(), OrigF->getInlineStrategy(),
+      OrigF->getEffectsKind(),
       /*InsertBefore*/ OrigF, OrigF->getDebugScope());
-  if (!OrigF->hasQualifiedOwnership()) {
+  if (OrigF->hasUnqualifiedOwnership()) {
     NewF->setUnqualifiedOwnership();
   }
   DEBUG(llvm::dbgs() << "  Specialize callee as ";
@@ -385,7 +387,7 @@ static SILFunction *getSpecializedWithDeadParams(
         return nullptr;
       }
       assert(isa<ApplyInst>(&I) && "unknown FullApplySite instruction");
-      RetValue = cast<ApplyInst>(&I);
+      RetValue = &I;
       continue;
     }
     if (auto *RI = dyn_cast<ReturnInst>(&I)) {
@@ -403,9 +405,6 @@ static SILFunction *getSpecializedWithDeadParams(
   if (PAI->hasSubstitutions()) {
     if (Specialized->isExternalDeclaration())
       return nullptr;
-    if (!Orig->shouldOptimize())
-      return nullptr;
-
     // Perform a generic specialization of the Specialized function.
     ReabstractionInfo ReInfo(ApplySite(), Specialized, PAI->getSubstitutions(),
                              /* ConvertIndirectToDirect */ false);

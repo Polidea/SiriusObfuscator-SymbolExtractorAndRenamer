@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend -emit-module -o %t %S/Inputs/generic_extension_1.swift
 // RUN: %target-swift-frontend -emit-sil -I %t %s | %FileCheck %s
 

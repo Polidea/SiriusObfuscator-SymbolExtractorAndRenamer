@@ -9,7 +9,8 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: if [ %target-runtime == "objc" ]; \
 // RUN: then \
@@ -52,8 +53,8 @@ mirrors.test("RandomAccessStructure") {
 let letters = "abcdefghijklmnopqrstuvwxyz "
 
 func find(_ substring: String, within domain: String) -> String.Index? {
-  let domainCount = domain.count
-  let substringCount = substring.count
+  let domainCount = domain.characters.count
+  let substringCount = substring.characters.count
 
   if (domainCount < substringCount) { return nil }
   var sliceStart = domain.startIndex
@@ -76,19 +77,19 @@ mirrors.test("ForwardStructure") {
     var customMirror: Mirror {
       return Mirror(
         self,
-        unlabeledChildren: Set(letters),
+        unlabeledChildren: Set(letters.characters),
         displayStyle: .`set`)
     }
   }
 
   let w = DoubleYou().customMirror
   expectEqual(.`set`, w.displayStyle)
-  expectEqual(letters.count, numericCast(w.children.count))
+  expectEqual(letters.characters.count, numericCast(w.children.count))
   
   // Because we don't control the order of a Set, we need to do a
   // fancy dance in order to validate the result.
   let description = w.testDescription
-  for c in letters {
+  for c in letters.characters {
     let expected = "nil: \"\(c)\""
     expectNotNil(find(expected, within: description))
   }
@@ -99,7 +100,7 @@ mirrors.test("BidirectionalStructure") {
     var customMirror: Mirror {
       return Mirror(
         self,
-        unlabeledChildren: letters,
+        unlabeledChildren: letters.characters,
         displayStyle: .collection)
     }
   }
@@ -111,7 +112,7 @@ mirrors.test("BidirectionalStructure") {
   let description = y.testDescription
   expectEqual(
     "[nil: \"a\", nil: \"b\", nil: \"c\", nil: \"",
-    description[description.startIndex..<description.index(of: "d")!])
+    description[description.startIndex..<description.characters.index(of: "d")!])
 }
 
 mirrors.test("LabeledStructure") {

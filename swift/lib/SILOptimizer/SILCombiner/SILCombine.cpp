@@ -1,4 +1,4 @@
-//===--- SILCombine.cpp ---------------------------------------------------===//
+//===--- SILCombine -------------------------------------------------------===//
 //
 // This source file is part of the Swift.org open source project
 //
@@ -150,7 +150,7 @@ bool SILCombiner::doOneIteration(SILFunction &F, unsigned Iteration) {
                          << "    New = " << *Result << '\n');
 
       // Everything uses the new instruction now.
-      replaceInstUsesWith(*cast<SingleValueInstruction>(I), Result);
+      replaceInstUsesWith(*I, Result);
 
       // Push the new instruction and any users onto the worklist.
       Worklist.addUsersToWorklist(Result);
@@ -181,11 +181,12 @@ bool SILCombiner::doOneIteration(SILFunction &F, unsigned Iteration) {
                            << "    New = " << *Result << '\n');
 
         // Everything uses the new instruction now.
-        replaceInstUsesPairwiseWith(I, Result);
+        replaceInstUsesWith(*I, Result);
 
         // Push the new instruction and any users onto the worklist.
         Worklist.add(Result);
-        Worklist.addUsersOfAllResultsToWorklist(Result);
+        Worklist.addUsersToWorklist(Result);
+
 
         eraseInstFromFunction(*I);
       } else {
@@ -198,7 +199,7 @@ bool SILCombiner::doOneIteration(SILFunction &F, unsigned Iteration) {
           eraseInstFromFunction(*I);
         } else {
           Worklist.add(I);
-          Worklist.addUsersOfAllResultsToWorklist(I);
+          Worklist.addUsersToWorklist(I);
         }
       }
       MadeChange = true;
@@ -265,31 +266,16 @@ SILInstruction *SILCombiner::insertNewInstBefore(SILInstruction *New,
 // replaceable with another preexisting expression. Here we add all uses of I
 // to the worklist, replace all uses of I with the new value, then return I,
 // so that the combiner will know that I was modified.
-void SILCombiner::replaceInstUsesWith(SingleValueInstruction &I, ValueBase *V) {
+SILInstruction *SILCombiner::replaceInstUsesWith(SILInstruction &I,
+                                                 ValueBase *V) {
   Worklist.addUsersToWorklist(&I);   // Add all modified instrs to worklist.
 
   DEBUG(llvm::dbgs() << "SC: Replacing " << I << "\n"
         "    with " << *V << '\n');
 
   I.replaceAllUsesWith(V);
-}
 
-/// Replace all of the results of the old instruction with the
-/// corresponding results of the new instruction.
-void SILCombiner::replaceInstUsesPairwiseWith(SILInstruction *oldI,
-                                              SILInstruction *newI) {
-  DEBUG(llvm::dbgs() << "SC: Replacing " << *oldI << "\n"
-        "    with " << *newI << '\n');
-
-  auto oldResults = oldI->getResults();
-  auto newResults = newI->getResults();
-  assert(oldResults.size() == newResults.size());
-  for (auto i : indices(oldResults)) {
-    // Add all modified instrs to worklist.
-    Worklist.addUsersToWorklist(oldResults[i]);
-
-    oldResults[i]->replaceAllUsesWith(newResults[i]);
-  }
+  return &I;
 }
 
 // Some instructions can never be "trivially dead" due to side effects or
@@ -303,14 +289,12 @@ SILInstruction *SILCombiner::eraseInstFromFunction(SILInstruction &I,
                                             bool AddOperandsToWorklist) {
   DEBUG(llvm::dbgs() << "SC: ERASE " << I << '\n');
 
-  assert(onlyHaveDebugUsesOfAllResults(&I) &&
-         "Cannot erase instruction that is used!");
-
+  assert(onlyHaveDebugUses(&I) && "Cannot erase instruction that is used!");
   // Make sure that we reprocess all operands now that we reduced their
   // use counts.
   if (I.getNumOperands() < 8 && AddOperandsToWorklist) {
     for (auto &OpI : I.getAllOperands()) {
-      if (auto *Op = OpI.get()->getDefiningInstruction()) {
+      if (auto *Op = llvm::dyn_cast<SILInstruction>(&*OpI.get())) {
         DEBUG(llvm::dbgs() << "SC: add op " << *Op <<
               " from erased inst to worklist\n");
         Worklist.add(Op);
@@ -318,9 +302,8 @@ SILInstruction *SILCombiner::eraseInstFromFunction(SILInstruction &I,
     }
   }
 
-  for (auto result : I.getResults())
-    for (Operand *DU : getDebugUses(result))
-      Worklist.remove(DU->getUser());
+  for (Operand *DU : getDebugUses(&I))
+    Worklist.remove(DU->getUser());
 
   Worklist.remove(&I);
   eraseFromParentWithDebugInsts(&I, InstIter);
@@ -357,10 +340,7 @@ class SILCombine : public SILFunctionTransform {
     }
   }
   
-  void handleDeleteNotification(SILNode *node) override {
-    auto I = dyn_cast<SILInstruction>(node);
-    if (!I) return;
-
+  void handleDeleteNotification(ValueBase *I) override {
     // Linear searching the tracking list doesn't hurt because usually it only
     // contains a few elements.
     auto Iter = std::find(TrackingList.begin(), TrackingList.end(), I);

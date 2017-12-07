@@ -13,7 +13,6 @@
 #define DEBUG_TYPE "definite-init"
 #include "DIMemoryUseCollectorOwnership.h"
 #include "swift/AST/Expr.h"
-#include "swift/SIL/InstructionUtils.h"
 #include "swift/SIL/SILArgument.h"
 #include "swift/SIL/SILBuilder.h"
 #include "llvm/ADT/StringExtras.h"
@@ -49,6 +48,7 @@ static unsigned getElementCountRec(SILModule &Module, SILType T,
   if (IsSelfOfNonDelegatingInitializer) {
     // Protocols never have a stored properties.
     if (auto *NTD = T.getNominalOrBoundGenericNominal()) {
+
       unsigned NumElements = 0;
       for (auto *VD : NTD->getStoredProperties())
         NumElements +=
@@ -89,8 +89,7 @@ computeMemorySILType(SILInstruction *MemoryInst) {
   return {MemorySILType, VDecl->isLet()};
 }
 
-DIMemoryObjectInfo::DIMemoryObjectInfo(SingleValueInstruction *MI)
-    : MemoryInst(MI) {
+DIMemoryObjectInfo::DIMemoryObjectInfo(SILInstruction *MI) : MemoryInst(MI) {
   auto &Module = MI->getModule();
 
   std::tie(MemorySILType, IsLet) = computeMemorySILType(MemoryInst);
@@ -117,12 +116,6 @@ DIMemoryObjectInfo::DIMemoryObjectInfo(SingleValueInstruction *MI)
   // If this is a derived class init method, track an extra element to determine
   // whether super.init has been called at each program point.
   NumElements += unsigned(isDerivedClassSelf());
-
-  // Make sure we track /something/ in a cross-module struct initializer.
-  if (NumElements == 0 && isCrossModuleStructInitSelf()) {
-    NumElements = 1;
-    HasDummyElement = true;
-  }
 }
 
 SILInstruction *DIMemoryObjectInfo::getFunctionEntryPoint() const {
@@ -142,8 +135,6 @@ static SILType getElementTypeRec(SILModule &Module, SILType T, unsigned EltNo,
         return getElementTypeRec(Module, FieldType, EltNo, false);
       EltNo -= NumFieldElements;
     }
-    // This can only happen if we look at a symbolic element number of an empty
-    // tuple.
     llvm::report_fatal_error("invalid element number");
   }
 
@@ -152,21 +143,13 @@ static SILType getElementTypeRec(SILModule &Module, SILType T, unsigned EltNo,
   // for each of the tuple members.
   if (IsSelfOfNonDelegatingInitializer) {
     if (auto *NTD = T.getNominalOrBoundGenericNominal()) {
-      bool HasStoredProperties = false;
       for (auto *VD : NTD->getStoredProperties()) {
-        HasStoredProperties = true;
         auto FieldType = T.getFieldType(VD, Module);
         unsigned NumFieldElements =
             getElementCountRec(Module, FieldType, false);
         if (EltNo < NumFieldElements)
           return getElementTypeRec(Module, FieldType, EltNo, false);
         EltNo -= NumFieldElements;
-      }
-
-      // If we do not have any stored properties and were passed an EltNo of 0,
-      // just return self.
-      if (!HasStoredProperties && EltNo == 0) {
-        return T;
       }
       llvm::report_fatal_error("invalid element number");
     }
@@ -185,9 +168,8 @@ SILType DIMemoryObjectInfo::getElementType(unsigned EltNo) const {
 
 /// computeTupleElementAddress - Given a tuple element number (in the flattened
 /// sense) return a pointer to a leaf element of the specified number.
-SILValue DIMemoryObjectInfo::emitElementAddress(
-    unsigned EltNo, SILLocation Loc, SILBuilder &B,
-    llvm::SmallVectorImpl<std::pair<SILValue, SILValue>> &EndBorrowList) const {
+SILValue DIMemoryObjectInfo::emitElementAddress(unsigned EltNo, SILLocation Loc,
+                                                SILBuilder &B) const {
   SILValue Ptr = getAddress();
   bool IsSelf = isNonDelegatingInit();
   auto &Module = MemoryInst->getModule();
@@ -221,37 +203,18 @@ SILValue DIMemoryObjectInfo::emitElementAddress(
     // lifetimes for each of the tuple members.
     if (IsSelf) {
       if (auto *NTD = PointeeType.getNominalOrBoundGenericNominal()) {
-        bool HasStoredProperties = false;
+        if (isa<ClassDecl>(NTD) && Ptr->getType().isAddress())
+          Ptr = B.createLoad(Loc, Ptr, LoadOwnershipQualifier::Unqualified);
         for (auto *VD : NTD->getStoredProperties()) {
-          if (!HasStoredProperties) {
-            HasStoredProperties = true;
-            // If we have a class, we can use a borrow directly and avoid ref
-            // count traffic.
-            if (isa<ClassDecl>(NTD) && Ptr->getType().isAddress()) {
-              SILValue Original = Ptr;
-              SILValue Borrowed = Ptr = B.createLoadBorrow(Loc, Ptr);
-              EndBorrowList.emplace_back(Borrowed, Original);
-            }
-          }
-
           auto FieldType = PointeeType.getFieldType(VD, Module);
           unsigned NumFieldElements =
               getElementCountRec(Module, FieldType, false);
           if (EltNo < NumFieldElements) {
-            if (isa<StructDecl>(NTD)) {
+            if (isa<StructDecl>(NTD))
               Ptr = B.createStructElementAddr(Loc, Ptr, VD);
-            } else {
+            else {
               assert(isa<ClassDecl>(NTD));
-              SILValue Original, Borrowed;
-              if (Ptr.getOwnershipKind() != ValueOwnershipKind::Guaranteed) {
-                Original = Ptr;
-                Borrowed = Ptr = B.createBeginBorrow(Loc, Ptr);
-              }
               Ptr = B.createRefElementAddr(Loc, Ptr, VD);
-              if (Original) {
-                assert(Borrowed);
-                EndBorrowList.emplace_back(Borrowed, Original);
-              }
             }
 
             PointeeType = FieldType;
@@ -260,12 +223,6 @@ SILValue DIMemoryObjectInfo::emitElementAddress(
           }
           EltNo -= NumFieldElements;
         }
-
-        if (!HasStoredProperties) {
-          assert(EltNo == 0 && "Element count problem");
-          return Ptr;
-        }
-
         continue;
       }
     }
@@ -326,9 +283,7 @@ DIMemoryObjectInfo::getPathStringToElement(unsigned Element,
   // If this is indexing into a field of 'self', look it up.
   if (isNonDelegatingInit() && !isDerivedClassSelfOnly()) {
     if (auto *NTD = MemorySILType.getNominalOrBoundGenericNominal()) {
-      bool HasStoredProperty = false;
       for (auto *VD : NTD->getStoredProperties()) {
-        HasStoredProperty = true;
         auto FieldType = MemorySILType.getFieldType(VD, Module);
         unsigned NumFieldElements =
             getElementCountRec(Module, FieldType, false);
@@ -340,10 +295,6 @@ DIMemoryObjectInfo::getPathStringToElement(unsigned Element,
         }
         Element -= NumFieldElements;
       }
-
-      // If we do not have any stored properties, we have nothing of interest.
-      if (!HasStoredProperty)
-        return nullptr;
     }
   }
 
@@ -432,8 +383,50 @@ bool DIMemoryUse::onlyTouchesTrivialElements(
 //                      DIElementUseInfo Implementation
 //===----------------------------------------------------------------------===//
 
-void DIElementUseInfo::trackStoreToSelf(SILInstruction *I) {
-  StoresToSelf.push_back(I);
+void DIElementUseInfo::trackFailableInitCall(
+    const DIMemoryObjectInfo &MemoryInfo, SILInstruction *I) {
+  // If we have a store to self inside the normal BB, we have a 'real'
+  // try_apply. Otherwise, this is a 'try? self.init()' or similar,
+  // and there is a store after.
+  if (auto *TAI = dyn_cast<TryApplyInst>(I)) {
+    trackFailureBlock(MemoryInfo, TAI, TAI->getNormalBB());
+    return;
+  }
+
+  if (auto *AI = dyn_cast<ApplyInst>(I)) {
+    // See if this is an optional initializer.
+    for (auto UI : AI->getUses()) {
+      SILInstruction *User = UI->getUser();
+
+      if (!isa<SelectEnumInst>(User) && !isa<SelectEnumAddrInst>(User))
+        continue;
+
+      if (!User->hasOneUse())
+        continue;
+
+      User = User->use_begin()->getUser();
+      if (auto *CBI = dyn_cast<CondBranchInst>(User)) {
+        trackFailureBlock(MemoryInfo, CBI, CBI->getTrueBB());
+        return;
+      }
+    }
+  }
+}
+
+/// We have to detect if the self box contents were consumed. Do this by
+/// checking for a store into the self box in the success branch.  Once we rip
+/// this out of SILGen, DI will be able to figure this out in a more logical
+/// manner.
+void DIElementUseInfo::trackFailureBlock(const DIMemoryObjectInfo &TheMemory,
+                                         TermInst *TI, SILBasicBlock *BB) {
+  for (auto &II : *BB) {
+    if (auto *SI = dyn_cast<StoreInst>(&II)) {
+      if (SI->getDest() == TheMemory.MemoryInst) {
+        FailableInits.push_back(TI);
+        return;
+      }
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//
@@ -452,12 +445,14 @@ getScalarizedElementAddresses(SILValue Pointer, SILBuilder &B, SILLocation Loc,
 }
 
 /// Given an RValue of aggregate type, compute the values of the elements by
-/// emitting a destructure.
+/// emitting a series of tuple_element instructions.
 static void getScalarizedElements(SILValue V,
                                   SmallVectorImpl<SILValue> &ElementVals,
                                   SILLocation Loc, SILBuilder &B) {
-  auto *DTI = B.createDestructureTuple(Loc, V);
-  copy(DTI->getResults(), std::back_inserter(ElementVals));
+  TupleType *TT = V->getType().castTo<TupleType>();
+  for (auto Index : indices(TT->getElements())) {
+    ElementVals.push_back(B.emitTupleExtract(Loc, V, Index));
+  }
 }
 
 /// Scalarize a load down to its subelements.  If NewLoads is specified, this
@@ -468,8 +463,8 @@ static SILValue scalarizeLoad(LoadInst *LI,
   SmallVector<SILValue, 4> ElementTmps;
 
   for (unsigned i = 0, e = ElementAddrs.size(); i != e; ++i) {
-    auto *SubLI = B.createTrivialLoadOr(LI->getLoc(), ElementAddrs[i],
-                                        LI->getOwnershipQualifier());
+    auto *SubLI = B.createLoad(LI->getLoc(), ElementAddrs[i],
+                               LoadOwnershipQualifier::Unqualified);
     ElementTmps.push_back(SubLI);
   }
 
@@ -566,8 +561,6 @@ private:
   void addElementUses(unsigned BaseEltNo, SILType UseTy, SILInstruction *User,
                       DIUseKind Kind);
   void collectTupleElementUses(TupleElementAddrInst *TEAI, unsigned BaseEltNo);
-  void collectDestructureTupleResultUses(DestructureTupleResult *DTR,
-                                         unsigned BaseEltNo);
   void collectStructElementUses(StructElementAddrInst *SEAI,
                                 unsigned BaseEltNo);
 };
@@ -617,33 +610,6 @@ void ElementUseCollector::collectTupleElementUses(TupleElementAddrInst *TEAI,
   collectUses(TEAI, BaseEltNo);
 }
 
-/// Given a destructure_tuple, compute the new BaseEltNo implicit in the
-/// selected member, and recursively add uses of the instruction.
-void ElementUseCollector::collectDestructureTupleResultUses(
-    DestructureTupleResult *DTR, unsigned BaseEltNo) {
-
-  // If we're walking into a tuple within a struct or enum, don't adjust the
-  // BaseElt.  The uses hanging off the tuple_element_addr are going to be
-  // counted as uses of the struct or enum itself.
-  if (InStructSubElement || InEnumSubElement)
-    return collectUses(DTR, BaseEltNo);
-
-  assert(!IsSelfOfNonDelegatingInitializer && "self doesn't have tuple type");
-
-  // tuple_element_addr P, 42 indexes into the current tuple element.
-  // Recursively process its uses with the adjusted element number.
-  unsigned FieldNo = DTR->getIndex();
-  auto T = DTR->getParent()->getOperand()->getType();
-  if (T.is<TupleType>()) {
-    for (unsigned i = 0; i != FieldNo; ++i) {
-      SILType EltTy = T.getTupleElementType(i);
-      BaseEltNo += getElementCountRec(Module, EltTy, false);
-    }
-  }
-
-  collectUses(DTR, BaseEltNo);
-}
-
 void ElementUseCollector::collectStructElementUses(StructElementAddrInst *SEAI,
                                                    unsigned BaseEltNo) {
   // Generally, we set the "InStructSubElement" flag and recursively process
@@ -680,7 +646,7 @@ void ElementUseCollector::collectContainerUses(AllocBoxInst *ABI) {
       continue;
 
     if (auto *PBI = dyn_cast<ProjectBoxInst>(User)) {
-      collectUses(PBI, PBI->getFieldIndex());
+      collectUses(User, PBI->getFieldIndex());
       continue;
     }
 
@@ -746,15 +712,14 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
       continue;
     }
 
-    // Look through begin_access and begin_borrow
-    if (isa<BeginAccessInst>(User) || isa<BeginBorrowInst>(User)) {
-      auto begin = cast<SingleValueInstruction>(User);
-      collectUses(begin, BaseEltNo);
+    // Look through begin_access.
+    if (isa<BeginAccessInst>(User)) {
+      collectUses(User, BaseEltNo);
       continue;
     }
 
-    // Ignore end_access and end_borrow.
-    if (isa<EndAccessInst>(User) || isa<EndBorrowInst>(User)) {
+    // Ignore end_access.
+    if (isa<EndAccessInst>(User)) {
       continue;
     }
 
@@ -764,13 +729,6 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
         UsesToScalarize.push_back(User);
       else
         addElementUses(BaseEltNo, PointeeType, User, DIUseKind::Load);
-      continue;
-    }
-
-    // Load borrows are similar to loads except that we do not support
-    // scalarizing them now.
-    if (isa<LoadBorrowInst>(User)) {
-      addElementUses(BaseEltNo, PointeeType, User, DIUseKind::Load);
       continue;
     }
 
@@ -908,8 +866,8 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
         // individual sub-member is passed as inout, then we model that as an
         // inout use.
         auto Kind = DIUseKind::InOutUse;
-        if (TheMemory.isStructInitSelf() &&
-            getAccessedPointer(Pointer) == TheMemory.getAddress())
+        if ((TheMemory.isStructInitSelf() || TheMemory.isProtocolInitSelf())
+            && getAccessedPointer(Pointer) == TheMemory.getAddress())
           Kind = DIUseKind::Escape;
 
         addElementUses(BaseEltNo, PointeeType, User, Kind);
@@ -930,14 +888,14 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
     // that is looking into the memory object (i.e., the memory object needs to
     // be explicitly initialized by a copy_addr or some other use of the
     // projected address).
-    if (auto init = dyn_cast<InitEnumDataAddrInst>(User)) {
+    if (isa<InitEnumDataAddrInst>(User)) {
       assert(!InStructSubElement &&
              "init_enum_data_addr shouldn't apply to struct subelements");
       // Keep track of the fact that we're inside of an enum.  This informs our
       // recursion that tuple stores are not scalarized outside, and that stores
       // should not be treated as partial stores.
       llvm::SaveAndRestore<bool> X(InEnumSubElement, true);
-      collectUses(init, BaseEltNo);
+      collectUses(User, BaseEltNo);
       continue;
     }
 
@@ -987,7 +945,7 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
   // Now that we've walked all of the immediate uses, scalarize any operations
   // working on tuples if we need to for canonicalization or analysis reasons.
   if (!UsesToScalarize.empty()) {
-    SILInstruction *PointerInst = Pointer->getDefiningInstruction();
+    SILInstruction *PointerInst = cast<SILInstruction>(Pointer);
     SmallVector<SILValue, 4> ElementAddrs;
     SILBuilderWithScope AddrBuilder(++SILBasicBlock::iterator(PointerInst),
                                     PointerInst);
@@ -1025,8 +983,8 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
         getScalarizedElements(SI->getOperand(0), ElementTmps, SI->getLoc(), B);
 
         for (unsigned i = 0, e = ElementAddrs.size(); i != e; ++i)
-          B.createTrivialStoreOr(SI->getLoc(), ElementTmps[i], ElementAddrs[i],
-                                 SI->getOwnershipQualifier());
+          B.createStore(SI->getLoc(), ElementTmps[i], ElementAddrs[i],
+                        StoreOwnershipQualifier::Unqualified);
         SI->eraseFromParent();
         continue;
       }
@@ -1057,15 +1015,8 @@ void ElementUseCollector::collectUses(SILValue Pointer, unsigned BaseEltNo) {
     // Now that we've scalarized some stuff, recurse down into the newly created
     // element address computations to recursively process it.  This can cause
     // further scalarization.
-    for (SILValue EltPtr : ElementAddrs) {
-      if (auto *TEAI = dyn_cast<TupleElementAddrInst>(EltPtr)) {
-        collectTupleElementUses(TEAI, BaseEltNo);
-        continue;
-      }
-
-      auto *DTRI = cast<DestructureTupleResult>(EltPtr);
-      collectDestructureTupleResultUses(DTRI, BaseEltNo);
-    }
+    for (auto EltPtr : ElementAddrs)
+      collectTupleElementUses(cast<TupleElementAddrInst>(EltPtr), BaseEltNo);
   }
 }
 
@@ -1099,14 +1050,10 @@ void ElementUseCollector::collectClassSelfUses() {
     return;
   }
 
-  // The number of stores of the initial 'self' argument into the self box
-  // that we saw.
-  unsigned StoresOfArgumentToSelf = 0;
-
   // Okay, given that we have a proper setup, we walk the use chains of the self
   // box to find any accesses to it. The possible uses are one of:
   //
-  //   1) The initialization store.
+  //   1) The initialization store (TheStore).
   //   2) Loads of the box, which have uses of self hanging off of them.
   //   3) An assign to the box, which happens at super.init.
   //   4) Potential escapes after super.init, if self is closed over.
@@ -1115,39 +1062,14 @@ void ElementUseCollector::collectClassSelfUses() {
   for (auto *Op : MUI->getUses()) {
     SILInstruction *User = Op->getUser();
 
-    // Stores to self.
-    if (auto *SI = dyn_cast<StoreInst>(User)) {
-      if (Op->getOperandNumber() == 1) {
-        // The initial store of 'self' into the box at the start of the
-        // function. Ignore it.
-        if (auto *Arg = dyn_cast<SILArgument>(SI->getSrc())) {
-          if (Arg->getParent() == MUI->getParent()) {
-            StoresOfArgumentToSelf++;
-            continue;
-          }
-        }
-
-        // A store of a load from the box is ignored.
-        // FIXME: SILGen should not emit these.
-        if (auto *LI = dyn_cast<LoadInst>(SI->getSrc()))
-          if (LI->getOperand() == MUI)
-            continue;
-
-        // Any other store needs to be recorded.
-        UseInfo.trackStoreToSelf(SI);
-        continue;
-      }
-    }
-
-    // Ignore end_borrows. These can only come from us being the source of a
-    // load_borrow.
-    if (isa<EndBorrowInst>(User))
+    // Stores to self are initializations store or the rebind of self as
+    // part of the super.init call.  Ignore both of these.
+    if (isa<StoreInst>(User) && Op->getOperandNumber() == 1)
       continue;
 
     // Loads of the box produce self, so collect uses from them.
-    if (isa<LoadInst>(User) || isa<LoadBorrowInst>(User)) {
-      auto load = cast<SingleValueInstruction>(User);
-      collectClassSelfUses(load, TheMemory.MemorySILType, EltNumbering);
+    if (auto *LI = dyn_cast<LoadInst>(User)) {
+      collectClassSelfUses(LI, TheMemory.MemorySILType, EltNumbering);
       continue;
     }
 
@@ -1168,70 +1090,80 @@ void ElementUseCollector::collectClassSelfUses() {
     // and super.init must be called.
     trackUse(DIMemoryUse(User, DIUseKind::Load, 0, TheMemory.NumElements));
   }
-
-  assert(StoresOfArgumentToSelf == 1 &&
-         "The 'self' argument should have been stored into the box exactly once");
 }
 
-static bool isSuperInitUse(SILInstruction *User) {
-  auto *LocExpr = User->getLoc().getAsASTNode<ApplyExpr>();
-  if (!LocExpr) {
-    // If we're reading a .sil file, treat a call to "superinit" as a
-    // super.init call as a hack to allow us to write testcases.
-    auto *AI = dyn_cast<ApplyInst>(User);
-    if (AI && AI->getLoc().isSILFile())
-      if (auto *Fn = AI->getReferencedFunction())
-        if (Fn->getName() == "superinit")
-          return true;
-    return false;
-  }
-
-  // This is a super.init call if structured like this:
-  // (call_expr type='SomeClass'
-  //   (dot_syntax_call_expr type='() -> SomeClass' super
-  //     (other_constructor_ref_expr implicit decl=SomeClass.init)
-  //     (super_ref_expr type='SomeClass'))
-  //   (...some argument...)
-  LocExpr = dyn_cast<ApplyExpr>(LocExpr->getFn());
-  if (!LocExpr || !isa<OtherConstructorDeclRefExpr>(LocExpr->getFn()))
-    return false;
-
-  if (LocExpr->getArg()->isSuperExpr())
-    return true;
-
-  // Instead of super_ref_expr, we can also get this for inherited delegating
-  // initializers:
-
-  // (derived_to_base_expr implicit type='C'
-  //   (declref_expr type='D' decl='self'))
-  if (auto *DTB = dyn_cast<DerivedToBaseExpr>(LocExpr->getArg())) {
-    if (auto *DRE = dyn_cast<DeclRefExpr>(DTB->getSubExpr())) {
-        ASTContext &Ctx = DRE->getDecl()->getASTContext();
-      if (DRE->getDecl()->isImplicit() &&
-          DRE->getDecl()->getBaseName() == Ctx.Id_self)
-        return true;
+static void
+collectBorrowedSuperUses(UpcastInst *Inst,
+                         llvm::SmallVectorImpl<UpcastInst *> &UpcastUsers) {
+  for (auto *Use : Inst->getUses()) {
+    if (auto *URCI = dyn_cast<UncheckedRefCastInst>(Use->getUser())) {
+      for (auto *InnerUse : URCI->getUses()) {
+        if (auto *InnerUpcastUser = dyn_cast<UpcastInst>(InnerUse->getUser())) {
+          UpcastUsers.push_back(InnerUpcastUser);
+        }
+      }
     }
   }
-
-  return false;
 }
 
-/// Return true if this SILBBArgument is the result of a call to super.init.
-static bool isSuperInitUse(SILArgument *Arg) {
-  // We only handle a very simple pattern here where there is a single
-  // predecessor to the block, and the predecessor instruction is a try_apply
-  // of a throwing delegated init.
-  auto *BB = Arg->getParent();
-  auto *Pred = BB->getSinglePredecessorBlock();
+/// isSuperInitUse - If this "upcast" is part of a call to super.init, return
+/// the Apply instruction for the call, otherwise return null.
+static SILInstruction *isSuperInitUse(UpcastInst *Inst) {
 
-  // The two interesting cases are where self.init throws, in which case
-  // the argument came from a try_apply, or if self.init is failable,
-  // in which case we have a switch_enum.
-  if (!Pred || (!isa<TryApplyInst>(Pred->getTerminator()) &&
-                !isa<SwitchEnumInst>(Pred->getTerminator())))
-    return false;
+  // "Inst" is an Upcast instruction.  Check to see if it is used by an apply
+  // that came from a call to super.init.
+  for (auto *Op : Inst->getUses()) {
+    auto *User = Op->getUser();
+    // If this used by another upcast instruction, recursively handle it, we may
+    // have a multiple upcast chain.
+    if (auto *UCIU = dyn_cast<UpcastInst>(User))
+      if (auto *subAI = isSuperInitUse(UCIU))
+        return subAI;
 
-  return isSuperInitUse(Pred->getTerminator());
+    // The call to super.init has to either be an apply or a try_apply.
+    if (!isa<FullApplySite>(User))
+      continue;
+
+    auto *LocExpr = User->getLoc().getAsASTNode<ApplyExpr>();
+    if (!LocExpr) {
+      // If we're reading a .sil file, treat a call to "superinit" as a
+      // super.init call as a hack to allow us to write testcases.
+      auto *AI = dyn_cast<ApplyInst>(User);
+      if (AI && User->getLoc().isSILFile())
+        if (auto *Fn = AI->getReferencedFunction())
+          if (Fn->getName() == "superinit")
+            return User;
+      continue;
+    }
+
+    // This is a super.init call if structured like this:
+    // (call_expr type='SomeClass'
+    //   (dot_syntax_call_expr type='() -> SomeClass' super
+    //     (other_constructor_ref_expr implicit decl=SomeClass.init)
+    //     (super_ref_expr type='SomeClass'))
+    //   (...some argument...)
+    LocExpr = dyn_cast<ApplyExpr>(LocExpr->getFn());
+    if (!LocExpr || !isa<OtherConstructorDeclRefExpr>(LocExpr->getFn()))
+      continue;
+
+    if (LocExpr->getArg()->isSuperExpr())
+      return User;
+
+    // Instead of super_ref_expr, we can also get this for inherited delegating
+    // initializers:
+
+    // (derived_to_base_expr implicit type='C'
+    //   (declref_expr type='D' decl='self'))
+    if (auto *DTB = dyn_cast<DerivedToBaseExpr>(LocExpr->getArg()))
+      if (auto *DRE = dyn_cast<DeclRefExpr>(DTB->getSubExpr())) {
+          ASTContext &Ctx = DRE->getDecl()->getASTContext();
+        if (DRE->getDecl()->isImplicit() &&
+            DRE->getDecl()->getBaseName() == Ctx.Id_self)
+          return User;
+      }
+  }
+
+  return nullptr;
 }
 
 static bool isUninitializedMetatypeInst(SILInstruction *I) {
@@ -1243,8 +1175,8 @@ static bool isUninitializedMetatypeInst(SILInstruction *I) {
   // Sometimes we get an upcast whose sole usage is a value_metatype_inst,
   // for example when calling a convenience initializer from a superclass.
   if (auto *UCI = dyn_cast<UpcastInst>(I)) {
-    for (auto *Op : UCI->getUses()) {
-      auto *User = Op->getUser();
+    for (auto *UI : UCI->getUses()) {
+      auto *User = UI->getUser();
       if (isa<ValueMetatypeInst>(User))
         continue;
       return false;
@@ -1266,6 +1198,12 @@ static bool isSelfInitUse(SILInstruction *I) {
         if (Fn->getName().startswith("selfinit"))
           return true;
 
+    // If this is a copy_addr to a delegating self MUI, then we treat it as a
+    // self init for the purposes of testcases.
+    if (auto *CAI = dyn_cast<CopyAddrInst>(I))
+      if (auto *MUI = dyn_cast<MarkUninitializedInst>(CAI->getDest()))
+        if (MUI->isDelegatingSelf())
+          return true;
     return false;
   }
 
@@ -1342,54 +1280,47 @@ static bool isSelfInitUse(SILArgument *Arg) {
   return isSelfInitUse(Pred->getTerminator());
 }
 
-static bool isSelfOperand(const Operand *Op, const SILInstruction *User) {
-  unsigned operandNum = Op->getOperandNumber();
-  unsigned numOperands;
+/// Returns true if \p Method is a callee of a full apply site that takes in \p
+/// Pointer as an argument. In such a case, we want to ignore the class method
+/// use and allow for the use by the apply inst to take precedence.
+static bool shouldIgnoreClassMethodUseError(ClassMethodInst *Method,
+                                            SILValue Pointer) {
 
-  // FIXME: This should just be cast<FullApplySite>(User) but that doesn't
-  // work
-  if (auto *AI = dyn_cast<ApplyInst>(User))
-    numOperands = AI->getNumOperands();
-  else
-    numOperands = cast<TryApplyInst>(User)->getNumOperands();
+  // In order to work around use-list ordering issues, if this method is called
+  // by an apply site that has I as an argument, we want to process the apply
+  // site for errors to emit, not the class method. If we do not obey these
+  // conditions, then continue to treat the class method as an escape.
+  auto CheckFullApplySite = [&](Operand *Op) -> bool {
+    FullApplySite FAS(Op->getUser());
+    if (!FAS || (FAS.getCallee() != Method))
+      return false;
+    return llvm::any_of(FAS.getArgumentsWithoutIndirectResults(),
+                        [&](SILValue Arg) -> bool { return Arg == Pointer; });
+  };
 
-  return (operandNum == numOperands - 1);
+  return llvm::any_of(Method->getUses(), CheckFullApplySite);
 }
 
 void ElementUseCollector::collectClassSelfUses(
     SILValue ClassPointer, SILType MemorySILType,
     llvm::SmallDenseMap<VarDecl *, unsigned> &EltNumbering) {
-  llvm::SmallVector<Operand *, 16> Worklist(ClassPointer->use_begin(),
-                                            ClassPointer->use_end());
-  while (!Worklist.empty()) {
-    auto *Op = Worklist.pop_back_val();
+  for (auto *Op : ClassPointer->getUses()) {
     auto *User = Op->getUser();
 
-    // Ignore any method lookup use.
-    if (isa<SuperMethodInst>(User) ||
-        isa<ObjCSuperMethodInst>(User) ||
-        isa<ClassMethodInst>(User) ||
-        isa<ObjCMethodInst>(User)) {
-      continue;
-    }
-
-    // Skip end_borrow.
-    if (isa<EndBorrowInst>(User))
+    // super_method always looks at the metatype for the class, not at any of
+    // its stored properties, so it doesn't have any DI requirements.
+    if (isa<SuperMethodInst>(User))
       continue;
 
     // ref_element_addr P, #field lookups up a field.
     if (auto *REAI = dyn_cast<RefElementAddrInst>(User)) {
-      // FIXME: This is a Sema bug and breaks resilience, we should not
-      // emit ref_element_addr in such cases at all.
-      if (EltNumbering.count(REAI->getField()) != 0) {
-        assert(EltNumbering.count(REAI->getField()) &&
-               "ref_element_addr not a local field?");
-        // Recursively collect uses of the fields.  Note that fields of the class
-        // could be tuples, so they may be tracked as independent elements.
-        llvm::SaveAndRestore<bool> X(IsSelfOfNonDelegatingInitializer, false);
-        collectUses(REAI, EltNumbering[REAI->getField()]);
-        continue;
-      }
+      assert(EltNumbering.count(REAI->getField()) &&
+             "ref_element_addr not a local field?");
+      // Recursively collect uses of the fields.  Note that fields of the class
+      // could be tuples, so they may be tracked as independent elements.
+      llvm::SaveAndRestore<bool> X(IsSelfOfNonDelegatingInitializer, false);
+      collectUses(REAI, EltNumbering[REAI->getField()]);
+      continue;
     }
 
     // retains of self in class constructors can be ignored since we do not care
@@ -1409,26 +1340,41 @@ void ElementUseCollector::collectClassSelfUses(
       continue;
     }
 
-    // Look through begin_borrow, upcast, unchecked_ref_cast
-    // and copy_value.
-    if (isa<BeginBorrowInst>(User) ||
-        isa<UpcastInst>(User) ||
-        isa<UncheckedRefCastInst>(User) ||
-        isa<CopyValueInst>(User)) {
-      auto value = cast<SingleValueInstruction>(User);
-      std::copy(value->use_begin(), value->use_end(),
-                std::back_inserter(Worklist));
-      continue;
+    if (auto *Method = dyn_cast<ClassMethodInst>(User)) {
+      if (shouldIgnoreClassMethodUseError(Method, ClassPointer)) {
+        continue;
+      }
     }
+
+    // If this is an upcast instruction, it is a conversion of self to the base.
+    // This is either part of a super.init sequence, or a general superclass
+    // access.
+    if (auto *UCI = dyn_cast<UpcastInst>(User))
+      if (auto *AI = isSuperInitUse(UCI)) {
+        // We remember the applyinst as the super.init site, not the upcast.
+        trackUse(
+            DIMemoryUse(AI, DIUseKind::SuperInit, 0, TheMemory.NumElements));
+        UseInfo.trackFailableInitCall(TheMemory, AI);
+
+        // Now that we know that we have a super.init site, check if our upcast
+        // has any borrow users. These used to be represented by a separate
+        // load, but now with sil ownership, they are represented as borrows
+        // from the same upcast as the super init user upcast.
+        llvm::SmallVector<UpcastInst *, 4> ExtraUpcasts;
+        collectBorrowedSuperUses(UCI, ExtraUpcasts);
+        for (auto *Upcast : ExtraUpcasts) {
+          trackUse(
+              DIMemoryUse(Upcast, DIUseKind::Load, 0, TheMemory.NumElements));
+        }
+        continue;
+      }
 
     // If this is an ApplyInst, check to see if this is part of a self.init
     // call in a delegating initializer.
     DIUseKind Kind = DIUseKind::Load;
-    if (isa<FullApplySite>(User) &&
-        (isSelfInitUse(User) || isSuperInitUse(User))) {
-      if (isSelfOperand(Op, User)) {
-        Kind = DIUseKind::SelfInit;
-      }
+    if (isa<FullApplySite>(User) && isSelfInitUse(User)) {
+      Kind = DIUseKind::SelfInit;
+      UseInfo.trackFailableInitCall(TheMemory, User);
     }
     
     if (isUninitializedMetatypeInst(User))
@@ -1453,8 +1399,6 @@ class DelegatingInitElementUseCollector {
   const DIMemoryObjectInfo &TheMemory;
   DIElementUseInfo &UseInfo;
 
-  void collectValueTypeInitSelfUses(SingleValueInstruction *I);
-
 public:
   DelegatingInitElementUseCollector(const DIMemoryObjectInfo &TheMemory,
                                     DIElementUseInfo &UseInfo)
@@ -1462,11 +1406,8 @@ public:
 
   void collectClassInitSelfUses();
   void collectValueTypeInitSelfUses();
-
-  // *NOTE* Even though this takes a SILInstruction it actually only accepts
-  // load_borrow and load instructions. This is enforced via an assert.
   void collectDelegatingClassInitSelfLoadUses(MarkUninitializedInst *MUI,
-                                              SingleValueInstruction *LI);
+                                              LoadInst *LI);
 };
 
 } // end anonymous namespace
@@ -1480,10 +1421,6 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
   assert(TheMemory.NumElements == 1 && "delegating inits only have 1 bit");
   auto *MUI = cast<MarkUninitializedInst>(TheMemory.MemoryInst);
 
-  // The number of stores of the initial 'self' argument into the self box
-  // that we saw.
-  unsigned StoresOfArgumentToSelf = 0;
-
   // We walk the use chains of the self MUI to find any accesses to it.  The
   // possible uses are:
   //   1) The initialization store.
@@ -1492,42 +1429,18 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
   //   4) Potential escapes after super.init, if self is closed over.
   // Handle each of these in turn.
   //
-  for (auto *Op : MUI->getUses()) {
-    SILInstruction *User = Op->getUser();
+  for (auto *UI : MUI->getUses()) {
+    SILInstruction *User = UI->getUser();
 
-    // Ignore end_borrow. If we see an end_borrow it can only come from a
-    // load_borrow from ourselves.
-    if (isa<EndBorrowInst>(User))
+    // Stores to self are initializations store or the rebind of self as
+    // part of the super.init call.  Ignore both of these.
+    if (isa<StoreInst>(User) && UI->getOperandNumber() == 1)
       continue;
-
-    // Stores to self.
-    if (auto *SI = dyn_cast<StoreInst>(User)) {
-      if (Op->getOperandNumber() == 1) {
-        // The initial store of 'self' into the box at the start of the
-        // function. Ignore it.
-        if (auto *Arg = dyn_cast<SILArgument>(SI->getSrc())) {
-          if (Arg->getParent() == MUI->getParent()) {
-            StoresOfArgumentToSelf++;
-            continue;
-          }
-        }
-
-        // A store of a load from the box is ignored.
-        // FIXME: SILGen should not emit these.
-        if (auto *LI = dyn_cast<LoadInst>(SI->getSrc()))
-          if (LI->getOperand() == MUI)
-            continue;
-
-        // Any other store needs to be recorded.
-        UseInfo.trackStoreToSelf(SI);
-        continue;
-      }
-    }
 
     // For class initializers, the assign into the self box may be
     // captured as SelfInit or SuperInit elsewhere.
-    if (isa<AssignInst>(User) &&
-        Op->getOperandNumber() == 1) {
+    if (TheMemory.isClassInitSelf() && isa<AssignInst>(User) &&
+        UI->getOperandNumber() == 1) {
       // If the source of the assignment is an application of a C
       // function, there is no metatype argument, so treat the
       // assignment to the self box as the initialization.
@@ -1535,7 +1448,6 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
         if (auto *Fn = AI->getCalleeFunction()) {
           if (Fn->getRepresentation() ==
               SILFunctionTypeRepresentation::CFunctionPointer) {
-            UseInfo.trackStoreToSelf(User);
             UseInfo.trackUse(DIMemoryUse(User, DIUseKind::SelfInit, 0, 1));
             continue;
           }
@@ -1546,27 +1458,31 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
     // Stores *to* the allocation are writes.  If the value being stored is a
     // call to self.init()... then we have a self.init call.
     if (auto *AI = dyn_cast<AssignInst>(User)) {
-      if (auto *AssignSource = AI->getOperand(0)->getDefiningInstruction()) {
-        if (isSelfInitUse(AssignSource) || isSuperInitUse(AssignSource)) {
-          UseInfo.trackStoreToSelf(User);
+      if (auto *AssignSource = dyn_cast<SILInstruction>(AI->getOperand(0))) {
+        if (isSelfInitUse(AssignSource)) {
           UseInfo.trackUse(DIMemoryUse(User, DIUseKind::SelfInit, 0, 1));
           continue;
         }
       }
       if (auto *AssignSource = dyn_cast<SILArgument>(AI->getOperand(0))) {
         if (AssignSource->getParent() == AI->getParent() &&
-            (isSelfInitUse(AssignSource) || isSuperInitUse(AssignSource))) {
-          UseInfo.trackStoreToSelf(User);
+            isSelfInitUse(AssignSource)) {
           UseInfo.trackUse(DIMemoryUse(User, DIUseKind::SelfInit, 0, 1));
           continue;
         }
       }
     }
 
+    if (auto *CAI = dyn_cast<CopyAddrInst>(User)) {
+      if (isSelfInitUse(CAI)) {
+        UseInfo.trackUse(DIMemoryUse(User, DIUseKind::SelfInit, 0, 1));
+        continue;
+      }
+    }
+
     // Loads of the box produce self, so collect uses from them.
-    if (isa<LoadInst>(User) || isa<LoadBorrowInst>(User)) {
-      collectDelegatingClassInitSelfLoadUses(MUI,
-                                        cast<SingleValueInstruction>(User));
+    if (auto *LI = dyn_cast<LoadInst>(User)) {
+      collectDelegatingClassInitSelfLoadUses(MUI, LI);
       continue;
     }
 
@@ -1581,9 +1497,6 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
     UseInfo.trackUse(DIMemoryUse(User, DIUseKind::Escape, 0, 1));
   }
 
-  assert(StoresOfArgumentToSelf == 1 &&
-         "The 'self' argument should have been stored into the box exactly once");
-
   // The MUI must be used on an alloc_box or alloc_stack instruction. If we have
   // an alloc_stack, there is nothing further to do.
   if (isa<AllocStackInst>(MUI->getOperand()))
@@ -1592,18 +1505,24 @@ void DelegatingInitElementUseCollector::collectClassInitSelfUses() {
   auto *PBI = cast<ProjectBoxInst>(MUI->getOperand());
   auto *ABI = cast<AllocBoxInst>(PBI->getOperand());
 
-  for (auto Op : ABI->getUses()) {
-    SILInstruction *User = Op->getUser();
+  for (auto UI : ABI->getUses()) {
+    SILInstruction *User = UI->getUser();
     if (isa<StrongReleaseInst>(User) || isa<DestroyValueInst>(User)) {
       UseInfo.trackDestroy(User);
     }
   }
 }
 
-void DelegatingInitElementUseCollector::collectValueTypeInitSelfUses(
-    SingleValueInstruction *I) {
-  for (auto Op : I->getUses()) {
-    auto *User = Op->getUser();
+void DelegatingInitElementUseCollector::collectValueTypeInitSelfUses() {
+  // When we're analyzing a delegating constructor, we aren't field sensitive at
+  // all.  Just treat all members of self as uses of the single
+  // non-field-sensitive value.
+  assert(TheMemory.NumElements == 1 && "delegating inits only have 1 bit");
+
+  auto *MUI = cast<MarkUninitializedInst>(TheMemory.MemoryInst);
+
+  for (auto UI : MUI->getUses()) {
+    auto *User = UI->getUser();
 
     // destroy_addr is a release of the entire value. This can result from an
     // early release due to a conditional initializer.
@@ -1623,28 +1542,23 @@ void DelegatingInitElementUseCollector::collectValueTypeInitSelfUses(
     // Stores *to* the allocation are writes.  If the value being stored is a
     // call to self.init()... then we have a self.init call.
     if (auto *AI = dyn_cast<AssignInst>(User)) {
-      if (AI->getDest() == I) {
-        UseInfo.trackStoreToSelf(AI);
-        Kind = DIUseKind::InitOrAssign;
+      if (auto *AssignSource = dyn_cast<SILInstruction>(AI->getOperand(0)))
+        if (isSelfInitUse(AssignSource))
+          Kind = DIUseKind::SelfInit;
+      if (auto *AssignSource = dyn_cast<SILArgument>(AI->getOperand(0))) {
+        if (AssignSource->getParent() == AI->getParent()) {
+          if (isSelfInitUse(AssignSource)) {
+            Kind = DIUseKind::SelfInit;
+          }
+        }
       }
     }
 
     if (auto *CAI = dyn_cast<CopyAddrInst>(User)) {
-      if (CAI->getDest() == I) {
-        UseInfo.trackStoreToSelf(CAI);
-        Kind = DIUseKind::InitOrAssign;
+      if (isSelfInitUse(CAI)) {
+        Kind = DIUseKind::SelfInit;
       }
     }
-
-    // Look through begin_access
-    if (auto *BAI = dyn_cast<BeginAccessInst>(User)) {
-      collectValueTypeInitSelfUses(BAI);
-      continue;
-    }
-
-    // Ignore end_access
-    if (isa<EndAccessInst>(User))
-      continue;
 
     // We can safely handle anything else as an escape.  They should all happen
     // after self.init is invoked.
@@ -1652,41 +1566,20 @@ void DelegatingInitElementUseCollector::collectValueTypeInitSelfUses(
   }
 }
 
-void DelegatingInitElementUseCollector::collectValueTypeInitSelfUses() {
-  // When we're analyzing a delegating constructor, we aren't field sensitive at
-  // all.  Just treat all members of self as uses of the single
-  // non-field-sensitive value.
-  assert(TheMemory.NumElements == 1 && "delegating inits only have 1 bit");
-
-  auto *MUI = cast<MarkUninitializedInst>(TheMemory.MemoryInst);
-  collectValueTypeInitSelfUses(MUI);
-}
-
 void DelegatingInitElementUseCollector::collectDelegatingClassInitSelfLoadUses(
-    MarkUninitializedInst *MUI, SingleValueInstruction *LI) {
-  assert(isa<LoadBorrowInst>(LI) || isa<LoadInst>(LI));
-
+    MarkUninitializedInst *MUI, LoadInst *LI) {
   // If we have a load, then this is a use of the box.  Look at the uses of
   // the load to find out more information.
-  llvm::SmallVector<Operand *, 8> Worklist(LI->use_begin(), LI->use_end());
-  while (!Worklist.empty()) {
-    auto *Op = Worklist.pop_back_val();
-    auto *User = Op->getUser();
+  for (auto *UI : LI->getUses()) {
+    auto *User = UI->getUser();
 
-    // Ignore any method lookup use.
-    if (isa<SuperMethodInst>(User) ||
-        isa<ObjCSuperMethodInst>(User) ||
-        isa<ClassMethodInst>(User) ||
-        isa<ObjCMethodInst>(User)) {
+    // super_method always looks at the metatype for the class, not at any of
+    // its stored properties, so it doesn't have any DI requirements.
+    if (isa<SuperMethodInst>(User))
       continue;
-    }
 
     // We ignore retains of self.
     if (isa<StrongRetainInst>(User))
-      continue;
-
-    // Ignore end_borrow.
-    if (isa<EndBorrowInst>(User))
       continue;
 
     // A release of a load from the self box in a class delegating
@@ -1697,13 +1590,39 @@ void DelegatingInitElementUseCollector::collectDelegatingClassInitSelfLoadUses(
       continue;
     }
 
-    // Look through begin_borrow, upcast and unchecked_ref_cast.
-    if (isa<BeginBorrowInst>(User) ||
-        isa<UpcastInst>(User) ||
-        isa<UncheckedRefCastInst>(User)) {
-      auto I = cast<SingleValueInstruction>(User);
-      copy(I->getUses(), std::back_inserter(Worklist));
-      continue;
+    if (auto *Method = dyn_cast<ClassMethodInst>(User)) {
+      // class_method that refers to an initializing constructor is a method
+      // lookup for delegation, which is ignored.
+      if (Method->getMember().kind == SILDeclRef::Kind::Initializer)
+        continue;
+
+      /// Returns true if \p Method used by an apply in a way that we know
+      /// will cause us to emit a better error.
+      if (shouldIgnoreClassMethodUseError(Method, LI))
+        continue;
+    }
+
+    // If this is an upcast instruction, it is a conversion of self to the
+    // base.  This is either part of a super.init sequence, or a general
+    // superclass access.  We special case super.init calls since they are
+    // part of the object lifecycle.
+    if (auto *UCI = dyn_cast<UpcastInst>(User)) {
+      if (auto *subAI = isSuperInitUse(UCI)) {
+        UseInfo.trackUse(DIMemoryUse(subAI, DIUseKind::SuperInit, 0, 1));
+        UseInfo.trackFailableInitCall(TheMemory, subAI);
+
+        // Now that we know that we have a super.init site, check if our upcast
+        // has any borrow users. These used to be represented by a separate
+        // load, but now with sil ownership, they are represented as borrows
+        // from the same upcast as the super init user upcast.
+        llvm::SmallVector<UpcastInst *, 4> ExtraUpcasts;
+        collectBorrowedSuperUses(UCI, ExtraUpcasts);
+        for (auto *Upcast : ExtraUpcasts) {
+          UseInfo.trackUse(
+              DIMemoryUse(Upcast, DIUseKind::Escape, 0, TheMemory.NumElements));
+        }
+        continue;
+      }
     }
 
     // We only track two kinds of uses for delegating initializers:
@@ -1715,11 +1634,9 @@ void DelegatingInitElementUseCollector::collectDelegatingClassInitSelfLoadUses(
 
     // If this is an ApplyInst, check to see if this is part of a self.init
     // call in a delegating initializer.
-    if (isa<FullApplySite>(User) &&
-        (isSelfInitUse(User) || isSuperInitUse(User))) {
-      if (isSelfOperand(Op, User)) {
-        Kind = DIUseKind::SelfInit;
-      }
+    if (isa<FullApplySite>(User) && isSelfInitUse(User)) {
+      Kind = DIUseKind::SelfInit;
+      UseInfo.trackFailableInitCall(TheMemory, User);
     }
 
     // If this load's value is being stored back into the delegating
@@ -1727,8 +1644,7 @@ void DelegatingInitElementUseCollector::collectDelegatingClassInitSelfLoadUses(
     // use. This is to handle situations where due to usage of a metatype to
     // allocate, we do not actually consume self.
     if (auto *SI = dyn_cast<StoreInst>(User)) {
-      if (SI->getDest() == MUI &&
-          (isSelfInitUse(User) || isSuperInitUse(User))) {
+      if (SI->getDest() == MUI && isSelfInitUse(User)) {
         continue;
       }
     }
@@ -1754,7 +1670,7 @@ void swift::ownership::collectDIElementUsesFrom(
   // collector.
   if (MemoryInfo.isDelegatingInit()) {
     DelegatingInitElementUseCollector UseCollector(MemoryInfo, UseInfo);
-    if (MemoryInfo.isClassInitSelf()) {
+    if (MemoryInfo.getType()->hasReferenceSemantics()) {
       UseCollector.collectClassInitSelfUses();
     } else {
       UseCollector.collectValueTypeInitSelfUses();

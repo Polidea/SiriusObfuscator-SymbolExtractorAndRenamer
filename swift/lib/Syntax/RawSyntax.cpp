@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "swift/Basic/ColorUtils.h"
 #include "swift/Syntax/RawSyntax.h"
 #include "swift/Syntax/TokenSyntax.h"
 #include "llvm/Support/Casting.h"
@@ -22,56 +21,27 @@ using llvm::dyn_cast;
 using namespace swift::syntax;
 
 namespace {
-static bool isTrivialSyntaxKind(SyntaxKind Kind) {
-  if (isUnknownKind(Kind))
-    return true;
-  if (isCollectionKind(Kind))
-    return true;
-  switch(Kind) {
-  case SyntaxKind::SourceFile:
-  case SyntaxKind::TopLevelCodeDecl:
-  case SyntaxKind::ExpressionStmt:
-  case SyntaxKind::DeclarationStmt:
-    return true;
-  default:
-    return false;
+void dumpSyntaxKind(llvm::raw_ostream &OS, const SyntaxKind Kind) {
+  switch (Kind) {
+#define SYNTAX(Id, Parent)                                                     \
+  case SyntaxKind::Id:                                                         \
+    OS << #Id;                                                                 \
+    break;
+#define MISSING_SYNTAX(Id, Parent) SYNTAX(Id, Parent)
+#define SYNTAX_COLLECTION(Id, Element) SYNTAX(Id, {})
+#include "swift/Syntax/SyntaxKinds.def"
+  case SyntaxKind::Token: OS << "Token"; break;
   }
 }
+} // end anonymous namespace
 
-static void printSyntaxKind(SyntaxKind Kind, llvm::raw_ostream &OS,
-                            SyntaxPrintOptions Opts, bool Open) {
-  std::unique_ptr<swift::OSColor> Color;
-  if (Opts.Visual) {
-    Color.reset(new swift::OSColor(OS, llvm::raw_ostream::GREEN));
-  }
-  OS << "<";
-  if (!Open)
-    OS << "/";
-  dumpSyntaxKind(OS, Kind);
-  OS << ">";
-}
-
-} // end of anonymous namespace
-void RawSyntax::print(llvm::raw_ostream &OS, SyntaxPrintOptions Opts) const {
-  if (isMissing())
-    return;
-
-  const bool PrintKind = Opts.PrintSyntaxKind && !isToken() &&
-    (Opts.PrintTrivialNodeKind || !isTrivialSyntaxKind(Kind));
-
-  if (PrintKind) {
-    printSyntaxKind(Kind, OS, Opts, true);
-  }
-
-  if (const auto Tok = dyn_cast<RawTokenSyntax>(this)) {
+void RawSyntax::print(llvm::raw_ostream &OS) const {
+  if (const auto Tok = dyn_cast<TokenSyntax>(this)) {
     Tok->print(OS);
   }
 
   for (const auto &LE : Layout) {
-    LE->print(OS, Opts);
-  }
-  if (PrintKind) {
-    printSyntaxKind(Kind, OS, Opts, false);
+    LE->print(OS);
   }
 }
 
@@ -101,7 +71,7 @@ void RawSyntax::dump(llvm::raw_ostream &OS, unsigned Indent) const {
     }
     switch ((*LE)->Kind) {
     case SyntaxKind::Token:
-      llvm::cast<RawTokenSyntax>(*LE)->dump(OS, Indent + 1);
+      llvm::cast<TokenSyntax>(*LE)->dump(OS, Indent + 1);
       break;
     default:
       (*LE)->dump(OS, Indent + 1);
@@ -117,7 +87,7 @@ bool RawSyntax::accumulateAbsolutePosition(
   for (auto LE : Layout) {
     switch (LE->Kind) {
     case SyntaxKind::Token: {
-      auto Tok = llvm::cast<RawTokenSyntax>(LE);
+      auto Tok = llvm::cast<TokenSyntax>(LE);
       for (auto Leader : Tok->LeadingTrivia) {
         Leader.accumulateAbsolutePosition(Pos);
       }

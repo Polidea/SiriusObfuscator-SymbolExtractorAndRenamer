@@ -1,7 +1,0 @@
-framework module Simple {
-  umbrella header "Simple.h"
-  export *
-  module * {
-    export *
-  }
-}

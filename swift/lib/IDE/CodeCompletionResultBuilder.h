@@ -108,27 +108,27 @@ public:
     ExpectedTypeRelation = relation;
   }
 
-  void addAccessControlKeyword(AccessLevel Access) {
+  void addAccessControlKeyword(Accessibility Access) {
     switch (Access) {
-    case AccessLevel::Private:
+    case Accessibility::Private:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "private ");
       break;
-    case AccessLevel::FilePrivate:
+    case Accessibility::FilePrivate:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "fileprivate ");
       break;
-    case AccessLevel::Internal:
+    case Accessibility::Internal:
       // 'internal' is the default, don't add it.
       break;
-    case AccessLevel::Public:
+    case Accessibility::Public:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "public ");
       break;
-    case AccessLevel::Open:
+    case Accessibility::Open:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "open ");
@@ -315,7 +315,7 @@ public:
   }
 
   void addCallParameter(Identifier Name, Identifier LocalName, Type Ty,
-                        bool IsVarArg, bool Outermost, bool IsInOut) {
+                        bool IsVarArg, bool Outermost) {
     CurrentNestingLevel++;
 
     addSimpleChunk(CodeCompletionString::Chunk::ChunkKind::CallParameterBegin);
@@ -344,10 +344,10 @@ public:
     }
 
     // 'inout' arguments are printed specially.
-    if (IsInOut) {
+    if (auto *IOT = Ty->getAs<InOutType>()) {
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::Ampersand, "&");
-      Ty = Ty->getInOutObjectType();
+      Ty = IOT->getObjectType();
     }
 
     if (Name.empty() && !LocalName.empty()) {
@@ -395,8 +395,8 @@ public:
   }
 
   void addCallParameter(Identifier Name, Type Ty, bool IsVarArg,
-                        bool Outermost, bool IsInOut) {
-    addCallParameter(Name, Identifier(), Ty, IsVarArg, Outermost, IsInOut);
+                        bool Outermost) {
+    addCallParameter(Name, Identifier(), Ty, IsVarArg, Outermost);
   }
 
   void addGenericParameter(StringRef Name) {

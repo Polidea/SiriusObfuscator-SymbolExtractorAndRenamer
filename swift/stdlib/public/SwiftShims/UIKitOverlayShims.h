@@ -20,10 +20,7 @@
 #endif
 
 #if TARGET_OS_TV || TARGET_OS_IOS
-static inline BOOL _swift_UIKit_UIFocusEnvironmentContainsEnvironment(
-  id<UIFocusEnvironment> environment,
-  id<UIFocusEnvironment> otherEnvironment
-) API_AVAILABLE(ios(11.0), tvos(11.0)) {
+static inline BOOL _swift_UIKit_UIFocusEnvironmentContainsEnvironment(id<UIFocusEnvironment> environment, id<UIFocusEnvironment> otherEnvironment) {
   return [UIFocusSystem environment:environment containsEnvironment:otherEnvironment];
 }
 #endif // TARGET_OS_TV || TARGET_OS_IOS

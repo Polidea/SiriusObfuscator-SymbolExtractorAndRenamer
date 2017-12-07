@@ -59,6 +59,11 @@ public:
     return ClosureBindingMetadataSource::create(*this, Index);
   }
 
+  const ParentMetadataSource *
+  createParent(const MetadataSource *Child) {
+    return ParentMetadataSource::create(*this, Child);
+  }
+
   const SelfMetadataSource *
   createSelf() {
     return SelfMetadataSource::create(*this);

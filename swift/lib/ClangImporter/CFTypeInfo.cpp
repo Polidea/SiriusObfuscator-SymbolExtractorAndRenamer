@@ -20,14 +20,12 @@
 using namespace swift;
 using namespace importer;
 
-/// The maximum length of any particular string in the list of known CF types.
-const size_t MaxCFTypeNameLength = 38;
+/// The maximum length of any particular string in the whitelist.
+const size_t MaxCFWhitelistStringLength = 38;
 namespace {
-  // FIXME: This is only needed because llvm::StringRef doesn't have a constexpr
-  // constructor.
-  struct CFTypeListEntry {
+  struct CFWhitelistEntry {
     unsigned char Length;
-    char Data[MaxCFTypeNameLength + 1];
+    char Data[MaxCFWhitelistStringLength + 1];
 
     operator StringRef() const { return StringRef(Data, Length); }
   };
@@ -35,7 +33,7 @@ namespace {
   // Quasi-lexicographic order: string length first, then string data.
   // Since we don't care about the actual length, we can use this, which
   // lets us ignore the string data a larger proportion of the time.
-  struct SortByLengthComparator {
+  struct CFWhitelistComparator {
     bool operator()(StringRef lhs, StringRef rhs) const {
       return (lhs.size() < rhs.size() ||
               (lhs.size() == rhs.size() && lhs < rhs));
@@ -48,20 +46,20 @@ static constexpr size_t string_lengthof(const char (&data)[Len]) {
   return Len - 1;
 }
 
-/// The list of known CF types.  We use 'constexpr' to verify that this is
+/// The CF whitelist.  We use 'constexpr' to verify that this is
 /// emitted as a constant.  Note that this is expected to be sorted in
 /// quasi-lexicographic order.
-static constexpr const CFTypeListEntry KnownCFTypes[] = {
+static constexpr const CFWhitelistEntry CFWhitelist[] = {
 #define CF_TYPE(NAME) { string_lengthof(#NAME), #NAME },
 #define NON_CF_TYPE(NAME)
 #include "SortedCFDatabase.def"
 };
-const size_t NumKnownCFTypes = sizeof(KnownCFTypes) / sizeof(*KnownCFTypes);
+const size_t NumCFWhitelistEntries = sizeof(CFWhitelist) / sizeof(*CFWhitelist);
 
-/// Maintain a set of known CF types.
-static bool isKnownCFTypeName(StringRef name) {
-  return std::binary_search(KnownCFTypes, KnownCFTypes + NumKnownCFTypes,
-                            name, SortByLengthComparator());
+/// Maintain a set of whitelisted CF types.
+static bool isWhitelistedCFTypeName(StringRef name) {
+  return std::binary_search(CFWhitelist, CFWhitelist + NumCFWhitelistEntries,
+                            name, CFWhitelistComparator());
 }
 
 /// Classify a potential CF typedef.
@@ -88,12 +86,12 @@ CFPointeeInfo::classifyTypedef(const clang::TypedefNameDecl *typedefDecl) {
         if (recordDecl->hasAttr<clang::ObjCBridgeAttr>() ||
             recordDecl->hasAttr<clang::ObjCBridgeMutableAttr>() ||
             recordDecl->hasAttr<clang::ObjCBridgeRelatedAttr>() ||
-            isKnownCFTypeName(typedefDecl->getName())) {
+            isWhitelistedCFTypeName(typedefDecl->getName())) {
           return forRecord(isConst, record->getDecl());
         }
       } else if (pointee->isVoidType()) {
         if (typedefDecl->hasAttr<clang::ObjCBridgeAttr>() ||
-            isKnownCFTypeName(typedefDecl->getName())) {
+            isWhitelistedCFTypeName(typedefDecl->getName())) {
           return isConst ? forConstVoid() : forVoid();
         }
       }

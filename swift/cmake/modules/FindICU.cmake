@@ -31,7 +31,7 @@ foreach(MODULE ${ICU_FIND_COMPONENTS})
   endif()
 endforeach()
 
-foreach(sdk ANDROID;FREEBSD;LINUX;WINDOWS;HAIKU)
+foreach(sdk ANDROID;FREEBSD;LINUX;WINDOWS)
   foreach(MODULE ${ICU_FIND_COMPONENTS})
     string(TOUPPER "${MODULE}" MODULE)
     if("${SWIFT_${sdk}_ICU_${MODULE}_INCLUDE}" STREQUAL "")

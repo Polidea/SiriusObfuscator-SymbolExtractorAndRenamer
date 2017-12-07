@@ -1,4 +1,0 @@
-module ObjCStuff {
-  header "ObjCStuff.h"
-  export *
-}

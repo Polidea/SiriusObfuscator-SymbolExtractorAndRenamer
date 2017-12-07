@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: %target-swift-frontend -emit-module -o %t %S/Inputs/foo_swift_module.swift
 //

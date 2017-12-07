@@ -141,8 +141,7 @@ getFinalReleases(SILValue Box,
     // If we have a copy value or a mark_uninitialized, add its uses to the work
     // list and continue.
     if (isa<MarkUninitializedInst>(User) || isa<CopyValueInst>(User)) {
-      copy(cast<SingleValueInstruction>(User)->getUses(),
-           std::back_inserter(Worklist));
+      copy(User->getUses(), std::back_inserter(Worklist));
       continue;
     }
 
@@ -213,8 +212,8 @@ static bool partialApplyEscapes(SILValue V, bool examineApply) {
     // If we have a copy_value, the copy value does not cause an escape, but its
     // uses might do so... so add the copy_value's uses to the worklist and
     // continue.
-    if (auto CVI = dyn_cast<CopyValueInst>(User)) {
-      copy(CVI->getUses(), std::back_inserter(Worklist));
+    if (isa<CopyValueInst>(User)) {
+      copy(User->getUses(), std::back_inserter(Worklist));
       continue;
     }
 
@@ -386,8 +385,7 @@ static SILInstruction* findUnexpectedBoxUse(SILValue Box,
     // If our user instruction is a copy_value or a marked_uninitialized, visit
     // the users recursively.
     if (isa<MarkUninitializedInst>(User) || isa<CopyValueInst>(User)) {
-      copy(cast<SingleValueInstruction>(User)->getUses(),
-           std::back_inserter(Worklist));
+      copy(User->getUses(), std::back_inserter(Worklist));
       continue;
     }
 
@@ -516,11 +514,11 @@ static bool rewriteAllocBoxAsAllocStack(AllocBoxInst *ABI) {
 
     // Look through any mark_uninitialized, copy_values.
     if (isa<MarkUninitializedInst>(User) || isa<CopyValueInst>(User)) {
-      auto Inst = cast<SingleValueInstruction>(User);
-      transform(Inst->getUses(), std::back_inserter(Worklist),
+      transform(User->getUses(), std::back_inserter(Worklist),
                 [](Operand *Op) -> SILInstruction * { return Op->getUser(); });
-      Inst->replaceAllUsesWithUndef();
-      Inst->eraseFromParent();
+      User->replaceAllUsesWith(
+          SILUndef::get(User->getType(), User->getModule()));
+      User->eraseFromParent();
       continue;
     }
 
@@ -540,7 +538,7 @@ namespace {
 /// promoting some of its box parameters to stack addresses.
 class PromotedParamCloner : public SILClonerWithScopes<PromotedParamCloner> {
 public:
-  friend class SILInstructionVisitor<PromotedParamCloner>;
+  friend class SILVisitor<PromotedParamCloner>;
   friend class SILCloner<PromotedParamCloner>;
 
   PromotedParamCloner(SILFunction *Orig, IsSerialized_t Serialized,
@@ -629,10 +627,9 @@ SILFunction *PromotedParamCloner::initCloned(SILFunction *Orig,
   // the parameters promoted.
   auto ClonedTy = SILFunctionType::get(
       OrigFTI->getGenericSignature(), OrigFTI->getExtInfo(),
-      OrigFTI->getCoroutineKind(), OrigFTI->getCalleeConvention(),
-      ClonedInterfaceArgTys, OrigFTI->getYields(),
+      OrigFTI->getCalleeConvention(), ClonedInterfaceArgTys,
       OrigFTI->getResults(), OrigFTI->getOptionalErrorResult(),
-      M.getASTContext(), OrigFTI->getWitnessMethodConformanceOrNone());
+      M.getASTContext());
 
   assert((Orig->isTransparent() || Orig->isBare() || Orig->getLocation())
          && "SILFunction missing location");
@@ -642,13 +639,12 @@ SILFunction *PromotedParamCloner::initCloned(SILFunction *Orig,
   auto *Fn = M.createFunction(
       SILLinkage::Shared, ClonedName, ClonedTy, Orig->getGenericEnvironment(),
       Orig->getLocation(), Orig->isBare(), IsNotTransparent, Serialized,
-      Orig->getEntryCount(), Orig->isThunk(), Orig->getClassSubclassScope(),
-      Orig->getInlineStrategy(), Orig->getEffectsKind(), Orig,
-      Orig->getDebugScope());
+      Orig->isThunk(), Orig->getClassSubclassScope(), Orig->getInlineStrategy(),
+      Orig->getEffectsKind(), Orig, Orig->getDebugScope());
   for (auto &Attr : Orig->getSemanticsAttrs()) {
     Fn->addSemanticsAttr(Attr);
   }
-  if (!Orig->hasQualifiedOwnership()) {
+  if (Orig->hasUnqualifiedOwnership()) {
     Fn->setUnqualifiedOwnership();
   }
   return Fn;
@@ -815,7 +811,7 @@ specializePartialApply(PartialApplyInst *PartialApply,
     // address because we've proven we can keep this value on the stack. The
     // partial_apply had ownership of this box so we must now release it
     // explicitly when the partial_apply is released.
-    auto *Box = cast<SingleValueInstruction>(O.get());
+    SILInstruction *Box = cast<SILInstruction>(O.get());
     assert((isa<AllocBoxInst>(Box) || isa<CopyValueInst>(Box)) &&
            "Expected either an alloc box or a copy of an alloc box");
     SILBuilder B(Box);

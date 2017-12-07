@@ -434,17 +434,9 @@ extension Float : _ObjectiveCBridgeable {
     }
 
     public init?(exactly number: NSNumber) {
-        let type = number.objCType.pointee
-        if type == 0x49 || type == 0x4c || type == 0x51 {
-            guard let result = Float(exactly: number.uint64Value) else { return nil }
-            self = result
-        } else if type == 0x69 || type == 0x6c || type == 0x71 {
-            guard let result = Float(exactly: number.int64Value) else { return nil }
-            self = result
-        } else {
-            guard let result = Float(exactly: number.doubleValue) else { return nil }
-            self = result
-        }
+        guard let value = Double(exactly: number) else { return nil }
+        guard let result = Float(exactly: value) else { return nil }
+        self = result
     }
 
     @_semantics("convertToObjectiveC")
@@ -459,12 +451,25 @@ extension Float : _ObjectiveCBridgeable {
     }
     
     public static func _conditionallyBridgeFromObjectiveC(_ x: NSNumber, result: inout Float?) -> Bool {
-        if x.floatValue.isNaN {
-            result = x.floatValue
+        guard let value = Double(exactly: x) else { return false }
+        guard !value.isNaN else {
+            result = Float.nan
             return true
         }
-        result = Float(exactly: x)
-        return result != nil
+        guard !value.isInfinite else {
+            if value.sign == .minus {
+                result = -Float.infinity
+            } else {
+                result = Float.infinity
+            }
+            return true
+        }
+        guard Swift.abs(value) <= Double(Float.greatestFiniteMagnitude) else {
+            return false
+        }
+        
+        result = Float(value)
+        return true
     }
     
     public static func _unconditionallyBridgeFromObjectiveC(_ source: NSNumber?) -> Float {
@@ -494,10 +499,7 @@ extension Double : _ObjectiveCBridgeable {
             guard let result = Double(exactly: number.int64Value) else  { return nil }
             self = result
         } else {
-            // All other integer types and single-precision floating points will
-            // fit in a `Double` without truncation.
-            guard let result = Double(exactly: number.doubleValue) else { return nil }
-            self = result
+            self = number.doubleValue
         }
     }
 
@@ -513,12 +515,9 @@ extension Double : _ObjectiveCBridgeable {
     }
     
     public static func _conditionallyBridgeFromObjectiveC(_ x: NSNumber, result: inout Double?) -> Bool {
-        if x.doubleValue.isNaN {
-            result = x.doubleValue
-            return true
-        }
-        result = Double(exactly: x)
-        return result != nil
+        guard let value = Double(exactly: x) else { return false }
+        result = value
+        return true
     }
     
     public static func _unconditionallyBridgeFromObjectiveC(_ source: NSNumber?) -> Double {
@@ -583,17 +582,17 @@ extension Bool : _ObjectiveCBridgeable {
 extension CGFloat : _ObjectiveCBridgeable {
     @available(swift, deprecated: 4, renamed: "init(truncating:)")
     public init(_ number: NSNumber) {
-        self.init(CGFloat.NativeType(truncating: number))
+        native = CGFloat.NativeType(truncating: number)
     }
 
     public init(truncating number: NSNumber) {
-        self.init(CGFloat.NativeType(truncating: number))
+        native = CGFloat.NativeType(truncating: number)
     }
 
     public init?(exactly number: NSNumber) {
         var nativeValue: CGFloat.NativeType? = 0
         guard CGFloat.NativeType._conditionallyBridgeFromObjectiveC(number, result: &nativeValue) else { return nil }
-        self.init(nativeValue!)
+        self.native = nativeValue!
     }
 
     @_semantics("convertToObjectiveC")

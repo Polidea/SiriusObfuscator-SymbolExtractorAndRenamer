@@ -1,6 +1,7 @@
 // Test the case when we compile normally
 //
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend -module-name comments -emit-module -emit-module-path %t/comments.swiftmodule -emit-module-doc -emit-module-doc-path %t/comments.swiftdoc %s
 // RUN: %target-swift-ide-test -print-module-comments -module-to-print=comments -source-filename %s -I %t > %t.normal.txt
 // RUN: %FileCheck %s -check-prefix=NORMAL < %t.normal.txt
@@ -8,7 +9,8 @@
 
 // Test the case when we compile with -enable-testing
 //
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend -enable-testing -module-name comments -emit-module -emit-module-path %t/comments.swiftmodule -emit-module-doc -emit-module-doc-path %t/comments.swiftdoc %s
 // RUN: %target-swift-ide-test -print-module-comments -module-to-print=comments -source-filename %s -I %t > %t.testing.txt
 // RUN: %FileCheck %s -check-prefix=TESTING < %t.testing.txt

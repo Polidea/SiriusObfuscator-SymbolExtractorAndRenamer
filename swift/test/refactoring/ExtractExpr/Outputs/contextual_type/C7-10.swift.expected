@@ -1,6 +1,0 @@
-func foo(_: Int32) {}
-func bar() {
-  let new_name: Int32 = 1+1
-foo(new_name)  
-}
-

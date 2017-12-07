@@ -4,7 +4,8 @@
 
 // REQUIRES: objc_interop
 
-// CHECK-AUTOLINK: !llvm.linker.options = !{
+// CHECK-AUTOLINK: !{{[0-9]+}} = !{i32 {{[0-9]+}}, !"Linker Options", ![[LINK_LIST:[0-9]+]]}
+// CHECK-AUTOLINK: ![[LINK_LIST]] = !{
 // CHECK-AUTOLINK-NOT: metadata !"-framework", metadata !"Mixed"
 
 // CHECK-WRONG-NAME: underlying Objective-C module 'WrongName' not found

@@ -648,7 +648,9 @@ extension ${mattype} {
 
   /// Initialize matrix to have specified `diagonal`, and zeros elsewhere.
   public init(diagonal: ${diagtype}) {
-    self.init()
+%   for i in range(cols):
+    self.columns.${i} = ${coltype}()
+%   end
 %   for i in range(diagsize):
     self.columns.${i}.${component[i]} = diagonal.${component[i]}
 %   end
@@ -657,7 +659,6 @@ extension ${mattype} {
   /// Initialize matrix to have specified `columns`.
   public init(_ columns: [${coltype}]) {
     _precondition(columns.count == ${cols}, "Requires array of ${cols} vectors")
-    self.init()
 %   for i in range(cols):
     self.columns.${i} = columns[${i}]
 %   end
@@ -672,7 +673,6 @@ extension ${mattype} {
   /// Initialize matrix to have specified `columns`.
   public init(${', '.join(['_ col' + str(i) + ': ' + coltype
                           for i in range(cols)])}) {
-    self.init()
 %   for i in range(cols):
       self.columns.${i} = col${i}
 %   end

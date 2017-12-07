@@ -60,8 +60,10 @@ TYPE("remap",           Remapping,          "remap",           "")
 TYPE("imported-modules", ImportedModules,   "importedmodules", "")
 TYPE("tbd",             TBD,                "tbd",             "")
 TYPE("module-trace",    ModuleTrace,        "trace.json",      "")
+
+// BEGIN APPLE-ONLY OUTPUT TYPES
 TYPE("index-data",      IndexData,          "",                "")
-TYPE("opt-record",      OptRecord,          "opt.yaml",        "")
+// END APPLE-ONLY OUTPUT TYPES
 
 // Misc types
 TYPE("pcm",             ClangModuleFile,    "pcm",             "")

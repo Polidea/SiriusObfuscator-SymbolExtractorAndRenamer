@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 // RUN: %target-build-swift %s -import-objc-header %S/Inputs/errors.h -o %t/main
 // RUN: %target-run %t/main
 

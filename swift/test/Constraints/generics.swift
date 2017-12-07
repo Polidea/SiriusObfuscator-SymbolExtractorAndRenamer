@@ -205,7 +205,7 @@ var _ : Int = R24267414.foo() // expected-error {{generic parameter 'T' could no
 
 
 // https://bugs.swift.org/browse/SR-599
-func SR599<T: FixedWidthInteger>() -> T.Type { return T.self }  // expected-note {{in call to function 'SR599()'}}
+func SR599<T: FixedWidthInteger>() -> T.Type { return T.self }  // expected-note {{in call to function 'SR599'}}
 _ = SR599()         // expected-error {{generic parameter 'T' could not be inferred}}
 
 
@@ -429,7 +429,7 @@ class GenericClass<A> {}
 func genericFunc<T>(t: T) {
   _ = [T: GenericClass] // expected-error {{generic parameter 'A' could not be inferred}}
   // expected-note@-1 {{explicitly specify the generic arguments to fix this issue}}
-  // expected-error@-2 3 {{type 'T' does not conform to protocol 'Hashable'}}
+  // expected-error@-2 2 {{type 'T' does not conform to protocol 'Hashable'}}
 }
 
 struct SR_3525<T> {}
@@ -479,65 +479,4 @@ public struct S5 {
         f(models: arr)
         g(models: arr)
     }
-}
-
-// rdar://problem/24329052 - QoI: call argument archetypes not lining up leads to ambiguity errors
-
-struct S_24329052<T> { // expected-note {{generic parameter 'T' of generic struct 'S_24329052' declared here}}
-  var foo: (T) -> Void
-  // expected-note@+1 {{generic parameter 'T' of instance method 'bar(_:)' declared here}}
-  func bar<T>(_ v: T) { foo(v) }
-  // expected-error@-1 {{cannot convert value of type 'T' (generic parameter of instance method 'bar(_:)') to expected argument type 'T' (generic parameter of generic struct 'S_24329052')}}
-}
-
-extension Sequence {
-  var rdar24329052: (Element) -> Void { fatalError() }
-  // expected-note@+1 {{generic parameter 'Element' of instance method 'foo24329052(_:)' declared here}}
-  func foo24329052<Element>(_ v: Element) { rdar24329052(v) }
-  // expected-error@-1 {{cannot convert value of type 'Element' (generic parameter of instance method 'foo24329052(_:)') to expected argument type 'Self.Element' (associated type of protocol 'Sequence')}}
-}
-
-func rdar27700622<E: Comparable>(_ input: [E]) -> [E] {
-  let pivot = input.first!
-  let lhs = input.dropFirst().filter { $0 <= pivot }
-  let rhs = input.dropFirst().filter { $0 > pivot }
-
-  return rdar27700622(lhs) + [pivot] + rdar27700622(rhs) // Ok
-}
-
-// rdar://problem/22898292 - Type inference failure with constrained subclass
-protocol P_22898292 {}
-
-do {
-  func construct_generic<T: P_22898292>(_ construct: () -> T) -> T { return construct() }
-
-  class A {}
-  class B : A, P_22898292 {}
-
-  func foo() -> B { return B() }
-  func bar(_ value: A) {}
-  func baz<T: A>(_ value: T) {}
-
-  func rdar_22898292_1() {
-    let x = construct_generic { foo() } // returns A
-    bar(x) // Ok
-    bar(construct_generic { foo() }) // Ok
-  }
-
-  func rdar22898292_2<T: B>(_ d: T) {
-    _ = { baz($0) }(construct_generic { d }) // Ok
-  }
-}
-
-// rdar://problem/35541153 - Generic parameter inference bug
-
-func rdar35541153() {
-  func foo<U: Equatable, V: Equatable, C: Collection>(_ c: C) where C.Element == (U, V) {}
-  func bar<K: Equatable, V, C: Collection>(_ c: C, _ k: K, _ v: V) where C.Element == (K, V) {}
-
-  let x: [(a: Int, b: Int)] = []
-  let y: [(k: String, v: Int)] = []
-
-  foo(x) // Ok
-  bar(y, "ultimate question", 42) // Ok
 }

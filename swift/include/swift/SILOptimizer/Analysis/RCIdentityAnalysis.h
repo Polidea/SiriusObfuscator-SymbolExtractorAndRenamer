@@ -55,16 +55,11 @@ public:
   /// unchecked_trivial_bit_cast.
   void getRCUsers(SILValue V, llvm::SmallVectorImpl<SILInstruction *> &Users);
 
-  void handleDeleteNotification(SILNode *node) {
-    auto value = dyn_cast<ValueBase>(node);
-    if (!value)
-      return;
-
+  void handleDeleteNotification(ValueBase *V) {
     // Check the cache. If we don't find it, there is nothing to do.
-    auto Iter = RCCache.find(SILValue(value));
+    auto Iter = RCCache.find(SILValue(V));
     if (Iter == RCCache.end())
       return;
-
     // Then erase Iter from the cache.
     RCCache.erase(Iter);
   }
@@ -89,14 +84,14 @@ public:
   RCIdentityAnalysis(const RCIdentityAnalysis &) = delete;
   RCIdentityAnalysis &operator=(const RCIdentityAnalysis &) = delete;
 
-  virtual void handleDeleteNotification(SILNode *node) override {
+  virtual void handleDeleteNotification(ValueBase *V) override {
     // If the parent function of this instruction was just turned into an
     // external declaration, bail. This happens during SILFunction destruction.
-    SILFunction *F = node->getFunction();
+    SILFunction *F = V->getFunction();
     if (F->isExternalDeclaration()) {
       return;
     }
-    get(F)->handleDeleteNotification(node);
+    get(F)->handleDeleteNotification(V);
   }
 
   virtual bool needsNotifications() override { return true; }

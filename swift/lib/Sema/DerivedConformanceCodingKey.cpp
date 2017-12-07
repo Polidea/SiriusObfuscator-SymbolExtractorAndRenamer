@@ -74,7 +74,7 @@ static void deriveRawValueInit(AbstractFunctionDecl *initDecl) {
                                              DeclNameLoc(), /*Implicit=*/true);
 
   // rawValue param to init(rawValue:)
-  auto *rawValueDecl = new (C) ParamDecl(VarDecl::Specifier::Owned, SourceLoc(),
+  auto *rawValueDecl = new (C) ParamDecl(/*IsLet=*/true, SourceLoc(),
                                          SourceLoc(), C.Id_rawValue,
                                          SourceLoc(), C.Id_rawValue,
                                          valueParam->getType(), parentDC);
@@ -124,7 +124,7 @@ static ValueDecl *deriveInitDecl(TypeChecker &tc, Decl *parentDecl,
   auto *parentDC = cast<DeclContext>(parentDecl);
 
   // rawValue
-  auto *rawDecl = new (C) ParamDecl(VarDecl::Specifier::Owned, SourceLoc(), SourceLoc(),
+  auto *rawDecl = new (C) ParamDecl(/*IsLet*/ true, SourceLoc(), SourceLoc(),
                                     paramName, SourceLoc(), paramName,
                                     paramType, parentDC);
   rawDecl->setInterfaceType(paramType);
@@ -159,29 +159,31 @@ static ValueDecl *deriveInitDecl(TypeChecker &tc, Decl *parentDecl,
   Type retInterfaceType =
       OptionalType::get(parentDC->getDeclaredInterfaceType());
   Type interfaceType = FunctionType::get(interfaceArgType, retInterfaceType);
-  auto selfParam = computeSelfParam(initDecl);
-  auto initSelfParam = computeSelfParam(initDecl, /*init*/ true);
+  Type selfInterfaceType = initDecl->computeInterfaceSelfType();
+  Type selfInitializerInterfaceType =
+      initDecl->computeInterfaceSelfType(/*init*/ true);
 
   Type allocIfaceType;
   Type initIfaceType;
   if (auto sig = parentDC->getGenericSignatureOfContext()) {
     initDecl->setGenericEnvironment(parentDC->getGenericEnvironmentOfContext());
 
-    allocIfaceType = GenericFunctionType::get(sig, {selfParam},
+    allocIfaceType = GenericFunctionType::get(sig, selfInterfaceType,
                                               interfaceType,
                                               FunctionType::ExtInfo());
-    initIfaceType = GenericFunctionType::get(sig, {initSelfParam},
+    initIfaceType = GenericFunctionType::get(sig, selfInitializerInterfaceType,
                                              interfaceType,
                                              FunctionType::ExtInfo());
   } else {
-    allocIfaceType = FunctionType::get({selfParam},
-                                       interfaceType, FunctionType::ExtInfo());
-    initIfaceType = FunctionType::get({initSelfParam},
-                                      interfaceType, FunctionType::ExtInfo());
+    allocIfaceType = FunctionType::get(selfInterfaceType,
+                                       interfaceType);
+    initIfaceType = FunctionType::get(selfInitializerInterfaceType,
+                                      interfaceType);
   }
   initDecl->setInterfaceType(allocIfaceType);
   initDecl->setInitializerInterfaceType(initIfaceType);
-  initDecl->setAccess(enumDecl->getFormalAccess());
+  initDecl->setAccessibility(std::max(Accessibility::Internal,
+                                      enumDecl->getFormalAccess()));
 
   // If the enum was not imported, the derived conformance is either from the
   // enum itself or an extension, in which case we will emit the declaration
@@ -269,7 +271,7 @@ deriveBodyCodingKey_enum_stringValue(AbstractFunctionDecl *strValDecl) {
     body = BraceStmt::create(C, SourceLoc(), ASTNode(returnStmt),
                              SourceLoc());
   } else {
-    SmallVector<ASTNode, 4> cases;
+    SmallVector<CaseStmt *, 4> cases;
     for (auto *elt : elements) {
       auto *pat = new (C) EnumElementPattern(TypeLoc::withoutLoc(enumType),
                                              SourceLoc(), SourceLoc(),
@@ -334,7 +336,7 @@ deriveBodyCodingKey_init_stringValue(AbstractFunctionDecl *initDecl) {
   }
 
   auto *selfRef = createSelfDeclRef(initDecl);
-  SmallVector<ASTNode, 4> cases;
+  SmallVector<CaseStmt *, 4> cases;
   for (auto *elt : elements) {
     auto *litExpr = new (C) StringLiteralExpr(elt->getNameStr(), SourceRange(),
                                               /*Implicit=*/true);

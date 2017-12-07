@@ -22,7 +22,6 @@
 #include "swift/AST/Pattern.h"
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/Types.h"
-#include "llvm/ADT/APInt.h"
 #include "DerivedConformances.h"
 
 using namespace swift;
@@ -94,7 +93,7 @@ static void deriveBodyRawRepresentable_raw(AbstractFunctionDecl *toRawDecl) {
 
   Type enumType = parentDC->getDeclaredTypeInContext();
 
-  SmallVector<ASTNode, 4> cases;
+  SmallVector<CaseStmt*, 4> cases;
   for (auto elt : enumDecl->getAllElements()) {
     auto pat = new (C) EnumElementPattern(TypeLoc::withoutLoc(enumType),
                                           SourceLoc(), SourceLoc(),
@@ -195,27 +194,13 @@ deriveBodyRawRepresentable_init(AbstractFunctionDecl *initDecl) {
   }
 #endif
 
-  bool isStringEnum =
-    (rawTy->getNominalOrBoundGenericNominal() == C.getStringDecl());
-  llvm::SmallVector<Expr *, 16> stringExprs;
-
   Type enumType = parentDC->getDeclaredTypeInContext();
 
   auto selfDecl = cast<ConstructorDecl>(initDecl)->getImplicitSelfDecl();
   
-  SmallVector<ASTNode, 4> cases;
-  unsigned Idx = 0;
+  SmallVector<CaseStmt*, 4> cases;
   for (auto elt : enumDecl->getAllElements()) {
-    LiteralExpr *litExpr = cloneRawLiteralExpr(C, elt->getRawValueExpr());
-    if (isStringEnum) {
-      // In case of a string enum we are calling the _findStringSwitchCase
-      // function from the library and switching on the returned Int value.
-      stringExprs.push_back(litExpr);
-      llvm::SmallString<16> IdxAsStringBuffer;
-      APInt(64, Idx).toStringUnsigned(IdxAsStringBuffer);
-      StringRef IndexAsString(C.AllocateCopy(IdxAsStringBuffer.str()));
-      litExpr = new (C) IntegerLiteralExpr(IndexAsString, SourceLoc());
-    }
+    auto litExpr = cloneRawLiteralExpr(C, elt->getRawValueExpr());
     auto litPat = new (C) ExprPattern(litExpr, /*isResolved*/ true,
                                       nullptr, nullptr);
     litPat->setImplicit();
@@ -240,7 +225,6 @@ deriveBodyRawRepresentable_init(AbstractFunctionDecl *initDecl) {
     cases.push_back(CaseStmt::create(C, SourceLoc(), labelItem,
                                      /*HasBoundDecls=*/false, SourceLoc(),
                                      body));
-    Idx++;
   }
 
   auto anyPat = new (C) AnyPattern(SourceLoc());
@@ -257,22 +241,7 @@ deriveBodyRawRepresentable_init(AbstractFunctionDecl *initDecl) {
 
   auto rawDecl = initDecl->getParameterList(1)->get(0);
   auto rawRef = new (C) DeclRefExpr(rawDecl, DeclNameLoc(), /*implicit*/true);
-  Expr *switchArg = rawRef;
-  if (isStringEnum) {
-    // Call _findStringSwitchCase with an array of strings as argument.
-    auto *Fun = new (C) UnresolvedDeclRefExpr(
-                  C.getIdentifier("_findStringSwitchCase"),
-                  DeclRefKind::Ordinary, DeclNameLoc());
-    auto *strArray = ArrayExpr::create(C, SourceLoc(), stringExprs, {},
-                                       SourceLoc());;
-    Identifier tableId = C.getIdentifier("cases");
-    Identifier strId = C.getIdentifier("string");
-    auto *Args = TupleExpr::createImplicit(C, {strArray, rawRef},
-                                              {tableId, strId});
-    auto *CallExpr = CallExpr::create(C, Fun, Args, {}, {}, false, false);
-    switchArg = CallExpr;
-  }
-  auto switchStmt = SwitchStmt::create(LabeledStmtInfo(), SourceLoc(), switchArg,
+  auto switchStmt = SwitchStmt::create(LabeledStmtInfo(), SourceLoc(), rawRef,
                                        SourceLoc(), cases, SourceLoc(), C);
   auto body = BraceStmt::create(C, SourceLoc(),
                                 ASTNode(switchStmt),
@@ -298,7 +267,7 @@ static ConstructorDecl *deriveRawRepresentable_init(TypeChecker &tc,
   auto *selfDecl = ParamDecl::createSelf(SourceLoc(), parentDC,
                                          /*static*/false, /*inout*/true);
 
-  auto *rawDecl = new (C) ParamDecl(VarDecl::Specifier::Owned, SourceLoc(), SourceLoc(),
+  auto *rawDecl = new (C) ParamDecl(/*IsLet*/true, SourceLoc(), SourceLoc(),
                                     C.Id_rawValue, SourceLoc(),
                                     C.Id_rawValue, rawType, parentDC);
   rawDecl->setInterfaceType(rawInterfaceType);
@@ -327,29 +296,31 @@ static ConstructorDecl *deriveRawRepresentable_init(TypeChecker &tc,
   Type retInterfaceType
     = OptionalType::get(parentDC->getDeclaredInterfaceType());
   Type interfaceType = FunctionType::get(interfaceArgType, retInterfaceType);
-  auto selfParam = computeSelfParam(initDecl);
-  auto initSelfParam = computeSelfParam(initDecl, /*init*/ true);
+  Type selfInterfaceType = initDecl->computeInterfaceSelfType();
+  Type selfInitializerInterfaceType
+    = initDecl->computeInterfaceSelfType(/*init*/ true);
 
   Type allocIfaceType;
   Type initIfaceType;
   if (auto sig = parentDC->getGenericSignatureOfContext()) {
     initDecl->setGenericEnvironment(parentDC->getGenericEnvironmentOfContext());
 
-    allocIfaceType = GenericFunctionType::get(sig, {selfParam},
+    allocIfaceType = GenericFunctionType::get(sig, selfInterfaceType,
                                               interfaceType,
                                               FunctionType::ExtInfo());
-    initIfaceType = GenericFunctionType::get(sig, {initSelfParam},
+    initIfaceType = GenericFunctionType::get(sig, selfInitializerInterfaceType,
                                              interfaceType,
                                              FunctionType::ExtInfo());
   } else {
-    allocIfaceType = FunctionType::get({selfParam},
-                                       interfaceType, FunctionType::ExtInfo());
-    initIfaceType = FunctionType::get({initSelfParam},
-                                      interfaceType, FunctionType::ExtInfo());
+    allocIfaceType = FunctionType::get(selfInterfaceType,
+                                       interfaceType);
+    initIfaceType = FunctionType::get(selfInitializerInterfaceType,
+                                      interfaceType);
   }
   initDecl->setInterfaceType(allocIfaceType);
   initDecl->setInitializerInterfaceType(initIfaceType);
-  initDecl->copyFormalAccessAndVersionedAttrFrom(enumDecl);
+  initDecl->setAccessibility(std::max(Accessibility::Internal,
+                                      enumDecl->getFormalAccess()));
 
   // If the enum was not imported, the derived conformance is either from the
   // enum itself or an extension, in which case we will emit the declaration

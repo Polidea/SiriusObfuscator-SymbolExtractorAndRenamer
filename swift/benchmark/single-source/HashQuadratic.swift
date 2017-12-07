@@ -12,11 +12,6 @@
 
 import TestsUtils
 
-public let HashQuadratic = BenchmarkInfo(
-  name: "HashQuadratic",
-  runFunction: run_HashQuadratic,
-  tags: [.unstable, .api, .Dictionary])
-
 let size = 3_000_000
 
 @inline(never)

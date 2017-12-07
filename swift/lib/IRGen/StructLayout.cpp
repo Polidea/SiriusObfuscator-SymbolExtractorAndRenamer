@@ -38,6 +38,11 @@ static bool requiresHeapHeader(LayoutKind kind) {
   llvm_unreachable("bad layout kind!");
 }
 
+/// Return the size of the standard heap header.
+Size irgen::getHeapHeaderSize(IRGenModule &IGM) {
+  return IGM.getPointerSize() + Size(8);
+}
+
 /// Perform structure layout on the given types.
 StructLayout::StructLayout(IRGenModule &IGM, CanType astTy,
                            LayoutKind layoutKind,
@@ -179,7 +184,7 @@ Address ElementLayout::project(IRGenFunction &IGF, Address baseAddr,
 
 void StructLayoutBuilder::addHeapHeader() {
   assert(StructFields.empty() && "adding heap header at a non-zero offset");
-  CurSize = IGM.RefCountedStructSize;
+  CurSize = getHeapHeaderSize(IGM);
   CurAlignment = IGM.getPointerAlignment();
   StructFields.push_back(IGM.RefCountedStructTy);
 }
@@ -199,38 +204,36 @@ bool StructLayoutBuilder::addFields(llvm::MutableArrayRef<ElementLayout> elts,
   // Loop through the elements.  The only valid field in each element
   // is Type; StructIndex and ByteOffset need to be laid out.
   for (auto &elt : elts) {
-    addedStorage |= addField(elt, strategy);
+    auto &eltTI = elt.getType();
+    IsKnownPOD &= eltTI.isPOD(ResilienceExpansion::Maximal);
+    IsKnownBitwiseTakable &= eltTI.isBitwiseTakable(ResilienceExpansion::Maximal);
+    IsKnownAlwaysFixedSize &= eltTI.isFixedSize(ResilienceExpansion::Minimal);
+    
+    // If the element type is empty, it adds nothing.
+    if (eltTI.isKnownEmpty(ResilienceExpansion::Maximal)) {
+      addEmptyElement(elt);
+    } else {
+      // Anything else we do at least potentially adds storage requirements.
+      addedStorage = true;
+
+      // TODO: consider using different layout rules.
+      // If the rules are changed so that fields aren't necessarily laid
+      // out sequentially, the computation of InstanceStart in the
+      // RO-data will need to be fixed.
+
+      // If this element is resiliently- or dependently-sized, record
+      // that and configure the ElementLayout appropriately.
+      if (isa<FixedTypeInfo>(eltTI)) {
+        addFixedSizeElement(elt);
+      } else {
+        addNonFixedSizeElement(elt);
+      }
+    }
+
+    NextNonFixedOffsetIndex++;
   }
 
   return addedStorage;
-}
-
-bool StructLayoutBuilder::addField(ElementLayout &elt,
-                                  LayoutStrategy strategy) {
-  auto &eltTI = elt.getType();
-  IsKnownPOD &= eltTI.isPOD(ResilienceExpansion::Maximal);
-  IsKnownBitwiseTakable &= eltTI.isBitwiseTakable(ResilienceExpansion::Maximal);
-  IsKnownAlwaysFixedSize &= eltTI.isFixedSize(ResilienceExpansion::Minimal);
-
-  if (eltTI.isKnownEmpty(ResilienceExpansion::Maximal)) {
-    addEmptyElement(elt);
-    // If the element type is empty, it adds nothing.
-    return false;
-  }
-  // TODO: consider using different layout rules.
-  // If the rules are changed so that fields aren't necessarily laid
-  // out sequentially, the computation of InstanceStart in the
-  // RO-data will need to be fixed.
-
-  // If this element is resiliently- or dependently-sized, record
-  // that and configure the ElementLayout appropriately.
-  if (isa<FixedTypeInfo>(eltTI)) {
-    addFixedSizeElement(elt);
-  } else {
-    addNonFixedSizeElement(elt);
-  }
-  NextNonFixedOffsetIndex++;
-  return true;
 }
 
 void StructLayoutBuilder::addFixedSizeElement(ElementLayout &elt) {

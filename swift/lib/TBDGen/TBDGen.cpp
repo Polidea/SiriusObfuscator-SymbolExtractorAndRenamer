@@ -109,7 +109,8 @@ void TBDGenVisitor::addConformances(DeclContext *DC) {
     // sometimes witness thunks need to be manually made public.
 
     auto conformanceIsFixed = SILWitnessTable::conformanceIsSerialized(
-        normalConformance);
+        normalConformance, SwiftModule->getResilienceStrategy(),
+        SILSerializeWitnessTables);
     auto addSymbolIfNecessary = [&](ValueDecl *valueReq,
                                     SILLinkage witnessLinkage) {
       if (conformanceIsFixed &&
@@ -328,13 +329,15 @@ void TBDGenVisitor::visitProtocolDecl(ProtocolDecl *PD) {
 static void enumeratePublicSymbolsAndWrite(ModuleDecl *M, FileUnit *singleFile,
                                            StringSet &symbols,
                                            bool hasMultipleIRGenThreads,
+                                           bool silSerializeWitnessTables,
                                            llvm::raw_ostream *os,
                                            StringRef installName) {
   auto isWholeModule = singleFile == nullptr;
   const auto &target = M->getASTContext().LangOpts.Target;
   UniversalLinkageInfo linkInfo(target, hasMultipleIRGenThreads, isWholeModule);
 
-  TBDGenVisitor visitor(symbols, target, linkInfo, M, installName);
+  TBDGenVisitor visitor(symbols, target, linkInfo, M, silSerializeWitnessTables,
+                        installName);
 
   auto visitFile = [&](FileUnit *file) {
     SmallVector<Decl *, 16> decls;
@@ -369,20 +372,24 @@ static void enumeratePublicSymbolsAndWrite(ModuleDecl *M, FileUnit *singleFile,
 }
 
 void swift::enumeratePublicSymbols(FileUnit *file, StringSet &symbols,
-                                   bool hasMultipleIRGenThreads) {
+                                   bool hasMultipleIRGenThreads,
+                                   bool silSerializeWitnessTables) {
   enumeratePublicSymbolsAndWrite(
       file->getParentModule(), file, symbols, hasMultipleIRGenThreads,
-      nullptr, StringRef());
+      silSerializeWitnessTables, nullptr, StringRef());
 }
 void swift::enumeratePublicSymbols(ModuleDecl *M, StringSet &symbols,
-                                   bool hasMultipleIRGenThreads) {
+                                   bool hasMultipleIRGenThreads,
+                                   bool silSerializeWitnessTables) {
   enumeratePublicSymbolsAndWrite(M, nullptr, symbols, hasMultipleIRGenThreads,
-                                 nullptr, StringRef());
+                                 silSerializeWitnessTables, nullptr,
+                                 StringRef());
 }
 void swift::writeTBDFile(ModuleDecl *M, llvm::raw_ostream &os,
                          bool hasMultipleIRGenThreads,
+                         bool silSerializeWitnessTables,
                          StringRef installName) {
   StringSet symbols;
   enumeratePublicSymbolsAndWrite(M, nullptr, symbols, hasMultipleIRGenThreads,
-                                 &os, installName);
+                                 silSerializeWitnessTables, &os, installName);
 }

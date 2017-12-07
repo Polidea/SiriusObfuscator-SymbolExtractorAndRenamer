@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // We compile with -O (optimizations) and -disable-access-control (which
 // allows use to "call" methods that are removed by dead code elimination).

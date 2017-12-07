@@ -129,8 +129,6 @@ func ascii() {
   var nsASCII = NSString(utf8String: "foobar")!
   // CHECK-NEXT: has UTF-16: false
   print("has UTF-16: \(CFStringGetCharactersPtr(unsafeBitCast(nsASCII, to: CFString.self)) != nil)")
-  print("has ASCII pointer: \(CFStringGetCStringPtr(unsafeBitCast(nsASCII, to: CFString.self), 0x0600) != nil)")
-  print("has ASCII pointer: \(CFStringGetCStringPtr(unsafeBitCast(nsASCII, to: CFString.self), 0x08000100) != nil)")
 
   // CHECK: --- ASCII basic round-tripping ---
   print("--- ASCII basic round-tripping ---")

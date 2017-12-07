@@ -15,11 +15,6 @@ import TestsUtils
 // A micro-benchmark for recursive divide and conquer problems.
 // The program performs integration via Gaussian Quadrature
 
-public let IntegrateTest = BenchmarkInfo(
-  name: "Integrate",
-  runFunction: run_Integrate,
-  tags: [.validation, .algorithm])
-
 class Integrate {
   static let epsilon = 1.0e-9
 

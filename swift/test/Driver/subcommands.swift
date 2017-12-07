@@ -16,8 +16,7 @@
 // (for shebang line use). We have to run these since we can't get the driver to
 // dump what it is doing and test the argv[1] processing.
 //
-// RUN: %empty-directory(%t.dir)
-// RUN: %empty-directory(%t.dir/subpath)
+// RUN: mkdir -p %t.dir/subpath
 // RUN: echo "print(\"exec: \" + #file)" > %t.dir/stdin
 // RUN: echo "print(\"exec: \" + #file)" > %t.dir/t.swift
 // RUN: echo "print(\"exec: \" + #file)" > %t.dir/subpath/build
@@ -31,7 +30,8 @@
 
 // Check that 'swift foo' invokes 'swift-foo'.
 //
-// RUN: %empty-directory(%t.dir)
+// RUN: rm -rf %t.dir
+// RUN: mkdir -p %t.dir
 // RUN: echo "#!/bin/sh" > %t.dir/swift-foo
 // RUN: echo "echo \"exec: \$0\"" >> %t.dir/swift-foo
 // RUN: chmod +x %t.dir/swift-foo

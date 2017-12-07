@@ -14,11 +14,6 @@
 
 import TestsUtils
 
-public let SortLargeExistentials = BenchmarkInfo(
-  name: "SortLargeExistentials",
-  runFunction: run_SortLargeExistentials,
-  tags: [.validation, .api, .algorithm])
-
 protocol LetterKind {
   var value: String { get }
   func lessthan(_ rhs: LetterKind) -> Bool

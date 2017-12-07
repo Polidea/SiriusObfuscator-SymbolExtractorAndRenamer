@@ -24,136 +24,80 @@
 
 namespace swift {
 
-/// A helper class for all the SIL visitors.
-/// You probably shouldn't use this directly.
-template <typename ImplClass, typename RetTy = void, typename... ArgTys>
-class SILVisitorBase {
+/// SILVisitor - This is a simple visitor class for Swift SIL nodes, allowing
+/// clients to walk over entire SIL functions, blocks, or instructions.
+template<typename ImplClass, typename ValueRetTy = void>
+class SILVisitor {
 public:
   ImplClass &asImpl() { return static_cast<ImplClass &>(*this); }
 
-  void visitSILBasicBlock(SILBasicBlock *BB, ArgTys... args) {
-    asImpl().visitBasicBlockArguments(BB, args...);
-
-    for (auto &I : *BB)
-      asImpl().visit(&I, args...);
-  }
-  void visitSILBasicBlock(SILBasicBlock &BB, ArgTys... args) {
-    asImpl().visitSILBasicBlock(&BB, args...);
+  // Perform any required pre-processing before visiting.
+  // Sub-classes can override it to provide their custom
+  // pre-processing steps.
+  void beforeVisit(ValueBase *V) {
   }
 
-  void visitSILFunction(SILFunction *F, ArgTys... args) {
-    for (auto &BB : *F)
-      asImpl().visitSILBasicBlock(&BB, args...);
-  }
-  void visitSILFunction(SILFunction &F, ArgTys... args) {
-    asImpl().visitSILFunction(&F, args...);
-  }
-};
+  ValueRetTy visit(ValueBase *V) {
+    asImpl().beforeVisit(V);
 
-/// SILValueVisitor - This is a simple visitor class for Swift SIL nodes,
-/// allowing clients to walk over entire SIL functions, blocks, or instructions.
-template <typename ImplClass, typename RetTy = void, typename... ArgTys>
-class SILValueVisitor
-       : public SILVisitorBase<ImplClass, RetTy, ArgTys...> {
-  using super = SILVisitorBase<ImplClass, RetTy, ArgTys...>;
-public:
-  using super::asImpl;
-
-  RetTy visit(ValueBase *V, ArgTys... args) {
     switch (V->getKind()) {
 #define VALUE(CLASS, PARENT)                                \
   case ValueKind::CLASS:                                    \
-    return asImpl().visit##CLASS(static_cast<CLASS*>(V),    \
-                                 std::forward<ArgTys>(args)...);
+    return asImpl().visit##CLASS(static_cast<CLASS*>(V));
 #include "swift/SIL/SILNodes.def"
     }
     llvm_unreachable("Not reachable, all cases handled");
   }
 
   // Define default dispatcher implementations chain to parent nodes.
-#define VALUE(CLASS, PARENT)                                         \
-  RetTy visit##CLASS(CLASS *I, ArgTys... args) {                     \
-    return asImpl().visit##PARENT(I, std::forward<ArgTys>(args)...); \
+#define VALUE(CLASS, PARENT)                                    \
+  ValueRetTy visit##CLASS(CLASS *I) {                           \
+    return asImpl().visit##PARENT(I);                           \
   }
 #define ABSTRACT_VALUE(CLASS, PARENT) VALUE(CLASS, PARENT)
 #include "swift/SIL/SILNodes.def"
-};
 
-/// A visitor that should only visit SIL instructions.
-template <typename ImplClass, typename RetTy = void, typename... ArgTys>
-class SILInstructionVisitor
-       : public SILVisitorBase<ImplClass, RetTy, ArgTys...> {
-  using super = SILVisitorBase<ImplClass, RetTy, ArgTys...>;
-public:
-  using super::asImpl;
-
-  // Perform any required pre-processing before visiting.
-  // Sub-classes can override it to provide their custom
-  // pre-processing steps.
-  void beforeVisit(SILInstruction *inst) {}
-
-  RetTy visit(SILInstruction *inst, ArgTys... args) {
-    asImpl().beforeVisit(inst, args...);
-
-    switch (inst->getKind()) {
-#define INST(CLASS, PARENT)                                             \
-    case SILInstructionKind::CLASS:                                     \
-      return asImpl().visit##CLASS(static_cast<CLASS*>(inst),           \
-                                   std::forward<ArgTys>(args)...);
-#include "swift/SIL/SILNodes.def"
-    }
-    llvm_unreachable("Not reachable, all cases handled");
+  void visitSILBasicBlock(SILBasicBlock *BB) {
+    asImpl().visitBasicBlockArguments(BB);
+      
+    for (auto &I : *BB)
+      asImpl().visit(&I);
+  }
+  void visitSILBasicBlock(SILBasicBlock &BB) {
+    asImpl().visitSILBasicBlock(&BB);
   }
 
-  // Define default dispatcher implementations chain to parent nodes.
-#define INST(CLASS, PARENT)                                             \
-  RetTy visit##CLASS(CLASS *inst, ArgTys... args) {                     \
-    return asImpl().visit##PARENT(inst, std::forward<ArgTys>(args)...); \
-  }
-#define ABSTRACT_INST(CLASS, PARENT) INST(CLASS, PARENT)
-#include "swift/SIL/SILNodes.def"
-
-  void visitBasicBlockArguments(SILBasicBlock *BB, ArgTys... args) {}
-};
-
-/// A visitor that should visit all SIL nodes.
-template <typename ImplClass, typename RetTy = void, typename... ArgTys>
-class SILNodeVisitor
-       : public SILVisitorBase<ImplClass, RetTy, ArgTys...> {
-  using super = SILVisitorBase<ImplClass, RetTy, ArgTys...>;
-public:
-  using super::asImpl;
-
-  // Perform any required pre-processing before visiting.
-  // Sub-classes can override it to provide their custom
-  // pre-processing steps.
-  void beforeVisit(SILNode *I, ArgTys... args) {}
-
-  RetTy visit(SILNode *node, ArgTys... args) {
-    asImpl().beforeVisit(node, args...);
-
-    switch (node->getKind()) {
-#define NODE(CLASS, PARENT)                                             \
-    case SILNodeKind::CLASS:                                            \
-      return asImpl().visit##CLASS(cast<CLASS>(node),                   \
-                                   std::forward<ArgTys>(args)...);
-#include "swift/SIL/SILNodes.def"
-    }
-    llvm_unreachable("Not reachable, all cases handled");
-  }
-
-  // Define default dispatcher implementations chain to parent nodes.
-#define NODE(CLASS, PARENT)                                             \
-  RetTy visit##CLASS(CLASS *node, ArgTys... args) {                     \
-    return asImpl().visit##PARENT(node, std::forward<ArgTys>(args)...); \
-  }
-#define ABSTRACT_NODE(CLASS, PARENT) NODE(CLASS, PARENT)
-#include "swift/SIL/SILNodes.def"
-
-  void visitBasicBlockArguments(SILBasicBlock *BB, ArgTys... args) {
+  void visitBasicBlockArguments(SILBasicBlock *BB) {
     for (auto argI = BB->args_begin(), argEnd = BB->args_end(); argI != argEnd;
          ++argI)
-      asImpl().visit(*argI, args...);
+      asImpl().visit(*argI);
+  }
+
+  void visitSILFunction(SILFunction *F) {
+    for (auto &BB : *F)
+      asImpl().visitSILBasicBlock(&BB);
+  }
+  void visitSILFunction(SILFunction &F) {
+    asImpl().visitSILFunction(&F);
+  }
+};
+
+/// A simple convenience class for a visitor that should only visit
+/// SIL instructions.
+template<typename ImplClass, typename ValueRetTy = void>
+class SILInstructionVisitor : public SILVisitor<ImplClass, ValueRetTy> {
+public:
+  void visitBasicBlockArguments(SILBasicBlock *BB) {}
+
+  ValueRetTy visitSILArgument(SILArgument *A) {
+    llvm_unreachable("should only be visiting instructions");
+  }
+  ValueRetTy visitSILUndef(SILUndef *U) {
+    llvm_unreachable("should only be visiting instructions");
+  }
+
+  ValueRetTy visit(SILInstruction *I) {
+    return SILVisitor<ImplClass, ValueRetTy>::visit(I);
   }
 };
 

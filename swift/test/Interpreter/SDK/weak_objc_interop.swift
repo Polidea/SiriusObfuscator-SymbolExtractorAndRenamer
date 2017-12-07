@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: cp %s %t/main.swift
 // RUN: %target-clang -fobjc-arc %S/Inputs/ObjCWeak/ObjCWeak.m -c -o %t/ObjCWeak.o

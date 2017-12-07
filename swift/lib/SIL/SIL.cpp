@@ -44,25 +44,47 @@ FormalLinkage swift::getDeclLinkage(const ValueDecl *D) {
   if (isa<ClangModuleUnit>(fileContext))
     return FormalLinkage::PublicNonUnique;
 
-  if (!D->hasAccess()) {
+  if (!D->hasAccessibility()) {
     assert(D->getDeclContext()->isLocalContext());
     return FormalLinkage::Private;
   }
 
   switch (D->getEffectiveAccess()) {
-  case AccessLevel::Public:
-  case AccessLevel::Open:
+  case Accessibility::Public:
+  case Accessibility::Open:
     return FormalLinkage::PublicUnique;
-  case AccessLevel::Internal:
+  case Accessibility::Internal:
+    // If we're serializing all function bodies, type metadata for internal
+    // types needs to be public too.
+    if (D->getDeclContext()->getParentModule()->getResilienceStrategy()
+        == ResilienceStrategy::Fragile)
+      return FormalLinkage::PublicUnique;
     return FormalLinkage::HiddenUnique;
-  case AccessLevel::FilePrivate:
-  case AccessLevel::Private:
+  case Accessibility::FilePrivate:
+  case Accessibility::Private:
     // Why "hidden" instead of "private"? Because the debugger may need to
     // access these symbols.
     return FormalLinkage::HiddenUnique;
   }
 
-  llvm_unreachable("Unhandled access level in switch.");
+  llvm_unreachable("Unhandled Accessibility in switch.");
+}
+
+FormalLinkage swift::getTypeLinkage(CanType type) {
+  FormalLinkage result = FormalLinkage::Top;
+
+  // Merge all nominal types from the structural type.
+  (void) type.findIf([&](Type _type) {
+    CanType type = CanType(_type);
+
+    // For any nominal type reference, look at the type declaration.
+    if (auto nominal = type->getAnyNominal())
+      result ^= getDeclLinkage(nominal);
+
+    return false; // continue searching
+  });
+
+  return result;
 }
 
 SILLinkage swift::getSILLinkage(FormalLinkage linkage,
@@ -95,20 +117,24 @@ swift::getLinkageForProtocolConformance(const NormalProtocolConformance *C,
   if (C->isBehaviorConformance())
     return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
 
+  ModuleDecl *conformanceModule = C->getDeclContext()->getParentModule();
+
   // If the conformance was synthesized by the ClangImporter, give it
   // shared linkage.
-  if (isa<ClangModuleUnit>(C->getDeclContext()->getModuleScopeContext()))
+  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
+  auto typeUnit = typeDecl->getModuleScopeContext();
+  if (isa<ClangModuleUnit>(typeUnit)
+      && conformanceModule == typeUnit->getParentModule())
     return SILLinkage::Shared;
 
-  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
-  AccessLevel access = std::min(C->getProtocol()->getEffectiveAccess(),
-                                typeDecl->getEffectiveAccess());
-  switch (access) {
-    case AccessLevel::Private:
-    case AccessLevel::FilePrivate:
+  Accessibility accessibility = std::min(C->getProtocol()->getEffectiveAccess(),
+                                         typeDecl->getEffectiveAccess());
+  switch (accessibility) {
+    case Accessibility::Private:
+    case Accessibility::FilePrivate:
       return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
 
-    case AccessLevel::Internal:
+    case Accessibility::Internal:
       return (definition ? SILLinkage::Hidden : SILLinkage::HiddenExternal);
 
     default:

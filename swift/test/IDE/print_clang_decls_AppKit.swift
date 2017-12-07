@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // This file deliberately does not use %clang-importer-sdk for most RUN lines.
 // Instead, it generates custom overlay modules itself, and uses -I %t when it

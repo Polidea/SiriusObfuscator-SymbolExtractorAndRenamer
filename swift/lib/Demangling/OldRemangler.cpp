@@ -257,8 +257,6 @@ namespace {
 
     void mangleIndex(Node::IndexType index);
     void mangleIdentifier(StringRef name, OperatorKind operatorKind);
-    void mangleAccessor(Node *storageNode, StringRef accessorCode,
-                        EntityContext &ctx);
 
     void mangleChildNodes(Node *node) { mangleNodes(node->begin(), node->end()); }
     void mangleNodes(Node::iterator i, Node::iterator e) {
@@ -768,29 +766,6 @@ void Remangler::mangleSubscript(Node *node, EntityContext &ctx) {
   mangleNamedAndTypedEntity(node, 'i', "", ctx);
 }
 
-void Remangler::mangleAccessor(Node *storageNode, StringRef accessorCode,
-                               EntityContext &ctx) {
-  Out << 'F';
-  mangleEntityContext(storageNode->getChild(0), ctx);
-  Out << accessorCode;
-  switch (storageNode->getKind()) {
-  case Demangle::Node::Kind::Variable:
-    mangleChildNode(storageNode, 1);
-    mangleEntityType(storageNode->getChild(2), ctx);
-    break;
-  case Demangle::Node::Kind::Subscript:
-    if (storageNode->getNumChildren() > 2 &&
-        storageNode->getChild(2)->getKind() == Node::Kind::PrivateDeclName) {
-      mangleChildNode(storageNode, 2);
-    }
-    mangleIdentifier("subscript", OperatorKind::NotOperator);
-    mangleEntityType(storageNode->getChild(1), ctx);
-    break;
-  default:
-      unreachable("Not a storage node");
-  }
-}
-
 void Remangler::mangleInitializer(Node *node, EntityContext &ctx) {
   mangleSimpleEntity(node, 'I', "i", ctx);
 }
@@ -825,61 +800,61 @@ void Remangler::mangleIVarDestroyer(Node *node, EntityContext &ctx) {
 }
 
 void Remangler::mangleGetter(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "g", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "g", ctx);
 }
 
 void Remangler::mangleGlobalGetter(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "G", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "G", ctx);
 }
 
 void Remangler::mangleSetter(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "s", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "s", ctx);
 }
 
 void Remangler::mangleMaterializeForSet(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "m", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "m", ctx);
 }
 
 void Remangler::mangleWillSet(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "w", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "w", ctx);
 }
 
 void Remangler::mangleDidSet(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "W", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "W", ctx);
 }
 
 void Remangler::mangleOwningMutableAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "aO", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "aO", ctx);
 }
 
 void Remangler::mangleNativeOwningMutableAddressor(Node *node,
                                                    EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "ao", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "ao", ctx);
 }
 
 void Remangler::mangleNativePinningMutableAddressor(Node *node,
                                                     EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "ap", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "ap", ctx);
 }
 
 void Remangler::mangleUnsafeMutableAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "au", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "au", ctx);
 }
 
 void Remangler::mangleOwningAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "lO", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "lO", ctx);
 }
 
 void Remangler::mangleNativeOwningAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "lo", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "lo", ctx);
 }
 
 void Remangler::mangleNativePinningAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "lp", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "lp", ctx);
 }
 
 void Remangler::mangleUnsafeAddressor(Node *node, EntityContext &ctx) {
-  mangleAccessor(node->getFirstChild(), "lu", ctx);
+  mangleNamedAndTypedEntity(node, 'F', "lu", ctx);
 }
 
 void Remangler::mangleExplicitClosure(Node *node, EntityContext &ctx) {
@@ -1164,10 +1139,6 @@ void Remangler::mangleImplResult(Node *node) {
   mangleChildNodes(node); // impl convention, type
 }
 
-void Remangler::mangleImplEscaping(Node *node) {
-  // The old mangler does not encode escaping.
-}
-
 void Remangler::mangleImplConvention(Node *node) {
   assert(node->getKind() == Node::Kind::ImplConvention);
   StringRef text = node->getText();
@@ -1276,11 +1247,6 @@ void Remangler::mangleUnmanaged(Node *node) {
 
 void Remangler::mangleWeak(Node *node) {
   Out << "Xw";
-  mangleSingleChildNode(node); // type
-}
-
-void Remangler::mangleShared(Node *node) {
-  Out << 'h';
   mangleSingleChildNode(node); // type
 }
 
@@ -1668,10 +1634,6 @@ void Remangler::mangleCurryThunk(Node *node, EntityContext &ctx) {
   Out << "<curry-thunk>";
 }
 
-void Remangler::mangleDispatchThunk(Node *node, EntityContext &ctx) {
-  Out << "<dispatch-thunk>";
-}
-
 void Remangler::mangleEmptyList(Node *node) {
   Out << "<empty>";
 }
@@ -1701,41 +1663,6 @@ void Remangler::mangleOutlinedRetain(Node *node) {
 
 void Remangler::mangleOutlinedRelease(Node *node) {
   Out << "Ws";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedInitializeWithTake(Node *node) {
-  Out << "Wb";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedInitializeWithCopy(Node *node) {
-  Out << "Wc";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedAssignWithTake(Node *node) {
-  Out << "Wd";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedAssignWithCopy(Node *node) {
-  Out << "Wf";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedDestroy(Node *node) {
-  Out << "Wh";
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedVariable(Node *node) {
-  Out << "Tv" << node->getIndex();
-  mangleSingleChildNode(node);
-}
-
-void Remangler::mangleOutlinedBridgedMethod(Node *node) {
-  Out << "Te" << node->getText();
   mangleSingleChildNode(node);
 }
 
@@ -1828,10 +1755,6 @@ void Remangler::mangleSILBoxImmutableField(Node *node) {
   assert(node->getNumChildren() == 1
          && node->getChild(0)->getKind() == Node::Kind::Type);
   mangleType(node->getChild(0));
-}
-
-void Remangler::mangleAssocTypePath(Node *node) {
-  unreachable("unsupported");
 }
 
 /// The top-level interface to the remangler.

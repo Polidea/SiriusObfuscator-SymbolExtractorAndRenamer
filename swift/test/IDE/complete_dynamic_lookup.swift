@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend -emit-module -disable-objc-attr-requires-foundation-module -o %t %S/Inputs/AnyObject/foo_swift_module.swift
 // RUN: %target-swift-frontend -emit-module -disable-objc-attr-requires-foundation-module -o %t %S/Inputs/AnyObject/bar_swift_module.swift
 // RUN: cp %S/Inputs/AnyObject/baz_clang_module.h %t
@@ -42,6 +43,10 @@
 
 // RUN: %target-swift-ide-test -code-completion -source-filename %s -I %t -disable-objc-attr-requires-foundation-module -code-completion-token=DL_FUNC_NAME_PAREN_1 > %t.dl.txt
 // RUN: %FileCheck %s -check-prefix=DL_FUNC_NAME_PAREN_1 < %t.dl.txt
+// RUN: %FileCheck %s -check-prefix=GLOBAL_NEGATIVE < %t.dl.txt
+
+// RUN: %target-swift-ide-test -code-completion -source-filename %s -I %t -disable-objc-attr-requires-foundation-module -code-completion-token=DL_FUNC_NAME_DOT_1 > %t.dl.txt
+// RUN: %FileCheck %s -check-prefix=DL_FUNC_NAME_DOT_1 < %t.dl.txt
 // RUN: %FileCheck %s -check-prefix=GLOBAL_NEGATIVE < %t.dl.txt
 
 // RUN: %target-swift-ide-test -code-completion -source-filename %s -I %t -disable-objc-attr-requires-foundation-module -code-completion-token=DL_FUNC_NAME_BANG_1 > %t.dl.txt
@@ -455,6 +460,7 @@ func testAnyObject11(_ dl: AnyObject) {
 }
 // FIXME: it would be nice if we produced a call pattern here.
 // DL_FUNC_NAME_1:     Begin completions
+// DL_FUNC_NAME_1-DAG: Decl[InstanceVar]/CurrNominal:      .description[#String#]{{; name=.+$}}
 // DL_FUNC_NAME_1:     End completions
 
 func testAnyObject11_(_ dl: AnyObject) {
@@ -468,6 +474,9 @@ func testAnyObject12(_ dl: AnyObject) {
   dl.returnsObjcClass.#^DL_FUNC_NAME_DOT_1^#
 }
 // FIXME: it would be nice if we produced a call pattern here.
+// DL_FUNC_NAME_DOT_1:     Begin completions
+// DL_FUNC_NAME_DOT_1-DAG: Decl[InstanceVar]/CurrNominal:      description[#String#]{{; name=.+$}}
+// DL_FUNC_NAME_DOT_1:     End completions
 
 func testAnyObject13(_ dl: AnyObject) {
   dl.returnsObjcClass!#^DL_FUNC_NAME_BANG_1^#

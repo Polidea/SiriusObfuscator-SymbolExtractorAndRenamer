@@ -149,10 +149,6 @@ static StringRef toString(ValueWitnessKind k) {
     return "destructiveProjectEnumData";
   case ValueWitnessKind::DestructiveInjectEnumTag:
     return "destructiveInjectEnumTag";
-  case ValueWitnessKind::GetEnumTagSinglePayload:
-    return "getEnumTagSinglePayload";
-  case ValueWitnessKind::StoreEnumTagSinglePayload:
-    return "storeEnumTagSinglePayload";
   }
   printer_unreachable("bad value witness kind");
 }
@@ -294,7 +290,6 @@ private:
     case Node::Kind::CFunctionPointer:
     case Node::Kind::Constructor:
     case Node::Kind::CurryThunk:
-    case Node::Kind::DispatchThunk:
     case Node::Kind::Deallocator:
     case Node::Kind::DeclContext:
     case Node::Kind::DefaultArgumentInitializer:
@@ -335,7 +330,6 @@ private:
     case Node::Kind::Index:
     case Node::Kind::IVarInitializer:
     case Node::Kind::IVarDestroyer:
-    case Node::Kind::ImplEscaping:
     case Node::Kind::ImplConvention:
     case Node::Kind::ImplFunctionAttribute:
     case Node::Kind::ImplFunctionType:
@@ -380,7 +374,6 @@ private:
     case Node::Kind::ReabstractionThunk:
     case Node::Kind::ReabstractionThunkHelper:
     case Node::Kind::Setter:
-    case Node::Kind::Shared:
     case Node::Kind::SILBoxLayout:
     case Node::Kind::SILBoxMutableField:
     case Node::Kind::SILBoxImmutableField:
@@ -416,18 +409,10 @@ private:
     case Node::Kind::EmptyList:
     case Node::Kind::FirstElementMarker:
     case Node::Kind::VariadicMarker:
-    case Node::Kind::OutlinedBridgedMethod:
     case Node::Kind::OutlinedCopy:
     case Node::Kind::OutlinedConsume:
     case Node::Kind::OutlinedRetain:
     case Node::Kind::OutlinedRelease:
-    case Node::Kind::OutlinedInitializeWithTake:
-    case Node::Kind::OutlinedInitializeWithCopy:
-    case Node::Kind::OutlinedAssignWithTake:
-    case Node::Kind::OutlinedAssignWithCopy:
-    case Node::Kind::OutlinedDestroy:
-    case Node::Kind::OutlinedVariable:
-    case Node::Kind::AssocTypePath:
       return false;
     }
     printer_unreachable("bad node kind");
@@ -625,9 +610,6 @@ private:
   /// The main big print function.
   NodePointer print(NodePointer Node, bool asPrefixContext = false);
 
-  NodePointer printAbstractStorage(NodePointer Node, bool asPrefixContent,
-                                   StringRef ExtraName);
-
   /// Utility function to print entities.
   ///
   /// \param Entity The entity node to print
@@ -640,14 +622,11 @@ private:
   /// \param ExtraName An extra name added to the entity name (if any).
   /// \param ExtraIndex An extra index added to the entity name (if any),
   ///        e.g. closure #1
-  /// \param OverwriteName If non-empty, print this name instead of the one
-  ///        provided by the node. Gets printed even if hasName is false.
   /// \return If a non-null node is returned it's a context which must be
   ///         printed in postfix-form after the entity: "<entity> in <context>".
   NodePointer printEntity(NodePointer Entity, bool asPrefixContext,
                           TypePrinting TypePr, bool hasName,
-                          StringRef ExtraName = "", int ExtraIndex = -1,
-                          StringRef OverwriteName = "");
+                          StringRef ExtraName = "", int ExtraIndex = -1);
 };
 } // end anonymous namespace
 
@@ -800,13 +779,6 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
     Printer << "curry thunk of ";
     print(Node->getChild(0));
     return nullptr;
-  case Node::Kind::DispatchThunk:
-    Printer << "dispatch thunk of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedBridgedMethod:
-    Printer << "outlined bridged method (" << Node->getText() << ") of ";
-    return nullptr;
   case Node::Kind::OutlinedCopy:
     Printer << "outlined copy of ";
     print(Node->getChild(0));
@@ -822,29 +794,6 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
   case Node::Kind::OutlinedRelease:
     Printer << "outlined release of ";
     print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedInitializeWithTake:
-    Printer << "outlined init with take of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedInitializeWithCopy:
-    Printer << "outlined init with copy of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedAssignWithTake:
-    Printer << "outlined assign with take of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedAssignWithCopy:
-    Printer << "outlined assign with copy of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedDestroy:
-    Printer << "outlined destroy of ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::OutlinedVariable:
-    Printer << "outlined variable #" << Node->getIndex() << " of ";
     return nullptr;
   case Node::Kind::Directness:
     Printer << toString(Directness(Node->getIndex())) << " ";
@@ -866,12 +815,9 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
     return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
                        /*hasName*/true);
   case Node::Kind::Function:
-    return printEntity(Node, asPrefixContext, TypePrinting::FunctionStyle,
-                       /*hasName*/true);
   case Node::Kind::Subscript:
     return printEntity(Node, asPrefixContext, TypePrinting::FunctionStyle,
-                       /*hasName*/false, /*ExtraName*/"", /*ExtraIndex*/-1,
-                       "subscript");
+                       /*hasName*/true);
   case Node::Kind::GenericTypeParamDecl:
     return printEntity(Node, asPrefixContext, TypePrinting::NoType,
                        /*hasName*/true);
@@ -1005,6 +951,9 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
       print(id);
     }
     if (isVariadic) {
+      SugarType Sugar = findSugar(type);
+      if (Sugar == SugarType::Array)
+        type = type->getFirstChild()->getChild(1)->getFirstChild();
       print(type);
       Printer << "...";
     } else {
@@ -1037,10 +986,6 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
     return nullptr;
   case Node::Kind::InOut:
     Printer << "inout ";
-    print(Node->getChild(0));
-    return nullptr;
-  case Node::Kind::Shared:
-    Printer << "__shared ";
     print(Node->getChild(0));
     return nullptr;
   case Node::Kind::NonObjCAttribute:
@@ -1511,47 +1456,47 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
     return nullptr;
   }
   case Node::Kind::OwningAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "owningAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "owningAddressor");
   case Node::Kind::OwningMutableAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "owningMutableAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "owningMutableAddressor");
   case Node::Kind::NativeOwningAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "nativeOwningAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "nativeOwningAddressor");
   case Node::Kind::NativeOwningMutableAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "nativeOwningMutableAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "nativeOwningMutableAddressor");
   case Node::Kind::NativePinningAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "nativePinningAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "nativePinningAddressor");
   case Node::Kind::NativePinningMutableAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "nativePinningMutableAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "nativePinningMutableAddressor");
   case Node::Kind::UnsafeAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "unsafeAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "unsafeAddressor");
   case Node::Kind::UnsafeMutableAddressor:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "unsafeMutableAddressor");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "unsafeMutableAddressor");
   case Node::Kind::GlobalGetter:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "getter");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "getter");
   case Node::Kind::Getter:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "getter");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "getter");
   case Node::Kind::Setter:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "setter");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "setter");
   case Node::Kind::MaterializeForSet:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "materializeForSet");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "materializeForSet");
   case Node::Kind::WillSet:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "willset");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "willset");
   case Node::Kind::DidSet:
-    return printAbstractStorage(Node->getFirstChild(), asPrefixContext,
-                                "didset");
+    return printEntity(Node, asPrefixContext, TypePrinting::WithColon,
+                       /*hasName*/true, "didset");
   case Node::Kind::Allocator:
     return printEntity(Node, asPrefixContext, TypePrinting::FunctionStyle,
                        /*hasName*/false, isClassType(Node->getChild(0)) ?
@@ -1597,9 +1542,6 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
   }
   case Node::Kind::TypeList:
     printChildren(Node);
-    return nullptr;
-  case Node::Kind::ImplEscaping:
-    Printer << "@escaping";
     return nullptr;
   case Node::Kind::ImplConvention:
     Printer << Node->getText();
@@ -1815,33 +1757,13 @@ NodePointer NodePrinter::print(NodePointer Node, bool asPrefixContext) {
            && Node->getChild(0)->getKind() == Node::Kind::Type);
     print(Node->getChild(0));
     return nullptr;
-  case Node::Kind::AssocTypePath:
-    printChildren(Node->begin(), Node->end(), ".");
-      return nullptr;
   }
   printer_unreachable("bad node kind!");
 }
 
-NodePointer NodePrinter::printAbstractStorage(NodePointer Node,
-                                              bool asPrefixContent,
-                                              StringRef ExtraName) {
-  switch (Node->getKind()) {
-    case Node::Kind::Variable:
-      return printEntity(Node, asPrefixContent, TypePrinting::WithColon,
-                         /*hasName*/true, ExtraName);
-    case Node::Kind::Subscript:
-      return printEntity(Node, asPrefixContent, TypePrinting::WithColon,
-                         /*hasName*/false, ExtraName, /*ExtraIndex*/-1,
-                         "subscript");
-    default:
-      printer_unreachable("Not an abstract storage node");
-  }
-}
-
 NodePointer NodePrinter::
 printEntity(NodePointer Entity, bool asPrefixContext, TypePrinting TypePr,
-            bool hasName, StringRef ExtraName, int ExtraIndex,
-            StringRef OverwriteName) {
+            bool hasName, StringRef ExtraName, int ExtraIndex) {
   // Either we print the context in prefix form "<context>.<name>" or in
   // suffix form "<name> in <context>".
   bool MultiWordName = ExtraName.contains(' ');
@@ -1873,7 +1795,7 @@ printEntity(NodePointer Entity, bool asPrefixContext, TypePrinting TypePr,
     }
   }
 
-  if (hasName || !OverwriteName.empty()) {
+  if (hasName) {
     assert(ExtraIndex < 0 && "Can't have a name and extra index");
     if (!ExtraName.empty() && MultiWordName) {
       Printer << ExtraName;
@@ -1881,11 +1803,7 @@ printEntity(NodePointer Entity, bool asPrefixContext, TypePrinting TypePr,
       ExtraName = "";
     }
     size_t CurrentPos = Printer.getStringRef().size();
-    if (!OverwriteName.empty()) {
-      Printer << OverwriteName;
-    } else {
-      print(Entity->getChild(1));
-    }
+    print(Entity->getChild(1));
     if (Printer.getStringRef().size() != CurrentPos && !ExtraName.empty())
       Printer << '.';
   }

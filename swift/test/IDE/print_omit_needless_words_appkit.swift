@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 
 // REQUIRES: objc_interop
 // REQUIRES: OS=macosx

@@ -23,8 +23,7 @@ namespace swift {
   void PrintTo(SourceLoc loc, std::ostream *os) {
     *os << loc.getOpaquePointerValue();
     if (loc.isValid())
-      *os << " '" << *static_cast<const char *>(loc.getOpaquePointerValue())
-          << "'";
+      *os << " '" << *(char *)loc.getOpaquePointerValue() << "'";
   }
 
   void PrintTo(SourceRange range, std::ostream *os) {
@@ -152,8 +151,7 @@ TEST(SourceLoc, StmtConditionElement) {
                         .addMemBufferCopy("if let x = Optional.some(1) { }");
   SourceLoc start = C.Ctx.SourceMgr.getLocForBufferStart(bufferID);
   
-  auto vardecl = new (C.Ctx) VarDecl(/*IsStatic*/false,
-                                     VarDecl::Specifier::Let,
+  auto vardecl = new (C.Ctx) VarDecl(/*IsStatic*/false, /*IsLet*/true,
                                      /*IsCaptureList*/false,
                                      start.getAdvancedLoc(7)
                                     , C.Ctx.getIdentifier("x")

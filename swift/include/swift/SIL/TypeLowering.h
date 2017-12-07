@@ -44,7 +44,7 @@ namespace Lowering {
 /// The default convention for handling the callee object on thick
 /// callees.
 const ParameterConvention DefaultThickCalleeConvention =
-    ParameterConvention::Direct_Guaranteed;
+  ParameterConvention::Direct_Owned;
 
 /// Given an AST function type, return a type that is identical except
 /// for using the given ExtInfo.
@@ -67,31 +67,21 @@ inline CanAnyFunctionType adjustFunctionType(CanAnyFunctionType t,
   
 /// Given a SIL function type, return a type that is identical except
 /// for using the given ExtInfo.
-CanSILFunctionType
-adjustFunctionType(CanSILFunctionType type, SILFunctionType::ExtInfo extInfo,
-                   ParameterConvention calleeConv,
-                   Optional<ProtocolConformanceRef> witnessMethodConformance);
-inline CanSILFunctionType
-adjustFunctionType(CanSILFunctionType type, SILFunctionType::ExtInfo extInfo,
-                   Optional<ProtocolConformanceRef> witnessMethodConformance) {
-  return adjustFunctionType(type, extInfo, type->getCalleeConvention(),
-                            witnessMethodConformance);
+CanSILFunctionType adjustFunctionType(CanSILFunctionType type,
+                                      SILFunctionType::ExtInfo extInfo,
+                                      ParameterConvention calleeConv);
+inline CanSILFunctionType adjustFunctionType(CanSILFunctionType type,
+                                      SILFunctionType::ExtInfo extInfo) {
+  return adjustFunctionType(type, extInfo, type->getCalleeConvention());
 }
-inline CanSILFunctionType
-adjustFunctionType(CanSILFunctionType t, SILFunctionType::Representation rep,
-                   Optional<ProtocolConformanceRef> witnessMethodConformance) {
+inline CanSILFunctionType adjustFunctionType(CanSILFunctionType t,
+                                         SILFunctionType::Representation rep) {
   if (t->getRepresentation() == rep) return t;
   auto extInfo = t->getExtInfo().withRepresentation(rep);
-  auto contextConvention = DefaultThickCalleeConvention;
+  
   return adjustFunctionType(t, extInfo,
-                            extInfo.hasContext()
-                                ? contextConvention
-                                : ParameterConvention::Direct_Unowned,
-                            witnessMethodConformance);
-}
-inline CanSILFunctionType
-adjustFunctionType(CanSILFunctionType t, SILFunctionType::Representation rep) {
-  return adjustFunctionType(t, rep, t->getWitnessMethodConformanceOrNone());
+                    extInfo.hasContext() ? DefaultThickCalleeConvention
+                                         : ParameterConvention::Direct_Unowned);
 }
   
 
@@ -264,19 +254,7 @@ public:
 
   enum class LoweringStyle { Shallow, Deep };
 
-  /// Given the result of the expansion heuristic,
-  /// return appropriate lowering style.
-  static LoweringStyle getLoweringStyle(bool shouldExpand) {
-    if (shouldExpand)
-      return TypeLowering::LoweringStyle::Deep;
-    return TypeLowering::LoweringStyle::Shallow;
-  }
-
-  //===--------------------------------------------------------------------===//
-  // DestroyValue
-  //===--------------------------------------------------------------------===//
-
-  /// Emit a lowered destroy value operation.
+  /// Emit a lowered 'release_value' operation.
   ///
   /// This type must be loadable.
   virtual void emitLoweredDestroyValue(SILBuilder &B, SILLocation loc,
@@ -291,7 +269,7 @@ public:
     return emitDestroyValue(B, loc, value);
   }
 
-  /// Emit a lowered destroy value operation.
+  /// Emit a lowered 'release_value' operation.
   ///
   /// This type must be loadable.
   void emitLoweredDestroyValueShallow(SILBuilder &B, SILLocation loc,
@@ -299,7 +277,7 @@ public:
     emitLoweredDestroyValue(B, loc, value, LoweringStyle::Shallow);
   }
 
-  /// Emit a lowered destroy_value operation.
+  /// Emit a lowered 'release_value' operation.
   ///
   /// This type must be loadable.
   void emitLoweredDestroyValueDeep(SILBuilder &B, SILLocation loc,
@@ -318,18 +296,14 @@ public:
   virtual void emitDestroyValue(SILBuilder &B, SILLocation loc,
                                 SILValue value) const = 0;
 
-  //===--------------------------------------------------------------------===//
-  // CopyValue
-  //===--------------------------------------------------------------------===//
-
-  /// Emit a lowered copy value operation.
+  /// Emit a lowered 'retain_value' operation.
   ///
   /// This type must be loadable.
   virtual SILValue emitLoweredCopyValue(SILBuilder &B, SILLocation loc,
                                         SILValue value,
                                         LoweringStyle style) const = 0;
 
-  /// Emit a lowered copy value operation.
+  /// Emit a lowered 'retain_value' operation.
   ///
   /// This type must be loadable.
   SILValue emitLoweredCopyValueShallow(SILBuilder &B, SILLocation loc,
@@ -337,7 +311,7 @@ public:
     return emitLoweredCopyValue(B, loc, value, LoweringStyle::Shallow);
   }
 
-  /// Emit a lowered copy value operation.
+  /// Emit a lowered 'retain_value' operation.
   ///
   /// This type must be loadable.
   SILValue emitLoweredCopyValueDeep(SILBuilder &B, SILLocation loc,
@@ -386,40 +360,24 @@ struct SILConstantInfo {
   /// The formal type of the constant, still curried.  For a normal
   /// function, this is just its declared type; for a getter or
   /// setter, computing this can be more involved.
-  CanAnyFunctionType FormalType;
-
-  /// The abstraction pattern of the constant.  Its type structure
-  /// matches the formal type, but with types replaced with their
-  /// bridged equivalents.
-  AbstractionPattern FormalPattern;
+  CanAnyFunctionType FormalInterfaceType;
 
   /// The uncurried and bridged type of the constant.
-  CanAnyFunctionType LoweredType;
+  CanAnyFunctionType LoweredInterfaceType;
 
   /// The SIL function type of the constant.
   CanSILFunctionType SILFnType;
   
   /// The generic environment used by the constant.
   GenericEnvironment *GenericEnv;
-
-  SILConstantInfo(CanAnyFunctionType formalType,
-                  AbstractionPattern formalPattern,
-                  CanAnyFunctionType loweredType,
-                  CanSILFunctionType silFnTy,
-                  GenericEnvironment *env)
-    : FormalType(formalType),
-      FormalPattern(formalPattern),
-      LoweredType(loweredType),
-      SILFnType(silFnTy),
-      GenericEnv(env) {}
   
   SILType getSILType() const {
     return SILType::getPrimitiveObjectType(SILFnType);
   }
 
   friend bool operator==(SILConstantInfo lhs, SILConstantInfo rhs) {
-    return lhs.FormalType == rhs.FormalType &&
-           lhs.LoweredType == rhs.LoweredType &&
+    return lhs.FormalInterfaceType == rhs.FormalInterfaceType &&
+           lhs.LoweredInterfaceType == rhs.LoweredInterfaceType &&
            lhs.SILFnType == rhs.SILFnType &&
            lhs.GenericEnv == rhs.GenericEnv;
   }
@@ -549,15 +507,12 @@ class TypeConverter {
 
   llvm::SmallVector<DependentTypeState, 1> DependentTypes;
 
-  llvm::DenseMap<SILDeclRef, SILConstantInfo *> ConstantTypes;
+  llvm::DenseMap<SILDeclRef, SILConstantInfo> ConstantTypes;
   
-  llvm::DenseMap<OverrideKey, SILConstantInfo *> ConstantOverrideTypes;
+  llvm::DenseMap<OverrideKey, SILConstantInfo> ConstantOverrideTypes;
 
   llvm::DenseMap<AnyFunctionRef, CaptureInfo> LoweredCaptures;
-
-  /// Cache of loadable SILType to number of (estimated) fields
-  llvm::DenseMap<SILType, unsigned> TypeFields;
-
+  
   CanAnyFunctionType makeConstantInterfaceType(SILDeclRef constant);
   
   /// Get the generic environment for a constant.
@@ -604,10 +559,7 @@ public:
   
   /// Get the method dispatch strategy for a protocol.
   static ProtocolDispatchStrategy getProtocolDispatchStrategy(ProtocolDecl *P);
-
-  /// Count the total number of fields inside the given SIL Type
-  unsigned countNumberOfFields(SILType Ty);
-
+  
   /// True if a protocol uses witness tables for dynamic dispatch.
   static bool protocolRequiresWitnessTable(ProtocolDecl *P) {
     return ProtocolDescriptorFlags::needsWitnessTable
@@ -676,19 +628,26 @@ public:
   /// whose type cannot be represented in the AST because it is
   /// a polymorphic function value. This function returns the
   /// unsubstituted lowered type of this callback.
-  CanSILFunctionType getMaterializeForSetCallbackType(
-      AbstractStorageDecl *storage, CanGenericSignature genericSig,
-      Type selfType, SILFunctionTypeRepresentation rep,
-      Optional<ProtocolConformanceRef> witnessMethodConformance);
+  CanSILFunctionType
+  getMaterializeForSetCallbackType(AbstractStorageDecl *storage,
+                                   CanGenericSignature genericSig,
+                                   Type selfType,
+                                   SILFunctionTypeRepresentation rep);
 
   /// Return the SILFunctionType for a native function value of the
   /// given type.
   CanSILFunctionType getSILFunctionType(AbstractionPattern origType,
                                         CanFunctionType substFnType);
 
+  /// Convert an AST function type into a SILFunctionType at a non-standard
+  /// uncurry level.
+  CanSILFunctionType getSILFunctionType(AbstractionPattern origType,
+                                        CanFunctionType substFnType,
+                                        unsigned uncurryLevel);
+
   /// Returns the formal type, lowered AST type, and SILFunctionType
   /// for a constant reference.
-  const SILConstantInfo &getConstantInfo(SILDeclRef constant);
+  SILConstantInfo getConstantInfo(SILDeclRef constant);
   
   /// Returns the SIL type of a constant reference.
   SILType getConstantType(SILDeclRef constant) {
@@ -723,7 +682,7 @@ public:
   ///
   /// Will be the same as getConstantInfo() if the declaration does not
   /// override anything.
-  const SILConstantInfo &getConstantOverrideInfo(SILDeclRef constant) {
+  SILConstantInfo getConstantOverrideInfo(SILDeclRef constant) {
     // Fast path if the constant does not override anything.
     auto next = constant.getNextOverriddenVTableEntry();
     if (next.isNull())
@@ -733,8 +692,8 @@ public:
     return getConstantOverrideInfo(constant, base);
   }
 
-  const SILConstantInfo &getConstantOverrideInfo(SILDeclRef constant,
-                                                 SILDeclRef base);
+  SILConstantInfo getConstantOverrideInfo(SILDeclRef constant,
+                                          SILDeclRef base);
 
   /// Get the empty tuple type as a SILType.
   SILType getEmptyTupleType() {
@@ -762,24 +721,19 @@ public:
                              SILFunctionTypeRepresentation rep,
                              BridgedTypePurpose purpose);
 
-  struct LoweredFormalTypes {
-    /// The abstraction pattern of the type.  This always has a type; the
-    /// type is a function type parallel in structure to the original formal
-    /// type but with types replaced with appropriate bridged types.
-    AbstractionPattern Pattern;
+  /// Convert a nested function type into an uncurried AST representation.
+  CanAnyFunctionType getLoweredASTFunctionType(CanAnyFunctionType t,
+                                               unsigned uncurryLevel,
+                                               AnyFunctionType::ExtInfo info,
+                                               Optional<SILDeclRef> constant);
 
-    /// The bridged and uncurried type of the constant.
-    CanAnyFunctionType Uncurried;
-  };
-
-  /// Derive the lowered formal type of the given constant.
-  LoweredFormalTypes getLoweredFormalTypes(SILDeclRef constant,
-                                           CanAnyFunctionType formalType);
-
-  /// Given a function type, yield its bridged formal type.
-  CanAnyFunctionType getBridgedFunctionType(AbstractionPattern fnPattern,
-                                            CanAnyFunctionType fnType,
-                                            AnyFunctionType::ExtInfo extInfo);
+  /// Convert a nested function type into an uncurried AST representation.
+  CanAnyFunctionType getLoweredASTFunctionType(CanAnyFunctionType t,
+                                               unsigned uncurryLevel,
+                                               Optional<SILDeclRef> constant) {
+    return getLoweredASTFunctionType(t, uncurryLevel, t->getExtInfo(),
+                                     constant);
+  }
 
   /// Given a referenced value and the substituted formal type of a
   /// resulting l-value expression, produce the substituted formal
@@ -890,6 +844,10 @@ private:
                                AbstractionPattern pattern,
                                CanType result,
                                bool suppressOptional);
+
+  CanAnyFunctionType getBridgedFunctionType(AbstractionPattern fnPattern,
+                                            CanAnyFunctionType fnType,
+                                            AnyFunctionType::ExtInfo extInfo);
 };
 
 inline const TypeLowering &
@@ -920,7 +878,7 @@ private:
   GenericContextScope(const GenericContextScope&) = delete;
   GenericContextScope &operator=(const GenericContextScope&) = delete;
 };
-
+  
 } // namespace Lowering
 } // namespace swift
 

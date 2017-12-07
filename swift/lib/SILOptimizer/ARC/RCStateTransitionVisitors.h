@@ -38,14 +38,14 @@ class RCStateTransitionKindVisitor {
   ImplTy &asImpl() { return *reinterpret_cast<ImplTy *>(this); }
 
 public:
-#define KIND(K) ResultTy visit ## K(SILNode *) { return ResultTy(); }
+#define KIND(K) ResultTy visit ## K(ValueBase *) { return ResultTy(); }
 #include "RCStateTransition.def"
 
-  ResultTy visit(SILNode *N) {
-    switch (getRCStateTransitionKind(N)) {
+  ResultTy visit(ValueBase *V) {
+    switch (getRCStateTransitionKind(V)) {
 #define KIND(K)                                 \
   case RCStateTransitionKind::K:                \
-    return asImpl().visit ## K(N);
+    return asImpl().visit ## K(V);
 #include "RCStateTransition.def"
     }
     llvm_unreachable("Covered switch isn't covered?!");
@@ -128,9 +128,9 @@ public:
       ARCState &DataflowState, bool FreezeOwnedArgEpilogueReleases,
       IncToDecStateMapTy &IncToDecStateMap,
       ImmutablePointerSetFactory<SILInstruction> &SetFactory);
-  DataflowResult visitAutoreleasePoolCall(SILNode *N);
-  DataflowResult visitStrongDecrement(SILNode *N);
-  DataflowResult visitStrongIncrement(SILNode *N);
+  DataflowResult visitAutoreleasePoolCall(ValueBase *V);
+  DataflowResult visitStrongDecrement(ValueBase *V);
+  DataflowResult visitStrongIncrement(ValueBase *V);
 };
 
 } // end swift namespace
@@ -163,10 +163,10 @@ public:
       RCIdentityFunctionInfo *RCFI, ARCState &State,
       DecToIncStateMapTy &DecToIncStateMap,
       ImmutablePointerSetFactory<SILInstruction> &SetFactory);
-  DataflowResult visitAutoreleasePoolCall(SILNode *N);
-  DataflowResult visitStrongDecrement(SILNode *N);
-  DataflowResult visitStrongIncrement(SILNode *N);
-  DataflowResult visitStrongEntrance(SILNode *N);
+  DataflowResult visitAutoreleasePoolCall(ValueBase *V);
+  DataflowResult visitStrongDecrement(ValueBase *V);
+  DataflowResult visitStrongIncrement(ValueBase *V);
+  DataflowResult visitStrongEntrance(ValueBase *V);
 
 private:
   DataflowResult visitStrongEntranceApply(ApplyInst *AI);

@@ -17,7 +17,6 @@
 
 #define DEBUG_TYPE "sil-generic-specializer"
 
-#include "swift/SIL/OptimizationRemark.h"
 #include "swift/SIL/SILFunction.h"
 #include "swift/SIL/SILInstruction.h"
 #include "swift/SILOptimizer/Utils/Generics.h"
@@ -50,7 +49,6 @@ class GenericSpecializer : public SILFunctionTransform {
 bool GenericSpecializer::specializeAppliesInFunction(SILFunction &F) {
   DeadInstructionSet DeadApplies;
   llvm::SmallSetVector<SILInstruction *, 8> Applies;
-  OptRemark::Emitter ORE(DEBUG_TYPE, F.getModule());
 
   bool Changed = false;
   for (auto &BB : F) {
@@ -69,17 +67,8 @@ bool GenericSpecializer::specializeAppliesInFunction(SILFunction &F) {
         continue;
 
       auto *Callee = Apply.getReferencedFunction();
-      if (!Callee)
+      if (!Callee || !Callee->isDefinition())
         continue;
-      if (!Callee->isDefinition()) {
-        ORE.emit([&]() {
-          using namespace OptRemark;
-          return RemarkMissed("NoDef", *I)
-                 << "Unable to specialize generic function "
-                 << NV("Callee", Callee) << " since definition is not visible";
-        });
-        continue;
-      }
 
       Applies.insert(Apply.getInstruction());
     }
@@ -95,13 +84,10 @@ bool GenericSpecializer::specializeAppliesInFunction(SILFunction &F) {
       SILFunction *Callee = Apply.getReferencedFunction();
       assert(Callee && "Expected to have a known callee");
 
-      if (!Callee->shouldOptimize())
-        continue;
-
       // We have a call that can potentially be specialized, so
       // attempt to do so.
       llvm::SmallVector<SILFunction *, 2> NewFunctions;
-      trySpecializeApplyOfGeneric(Apply, DeadApplies, NewFunctions, ORE);
+      trySpecializeApplyOfGeneric(Apply, DeadApplies, NewFunctions);
 
       // Remove all the now-dead applies. We must do this immediately
       // rather than defer it in order to avoid problems with cloning

@@ -41,10 +41,9 @@ extension AudioBuffer {
     _ typedBuffer: UnsafeMutableBufferPointer<Element>,
     numberOfChannels: Int
   ) {
-    let byteSize = typedBuffer.count * MemoryLayout<Element>.stride
-    self.init(mNumberChannels: UInt32(numberOfChannels),
-              mDataByteSize: UInt32(byteSize),
-              mData: UnsafeMutableRawPointer(typedBuffer.baseAddress))
+    self.mNumberChannels = UInt32(numberOfChannels)
+    self.mData = UnsafeMutableRawPointer(typedBuffer.baseAddress)
+    self.mDataByteSize = UInt32(typedBuffer.count * MemoryLayout<Element>.stride)
   }
 }
 
@@ -163,9 +162,9 @@ extension UnsafeMutableAudioBufferListPointer
   }
 
   public subscript(bounds: Range<Int>)
-    -> Slice<UnsafeMutableAudioBufferListPointer> {
+    -> MutableRandomAccessSlice<UnsafeMutableAudioBufferListPointer> {
     get {
-      return Slice(base: self, bounds: bounds)
+      return MutableRandomAccessSlice(base: self, bounds: bounds)
     }
     set {
       _writeBackMutableSlice(&self, bounds: bounds, slice: newValue)

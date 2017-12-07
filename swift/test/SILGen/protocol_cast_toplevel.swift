@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -emit-silgen %s -disable-objc-attr-requires-foundation-module -enable-sil-ownership
+// RUN: %target-swift-frontend -emit-silgen %s -disable-objc-attr-requires-foundation-module
 
 // REQUIRES: objc_interop
 

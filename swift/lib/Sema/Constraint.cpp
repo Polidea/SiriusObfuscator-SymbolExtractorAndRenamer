@@ -493,6 +493,8 @@ Type Fix::getTypeArgument(ConstraintSystem &cs) const {
 
 StringRef Fix::getName(FixKind kind) {
   switch (kind) {
+  case FixKind::None:
+    return "prevent fixes";
   case FixKind::ForceOptional:
     return "fix: force optional";
   case FixKind::OptionalChaining:

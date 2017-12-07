@@ -1,3 +1,0 @@
-module VariadicBool {
-  header "variadicBool.h"
-}

@@ -1,4 +1,4 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t && mkdir -p %t
 // RUN: %target-build-swift -emit-module -c %S/Inputs/OpenHelpers.swift -o %t/OpenHelpers.swiftmodule
 // RUN: %target-typecheck-verify-swift -I %t
 

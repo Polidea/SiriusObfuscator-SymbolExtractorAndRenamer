@@ -10,9 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "SILGen.h"
 #include "Initialization.h"
 #include "RValue.h"
-#include "SILGen.h"
 #include "SILGenDynamicCast.h"
 #include "Scope.h"
 #include "SwitchCaseFullExpr.h"
@@ -21,7 +21,6 @@
 #include "swift/AST/Module.h"
 #include "swift/AST/NameLookup.h"
 #include "swift/AST/ProtocolConformance.h"
-#include "swift/Basic/ProfileCounter.h"
 #include "swift/SIL/FormalLinkage.h"
 #include "swift/SIL/PrettyStackTrace.h"
 #include "swift/SIL/SILArgument.h"
@@ -50,7 +49,7 @@ namespace {
     }
     
     MutableArrayRef<InitializationPtr>
-    splitIntoTupleElements(SILGenFunction &SGF, SILLocation loc,
+    splitIntoTupleElements(SILGenFunction &gen, SILLocation loc,
                            CanType type,
                            SmallVectorImpl<InitializationPtr> &buf) override {
       // "Destructure" an ignored binding into multiple ignored bindings.
@@ -61,12 +60,12 @@ namespace {
       return buf;
     }
 
-    void copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
+    void copyOrInitValueInto(SILGenFunction &gen, SILLocation loc,
                              ManagedValue value, bool isInit) override {
       /// This just ignores the provided value.
     }
 
-    void finishUninitialized(SILGenFunction &SGF) override {
+    void finishUninitialized(SILGenFunction &gen) override {
       // do nothing
     }
   };
@@ -119,9 +118,9 @@ void TupleInitialization::copyOrInitValueInto(SILGenFunction &SGF,
       });
 }
 
-void TupleInitialization::finishUninitialized(SILGenFunction &SGF) {
+void TupleInitialization::finishUninitialized(SILGenFunction &gen) {
   for (auto &subInit : SubInitializations) {
-    subInit->finishUninitialized(SGF);
+    subInit->finishUninitialized(gen);
   }
 }
 
@@ -130,8 +129,8 @@ namespace {
     SILValue closure;
   public:
     CleanupClosureConstant(SILValue closure) : closure(closure) {}
-    void emit(SILGenFunction &SGF, CleanupLocation l) override {
-      SGF.B.emitDestroyValueOperation(l, closure);
+    void emit(SILGenFunction &gen, CleanupLocation l) override {
+      gen.B.emitDestroyValueOperation(l, closure);
     }
     void dump(SILGenFunction &) const override {
 #ifndef NDEBUG
@@ -154,28 +153,28 @@ void SILGenFunction::visitFuncDecl(FuncDecl *fd) {
 
 MutableArrayRef<InitializationPtr>
 SingleBufferInitialization::
-splitIntoTupleElements(SILGenFunction &SGF, SILLocation loc, CanType type,
+splitIntoTupleElements(SILGenFunction &gen, SILLocation loc, CanType type,
                        SmallVectorImpl<InitializationPtr> &buf) {
   assert(SplitCleanups.empty() && "getting sub-initializations twice?");
-  auto address = getAddressForInPlaceInitialization(SGF, loc);
-  return splitSingleBufferIntoTupleElements(SGF, loc, type, address,
+  auto address = getAddressForInPlaceInitialization(gen, loc);
+  return splitSingleBufferIntoTupleElements(gen, loc, type, address,
                                             buf, SplitCleanups);
 }
 
 MutableArrayRef<InitializationPtr>
 SingleBufferInitialization::
-splitSingleBufferIntoTupleElements(SILGenFunction &SGF, SILLocation loc,
+splitSingleBufferIntoTupleElements(SILGenFunction &gen, SILLocation loc,
                                    CanType type, SILValue baseAddr,
                                    SmallVectorImpl<InitializationPtr> &buf,
                      TinyPtrVector<CleanupHandle::AsPointer> &splitCleanups) {
   // Destructure the buffer into per-element buffers.
   for (auto i : indices(cast<TupleType>(type)->getElementTypes())) {
     // Project the element.
-    SILValue eltAddr = SGF.B.createTupleElementAddr(loc, baseAddr, i);
+    SILValue eltAddr = gen.B.createTupleElementAddr(loc, baseAddr, i);
 
     // Create an initialization to initialize the element.
-    auto &eltTL = SGF.getTypeLowering(eltAddr->getType());
-    auto eltInit = SGF.useBufferAsTemporary(eltAddr, eltTL);
+    auto &eltTL = gen.getTypeLowering(eltAddr->getType());
+    auto eltInit = gen.useBufferAsTemporary(eltAddr, eltTL);
 
     // Remember the element cleanup.
     auto eltCleanup = eltInit->getInitializedCleanup();
@@ -189,29 +188,29 @@ splitSingleBufferIntoTupleElements(SILGenFunction &SGF, SILLocation loc,
 }
 
 void SingleBufferInitialization::
-copyOrInitValueIntoSingleBuffer(SILGenFunction &SGF, SILLocation loc,
+copyOrInitValueIntoSingleBuffer(SILGenFunction &gen, SILLocation loc,
                                 ManagedValue value, bool isInit,
                                 SILValue destAddr) {
   if (!isInit) {
     assert(value.getValue() != destAddr && "copying in place?!");
-    value.copyInto(SGF, destAddr, loc);
+    value.copyInto(gen, destAddr, loc);
     return;
   }
   
   // If we didn't evaluate into the initialization buffer, do so now.
   if (value.getValue() != destAddr) {
-    value.forwardInto(SGF, loc, destAddr);
+    value.forwardInto(gen, loc, destAddr);
   } else {
     // If we did evaluate into the initialization buffer, disable the
     // cleanup.
-    value.forwardCleanup(SGF);
+    value.forwardCleanup(gen);
   }
 }
 
-void SingleBufferInitialization::finishInitialization(SILGenFunction &SGF) {
+void SingleBufferInitialization::finishInitialization(SILGenFunction &gen) {
   // Forward all of the split element cleanups, assuming we made any.
   for (CleanupHandle eltCleanup : SplitCleanups)
-    SGF.Cleanups.forwardCleanup(eltCleanup);
+    gen.Cleanups.forwardCleanup(eltCleanup);
 }
 
 bool KnownAddressInitialization::isInPlaceInitializationOfGlobal() const {
@@ -222,10 +221,10 @@ bool TemporaryInitialization::isInPlaceInitializationOfGlobal() const {
   return isa<GlobalAddrInst>(Addr);
 }
 
-void TemporaryInitialization::finishInitialization(SILGenFunction &SGF) {
-  SingleBufferInitialization::finishInitialization(SGF);
+void TemporaryInitialization::finishInitialization(SILGenFunction &gen) {
+  SingleBufferInitialization::finishInitialization(gen);
   if (Cleanup.isValid())
-    SGF.Cleanups.setCleanupState(Cleanup, CleanupState::Active);
+    gen.Cleanups.setCleanupState(Cleanup, CleanupState::Active);
 }
 
 namespace {
@@ -237,8 +236,8 @@ public:
   EndBorrowCleanup(SILValue original, SILValue borrowed)
       : original(original), borrowed(borrowed) {}
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
-    SGF.B.createEndBorrow(l, borrowed, original);
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
+    gen.B.createEndBorrow(l, borrowed, original);
   }
 
   void dump(SILGenFunction &) const override {
@@ -258,11 +257,11 @@ class ReleaseValueCleanup : public Cleanup {
 public:
   ReleaseValueCleanup(SILValue v) : v(v) {}
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
     if (v->getType().isAddress())
-      SGF.B.createDestroyAddr(l, v);
+      gen.B.createDestroyAddr(l, v);
     else
-      SGF.B.emitDestroyValueOperation(l, v);
+      gen.B.emitDestroyValueOperation(l, v);
   }
 
   void dump(SILGenFunction &) const override {
@@ -282,8 +281,8 @@ class DeallocStackCleanup : public Cleanup {
 public:
   DeallocStackCleanup(SILValue addr) : Addr(addr) {}
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
-    SGF.B.createDeallocStack(l, Addr);
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
+    gen.B.createDeallocStack(l, Addr);
   }
 
   void dump(SILGenFunction &) const override {
@@ -303,8 +302,8 @@ class DestroyLocalVariable : public Cleanup {
 public:
   DestroyLocalVariable(VarDecl *var) : Var(var) {}
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
-    SGF.destroyLocalVariable(l, Var);
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
+    gen.destroyLocalVariable(l, Var);
   }
 
   void dump(SILGenFunction &SGF) const override {
@@ -336,8 +335,8 @@ class DeallocateUninitializedLocalVariable : public Cleanup {
 public:
   DeallocateUninitializedLocalVariable(VarDecl *var) : Var(var) {}
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
-    SGF.deallocateUninitializedLocalVariable(l, Var);
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
+    gen.deallocateUninitializedLocalVariable(l, Var);
   }
 
   void dump(SILGenFunction &) const override {
@@ -387,7 +386,7 @@ public:
 
     // The variable may have its lifetime extended by a closure, heap-allocate
     // it using a box.
-    SILValue allocBox =
+    SILInstruction *allocBox =
         SGF.B.createAllocBox(decl, boxType, {decl->isLet(), ArgNo});
 
     // Mark the memory as uninitialized, so DI will track it for us.
@@ -429,8 +428,8 @@ public:
     return isa<GlobalAddrInst>(getAddress());
   }
 
-  void finishUninitialized(SILGenFunction &SGF) override {
-    LocalVariableInitialization::finishInitialization(SGF);
+  void finishUninitialized(SILGenFunction &gen) override {
+    LocalVariableInitialization::finishInitialization(gen);
   }
 
   void finishInitialization(SILGenFunction &SGF) override {
@@ -464,8 +463,9 @@ class LetValueInitialization : public Initialization {
   bool DidFinish = false;
 
 public:
-  LetValueInitialization(VarDecl *vd, SILGenFunction &SGF) : vd(vd) {
-    auto &lowering = SGF.getTypeLowering(vd->getType());
+  LetValueInitialization(VarDecl *vd, SILGenFunction &gen) : vd(vd)
+  {
+    auto &lowering = gen.getTypeLowering(vd->getType());
     
     // Decide whether we need a temporary stack buffer to evaluate this 'let'.
     // There are three cases we need to handle here: parameters, initialized (or
@@ -488,22 +488,22 @@ public:
       // If this is a let with an initializer or bound value, we only need a
       // buffer if the type is address only.
       needsTemporaryBuffer =
-          lowering.isAddressOnly() && SGF.silConv.useLoweredAddresses();
+          lowering.isAddressOnly() && gen.silConv.useLoweredAddresses();
     }
    
     if (needsTemporaryBuffer) {
-      address = SGF.emitTemporaryAllocation(vd, lowering.getLoweredType());
+      address = gen.emitTemporaryAllocation(vd, lowering.getLoweredType());
       if (isUninitialized)
-        address = SGF.B.createMarkUninitializedVar(vd, address);
-      DestroyCleanup = SGF.enterDormantTemporaryCleanup(address, lowering);
-      SGF.VarLocs[vd] = SILGenFunction::VarLoc::get(address);
+        address = gen.B.createMarkUninitializedVar(vd, address);
+      DestroyCleanup = gen.enterDormantTemporaryCleanup(address, lowering);
+      gen.VarLocs[vd] = SILGenFunction::VarLoc::get(address);
     } else if (!lowering.isTrivial()) {
       // Push a cleanup to destroy the let declaration.  This has to be
       // inactive until the variable is initialized: if control flow exits the
       // before the value is bound, we don't want to destroy the value.
-      SGF.Cleanups.pushCleanupInState<DestroyLocalVariable>(
+      gen.Cleanups.pushCleanupInState<DestroyLocalVariable>(
                                                     CleanupState::Dormant, vd);
-      DestroyCleanup = SGF.Cleanups.getTopCleanup();
+      DestroyCleanup = gen.Cleanups.getTopCleanup();
     } else {
       DestroyCleanup = CleanupHandle::invalid();
     }
@@ -542,72 +542,72 @@ public:
   }
   
   MutableArrayRef<InitializationPtr>
-  splitIntoTupleElements(SILGenFunction &SGF, SILLocation loc, CanType type,
+  splitIntoTupleElements(SILGenFunction &gen, SILLocation loc, CanType type,
                          SmallVectorImpl<InitializationPtr> &buf) override {
     assert(SplitCleanups.empty());
-    auto address = getAddressForInPlaceInitialization(SGF, loc);
+    auto address = getAddressForInPlaceInitialization(gen, loc);
     return SingleBufferInitialization
-       ::splitSingleBufferIntoTupleElements(SGF, loc, type, address, buf,
+       ::splitSingleBufferIntoTupleElements(gen, loc, type, address, buf,
                                             SplitCleanups);
   }
 
-  void bindValue(SILValue value, SILGenFunction &SGF) {
-    assert(!SGF.VarLocs.count(vd) && "Already emitted this vardecl?");
+  void bindValue(SILValue value, SILGenFunction &gen) {
+    assert(!gen.VarLocs.count(vd) && "Already emitted this vardecl?");
     // If we're binding an address to this let value, then we can use it as an
     // address later.  This happens when binding an address only parameter to
     // an argument, for example.
     if (value->getType().isAddress())
       address = value;
-    SGF.VarLocs[vd] = SILGenFunction::VarLoc::get(value);
+    gen.VarLocs[vd] = SILGenFunction::VarLoc::get(value);
 
     // Emit a debug_value[_addr] instruction to record the start of this value's
     // lifetime.
     SILLocation PrologueLoc(vd);
     PrologueLoc.markAsPrologue();
     if (address)
-      SGF.B.createDebugValueAddr(PrologueLoc, value);
+      gen.B.createDebugValueAddr(PrologueLoc, value);
     else
-      SGF.B.createDebugValue(PrologueLoc, value);
+      gen.B.createDebugValue(PrologueLoc, value);
   }
   
-  void copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
+  void copyOrInitValueInto(SILGenFunction &gen, SILLocation loc,
                            ManagedValue value, bool isInit) override {
     // If this let value has an address, we can handle it just like a single
     // buffer value.
     if (hasAddress())
       return SingleBufferInitialization::
-        copyOrInitValueIntoSingleBuffer(SGF, loc, value, isInit, address);
+        copyOrInitValueIntoSingleBuffer(gen, loc, value, isInit, address);
     
     // Otherwise, we bind the value.
     if (isInit) {
       // Disable the rvalue expression cleanup, since the let value
       // initialization has a cleanup that lives for the entire scope of the
       // let declaration.
-      bindValue(value.forward(SGF), SGF);
+      bindValue(value.forward(gen), gen);
     } else {
       // Disable the expression cleanup of the copy, since the let value
       // initialization has a cleanup that lives for the entire scope of the
       // let declaration.
-      bindValue(value.copyUnmanaged(SGF, loc).forward(SGF), SGF);
+      bindValue(value.copyUnmanaged(gen, loc).forward(gen), gen);
     }
   }
 
-  void finishUninitialized(SILGenFunction &SGF) override {
-    LetValueInitialization::finishInitialization(SGF);
+  void finishUninitialized(SILGenFunction &gen) override {
+    LetValueInitialization::finishInitialization(gen);
   }
 
-  void finishInitialization(SILGenFunction &SGF) override {
+  void finishInitialization(SILGenFunction &gen) override {
     assert(!DidFinish &&
            "called LetValueInit::finishInitialization twice!");
-    assert(SGF.VarLocs.count(vd) && "Didn't bind a value to this let!");
+    assert(gen.VarLocs.count(vd) && "Didn't bind a value to this let!");
 
     // Deactivate any cleanups we made when splitting the tuple.
     for (auto cleanup : SplitCleanups)
-      SGF.Cleanups.forwardCleanup(cleanup);
+      gen.Cleanups.forwardCleanup(cleanup);
 
     // Activate the destroy cleanup.
     if (DestroyCleanup != CleanupHandle::invalid())
-      SGF.Cleanups.setCleanupState(DestroyCleanup, CleanupState::Active);
+      gen.Cleanups.setCleanupState(DestroyCleanup, CleanupState::Active);
 
     DidFinish = true;
   }
@@ -625,23 +625,23 @@ public:
     assert(VarInit->canPerformInPlaceInitialization());
   }
 
-  void copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
+  void copyOrInitValueInto(SILGenFunction &gen, SILLocation loc,
                            ManagedValue value, bool isInit) override {
-    auto address = VarInit->getAddressForInPlaceInitialization(SGF, loc);
+    auto address = VarInit->getAddressForInPlaceInitialization(gen, loc);
     // If this is not an initialization, copy the value before we translateIt,
     // translation expects a +1 value.
     if (isInit)
-      value.forwardInto(SGF, loc, address);
+      value.forwardInto(gen, loc, address);
     else
-      value.copyInto(SGF, address, loc);
+      value.copyInto(gen, address, loc);
   }
 
-  void finishUninitialized(SILGenFunction &SGF) override {
-    ReferenceStorageInitialization::finishInitialization(SGF);
+  void finishUninitialized(SILGenFunction &gen) override {
+    ReferenceStorageInitialization::finishInitialization(gen);
   }
   
-  void finishInitialization(SILGenFunction &SGF) override {
-    VarInit->finishInitialization(SGF);
+  void finishInitialization(SILGenFunction &gen) override {
+    VarInit->finishInitialization(gen);
   }
 };
 } // end anonymous namespace
@@ -660,13 +660,13 @@ public:
 
   JumpDest getFailureDest() const { return failureDest; }
 
-  void copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
+  void copyOrInitValueInto(SILGenFunction &gen, SILLocation loc,
                            ManagedValue value, bool isInit) override = 0;
 
   void bindVariable(SILLocation loc, VarDecl *var, ManagedValue value,
                     CanType formalValueType, SILGenFunction &SGF) {
     // Initialize the variable value.
-    InitializationPtr init = SGF.emitInitializationForVarDecl(var, var->isLet());
+    InitializationPtr init = SGF.emitInitializationForVarDecl(var);
     RValue(SGF, loc, formalValueType, value).forwardInto(SGF, loc, init.get());
   }
 
@@ -680,7 +680,7 @@ public:
   ExprPatternInitialization(ExprPattern *P, JumpDest patternFailDest)
     : RefutablePatternInitialization(patternFailDest), P(P) {}
 
-  void copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
+  void copyOrInitValueInto(SILGenFunction &gen, SILLocation loc,
                            ManagedValue value, bool isInit) override;
 };
 } // end anonymous namespace
@@ -909,13 +909,12 @@ copyOrInitValueInto(SILGenFunction &SGF, SILLocation loc,
   // Try to perform the cast to the destination type, producing an optional that
   // indicates whether we succeeded.
   auto destType = OptionalType::get(pattern->getCastTypeLoc().getType());
-
-  value =
-      emitConditionalCheckedCast(SGF, loc, value, pattern->getType(), destType,
-                                 pattern->getCastKind(), SGFContext(),
-                                 ProfileCounter(), ProfileCounter())
-          .getAsSingleValue(SGF, loc);
-
+  
+  value = emitConditionalCheckedCast(SGF, loc, value, pattern->getType(),
+                                     destType, pattern->getCastKind(),
+                                     SGFContext())
+            .getAsSingleValue(SGF, loc);
+  
   // Now that we have our result as an optional, we can use an enum projection
   // to do all the work.
   EnumElementPatternInitialization::
@@ -1009,7 +1008,7 @@ struct InitializationForPattern
       return InitializationPtr(new BlackHoleInitialization());
     }
 
-    return SGF.emitInitializationForVarDecl(P->getDecl(), P->getDecl()->isLet());
+    return SGF.emitInitializationForVarDecl(P->getDecl());
   }
 
   // Bind a tuple pattern by aggregating the component variables into a
@@ -1054,8 +1053,7 @@ struct InitializationForPattern
 
 } // end anonymous namespace
 
-InitializationPtr
-SILGenFunction::emitInitializationForVarDecl(VarDecl *vd, bool forceImmutable) {
+InitializationPtr SILGenFunction::emitInitializationForVarDecl(VarDecl *vd) {
   // If this is a computed variable, we don't need to do anything here.
   // We'll generate the getter and setter when we see their FuncDecls.
   if (!vd->hasStorage())
@@ -1078,7 +1076,7 @@ SILGenFunction::emitInitializationForVarDecl(VarDecl *vd, bool forceImmutable) {
 
   // If this is a 'let' initialization for a non-global, set up a
   // let binding, which stores the initialization value into VarLocs directly.
-  if (forceImmutable && vd->getDeclContext()->isLocalContext() &&
+  if (vd->isLet() && vd->getDeclContext()->isLocalContext() &&
       !isa<ReferenceStorageType>(varType))
     return InitializationPtr(new LetValueInitialization(vd, *this));
 
@@ -1125,7 +1123,7 @@ void SILGenFunction::emitPatternBinding(PatternBindingDecl *PBD,
   // the initialization. Otherwise, mark it uninitialized for DI to resolve.
   if (auto *Init = entry.getInit()) {
     FullExpr Scope(Cleanups, CleanupLocation(Init));
-    emitExprInto(Init, initialization.get(), SILLocation(PBD));
+    emitExprInto(Init, initialization.get());
   } else {
     initialization->finishUninitialized(*this);
   }
@@ -1186,10 +1184,8 @@ SILValue SILGenFunction::emitOSVersionRangeCheck(SILLocation loc,
 /// specified JumpDest.  The insertion point is left in the block where the
 /// condition has matched and any bound variables are in scope.
 ///
-void SILGenFunction::emitStmtCondition(StmtCondition Cond, JumpDest FailDest,
-                                       SILLocation loc,
-                                       ProfileCounter NumTrueTaken,
-                                       ProfileCounter NumFalseTaken) {
+void SILGenFunction::emitStmtCondition(StmtCondition Cond,
+                                       JumpDest FailDest, SILLocation loc) {
 
   assert(B.hasValidInsertionPoint() &&
          "emitting condition at unreachable point");
@@ -1244,9 +1240,8 @@ void SILGenFunction::emitStmtCondition(StmtCondition Cond, JumpDest FailDest,
     // on success we fall through to a new block.
     SILBasicBlock *ContBB = createBasicBlock();
     auto FailBB = Cleanups.emitBlockForCleanups(FailDest, loc);
-    B.createCondBranch(booleanTestLoc, booleanTestValue, ContBB, FailBB,
-                       NumTrueTaken, NumFalseTaken);
-
+    B.createCondBranch(booleanTestLoc, booleanTestValue, ContBB, FailBB);
+    
     // Finally, emit the continue block and keep emitting the rest of the
     // condition.
     B.emitBlock(ContBB);
@@ -1286,21 +1281,21 @@ namespace {
         concreteFormalType(concreteFormalType),
         repr(repr) {}
     
-    void emit(SILGenFunction &SGF, CleanupLocation l) override {
+    void emit(SILGenFunction &gen, CleanupLocation l) override {
       switch (repr) {
       case ExistentialRepresentation::None:
       case ExistentialRepresentation::Class:
       case ExistentialRepresentation::Metatype:
         llvm_unreachable("cannot cleanup existential");
       case ExistentialRepresentation::Opaque:
-        if (SGF.silConv.useLoweredAddresses()) {
-          SGF.B.createDeinitExistentialAddr(l, existentialAddr);
+        if (gen.silConv.useLoweredAddresses()) {
+          gen.B.createDeinitExistentialAddr(l, existentialAddr);
         } else {
-          SGF.B.createDeinitExistentialValue(l, existentialAddr);
+          gen.B.createDeinitExistentialOpaque(l, existentialAddr);
         }
         break;
       case ExistentialRepresentation::Boxed:
-        SGF.B.createDeallocExistentialBox(l, concreteFormalType,
+        gen.B.createDeallocExistentialBox(l, concreteFormalType,
                                           existentialAddr);
         break;
       }
@@ -1453,34 +1448,34 @@ struct FormalAccessReleaseValueCleanup : Cleanup {
 
   FormalAccessReleaseValueCleanup() : Depth() {}
 
-  void setState(SILGenFunction &SGF, CleanupState newState) override {
+  void setState(SILGenFunction &gen, CleanupState newState) override {
     if (newState == CleanupState::Dead) {
-      getEvaluation(SGF).setFinished();
+      getEvaluation(gen).setFinished();
     }
 
     state = newState;
   }
 
-  void emit(SILGenFunction &SGF, CleanupLocation l) override {
-    getEvaluation(SGF).finish(SGF);
+  void emit(SILGenFunction &gen, CleanupLocation l) override {
+    getEvaluation(gen).finish(gen);
   }
 
-  void dump(SILGenFunction &SGF) const override {
+  void dump(SILGenFunction &gen) const override {
 #ifndef NDEBUG
     llvm::errs() << "FormalAccessReleaseValueCleanup "
                  << "State:" << getState() << "\n"
-                 << "Value:" << getValue(SGF) << "\n";
+                 << "Value:" << getValue(gen) << "\n";
 #endif
   }
 
-  OwnedFormalAccess &getEvaluation(SILGenFunction &SGF) const {
-    auto &evaluation = *SGF.FormalEvalContext.find(Depth);
+  OwnedFormalAccess &getEvaluation(SILGenFunction &gen) const {
+    auto &evaluation = *gen.FormalEvalContext.find(Depth);
     assert(evaluation.getKind() == FormalAccess::Owned);
     return static_cast<OwnedFormalAccess &>(evaluation);
   }
 
-  SILValue getValue(SILGenFunction &SGF) const {
-    return getEvaluation(SGF).getValue();
+  SILValue getValue(SILGenFunction &gen) const {
+    return getEvaluation(gen).getValue();
   }
 };
 
@@ -1489,7 +1484,7 @@ struct FormalAccessReleaseValueCleanup : Cleanup {
 ManagedValue
 SILGenFunction::emitFormalAccessManagedBufferWithCleanup(SILLocation loc,
                                                          SILValue addr) {
-  assert(InFormalEvaluationScope && "Must be in formal evaluation scope");
+  assert(InWritebackScope && "Must be in formal evaluation scope");
   auto &lowering = getTypeLowering(addr->getType());
   if (lowering.isTrivial())
     return ManagedValue::forUnmanaged(addr);
@@ -1504,7 +1499,7 @@ SILGenFunction::emitFormalAccessManagedBufferWithCleanup(SILLocation loc,
 ManagedValue
 SILGenFunction::emitFormalAccessManagedRValueWithCleanup(SILLocation loc,
                                                          SILValue value) {
-  assert(InFormalEvaluationScope && "Must be in formal evaluation scope");
+  assert(InWritebackScope && "Must be in formal evaluation scope");
   auto &lowering = getTypeLowering(value->getType());
   if (lowering.isTrivial())
     return ManagedValue::forUnmanaged(value);
@@ -1518,7 +1513,7 @@ SILGenFunction::emitFormalAccessManagedRValueWithCleanup(SILLocation loc,
 
 CleanupHandle SILGenFunction::enterDormantFormalAccessTemporaryCleanup(
     SILValue addr, SILLocation loc, const TypeLowering &tempTL) {
-  assert(InFormalEvaluationScope && "Must be in formal evaluation scope");
+  assert(InWritebackScope && "Must be in formal evaluation scope");
   if (tempTL.isTrivial())
     return CleanupHandle::invalid();
 

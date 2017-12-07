@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %swift -emit-module -o %t/test_module.swiftmodule %S/Inputs/test_module.swift
 
 // RUN: %sourcekitd-test -req=index %s -- %s -I %t | %FileCheck %s

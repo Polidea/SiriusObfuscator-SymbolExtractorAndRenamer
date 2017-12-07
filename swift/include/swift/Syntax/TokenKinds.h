@@ -19,8 +19,21 @@
 
 namespace swift {
 enum class tok {
-#define LITERAL(X) X,
-#define MISC(X) X,
+  unknown = 0,
+  eof,
+  code_complete,
+  identifier,
+  oper_binary_unspaced,   // "x+y"
+  oper_binary_spaced,     // "x + y"
+  oper_postfix,
+  oper_prefix,
+  dollarident,
+  integer_literal,
+  floating_literal,
+  string_literal,
+  sil_local_name,      // %42 in SIL mode.
+  comment,
+
 #define KEYWORD(X) kw_ ## X,
 #define PUNCTUATOR(X, Y) X,
 #define POUND_KEYWORD(X) pound_ ## X,

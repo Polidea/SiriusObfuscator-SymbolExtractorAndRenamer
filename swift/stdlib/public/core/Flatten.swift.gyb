@@ -14,6 +14,7 @@
 from gyb_stdlib_support import (
     TRAVERSALS,
     collectionForTraversal,
+    sliceTypeName
 )
 }%
 
@@ -25,13 +26,10 @@ from gyb_stdlib_support import (
 ///
 /// - Note: This is the `IteratorProtocol` used by `FlattenSequence`,
 ///   `FlattenCollection`, and `BidirectionalFlattenCollection`.
-@_fixed_layout // FIXME(sil-serialize-all)
 public struct FlattenIterator<Base : IteratorProtocol> : IteratorProtocol, Sequence
   where Base.Element : Sequence {
 
   /// Construct around a `base` iterator.
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init(_base: Base) {
     self._base = _base
   }
@@ -43,7 +41,6 @@ public struct FlattenIterator<Base : IteratorProtocol> : IteratorProtocol, Seque
   ///
   /// - Precondition: `next()` has not been applied to a copy of `self`
   ///   since the copy was made.
-  @_inlineable // FIXME(sil-serialize-all)
   public mutating func next() -> Base.Element.Element? {
     repeat {
       if _fastPath(_inner != nil) {
@@ -61,9 +58,7 @@ public struct FlattenIterator<Base : IteratorProtocol> : IteratorProtocol, Seque
     while true
   }
 
-  @_versioned // FIXME(sil-serialize-all)
   internal var _base: Base
-  @_versioned // FIXME(sil-serialize-all)
   internal var _inner: Base.Element.Iterator?
 }
 
@@ -82,15 +77,12 @@ public struct FlattenIterator<Base : IteratorProtocol> : IteratorProtocol, Seque
 /// * `s.lazy.joined().map(f)` maps lazily and returns a `LazyMapSequence`
 ///
 /// - See also: `FlattenCollection`
-@_fixed_layout // FIXME(sil-serialize-all)
 public struct FlattenSequence<Base : Sequence> : Sequence
   where Base.Element : Sequence {
 
   /// Creates a concatenation of the elements of the elements of `base`.
   ///
   /// - Complexity: O(1)
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init(_base: Base) {
     self._base = _base
   }
@@ -98,12 +90,10 @@ public struct FlattenSequence<Base : Sequence> : Sequence
   /// Returns an iterator over the elements of this sequence.
   ///
   /// - Complexity: O(1).
-  @_inlineable // FIXME(sil-serialize-all)
   public func makeIterator() -> FlattenIterator<Base.Iterator> {
     return FlattenIterator(_base: _base.makeIterator())
   }
 
-  @_versioned // FIXME(sil-serialize-all)
   internal var _base: Base
 }
 
@@ -131,9 +121,13 @@ extension Sequence where Element : Sequence {
   ///
   /// - Returns: A flattened view of the elements of this
   ///   sequence of sequences.
-  @_inlineable // FIXME(sil-serialize-all)
   public func joined() -> FlattenSequence<Self> {
     return FlattenSequence(_base: self)
+  }
+
+  @available(*, unavailable, renamed: "joined()")
+  public func flatten() -> FlattenSequence<Self> {
+    Builtin.unreachable()
   }
 }
 
@@ -141,11 +135,15 @@ extension LazySequenceProtocol where Element : Sequence {
 
   /// Returns a lazy sequence that concatenates the elements of this sequence of
   /// sequences.
-  @_inlineable // FIXME(sil-serialize-all)
   public func joined() -> LazySequence<
     FlattenSequence<Elements>
   > {
     return FlattenSequence(_base: elements).lazy
+  }
+
+  @available(*, unavailable, renamed: "joined()")
+  public func flatten() -> LazySequence<FlattenSequence<Elements>> {
+    Builtin.unreachable()
   }
 }
 
@@ -156,15 +154,13 @@ extension LazySequenceProtocol where Element : Sequence {
 %   if traversal == 'Bidirectional':
 %     constraints = '%(Base)sIterator.Element : BidirectionalCollection'
 %   Index = Collection + 'Index'
+%   Slice = sliceTypeName(traversal=traversal, mutable=False, rangeReplaceable=False)
 /// A position in a `${Collection}`.
-@_fixed_layout // FIXME(sil-serialize-all)
 public struct ${Index}<BaseElements>
   where
   BaseElements : ${collectionForTraversal(traversal)},
   ${constraints % {'Base': 'BaseElements.'}} {
 
-  @_inlineable // FIXME(sil-serialize-all)
-  @_versioned // FIXME(sil-serialize-all)
   internal init(
     _ _outer: BaseElements.Index,
     _ inner: BaseElements.Element.Index?) {
@@ -173,7 +169,6 @@ public struct ${Index}<BaseElements>
   }
 
   /// The position in the outer collection of collections.
-  @_versioned // FIXME(sil-serialize-all)
   internal let _outer: BaseElements.Index
 
   /// The position in the inner collection at `base[_outer]`, or `nil` if
@@ -182,12 +177,10 @@ public struct ${Index}<BaseElements>
   /// When `_inner != nil`, `_inner!` is a valid subscript of `base[_outer]`;
   /// when `_inner == nil`, `_outer == base.endIndex` and this index is
   /// `endIndex` of the `${Collection}`.
-  @_versioned // FIXME(sil-serialize-all)
   internal let _inner: BaseElements.Element.Index?
 }
 
 extension ${Index} : Comparable {
-  @_inlineable // FIXME(sil-serialize-all)
   public static func == (
     lhs: ${Index}<BaseElements>,
     rhs: ${Index}<BaseElements>
@@ -195,7 +188,6 @@ extension ${Index} : Comparable {
     return lhs._outer == rhs._outer && lhs._inner == rhs._inner
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public static func < (
     lhs: ${Index}<BaseElements>,
     rhs: ${Index}<BaseElements>
@@ -215,14 +207,6 @@ extension ${Index} : Comparable {
     _precondition(lhs._inner == nil && rhs._inner == nil)
 
     return false
-  }
-}
-
-extension ${Index} : Hashable
-  where BaseElements.Index : Hashable, BaseElements.Element.Index : Hashable
-{
-  public var hashValue: Int {
-    return _mixInt(_inner?.hashValue ?? 0) ^ _outer.hashValue
   }
 }
 
@@ -248,7 +232,6 @@ extension ${Index} : Hashable
 ///   documented complexity.
 ///
 /// - See also: `FlattenSequence`
-@_fixed_layout // FIXME(sil-serialize-all)
 public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   where
   Base : ${collectionForTraversal(traversal)},
@@ -264,7 +247,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   public typealias IndexDistance = Base.IndexDistance
 
   /// Creates a flattened view of `base`.
-  @_inlineable // FIXME(sil-serialize-all)
   public init(_ base: Base) {
     self._base = base
   }
@@ -272,7 +254,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   /// Returns an iterator over the elements of this sequence.
   ///
   /// - Complexity: O(1).
-  @_inlineable // FIXME(sil-serialize-all)
   public func makeIterator() -> FlattenIterator<Base.Iterator> {
     return FlattenIterator(_base: _base.makeIterator())
   }
@@ -280,7 +261,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   /// The position of the first element in a non-empty collection.
   ///
   /// In an empty collection, `startIndex == endIndex`.
-  @_inlineable // FIXME(sil-serialize-all)
   public var startIndex: Index {
     let end = _base.endIndex
     var outer = _base.startIndex
@@ -300,13 +280,11 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   /// `endIndex` is not a valid argument to `subscript`, and is always
   /// reachable from `startIndex` by zero or more applications of
   /// `index(after:)`.
-  @_inlineable // FIXME(sil-serialize-all)
   public var endIndex: Index {
     return ${Index}(_base.endIndex, nil)
   }
 
   // TODO: swift-3-indexing-model - add docs
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(after i: Index) -> Index {
     let innerCollection = _base[i._outer]
     let nextInner = innerCollection.index(after: i._inner!)
@@ -328,7 +306,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
 
 % if traversal == 'Bidirectional':
   // TODO: swift-3-indexing-model - add docs
-  @_inlineable // FIXME(sil-serialize-all)
   public func index(before i: Index) -> Index {
     var prevOuter = i._outer
     if prevOuter == _base.endIndex {
@@ -351,17 +328,15 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   ///
   /// - Precondition: `position` is a valid position in `self` and
   ///   `position != endIndex`.
-  @_inlineable // FIXME(sil-serialize-all)
   public subscript(
     position: Index
   ) -> Base.Element.Element {
     return _base[position._outer][position._inner!]
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public subscript(bounds: Range<Index>)
-    -> Slice<${Collection}> {
-    return Slice(base: self, bounds: bounds)
+    -> ${Slice}<${Collection}> {
+    return ${Slice}(base: self, bounds: bounds)
   }
 
   // To return any estimate of the number of elements, we have to start
@@ -369,7 +344,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   // just return zero.
   public var underestimatedCount: Int { return 0 }
 
-  @_inlineable // FIXME(sil-serialize-all)
   public func _copyToContiguousArray()
     -> ContiguousArray<Base.Element.Element> {
 
@@ -381,7 +355,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   }
 
   // TODO: swift-3-indexing-model - add docs
-  @_inlineable // FIXME(sil-serialize-all)
   public func forEach(
     _ body: (Base.Element.Element) throws -> Void
   ) rethrows {
@@ -394,7 +367,6 @@ public struct ${Collection}<Base> : ${collectionForTraversal(traversal)}
   // FIXME(performance): swift-3-indexing-model: add custom advance/distance
   // methods that skip over inner collections when random-access
 
-  @_versioned // FIXME(sil-serialize-all)
   internal var _base: Base
 }
 
@@ -423,9 +395,13 @@ extension ${collectionForTraversal(traversal)}
   ///
   /// - Returns: A flattened view of the elements of this
   ///   collection of collections.
-  @_inlineable // FIXME(sil-serialize-all)
   public func joined() -> ${Collection}<Self> {
     return ${Collection}(self)
+  }
+
+  @available(*, unavailable, renamed: "joined()")
+  public func flatten() -> ${Collection}<Self> {
+    Builtin.unreachable()
   }
 }
 
@@ -438,10 +414,34 @@ extension LazyCollectionProtocol
   ${constraints % {'Base': 'Elements.'}}
 {
   /// A concatenation of the elements of `self`.
-  @_inlineable // FIXME(sil-serialize-all)
   public func joined() -> LazyCollection<${Collection}<Elements>> {
     return ${Collection}(elements).lazy
+  }
+
+  @available(*, unavailable, renamed: "joined()")
+  public func flatten() -> LazyCollection<${Collection}<Elements>> {
+    Builtin.unreachable()
   }
 }
 
 % end
+
+@available(*, unavailable, renamed: "FlattenIterator")
+public struct FlattenGenerator<Base : IteratorProtocol>
+  where Base.Element : Sequence {}
+
+extension FlattenSequence {
+  @available(*, unavailable, renamed: "makeIterator()")
+  public func generate() -> FlattenIterator<Base.Iterator> {
+    Builtin.unreachable()
+  }
+}
+
+% for traversal in ('Forward', 'Bidirectional'):
+extension Flatten${collectionForTraversal(traversal)} {
+  @available(*, unavailable, renamed: "getter:underestimatedCount()")
+  public func underestimateCount() -> Int {
+    Builtin.unreachable()
+  }
+}
+%end

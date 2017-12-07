@@ -12,7 +12,6 @@
 
 #include "swift/SILOptimizer/Utils/SpecializationMangler.h"
 #include "swift/SIL/SILGlobalVariable.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/AST/SubstitutionMap.h"
 #include "swift/Demangling/ManglingMacros.h"
 
@@ -184,29 +183,29 @@ FunctionSignatureSpecializationMangler::mangleConstantProp(LiteralInst *LI) {
   switch (LI->getKind()) {
   default:
     llvm_unreachable("unknown literal");
-  case SILInstructionKind::FunctionRefInst: {
+  case ValueKind::FunctionRefInst: {
     SILFunction *F = cast<FunctionRefInst>(LI)->getReferencedFunction();
     ArgOpBuffer << 'f';
     appendIdentifier(F->getName());
     break;
   }
-  case SILInstructionKind::GlobalAddrInst: {
+  case ValueKind::GlobalAddrInst: {
     SILGlobalVariable *G = cast<GlobalAddrInst>(LI)->getReferencedGlobal();
     ArgOpBuffer << 'g';
     appendIdentifier(G->getName());
     break;
   }
-  case SILInstructionKind::IntegerLiteralInst: {
+  case ValueKind::IntegerLiteralInst: {
     APInt apint = cast<IntegerLiteralInst>(LI)->getValue();
     ArgOpBuffer << 'i' << apint;
     break;
   }
-  case SILInstructionKind::FloatLiteralInst: {
+  case ValueKind::FloatLiteralInst: {
     APInt apint = cast<FloatLiteralInst>(LI)->getBits();
     ArgOpBuffer << 'd' << apint;
     break;
   }
-  case SILInstructionKind::StringLiteralInst: {
+  case ValueKind::StringLiteralInst: {
     StringLiteralInst *SLI = cast<StringLiteralInst>(LI);
     StringRef V = SLI->getValue();
     assert(V.size() <= 32 && "Cannot encode string of length > 32");

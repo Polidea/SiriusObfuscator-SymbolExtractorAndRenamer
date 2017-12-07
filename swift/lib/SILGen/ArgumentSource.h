@@ -22,13 +22,11 @@
 #ifndef SWIFT_LOWERING_ARGUMENTSOURCE_H
 #define SWIFT_LOWERING_ARGUMENTSOURCE_H
 
-#include "swift/Basic/ExternalUnion.h"
 #include "RValue.h"
 #include "LValue.h"
 
 namespace swift {
 namespace Lowering {
-class Conversion;
 
 /// A means of generating an argument.
 ///
@@ -49,73 +47,52 @@ class Conversion;
 /// working with multiple ArgumentSources should document the order in
 /// which they plan to evaluate them.
 class ArgumentSource {
+  union Storage {
+    struct {
+      RValue Value;
+      SILLocation Loc;
+    } TheRV;
+    struct {
+      LValue Value;
+      SILLocation Loc;
+    } TheLV;
+    Expr *TheExpr;
+
+    Storage() {}
+    ~Storage() {}
+  } Storage;
+
   enum class Kind : unsigned char {
-    Invalid,
     RValue,
     LValue,
     Expr,
-    Tuple,
-  };
+  } StoredKind;
 
-  struct RValueStorage {
-    RValue Value;
-    SILLocation Loc;
-  };
-  struct LValueStorage {
-    LValue Value;
-    SILLocation Loc;
-  };
-  struct TupleStorage {
-    CanTupleType SubstType;
-    SILLocation Loc;
-    std::vector<ArgumentSource> Elements;
-
-    TupleStorage(CanTupleType type, SILLocation loc,
-                 MutableArrayRef<ArgumentSource> elements)
-        : SubstType(type), Loc(loc) {
-      assert(type->getNumElements() == elements.size());
-      Elements.reserve(elements.size());
-      for (auto i : indices(elements)) {
-        Elements.push_back(std::move(elements[i]));
-      }
-    }
-  };
-
-  using StorageMembers =
-    ExternalUnionMembers<void, RValueStorage, LValueStorage,
-                         Expr*, TupleStorage>;
-
-  static StorageMembers::Index getStorageIndexForKind(Kind kind) {
-    switch (kind) {
-    case Kind::Invalid: return StorageMembers::indexOf<void>();
-    case Kind::RValue:
-      return StorageMembers::indexOf<RValueStorage>();
-    case Kind::LValue: return StorageMembers::indexOf<LValueStorage>();
-    case Kind::Expr: return StorageMembers::indexOf<Expr*>();
-    case Kind::Tuple: return StorageMembers::indexOf<TupleStorage>();
-    }
-    llvm_unreachable("bad kind");
+  void initRV(SILLocation loc, RValue &&value) {
+    assert(StoredKind == Kind::RValue);
+    Storage.TheRV.Loc = loc;
+    new (&Storage.TheRV.Value) RValue(std::move(value));
   }
 
-  ExternalUnion<Kind, StorageMembers, getStorageIndexForKind> Storage;
-  Kind StoredKind;
+  void initLV(SILLocation loc, LValue &&value) {
+    assert(StoredKind == Kind::LValue);
+    Storage.TheLV.Loc = loc;
+    new (&Storage.TheLV.Value) LValue(std::move(value));
+  }
 
 public:
-  ArgumentSource() : StoredKind(Kind::Invalid) {}
+  ArgumentSource() : StoredKind(Kind::Expr) {
+    Storage.TheExpr = nullptr;
+  }
   ArgumentSource(SILLocation loc, RValue &&value) : StoredKind(Kind::RValue) {
-    Storage.emplaceAggregate<RValueStorage>(StoredKind, std::move(value), loc);
+    initRV(loc, std::move(value));
   }
   ArgumentSource(SILLocation loc, LValue &&value) : StoredKind(Kind::LValue) {
-    Storage.emplaceAggregate<LValueStorage>(StoredKind, std::move(value), loc);
+    initLV(loc, std::move(value));
   }
   ArgumentSource(Expr *e) : StoredKind(Kind::Expr) {
     assert(e && "initializing ArgumentSource with null expression");
-    Storage.emplace<Expr*>(StoredKind, e);
-  }
-  ArgumentSource(SILLocation loc, CanTupleType type,
-                 MutableArrayRef<ArgumentSource> elements)
-      : StoredKind(Kind::Tuple) {
-    Storage.emplace<TupleStorage>(StoredKind, type, loc, elements);
+    Storage.TheExpr = e;
   }
 
   // Cannot be copied.
@@ -124,49 +101,79 @@ public:
 
   // Can be moved.
   ArgumentSource(ArgumentSource &&other) : StoredKind(other.StoredKind) {
-    Storage.moveConstruct(StoredKind, std::move(other.Storage));
+    switch (StoredKind) {
+    case Kind::RValue:
+      initRV(other.getKnownRValueLocation(), std::move(other).asKnownRValue());
+      return;
+    case Kind::LValue:
+      initLV(other.getKnownLValueLocation(), std::move(other).asKnownLValue());
+      return;
+    case Kind::Expr:
+      Storage.TheExpr = std::move(other).asKnownExpr();
+      return;
+    }
+    llvm_unreachable("bad kind");
   }
 
   ArgumentSource &operator=(ArgumentSource &&other) {
-    Storage.moveAssign(StoredKind, other.StoredKind, std::move(other.Storage));
-    StoredKind = other.StoredKind;
-    other.Storage.destruct(other.StoredKind);
-    other.StoredKind = Kind::Invalid;
-    return *this;
+    // If the kinds don't align, just move the other object over this.
+    if (StoredKind != other.StoredKind) {
+      this->~ArgumentSource();
+      new (this) ArgumentSource(std::move(other));
+      return *this;
+    }
+
+    // Otherwise, move RValue and LValue objects in-place.
+    switch (StoredKind) {
+    case Kind::RValue:
+      Storage.TheRV.Value = std::move(other).asKnownRValue();
+      Storage.TheRV.Loc = other.getKnownRValueLocation();
+      return *this;
+    case Kind::LValue:
+      Storage.TheLV.Value = std::move(other).asKnownLValue();
+      Storage.TheLV.Loc = other.getKnownLValueLocation();
+      return *this;
+    case Kind::Expr:
+      Storage.TheExpr = std::move(other).asKnownExpr();
+      return *this;
+    }
+    llvm_unreachable("bad kind");
   }
 
   ~ArgumentSource() {
-    Storage.destruct(StoredKind);
+    switch (StoredKind) {
+    case Kind::RValue:
+      asKnownRValue().~RValue();
+      return;
+    case Kind::LValue:
+      asKnownLValue().~LValue();
+      return;
+    case Kind::Expr:
+      return;
+    }
+    llvm_unreachable("bad kind");
   }
 
   explicit operator bool() const & {
     switch (StoredKind) {
-    case Kind::Invalid:
-      return false;
     case Kind::RValue:
-      return !asKnownRValue().isNull();
+      return bool(asKnownRValue());
     case Kind::LValue:
       return asKnownLValue().isValid();
     case Kind::Expr:
       return asKnownExpr() != nullptr;
-    case Kind::Tuple:
-      return true;
     }
     llvm_unreachable("bad kind");
   }
 
   CanType getSubstType() const & {
     switch (StoredKind) {
-    case Kind::Invalid:
-      llvm_unreachable("argument source is invalid");
     case Kind::RValue:
       return asKnownRValue().getType();
     case Kind::LValue:
       return CanInOutType::get(asKnownLValue().getSubstFormalType());
     case Kind::Expr:
       return asKnownExpr()->getType()->getCanonicalType();
-    case Kind::Tuple:
-      return Storage.get<TupleStorage>(StoredKind).SubstType;
     }
     llvm_unreachable("bad kind");
   }
@@ -175,16 +182,12 @@ public:
 
   CanType getSubstRValueType() const & {
     switch (StoredKind) {
-    case Kind::Invalid:
-      llvm_unreachable("argument source is invalid");
     case Kind::RValue:
       return asKnownRValue().getType();
     case Kind::LValue:
       return asKnownLValue().getSubstFormalType();
     case Kind::Expr:
       return asKnownExpr()->getType()->getInOutObjectType()->getCanonicalType();
-    case Kind::Tuple:
-      return Storage.get<TupleStorage>(StoredKind).SubstType;
     }
     llvm_unreachable("bad kind");
   }
@@ -193,28 +196,21 @@ public:
 
   bool hasLValueType() const & {
     switch (StoredKind) {
-    case Kind::Invalid: llvm_unreachable("argument source is invalid");
-    case Kind::RValue:
-      return false;
+    case Kind::RValue: return false;
     case Kind::LValue: return true;
-    case Kind::Expr: return asKnownExpr()->isSemanticallyInOutExpr();
-    case Kind::Tuple: return false;
+    case Kind::Expr: return asKnownExpr()->getType()->is<InOutType>();
     }
     llvm_unreachable("bad kind");    
   }
 
   SILLocation getLocation() const & {
     switch (StoredKind) {
-    case Kind::Invalid:
-      llvm_unreachable("argument source is invalid");
     case Kind::RValue:
       return getKnownRValueLocation();
     case Kind::LValue:
       return getKnownLValueLocation();
     case Kind::Expr:
       return asKnownExpr();
-    case Kind::Tuple:
-      return getKnownTupleLocation();
     }
     llvm_unreachable("bad kind");
   }
@@ -222,54 +218,41 @@ public:
   bool isExpr() const & { return StoredKind == Kind::Expr; }
   bool isRValue() const & { return StoredKind == Kind::RValue; }
   bool isLValue() const & { return StoredKind == Kind::LValue; }
-  bool isTuple() const & { return StoredKind == Kind::Tuple; }
 
   /// Given that this source is storing an RValue, extract and clear
   /// that value.
-  RValue &&asKnownRValue(SILGenFunction &SGF) && {
-    return std::move(Storage.get<RValueStorage>(StoredKind).Value);
+  RValue &&asKnownRValue() && {
+    assert(isRValue());
+    return std::move(Storage.TheRV.Value);
   }
-
   SILLocation getKnownRValueLocation() const & {
-    return Storage.get<RValueStorage>(StoredKind).Loc;
+    assert(isRValue());
+    return Storage.TheRV.Loc;
   }
 
   /// Given that this source is storing an LValue, extract and clear
   /// that value.
   LValue &&asKnownLValue() && {
-    return std::move(Storage.get<LValueStorage>(StoredKind).Value);
+    assert(isLValue());
+    return std::move(Storage.TheLV.Value);
   }
   SILLocation getKnownLValueLocation() const & {
-    return Storage.get<LValueStorage>(StoredKind).Loc;
+    assert(isLValue());
+    return Storage.TheLV.Loc;
   }
 
   /// Given that this source is an expression, extract and clear
   /// that expression.
   Expr *asKnownExpr() && {
-    Expr *result = Storage.get<Expr*>(StoredKind);
-    Storage.resetToEmpty<Expr*>(StoredKind, Kind::Invalid);
-    StoredKind = Kind::Invalid;
+    assert(StoredKind == Kind::Expr);
+    Expr *result = Storage.TheExpr;
+    Storage.TheExpr = nullptr;
     return result;
   }
 
-  SILLocation getKnownTupleLocation() const & {
-    return Storage.get<TupleStorage>(StoredKind).Loc;
-  }
-
-  template <class ResultType>
-  ResultType withKnownTupleElementSources(
-    llvm::function_ref<ResultType(SILLocation loc, CanTupleType type,
-                         MutableArrayRef<ArgumentSource> elts)> callback) && {
-    auto &tuple = Storage.get<TupleStorage>(StoredKind);
-
-    auto result = callback(tuple.Loc, tuple.SubstType, tuple.Elements);
-
-    // We've consumed the tuple.
-    Storage.resetToEmpty<TupleStorage>(StoredKind, Kind::Invalid);
-    StoredKind = Kind::Invalid;
-
-    return result;
-  }
+  /// Force this source to become an r-value, then return an unmoved
+  /// handle to that r-value.
+  RValue &forceAndPeekRValue(SILGenFunction &SGF) &;
 
   /// Return an unowned handle to the r-value stored in this source. Undefined
   /// if this ArgumentSource is not an rvalue.
@@ -282,16 +265,9 @@ public:
                                 AbstractionPattern origFormalType,
                                 SGFContext C = SGFContext()) &&;
 
-  ManagedValue getConverted(SILGenFunction &SGF, const Conversion &conversion,
-                            SGFContext C = SGFContext()) &&;
-
   void forwardInto(SILGenFunction &SGF, Initialization *dest) &&;
   void forwardInto(SILGenFunction &SGF, AbstractionPattern origFormalType,
                    Initialization *dest, const TypeLowering &destTL) &&;
-
-  /// If we have an rvalue, borrow the rvalue into a new ArgumentSource and
-  /// return the ArgumentSource. Otherwise, assert.
-  ArgumentSource borrow(SILGenFunction &SGF) const &;
 
   ManagedValue materialize(SILGenFunction &SGF) &&;
 
@@ -308,32 +284,27 @@ public:
   void rewriteType(CanType newType) &;
 
   /// Whether this argument source requires the callee to evaluate.
-  bool requiresCalleeToEvaluate() const;
-
-  void dump() const;
-  void dump(raw_ostream &os, unsigned indent = 0) const;
+  bool requiresCalleeToEvaluate();
 
 private:
-  /// Private helper constructor for delayed borrowed rvalues.
-  ArgumentSource(SILLocation loc, RValue &&rv, Kind kind);
-
   // Make the non-move accessors private to make it more difficult
   // to accidentally re-emit values.
   const RValue &asKnownRValue() const & {
-    return Storage.get<RValueStorage>(StoredKind).Value;
+    assert(isRValue());
+    return Storage.TheRV.Value;
   }
 
   // Make the non-move accessors private to make it more difficult
   // to accidentally re-emit values.
   const LValue &asKnownLValue() const & {
-    return Storage.get<LValueStorage>(StoredKind).Value;
+    assert(isLValue());
+    return Storage.TheLV.Value;
   }
 
   Expr *asKnownExpr() const & {
-    return Storage.get<Expr*>(StoredKind);
+    assert(StoredKind == Kind::Expr);
+    return Storage.TheExpr;
   }
-
-  RValue getKnownTupleAsRValue(SILGenFunction &SGF, SGFContext C) &&;
 };
 
 } // end namespace Lowering

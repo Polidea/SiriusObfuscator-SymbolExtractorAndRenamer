@@ -138,6 +138,10 @@ public:
       TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
       return transformRepeatWhileStmt(cast<RepeatWhileStmt>(S));
     }
+    case StmtKind::For: {
+      TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
+      return transformForStmt(cast<ForStmt>(S));
+    }
     case StmtKind::ForEach: {
       TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
       return transformForEachStmt(cast<ForEachStmt>(S));
@@ -199,6 +203,17 @@ public:
     }
 
     return RWS;
+  }
+
+  ForStmt *transformForStmt(ForStmt *FS) {
+    if (Stmt *B = FS->getBody()) {
+      Stmt *NB = transformStmt(B);
+      if (NB != B) {
+        FS->setBody(NB);
+      }
+    }
+
+    return FS;
   }
 
   ForEachStmt *transformForEachStmt(ForEachStmt *FES) {
@@ -264,7 +279,6 @@ public:
         BraceStmt *NB = transformBraceStmt(B);
         if (NB != B) {
           FD->setBody(NB);
-          TypeChecker(Context).checkFunctionErrorHandling(FD);
         }
       }
     } else if (auto *NTD = dyn_cast<NominalTypeDecl>(D)) {
@@ -655,7 +669,7 @@ public:
           useJustFirst = true;
         } else {
           for (Expr *Arg : TE->getElements()) {
-            if (Arg->isSemanticallyInOutExpr()) {
+            if (Arg->getType()->is<InOutType>()) {
               useJustFirst = true;
               break;
             }
@@ -730,11 +744,11 @@ public:
     }
 
     VarDecl *VD =
-        new (Context) VarDecl(/*IsStatic*/false, VarDecl::Specifier::Let,
+        new (Context) VarDecl(/*IsStatic*/false, /*IsLet*/true,
                               /*IsCaptureList*/false, SourceLoc(),
                               Context.getIdentifier(NameBuf),
                               MaybeLoadInitExpr->getType(), TypeCheckDC);
-    VD->setInterfaceType(VD->getType()->mapTypeOutOfContext());
+    VD->setInterfaceType(TypeCheckDC->mapTypeOutOfContext(VD->getType()));
     VD->setImplicit();
 
     NamedPattern *NP = new (Context) NamedPattern(VD, /*implicit*/ true);

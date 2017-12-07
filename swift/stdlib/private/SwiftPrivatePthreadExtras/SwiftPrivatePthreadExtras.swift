@@ -17,7 +17,7 @@
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Cygwin) || os(Haiku)
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
 import Glibc
 #endif
 
@@ -59,7 +59,7 @@ internal func invokeBlockContext(
   return context.run()
 }
 
-#if os(Cygwin) || os(FreeBSD) || os(Haiku)
+#if CYGWIN || os(FreeBSD)
 public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t?>
 #else
 public typealias _stdlib_pthread_attr_t = UnsafePointer<pthread_attr_t>
@@ -107,8 +107,8 @@ public func _stdlib_pthread_join<Result>(
     let threadResultPtr = threadResultRawPtr!.assumingMemoryBound(
       to: Result.self)
     let threadResult = threadResultPtr.pointee
-    threadResultPtr.deinitialize(count: 1)
-    threadResultPtr.deallocate()
+    threadResultPtr.deinitialize()
+    threadResultPtr.deallocate(capacity: 1)
     return (result, threadResult)
   } else {
     return (result, nil)

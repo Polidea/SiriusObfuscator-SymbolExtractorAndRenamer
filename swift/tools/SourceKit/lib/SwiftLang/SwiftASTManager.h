@@ -40,7 +40,6 @@ namespace SourceKit {
   class SwiftEditorDocumentFileMap;
   class SwiftLangSupport;
   class SwiftInvocation;
-  struct SwiftStatistics;
   typedef RefPtr<SwiftInvocation> SwiftInvocationRef;
   class EditorDiagConsumer;
 
@@ -49,7 +48,7 @@ public:
   struct Implementation;
   Implementation &Impl;
 
-  explicit ASTUnit(uint64_t Generation, SwiftStatistics &Statistics);
+  explicit ASTUnit(uint64_t Generation);
   ~ASTUnit();
 
   swift::CompilerInstance &getCompilerInstance() const;

@@ -177,9 +177,9 @@ extension NSSet {
     assert(alignment == MemoryLayout<AnyObject>.alignment)
 
     let rawBuffer = UnsafeMutableRawPointer.allocate(
-      byteCount: bufferSize, alignment: alignment)
+      bytes: bufferSize, alignedTo: alignment)
     defer {
-      rawBuffer.deallocate()
+      rawBuffer.deallocate(bytes: bufferSize, alignedTo: alignment)
       _fixLifetime(anSet)
     }
     let valueBuffer = rawBuffer.bindMemory(

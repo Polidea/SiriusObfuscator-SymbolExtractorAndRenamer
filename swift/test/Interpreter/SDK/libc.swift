@@ -1,13 +1,10 @@
 /* magic */
 // Do not edit the line above.
 
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t  &&  mkdir -p %t
 // RUN: %target-run-simple-swift %s %t | %FileCheck %s
 
 // REQUIRES: executable_test
-
-// TODO: rdar://problem/33388782
-// REQUIRES: CPU=x86_64
 
 #if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
   import Darwin

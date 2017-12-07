@@ -499,8 +499,8 @@ static bool usesGenerics(SILFunction *F,
       }
 
       // Scan the result type of the instruction.
-      for (auto V : I.getResults()) {
-        V->getType().getSwiftRValueType().visit(FindArchetypesAndGenericTypes);
+      if (I.getType()) {
+        I.getType().getSwiftRValueType().visit(FindArchetypesAndGenericTypes);
       }
 
       if (UsesGenerics)
@@ -522,7 +522,7 @@ mapInterfaceTypes(SILFunction *F,
     if (!Param.getType()->hasArchetype())
       continue;
     Param = SILParameterInfo(
-      Param.getType()->mapTypeOutOfContext()->getCanonicalType(),
+      F->mapTypeOutOfContext(Param.getType())->getCanonicalType(),
       Param.getConvention());
   }
 
@@ -530,14 +530,14 @@ mapInterfaceTypes(SILFunction *F,
     if (!Result.getType()->hasArchetype())
       continue;
     auto InterfaceResult = Result.getWithType(
-      Result.getType()->mapTypeOutOfContext()->getCanonicalType());
+        F->mapTypeOutOfContext(Result.getType())->getCanonicalType());
     Result = InterfaceResult;
   }
 
   if (InterfaceErrorResult.hasValue()) {
     if (InterfaceErrorResult.getValue().getType()->hasArchetype()) {
       InterfaceErrorResult = SILResultInfo(
-          InterfaceErrorResult.getValue().getType()->mapTypeOutOfContext()
+          F->mapTypeOutOfContext(InterfaceErrorResult.getValue().getType())
               ->getCanonicalType(),
           InterfaceErrorResult.getValue().getConvention());
     }
@@ -577,12 +577,6 @@ CanSILFunctionType FunctionSignatureTransform::createOptimizedSILFunctionType() 
     InterfaceResults.push_back(InterfaceResult);
   }
 
-  llvm::SmallVector<SILYieldInfo, 8> InterfaceYields;
-  for (SILYieldInfo InterfaceYield : FTy->getYields()) {
-    // For now, don't touch the yield types.
-    InterfaceYields.push_back(InterfaceYield);
-  }
-
   bool UsesGenerics = false;
   if (HasGenericSignature) {
     // Not all of the generic type parameters are used by the function
@@ -617,10 +611,8 @@ CanSILFunctionType FunctionSignatureTransform::createOptimizedSILFunctionType() 
 
   // Don't use a method representation if we modified self.
   auto ExtInfo = FTy->getExtInfo();
-  auto witnessMethodConformance = FTy->getWitnessMethodConformanceOrNone();
   if (shouldModifySelfArgument) {
     ExtInfo = ExtInfo.withRepresentation(SILFunctionTypeRepresentation::Thin);
-    witnessMethodConformance = None;
   }
 
   Optional<SILResultInfo> InterfaceErrorResult;
@@ -635,10 +627,10 @@ CanSILFunctionType FunctionSignatureTransform::createOptimizedSILFunctionType() 
   GenericSignature *GenericSig =
       UsesGenerics ? FTy->getGenericSignature() : nullptr;
 
-  return SILFunctionType::get(
-      GenericSig, ExtInfo, FTy->getCoroutineKind(), FTy->getCalleeConvention(),
-      InterfaceParams, InterfaceYields, InterfaceResults, InterfaceErrorResult,
-      F->getModule().getASTContext(), witnessMethodConformance);
+  return SILFunctionType::get(GenericSig, ExtInfo,
+                              FTy->getCalleeConvention(), InterfaceParams,
+                              InterfaceResults, InterfaceErrorResult,
+                              F->getModule().getASTContext());
 }
 
 void FunctionSignatureTransform::createFunctionSignatureOptimizedFunction() {
@@ -657,12 +649,12 @@ void FunctionSignatureTransform::createFunctionSignatureOptimizedFunction() {
     NewFGenericEnv = nullptr;
   }
 
-  NewF = M.createFunction(linkage, Name, NewFTy, NewFGenericEnv,
-                          F->getLocation(), F->isBare(), F->isTransparent(),
-                          F->isSerialized(), F->getEntryCount(), F->isThunk(),
-                          F->getClassSubclassScope(), F->getInlineStrategy(),
-                          F->getEffectsKind(), nullptr, F->getDebugScope());
-  if (!F->hasQualifiedOwnership()) {
+  NewF = M.createFunction(
+      linkage, Name, NewFTy, NewFGenericEnv, F->getLocation(), F->isBare(),
+      F->isTransparent(), F->isSerialized(), F->isThunk(),
+      F->getClassSubclassScope(), F->getInlineStrategy(), F->getEffectsKind(),
+      nullptr, F->getDebugScope());
+  if (F->hasUnqualifiedOwnership()) {
     NewF->setUnqualifiedOwnership();
   }
 
@@ -956,8 +948,8 @@ void FunctionSignatureTransform::OwnedToGuaranteedTransformFunctionResults() {
         continue;
       }
       // Create a release to balance it out.
-      auto AI = cast<ApplyInst>(X);
-      createDecrementBefore(AI, AI->getParent()->getTerminator());
+      assert(isa<ApplyInst>(X) && "Unknown epilogue retain");
+      createDecrementBefore(X, dyn_cast<ApplyInst>(X)->getParent()->getTerminator());
     }
   }
 }
@@ -975,17 +967,18 @@ OwnedToGuaranteedFinalizeThunkFunction(SILBuilder &Builder, SILFunction *F) {
 
 static void createArgumentRelease(SILBuilder &Builder, ArgumentDescriptor &AD) {
   auto &F = Builder.getFunction();
-  SILArgument *Arg = F.getArguments()[AD.Index];
-  if (Arg->getType().isAddress()) {
-    assert(AD.PInfo->getConvention() == ParameterConvention::Indirect_In
-           && F.getConventions().useLoweredAddresses());
+  if (AD.PInfo->getConvention() == ParameterConvention::Direct_Owned) {
+    Builder.createReleaseValue(RegularLocation(SourceLoc()),
+                               F.getArguments()[AD.Index],
+                               Builder.getDefaultAtomicity());
+    return;
+  }
+  if (AD.PInfo->getConvention() == ParameterConvention::Indirect_In) {
     Builder.createDestroyAddr(RegularLocation(SourceLoc()),
                               F.getArguments()[AD.Index]);
     return;
   }
-  Builder.createReleaseValue(RegularLocation(SourceLoc()),
-                             F.getArguments()[AD.Index],
-                             Builder.getDefaultAtomicity());
+  llvm_unreachable("Parameter convention is not supported");
 }
 
 /// Set up epilogue work for the thunk arguments based in the given argument.
@@ -1026,12 +1019,12 @@ OwnedToGuaranteedAddResultRelease(ResultDescriptor &RD, SILBuilder &Builder,
   }
 
   SILInstruction *Call = findOnlyApply(F);
-  if (auto AI = dyn_cast<ApplyInst>(Call)) {
-    Builder.setInsertionPoint(&*std::next(SILBasicBlock::iterator(AI)));
-    Builder.createRetainValue(RegularLocation(SourceLoc()), AI,
+  if (isa<ApplyInst>(Call)) {
+    Builder.setInsertionPoint(&*std::next(SILBasicBlock::iterator(Call)));
+    Builder.createRetainValue(RegularLocation(SourceLoc()), Call,
                               Builder.getDefaultAtomicity());
   } else {
-    SILBasicBlock *NormalBB = cast<TryApplyInst>(Call)->getNormalBB();
+    SILBasicBlock *NormalBB = dyn_cast<TryApplyInst>(Call)->getNormalBB();
     Builder.setInsertionPoint(&*NormalBB->begin());
     Builder.createRetainValue(RegularLocation(SourceLoc()),
                               NormalBB->getArgument(0), Builder.getDefaultAtomicity());
@@ -1148,7 +1141,8 @@ public:
     auto *F = getFunction();
 
     // Don't run function signature optimizations at -Os.
-    if (F->optimizeForSize())
+    if (F->getModule().getOptions().Optimization ==
+        SILOptions::SILOptMode::OptimizeForSize)
       return;
 
     // Don't optimize callees that should not be optimized.

@@ -2,8 +2,6 @@
 // RUN: %target-build-swift %s -o %t/a.out3 -swift-version 3 && %target-run %t/a.out3
 // RUN: %target-build-swift %s -o %t/a.out4 -swift-version 4 && %target-run %t/a.out4
 
-// REQUIRES: executable_test
-
 import StdlibUnittest
 
 //===--- MyString ---------------------------------------------------------===//
@@ -18,14 +16,10 @@ extension MyString : BidirectionalCollection {
   typealias Iterator = String.Iterator
   typealias Index = String.Index
   typealias IndexDistance = String.IndexDistance
-  typealias SubSequence = MyString
   func makeIterator() -> Iterator { return base.makeIterator() }
   var startIndex: String.Index { return base.startIndex }
   var endIndex: String.Index { return base.startIndex }
   subscript(i: Index) -> Character { return base[i] }
-  subscript(indices: Range<Index>) -> MyString {
-    return MyString(base: String(self.base[indices]))
-  }
   func index(after i: Index) -> Index { return base.index(after: i) }
   func index(before i: Index) -> Index { return base.index(before: i) }
   func index(_ i: Index, offsetBy n: IndexDistance) -> Index {

@@ -45,6 +45,8 @@ public:
 
 private:
   bool FileHasEntryPoint = false;
+  bool SILSerializeWitnessTables;
+
   bool InsideAbstractStorageDecl = false;
 
   void addSymbol(StringRef name) {
@@ -72,9 +74,11 @@ private:
 public:
   TBDGenVisitor(StringSet &symbols, const llvm::Triple &triple,
                 const UniversalLinkageInfo &universalLinkInfo,
-                ModuleDecl *swiftModule, StringRef installName)
+                ModuleDecl *swiftModule, bool silSerializeWitnessTables,
+                StringRef installName)
       : Symbols(symbols), Triple(triple), UniversalLinkInfo(universalLinkInfo),
-        SwiftModule(swiftModule), InstallName(installName) {}
+        SwiftModule(swiftModule), InstallName(installName),
+        SILSerializeWitnessTables(silSerializeWitnessTables) {}
 
   void setFileHasEntryPoint(bool hasEntryPoint) {
     FileHasEntryPoint = hasEntryPoint;

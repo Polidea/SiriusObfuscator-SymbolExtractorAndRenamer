@@ -23,12 +23,6 @@
 
 
 import TestsUtils
-
-public let TypeFlood = BenchmarkInfo(
-  name: "TypeFlood",
-  runFunction: run_TypeFlood,
-  tags: [.validation, .metadata])
-
 protocol Pingable {}
 
 struct Some1<T> {

@@ -53,13 +53,13 @@ STATISTIC(TotalPrivateExternalFuncs, "Number of private external funcs");
 STATISTIC(TotalSharedExternalFuncs, "Number of shared external funcs");
 
 // Individual instruction statistics
-#define INST(Id, Parent) \
+#define INST(Id, Parent, TextualName, MemBehavior, ReleasingBehavior)          \
   STATISTIC(Num##Id, "Number of " #Id);
 #include "swift/SIL/SILNodes.def"
 
 namespace {
 
-struct InstCountVisitor : SILInstructionVisitor<InstCountVisitor> {
+struct InstCountVisitor : SILVisitor<InstCountVisitor> {
   // We store these locally so that we do not continually check if the function
   // is external or not. Instead, we just check once at the end and accumulate.
   unsigned InstCount = 0;
@@ -67,16 +67,16 @@ struct InstCountVisitor : SILInstructionVisitor<InstCountVisitor> {
 
   void visitSILBasicBlock(SILBasicBlock *BB) {
     BlockCount++;
-    SILInstructionVisitor<InstCountVisitor>::visitSILBasicBlock(BB);
+    SILVisitor<InstCountVisitor>::visitSILBasicBlock(BB);
   }
 
   void visitSILFunction(SILFunction *F) {
-    SILInstructionVisitor<InstCountVisitor>::visitSILFunction(F);
+    SILVisitor<InstCountVisitor>::visitSILFunction(F);
   }
 
   void visitValueBase(ValueBase *V) { }
 
-#define INST(Id, Parent)                                                       \
+#define INST(Id, Parent, TextualName, MemBehavior, ReleasingBehavior)          \
   void visit##Id(Id *I) {                                                      \
     ++Num##Id;                                                                 \
     ++InstCount;                                                               \

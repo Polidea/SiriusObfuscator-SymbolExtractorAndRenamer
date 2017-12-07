@@ -43,11 +43,6 @@ private:
   std::vector<std::string> InputFilenames;
 
 public:
-  bool hasUniqueInputFilename() const { return InputFilenames.size() == 1; }
-  const std::string &getFilenameOfFirstInput() const {
-    return InputFilenames[0];
-  }
-
   void setMainExecutablePath(const std::string &Path) {
     MainExecutablePath = Path;
   }
@@ -79,7 +74,8 @@ public:
       TargetTriple = llvm::Triple(llvm::sys::getDefaultTargetTriple());
 
     if (ParsedArgs.hasArg(OPT_UNKNOWN)) {
-      for (const Arg *A : ParsedArgs.filtered(OPT_UNKNOWN)) {
+      for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_UNKNOWN),
+                                     ParsedArgs.filtered_end())) {
         Diags.diagnose(SourceLoc(), diag::error_unknown_arg,
                        A->getAsString(ParsedArgs));
       }
@@ -93,7 +89,8 @@ public:
       return 1;
     }
 
-    for (const Arg *A : ParsedArgs.filtered(OPT_INPUT)) {
+    for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_INPUT),
+                                   ParsedArgs.filtered_end())) {
       InputFilenames.push_back(A->getValue());
     }
 
@@ -131,13 +128,13 @@ int modulewrap_main(ArrayRef<const char *> Args, const char *Argv0,
     return 1;
   }
 
-  if (!Invocation.hasUniqueInputFilename()) {
+  if (Invocation.getInputFilenames().size() != 1) {
     Instance.getDiags().diagnose(SourceLoc(),
                                  diag::error_mode_requires_one_input_file);
     return 1;
   }
 
-  StringRef Filename = Invocation.getFilenameOfFirstInput();
+  StringRef Filename = Invocation.getInputFilenames()[0];
   auto ErrOrBuf = llvm::MemoryBuffer::getFile(Filename);
   if (!ErrOrBuf) {
     Instance.getDiags().diagnose(

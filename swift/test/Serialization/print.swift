@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -emit-module -o %t %s
 // RUN: %target-swift-ide-test(mock-sdk: %clang-importer-sdk) -print-module -skip-deinit=false -module-to-print=print -I %t -source-filename=%s | %FileCheck %s
 

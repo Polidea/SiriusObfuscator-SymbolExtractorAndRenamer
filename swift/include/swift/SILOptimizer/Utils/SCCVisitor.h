@@ -39,13 +39,13 @@ namespace swift {
 template <typename ImplClass>
 class SCCVisitor {
 public:
-  SCCVisitor(SILFunction &F) : F(F) {}
+  SCCVisitor(SILFunction &F) : F(F), CurrentNum(0) {}
   ~SCCVisitor() {
     cleanup();
   }
   ImplClass &asImpl() {  return static_cast<ImplClass &>(*this); }
 
-  void visit(llvm::SmallVectorImpl<SILNode *> &SCC) { }
+  void visit(llvm::SmallVectorImpl<ValueBase *> &SCC) { }
 
   void run() {
     llvm::ReversePostOrderTraversal<SILFunction *> RPOT(&F);
@@ -53,7 +53,8 @@ public:
     for (auto Iter = RPOT.begin(), E = RPOT.end(); Iter != E; ++Iter) {
       auto *BB = *Iter;
       for (auto &I : *BB)
-        maybeDFS(&I);
+        if (!Visited.count(&I))
+          DFS(&I);
     }
 
     cleanup();
@@ -61,19 +62,20 @@ public:
 
 private:
   struct DFSInfo {
-    SILNode *Node;
+    ValueBase *Value;
     int DFSNum;
     int LowNum;
 
-    DFSInfo(SILNode *node, int num) : Node(node), DFSNum(num), LowNum(num) {}
+    DFSInfo(ValueBase *Value, int Num) : Value(Value), DFSNum(Num),
+                                         LowNum(Num) {}
   };
 
   SILFunction &F;
-  int CurrentNum = 0;
+  int CurrentNum;
 
-  llvm::DenseSet<SILNode *> Visited;
-  llvm::SetVector<SILNode *> DFSStack;
-  typedef llvm::DenseMap<SILNode *, DFSInfo *> ValueInfoMapType;
+  llvm::DenseSet<ValueBase *> Visited;
+  llvm::SetVector<ValueBase *> DFSStack;
+  typedef llvm::DenseMap<ValueBase *, DFSInfo *> ValueInfoMapType;
   ValueInfoMapType ValueInfoMap;
 
   void cleanup() {
@@ -86,26 +88,25 @@ private:
     CurrentNum = 0;
   }
 
-  DFSInfo &addDFSInfo(SILNode *node) {
-    assert(node->isRepresentativeSILNodeInObject());
+  DFSInfo &addDFSInfo(ValueBase *Value) {
+    typename ValueInfoMapType::iterator Iter;
+    bool Inserted;
 
-    auto entry = std::make_pair(node, new DFSInfo(node, CurrentNum++));
-    auto insertion = ValueInfoMap.insert(entry);
-    assert(insertion.second && "Cannot add DFS info more than once!");
-    return *insertion.first->second;
+    auto MapEntry = std::make_pair(Value, new DFSInfo(Value, CurrentNum++));
+    std::tie(Iter, Inserted) = ValueInfoMap.insert(MapEntry);
+    assert(Inserted && "Cannot add DFS info more than once for a value!");
+    return *Iter->second;
   }
 
-  DFSInfo &getDFSInfo(SILNode *node) {
-    assert(node->isRepresentativeSILNodeInObject());
-    auto it = ValueInfoMap.find(node);
-    assert(it != ValueInfoMap.end() &&
+  DFSInfo &getDFSInfo(ValueBase *Value) {
+    assert(ValueInfoMap.find(Value) != ValueInfoMap.end() &&
            "Expected to find value in DFS info map!");
 
-    return *it->second;
+    return *ValueInfoMap.find(Value)->second;
   }
 
   void getArgsForTerminator(TermInst *Term, SILBasicBlock *SuccBB, int Index,
-                            llvm::SmallVectorImpl<SILValue> &Operands) {
+                            llvm::SmallVectorImpl<ValueBase *> &Operands) {
     switch (Term->getTermKind()) {
     case TermKind::BranchInst:
       return Operands.push_back(cast<BranchInst>(Term)->getArg(Index));
@@ -133,13 +134,7 @@ private:
     case TermKind::ReturnInst:
     case TermKind::SwitchValueInst:
     case TermKind::ThrowInst:
-    case TermKind::UnwindInst:
       llvm_unreachable("Did not expect terminator that does not have args!");
-
-    case TermKind::YieldInst:
-      for (auto &O : cast<YieldInst>(Term)->getAllOperands())
-        Operands.push_back(O.get());
-      return;
 
     case TermKind::TryApplyInst:
       for (auto &O : cast<TryApplyInst>(Term)->getAllOperands())
@@ -148,15 +143,15 @@ private:
     }
   }
 
-  void collectOperandsForUser(SILNode *node,
-                              llvm::SmallVectorImpl<SILValue> &Operands) {
-    if (auto *I = dyn_cast<SILInstruction>(node)) {
+  void collectOperandsForUser(ValueBase *User,
+                              llvm::SmallVectorImpl<ValueBase *> &Operands) {
+    if (auto *I = dyn_cast<SILInstruction>(User)) {
       for (auto &O : I->getAllOperands())
         Operands.push_back(O.get());
       return;
     }
 
-    if (auto *A = dyn_cast<SILArgument>(node)) {
+    if (auto *A = dyn_cast<SILArgument>(User)) {
       auto *BB = A->getParent();
       auto Index = A->getIndex();
 
@@ -166,53 +161,47 @@ private:
     }
   }
 
-  void maybeDFS(SILInstruction *inst) {
-    (void) maybeDFSCanonicalNode(inst->getRepresentativeSILNodeInObject());
+  // Is Value currently on our DFS stack?
+  bool onStack(ValueBase *Value) {
+    return DFSStack.count(Value);
   }
 
-  /// Continue a DFS from the given node, finding the strongly
-  /// component that User is a part of, calling visit() with that SCC,
-  /// and returning the DFSInfo for the node.
-  /// But if we've already visited the node, just return null.
-  DFSInfo *maybeDFSCanonicalNode(SILNode *node) {
-    assert(node->isRepresentativeSILNodeInObject() &&
-           "should already be canonical");
+  /// Do depth-first through the value graph, finding the strongly
+  /// component that User is a part of, and call visit() with that SCC.
+  void DFS(ValueBase *User) {
+    assert(!Visited.count(User) &&
+           "Attempting to visit a value twice in DFS search!");
 
-    if (!Visited.insert(node).second)
-      return nullptr;
+    DFSStack.insert(User);
+    Visited.insert(User);
 
-    DFSStack.insert(node);
+    auto &UserInfo = addDFSInfo(User);
 
-    auto &nodeInfo = addDFSInfo(node);
-
-    llvm::SmallVector<SILValue, 4> operands;
-    collectOperandsForUser(node, operands);
+    llvm::SmallVector<ValueBase *, 4> Operands;
+    collectOperandsForUser(User, Operands);
 
     // Visit each unvisited operand, updating the lowest DFS number we've seen
     // reachable in User's SCC.
-    for (SILValue operandValue : operands) {
-      SILNode *operandNode = operandValue->getRepresentativeSILNodeInObject();
-      if (auto operandNodeInfo = maybeDFSCanonicalNode(operandNode)) {
-        nodeInfo.LowNum = std::min(nodeInfo.LowNum, operandNodeInfo->LowNum);
-      } else if (DFSStack.count(operandNode)) {
-        auto operandNodeInfo = &getDFSInfo(operandNode);
-        nodeInfo.LowNum = std::min(nodeInfo.LowNum, operandNodeInfo->DFSNum);
+    for (auto *Opnd : Operands) {
+      if (!Visited.count(Opnd)) {
+        DFS(Opnd);
+        UserInfo.LowNum = std::min(UserInfo.LowNum, getDFSInfo(Opnd).LowNum);
+      } else if (onStack(Opnd)) {
+        UserInfo.LowNum = std::min(UserInfo.LowNum, getDFSInfo(Opnd).DFSNum);
       }
     }
 
     // If User is the head of its own SCC, pop that SCC off the DFS stack.
-    if (nodeInfo.DFSNum == nodeInfo.LowNum) {
-      llvm::SmallVector<SILNode *, 4> SCC;
-      SILNode *poppedNode;
+    if (UserInfo.DFSNum == UserInfo.LowNum) {
+      llvm::SmallVector<ValueBase *, 4> SCC;
+      ValueBase *PoppedValue;
       do {
-        poppedNode = DFSStack.pop_back_val();
-        SCC.push_back(poppedNode);
-      } while (poppedNode != node);
+        PoppedValue = DFSStack.pop_back_val();
+        SCC.push_back(PoppedValue);
+      } while (PoppedValue != User);
 
       asImpl().visit(SCC);
     }
-
-    return &nodeInfo;
   }
 };
 

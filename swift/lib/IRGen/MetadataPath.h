@@ -57,13 +57,12 @@ class MetadataPath {
 
       /// Type metadata at requirement index P of a generic nominal type.
       NominalTypeArgument,
-
-      /// Conditional conformance at index P (i.e. the P'th element) of a
-      /// conformance.
-      ConditionalConformance,
-      LastWithPrimaryIndex = ConditionalConformance,
+      LastWithPrimaryIndex = NominalTypeArgument,
 
       // Everything past this point has no index.
+
+      /// The parent metadata of a nominal type.
+      NominalParent,
 
       /// An impossible path.
       Impossible,
@@ -103,7 +102,7 @@ class MetadataPath {
       case Kind::OutOfLineBaseProtocol:
       case Kind::NominalTypeArgumentConformance:
       case Kind::NominalTypeArgument:
-      case Kind::ConditionalConformance:
+      case Kind::NominalParent:
         return OperationCost::Load;
 
       case Kind::AssociatedConformance:
@@ -145,6 +144,11 @@ public:
     Path.push_back(Component(Component::Kind::Impossible));
   }
 
+  /// Add a step to this path which gets the parent metadata.
+  void addNominalParentComponent() {
+    Path.push_back(Component(Component::Kind::NominalParent));
+  }
+
   /// Add a step to this path which gets the type metadata stored at
   /// requirement index n in a generic type metadata.
   void addNominalTypeArgumentComponent(unsigned index) {
@@ -172,10 +176,6 @@ public:
     assert(!index.isPrefix());
     Path.push_back(Component(Component::Kind::AssociatedConformance,
                              index.getValue()));
-  }
-
-  void addConditionalConformanceComponent(unsigned index) {
-    Path.push_back(Component(Component::Kind::ConditionalConformance, index));
   }
 
   /// Return an abstract measurement of the cost of this path.
@@ -208,6 +208,9 @@ public:
 
     for (auto C : Path) {
       switch (C.getKind()) {
+      case Component::Kind::NominalParent:
+        Root = A.createParent(Root);
+        continue;
       case Component::Kind::NominalTypeArgument:
         Root = A.createGenericArgument(C.getPrimaryIndex(), Root);
         continue;

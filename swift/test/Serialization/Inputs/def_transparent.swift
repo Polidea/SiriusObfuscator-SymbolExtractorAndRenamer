@@ -11,21 +11,13 @@
 @_transparent public func standalone_function(x x: Int32, y: Int32) -> Int32 {
   return x
 }
-
-@_inlineable
 public func foo() -> Int32 { return 0 }
-@_inlineable
 public func runced() -> Bool { return true }
 
-@_inlineable
 public func a() {}
-@_inlineable
 public func b() {}
-@_inlineable
 public func c() {}
-@_inlineable
 public func d() {}
-@_inlineable
 public func e() {}
 
 @_transparent public func test_br() {
@@ -44,7 +36,6 @@ public enum MaybePair {
   case Right(String)
   case Both(Int32, String)
 }
-@_inlineable
 public func do_switch(u u: MaybePair) {
   switch u {
   case .Neither:

@@ -130,16 +130,12 @@ const Metadata *TypeMetadataRecord::getCanonicalTypeMetadata() const {
   switch (getTypeKind()) {
   case TypeMetadataRecordKind::UniqueDirectType:
     return getDirectType();
-  case TypeMetadataRecordKind::NonuniqueDirectType: {
-    const ForeignTypeMetadata *FMD =
-        static_cast<const ForeignTypeMetadata *>(getDirectType());
-    return swift_getForeignTypeMetadata(const_cast<ForeignTypeMetadata *>(FMD));
-  }
+  case TypeMetadataRecordKind::NonuniqueDirectType:
+    return swift_getForeignTypeMetadata((ForeignTypeMetadata *)getDirectType());
   case TypeMetadataRecordKind::UniqueDirectClass:
     if (auto *ClassMetadata =
-          static_cast<const ::ClassMetadata *>(getDirectType())) {
-      return getMetadataForClass(ClassMetadata);
-    }
+          static_cast<const ::ClassMetadata *>(getDirectType()))
+      return swift_getObjCClassMetadata(ClassMetadata);
     else
       return nullptr;
   default:
@@ -258,14 +254,10 @@ _classByName(const llvm::StringRef typeName) {
 
 /// \param typeName The name of a class in the form: <module>.<class>
 /// \return Returns the metadata of the type, if found.
-
-/// internal func _getTypeByName(_ name: UnsafePointer<UInt8>,
-///                              _ nameLength: UInt)  -> Any.Type?
-#define _getTypeByName \
-  MANGLE_SYM(s14_getTypeByNameypXpSgSPys5UInt8VG_SutF)
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERNAL
+SWIFT_CC(swift)
+SWIFT_RUNTIME_EXPORT
 const Metadata *
-_getTypeByName(const char *typeName, size_t typeNameLength) {
+swift_getTypeByName(const char *typeName, size_t typeNameLength) {
   llvm::StringRef name(typeName, typeNameLength);
   return _classByName(name);
 }

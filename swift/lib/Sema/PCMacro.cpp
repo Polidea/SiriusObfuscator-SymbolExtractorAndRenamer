@@ -62,6 +62,9 @@ public:
     case StmtKind::RepeatWhile: {
       return transformRepeatWhileStmt(cast<RepeatWhileStmt>(S));
     }
+    case StmtKind::For: {
+      return transformForStmt(cast<ForStmt>(S));
+    }
     case StmtKind::ForEach: {
       return transformForEachStmt(cast<ForEachStmt>(S));
     }
@@ -184,6 +187,17 @@ public:
     return RWS;
   }
 
+  ForStmt *transformForStmt(ForStmt *FS) {
+    if (Stmt *B = FS->getBody()) {
+      Stmt *NB = transformStmt(B);
+      if (NB != B) {
+        FS->setBody(NB);
+      }
+    }
+
+    return FS;
+  }
+
   ForEachStmt *transformForEachStmt(ForEachStmt *FES) {
     if (BraceStmt *B = FES->getBody()) {
       BraceStmt *NB = transformBraceStmt(B);
@@ -300,12 +314,15 @@ public:
           EndLoc = FD->getParameterLists().back()->getSourceRange().End;
         }
 
-        if (EndLoc.isValid())
-          NB = prependLoggerCall(NB, {StartLoc, EndLoc});
-
-        if (NB != B) {
-          FD->setBody(NB);
-          TypeChecker(Context).checkFunctionErrorHandling(FD);
+        if (EndLoc.isValid()) {
+          BraceStmt *NNB = prependLoggerCall(NB, {StartLoc, EndLoc});
+          if (NNB != B) {
+            FD->setBody(NNB);
+          }
+        } else {
+          if (NB != B) {
+            FD->setBody(NB);
+          }
         }
       }
     } else if (auto *NTD = dyn_cast<NominalTypeDecl>(D)) {
@@ -462,7 +479,7 @@ public:
     }
 
     VarDecl *VD =
-        new (Context) VarDecl(/*IsStatic*/false, VarDecl::Specifier::Let,
+        new (Context) VarDecl(/*IsStatic*/false, /*IsLet*/true,
                               /*IsCaptureList*/false, SourceLoc(),
                               Context.getIdentifier(NameBuf),
                               MaybeLoadInitExpr->getType(), TypeCheckDC);
@@ -672,7 +689,12 @@ void swift::performPCMacro(SourceFile &SF, TopLevelContext &TLC) {
           if (FD->getBody()) {
             ASTContext &ctx = FD->getASTContext();
             Instrumenter I(ctx, FD, TmpNameIndex);
-            I.transformDecl(FD);
+            Decl *NewDecl = I.transformDecl(FD);
+            if (AbstractFunctionDecl *NFD =
+                    dyn_cast<AbstractFunctionDecl>(NewDecl)) {
+              TypeChecker TC(ctx);
+              TC.checkFunctionErrorHandling(NFD);
+            }
             return false;
           }
         }

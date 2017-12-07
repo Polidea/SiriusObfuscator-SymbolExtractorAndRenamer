@@ -156,10 +156,6 @@ public:
     return visit(T->getBase());
   }
 
-  FoundResult visitSharedTypeRepr(SharedTypeRepr *T) {
-    return visit(T->getBase());
-  }
-
   FoundResult visitArrayTypeRepr(ArrayTypeRepr *T) {
     return handleParent(T, T->getBase());
   }
@@ -173,11 +169,9 @@ public:
     // as their own index level
     if (T->getNumElements() == 1) {
       ParentIsOptional = false;
-      return visit(T->getElementType(0));
+      return visit(T->getElement(0));
     }
-    llvm::SmallVector<TypeRepr *, 8> Children;
-    T->getElementTypes(Children);
-    return handleParent(T, ArrayRef<TypeRepr *>(Children));
+    return handleParent(T, T->getElements());
   }
 
   FoundResult visitFunctionTypeRepr(FunctionTypeRepr *T) {

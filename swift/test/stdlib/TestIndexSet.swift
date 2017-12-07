@@ -230,69 +230,63 @@ class TestIndexSet : TestIndexSetSuper {
     }
     
     func testSubrangeIteration() {
-        func expectRanges(_ ranges: [Range<IndexSet.RangeView.Index>], in view: IndexSet.RangeView) {
-            expectEqual(ranges.count, view.count)
-
-            for i in 0 ..< min(ranges.count, view.count) {
-                expectEqual(Range(ranges[i]), Range(view[i]))
+        var someIndexes = IndexSet(integersIn: 2..<5)
+        someIndexes.insert(integersIn: 8..<11)
+        someIndexes.insert(integersIn: 15..<20)
+        someIndexes.insert(integersIn: 30..<40)
+        someIndexes.insert(integersIn: 60..<80)
+        
+        var count = 0
+        for _ in someIndexes.rangeView {
+            count += 1
+        }
+        expectEqual(5, count)
+        
+        
+        count = 0
+        for r in someIndexes.rangeView(of: 9..<35) {
+            if count == 0 {
+                expectEqual(r, 9..<11)
+            }
+            count += 1
+            if count == 3 {
+                expectEqual(r, 30..<35)
             }
         }
+        expectEqual(3, count)
+        
+        count = 0
+        for r in someIndexes.rangeView(of: 0...34) {
+            if count == 0 {
+                expectEqual(r, 2..<5)
+            }
+            count += 1
+            if count == 4 {
+                expectEqual(r, 30..<35)
+            }
+        }
+        expectEqual(4, count)
 
-        // Inclusive ranges for test:
-        // 2-4, 8-10, 15-19, 30-39, 60-79
-        var indexes = IndexSet()
-        indexes.insert(integersIn: 2..<5)
-        indexes.insert(integersIn: 8...10)
-        indexes.insert(integersIn: Range(15..<20))
-        indexes.insert(integersIn: Range(30...39))
-        indexes.insert(integersIn: 60..<80)
+        // Empty intersection, before start
+        count = 0
+        for _ in someIndexes.rangeView(of: 0..<1) {
+            count += 1
+        }
+        expectEqual(0, count)
 
-        // Empty ranges should yield no results:
-        expectRanges([], in: indexes.rangeView(of: 0..<0))
+        // Empty range
+        count = 0
+        for _ in someIndexes.rangeView(of: 0..<0) {
+            count += 1
+        }
+        expectEqual(0, count)
 
-        // Ranges below contained indexes should yield no results:
-        expectRanges([], in: indexes.rangeView(of: 0...1))
-
-        // Ranges starting below first index but overlapping should yield a result:
-        expectRanges([2..<3], in: indexes.rangeView(of: 0...2))
-
-        // Ranges starting below first index but enveloping a range should yield a result:
-        expectRanges([2..<5], in: indexes.rangeView(of: 0...6))
-
-        // Ranges within subranges should yield a result:
-        expectRanges([2..<5], in: indexes.rangeView(of: 2...4))
-        expectRanges([3..<5], in: indexes.rangeView(of: 3...4))
-        expectRanges([3..<4], in: indexes.rangeView(of: 3..<4))
-
-        // Ranges starting within subranges and going over the end should yield a result:
-        expectRanges([3..<5], in: indexes.rangeView(of: 3...6))
-
-        // Ranges not matching any indexes should yield no results:
-        expectRanges([], in: indexes.rangeView(of: 5...6))
-        expectRanges([], in: indexes.rangeView(of: 5..<8))
-
-        // Same as above -- overlapping with a range of indexes should slice it appropriately:
-        expectRanges([8..<9], in: indexes.rangeView(of: 6...8))
-        expectRanges([8..<11], in: indexes.rangeView(of: 8...10))
-        expectRanges([8..<11], in: indexes.rangeView(of: 8...13))
-
-        expectRanges([2..<5, 8..<10], in: indexes.rangeView(of: 0...9))
-        expectRanges([2..<5, 8..<11], in: indexes.rangeView(of: 0...12))
-        expectRanges([3..<5, 8..<11], in: indexes.rangeView(of: 3...14))
-
-        expectRanges([3..<5, 8..<11, 15..<18], in: indexes.rangeView(of: 3...17))
-        expectRanges([3..<5, 8..<11, 15..<20], in: indexes.rangeView(of: 3...20))
-        expectRanges([3..<5, 8..<11, 15..<20], in: indexes.rangeView(of: 3...21))
-
-        // Ranges inclusive of the end index should yield all of the contained ranges:
-        expectRanges([2..<5, 8..<11, 15..<20, 30..<40, 60..<80], in: indexes.rangeView(of: 0...80))
-        expectRanges([2..<5, 8..<11, 15..<20, 30..<40, 60..<80], in: indexes.rangeView(of: 2..<80))
-        expectRanges([2..<5, 8..<11, 15..<20, 30..<40, 60..<80], in: indexes.rangeView(of: 2...80))
-
-        // Ranges above the end index should yield no results:
-        expectRanges([], in: indexes.rangeView(of: 90..<90))
-        expectRanges([], in: indexes.rangeView(of: 90...90))
-        expectRanges([], in: indexes.rangeView(of: 90...100))
+        // Empty intersection, after end
+        count = 0
+        for _ in someIndexes.rangeView(of: 999..<1000) {
+            count += 1
+        }
+        expectEqual(0, count)
     }
     
     func testSlicing() {

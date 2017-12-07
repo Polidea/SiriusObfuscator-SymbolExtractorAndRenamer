@@ -15,7 +15,7 @@
 
 namespace swift {
 
-class SILNode;
+class ValueBase;
 
 /// A protocol (or interface) for handling value deletion notifications.
 ///
@@ -29,7 +29,7 @@ struct DeleteNotificationHandler {
   virtual ~DeleteNotificationHandler() {}
 
   /// Handle the invalidation message for the value \p Value.
-  virtual void handleDeleteNotification(SILNode *value) { }
+  virtual void handleDeleteNotification(swift::ValueBase *Value) { }
 
   /// Returns True if the pass, analysis or other entity wants to receive
   /// notifications. This callback is called once when the class is being

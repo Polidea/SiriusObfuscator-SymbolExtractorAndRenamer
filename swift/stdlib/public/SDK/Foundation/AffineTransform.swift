@@ -12,7 +12,7 @@
 
 @_exported import Foundation // Clang module
 
-#if os(macOS)
+#if os(OSX)
 
 private let ε: CGFloat = 2.22045e-16
 

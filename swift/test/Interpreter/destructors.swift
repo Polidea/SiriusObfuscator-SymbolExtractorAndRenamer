@@ -15,19 +15,9 @@ class D : C {
   }
 }
 
-@inline(never)
-func createC() -> C {
-  return C()
-}
-
-@inline(never)
-func createD() -> C {
-  return D()
-}
-
+C()
 // CHECK: boom! roasted
-createC()
+D()
 // CHECK-NEXT: i can't decide between a fat joke and a dumb joke
 // CHECK-NEXT: boom! roasted
-createD()
 

@@ -14,4 +14,6 @@ struct Struct${N} {
     static var prop = 0
     subscript(n: Int) -> Int { return 0 }
 % end
+
+    struct Nested {}
 }

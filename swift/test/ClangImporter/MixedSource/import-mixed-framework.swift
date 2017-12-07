@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: cp -r %S/Inputs/mixed-framework/Mixed.framework %t
 
 // Don't crash if a generated header is present but the swiftmodule is missing.

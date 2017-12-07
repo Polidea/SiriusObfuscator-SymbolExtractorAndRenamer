@@ -15,7 +15,6 @@
 //
 //===----------------------------------------------------------------------===//
 #include "ConstraintSystem.h"
-#include "swift/AST/GenericSignature.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/AST/ParameterList.h"
 #include "llvm/ADT/Statistic.h"
@@ -71,14 +70,22 @@ void ConstraintSystem::increaseScore(ScoreKind kind, unsigned value) {
     case SK_ValueToOptional:
       log << "value to optional";
       break;
+
+    case SK_ArrayPointerConversion:
+      log << "array-to-pointer conversion";
+      break;
+    case SK_ScalarPointerConversion:
+      log << "scalar-to-pointer conversion";
+      break;
     case SK_EmptyExistentialConversion:
       log << "empty-existential conversion";
       break;
     case SK_KeyPathSubscript:
       log << "key path subscript";
       break;
-    case SK_ValueToPointerConversion:
-      log << "value-to-pointer conversion";
+
+    case SK_StringToPointerConversion:
+      log << "string-to-pointer conversion";
       break;
     }
     log << ")\n";
@@ -156,6 +163,57 @@ static bool sameOverloadChoice(const OverloadChoice &x,
   llvm_unreachable("Unhandled OverloadChoiceKind in switch.");
 }
 
+/// Compare two declarations to determine whether one is a witness of the other.
+static Comparison compareWitnessAndRequirement(TypeChecker &tc, DeclContext *dc,
+                                               ValueDecl *decl1,
+                                               ValueDecl *decl2) {
+  // We only have a witness/requirement pair if exactly one of the declarations
+  // comes from a protocol.
+  auto proto1 = dyn_cast<ProtocolDecl>(decl1->getDeclContext());
+  auto proto2 = dyn_cast<ProtocolDecl>(decl2->getDeclContext());
+  if ((bool)proto1 == (bool)proto2)
+    return Comparison::Unordered;
+
+  // Figure out the protocol, requirement, and potential witness.
+  ProtocolDecl *proto;
+  ValueDecl *req;
+  ValueDecl *potentialWitness;
+  if (proto1) {
+    proto = proto1;
+    req = decl1;
+    potentialWitness = decl2;
+  } else {
+    proto = proto2;
+    req = decl2;
+    potentialWitness = decl1;
+  }
+
+  // Cannot compare type declarations this way.
+  // FIXME: Use the same type-substitution approach as lookupMemberType.
+  if (isa<TypeDecl>(req))
+    return Comparison::Unordered;
+
+  if (!potentialWitness->getDeclContext()->isTypeContext())
+    return Comparison::Unordered;
+
+  // Determine whether the type of the witness's context conforms to the
+  // protocol.
+  auto owningType
+    = potentialWitness->getDeclContext()->getDeclaredInterfaceType();
+  auto conformance = tc.conformsToProtocol(owningType, proto, dc,
+                                           ConformanceCheckFlags::InExpression);
+  if (!conformance || conformance->isAbstract())
+    return Comparison::Unordered;
+
+  // If the witness and the potential witness are not the same, there's no
+  // ordering here.
+  if (conformance->getConcrete()->getWitnessDecl(req, &tc) != potentialWitness)
+    return Comparison::Unordered;
+
+  // We have a requirement/witness match.
+  return proto1? Comparison::Worse : Comparison::Better;
+}
+
 namespace {
   /// Describes the relationship between the context types for two declarations.
   enum class SelfTypeRelationship {
@@ -191,38 +249,39 @@ static bool isNominallySuperclassOf(Type type1, Type type2) {
 
 /// Determine the relationship between the self types of the given declaration
 /// contexts..
-static std::pair<SelfTypeRelationship, Optional<ProtocolConformanceRef>>
-computeSelfTypeRelationship(TypeChecker &tc, DeclContext *dc, DeclContext *dc1,
-                            DeclContext *dc2) {
+static SelfTypeRelationship computeSelfTypeRelationship(TypeChecker &tc,
+                                                        DeclContext *dc,
+                                                        DeclContext *dc1,
+                                                        DeclContext *dc2){
   // If at least one of the contexts is a non-type context, the two are
   // unrelated.
   if (!dc1->isTypeContext() || !dc2->isTypeContext())
-    return {SelfTypeRelationship::Unrelated, None};
+    return SelfTypeRelationship::Unrelated;
 
   Type type1 = dc1->getDeclaredInterfaceType();
   Type type2 = dc2->getDeclaredInterfaceType();
 
   // If the types are equal, the answer is simple.
   if (type1->isEqual(type2))
-    return {SelfTypeRelationship::Equivalent, None};
+    return SelfTypeRelationship::Equivalent;
 
   // If both types can have superclasses, which whether one is a superclass
   // of the other. The subclass is the common base type.
   if (type1->mayHaveSuperclass() && type2->mayHaveSuperclass()) {
     if (isNominallySuperclassOf(type1, type2))
-      return {SelfTypeRelationship::Superclass, None};
+      return SelfTypeRelationship::Superclass;
 
     if (isNominallySuperclassOf(type2, type1))
-      return {SelfTypeRelationship::Subclass, None};
+      return SelfTypeRelationship::Subclass;
 
-    return {SelfTypeRelationship::Unrelated, None};
+    return SelfTypeRelationship::Unrelated;
   }
 
   // If neither or both are protocol types, consider the bases unrelated.
   bool isProtocol1 = isa<ProtocolDecl>(dc1);
   bool isProtocol2 = isa<ProtocolDecl>(dc2);
   if (isProtocol1 == isProtocol2)
-    return {SelfTypeRelationship::Unrelated, None};
+    return SelfTypeRelationship::Unrelated;
 
   // Just one of the two is a protocol. Check whether the other conforms to
   // that protocol.
@@ -232,17 +291,12 @@ computeSelfTypeRelationship(TypeChecker &tc, DeclContext *dc, DeclContext *dc1,
 
   // If the model type does not conform to the protocol, the bases are
   // unrelated.
-  auto conformance = tc.conformsToProtocol(
-                         modelTy, proto, dc,
-                         (ConformanceCheckFlags::InExpression|
-                          ConformanceCheckFlags::SkipConditionalRequirements));
-  if (!conformance)
-    return {SelfTypeRelationship::Unrelated, None};
+  if (!tc.conformsToProtocol(modelTy, proto, dc,
+                             ConformanceCheckFlags::InExpression))
+    return SelfTypeRelationship::Unrelated;
 
-  if (isProtocol1)
-    return {SelfTypeRelationship::ConformedToBy, conformance};
-
-  return {SelfTypeRelationship::ConformsTo, conformance};
+  return isProtocol1? SelfTypeRelationship::ConformedToBy
+                    : SelfTypeRelationship::ConformsTo;
 }
 
 // Given a type and a declaration context, return a type with a curried
@@ -314,6 +368,56 @@ static bool isDeclMoreConstrainedThan(ValueDecl *decl1, ValueDecl *decl2) {
   return false;
 }
 
+static Type getTypeAtIndex(const ParameterList *params, size_t index) {
+  if (params->size() == 0)
+    return nullptr;
+
+  if (index < params->size()) {
+    auto param = params->get(index);
+    if (param->isVariadic())
+      return param->getVarargBaseTy();
+  
+    return param->getInterfaceType();
+  }
+  
+  /// FIXME: This looks completely wrong for varargs within a parameter list.
+  if (params->size() != 0) {
+    auto lastParam = params->getArray().back();
+    if (lastParam->isVariadic())
+      return lastParam->getVarargBaseTy();
+  }
+  
+  return nullptr;
+}
+
+/// For two function declarations, determine if a parameter of the second is an
+/// empty existential composition ("Any"), and if it would otherwise be compared
+/// against a non-existential parameter at the same position of the first decl.
+/// This is used to disambiguate function overloads that would otherwise be
+/// identical after opening their parameter types.
+static bool hasEmptyExistentialParameterMismatch(ValueDecl *decl1,
+                                                 ValueDecl *decl2) {
+  auto func1 = dyn_cast<FuncDecl>(decl1);
+  auto func2 = dyn_cast<FuncDecl>(decl2);
+  if (!func1 || !func2) return false;
+    
+  auto pl1 = func1->getParameterLists();
+  auto pl2 = func2->getParameterLists();
+  
+  auto pc = std::min(pl1.size(), pl2.size());
+  
+  for (size_t i = 0; i < pc; i++) {
+    auto t1 = getTypeAtIndex(pl1[i], i);
+    auto t2 = getTypeAtIndex(pl2[i], i);
+    if (!t1 || !t2)
+      return false;
+    
+    if (t2->isAnyExistentialType() && !t1->isAnyExistentialType())
+      return t2->isAny();
+  }
+  return false;
+}
+
 /// Determine whether one protocol extension is at least as specialized as
 /// another.
 static bool isProtocolExtensionAsSpecializedAs(TypeChecker &tc,
@@ -364,17 +468,6 @@ static bool isProtocolExtensionAsSpecializedAs(TypeChecker &tc,
   return cs.solveSingle().hasValue();
 }
 
-/// Retrieve the adjusted parameter type for overloading purposes.
-static Type getAdjustedParamType(const AnyFunctionType::Param &param) {
-  if (auto funcTy = param.getType()->getAs<FunctionType>()) {
-    if (funcTy->isAutoClosure()) {
-      return funcTy->getResult();
-    }
-  }
-
-  return param.getType();
-}
-
 /// \brief Determine whether the first declaration is as "specialized" as
 /// the second declaration.
 ///
@@ -417,6 +510,18 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
         auto subscript2 = cast<SubscriptDecl>(decl2);
         if (subscript1->isGeneric() != subscript2->isGeneric())
           return subscript2->isGeneric();
+      }
+
+      // A witness is always more specialized than the requirement it satisfies.
+      switch (compareWitnessAndRequirement(tc, dc, decl1, decl2)) {
+      case Comparison::Unordered:
+        break;
+
+      case Comparison::Better:
+        return true;
+
+      case Comparison::Worse:
+        return false;
       }
 
       // Members of protocol extensions have special overloading rules.
@@ -540,11 +645,7 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
       // Determine the relationship between the 'self' types and add the
       // appropriate constraints. The constraints themselves never fail, but
       // they help deduce type variables that were opened.
-      auto selfTypeRelationship =
-          computeSelfTypeRelationship(tc, dc, outerDC1, outerDC2);
-      auto relationshipKind = selfTypeRelationship.first;
-      auto conformance = selfTypeRelationship.second;
-      switch (relationshipKind) {
+      switch (computeSelfTypeRelationship(tc, dc, outerDC1, outerDC2)) {
       case SelfTypeRelationship::Unrelated:
         // Skip the self types parameter entirely.
         break;
@@ -562,14 +663,12 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
         break;
 
       case SelfTypeRelationship::ConformsTo:
-        assert(conformance);
         cs.addConstraint(ConstraintKind::ConformsTo, selfTy1,
                          cast<ProtocolDecl>(outerDC2)->getDeclaredType(),
                          locator);
         break;
 
       case SelfTypeRelationship::ConformedToBy:
-        assert(conformance);
         cs.addConstraint(ConstraintKind::ConformsTo, selfTy2,
                          cast<ProtocolDecl>(outerDC1)->getDeclaredType(),
                          locator);
@@ -591,12 +690,12 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
         // second type's inputs, i.e., can we forward the arguments?
         auto funcTy1 = openedType1->castTo<FunctionType>();
         auto funcTy2 = openedType2->castTo<FunctionType>();
-        auto params1 = funcTy1->getParams();
-        auto params2 = funcTy2->getParams();
-        SmallVector<bool, 4> defaultMapType2;
-        computeDefaultMap(funcTy2->getInput(), decl2,
-                          outerDC2->isTypeContext(),
-                          defaultMapType2);
+        SmallVector<CallArgParam, 4> params1 =
+          decomposeParamType(funcTy1->getInput(), decl1,
+                             outerDC1->isTypeContext());
+        SmallVector<CallArgParam, 4> params2 =
+          decomposeParamType(funcTy2->getInput(), decl2,
+                             outerDC2->isTypeContext());
 
         unsigned numParams1 = params1.size();
         unsigned numParams2 = params2.size();
@@ -606,8 +705,8 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
         bool compareTrailingClosureParamsSeparately = false;
         if (!tc.getLangOpts().isSwiftVersion3()) {
           if (numParams1 > 0 && numParams2 > 0 &&
-              params1.back().getType()->is<AnyFunctionType>() &&
-              params2.back().getType()->is<AnyFunctionType>()) {
+              params1.back().Ty->is<AnyFunctionType>() &&
+              params2.back().Ty->is<AnyFunctionType>()) {
             compareTrailingClosureParamsSeparately = true;
             --numParams1;
             --numParams2;
@@ -615,8 +714,7 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
         }
 
         auto maybeAddSubtypeConstraint =
-            [&](const AnyFunctionType::Param &param1,
-                const AnyFunctionType::Param &param2) -> bool {
+            [&](const CallArgParam &param1, const CallArgParam &param2) -> bool{
           // If one parameter is variadic and the other is not...
           if (param1.isVariadic() != param2.isVariadic()) {
             // If the first parameter is the variadic one, it's not
@@ -626,12 +724,9 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
             fewerEffectiveParameters = true;
           }
 
-          Type paramType1 = getAdjustedParamType(param1);
-          Type paramType2 = getAdjustedParamType(param2);
-
           // Check whether the first parameter is a subtype of the second.
-          cs.addConstraint(ConstraintKind::Subtype,
-                           paramType1, paramType2, locator);
+          cs.addConstraint(ConstraintKind::Subtype, param1.Ty, param2.Ty,
+                           locator);
           return true;
         };
 
@@ -642,7 +737,7 @@ static bool isDeclAsSpecializedAs(TypeChecker &tc, DeclContext *dc,
             // We need either a default argument or a variadic
             // argument for the first declaration to be more
             // specialized.
-            if (!defaultMapType2[i] &&
+            if (!params2[i].HasDefaultArgument &&
                 !params2[i].isVariadic())
               return false;
 
@@ -707,10 +802,12 @@ Comparison TypeChecker::compareDeclarations(DeclContext *dc,
   return decl1Better? Comparison::Better : Comparison::Worse;
 }
 
-SolutionCompareResult ConstraintSystem::compareSolutions(
-    ConstraintSystem &cs, ArrayRef<Solution> solutions,
-    const SolutionDiff &diff, unsigned idx1, unsigned idx2,
-    llvm::DenseMap<Expr *, unsigned> &weights) {
+SolutionCompareResult
+ConstraintSystem::compareSolutions(ConstraintSystem &cs,
+                                   ArrayRef<Solution> solutions,
+                                   const SolutionDiff &diff,
+                                   unsigned idx1, unsigned idx2) {
+
   if (cs.TC.getLangOpts().DebugConstraintSolver) {
     auto &log = cs.getASTContext().TypeCheckerDebug->getStream();
     log.indent(cs.solverState->depth * 2)
@@ -737,20 +834,8 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
   bool isStdlibOptionalMPlusOperator1 = false;
   bool isStdlibOptionalMPlusOperator2 = false;
 
-  auto getWeight = [&](ConstraintLocator *locator) -> unsigned {
-    if (auto *anchor = locator->getAnchor()) {
-      auto weight = weights.find(anchor);
-      if (weight != weights.end())
-        return weight->getSecond() + 1;
-    }
-
-    return 1;
-  };
-
   // Compare overload sets.
   for (auto &overload : diff.overloads) {
-    unsigned weight = getWeight(overload.locator);
-
     auto choice1 = overload.choices[idx1];
     auto choice2 = overload.choices[idx2];
 
@@ -798,7 +883,7 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
           (choice2.getKind() == OverloadChoiceKind::DeclViaDynamic || 
            choice2.getKind() == OverloadChoiceKind::DeclViaBridge ||
            choice2.getKind() == OverloadChoiceKind::DeclViaUnwrappedOptional)) {
-        score1 += weight;
+        ++score1;
         continue;
       }
 
@@ -806,7 +891,7 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
            choice1.getKind() == OverloadChoiceKind::DeclViaBridge ||
            choice1.getKind() == OverloadChoiceKind::DeclViaUnwrappedOptional) &&
           choice2.getKind() == OverloadChoiceKind::Decl) {
-        score2 += weight;
+        ++score2;
         continue;
       }
 
@@ -834,11 +919,11 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
     bool firstAsSpecializedAs = false;
     bool secondAsSpecializedAs = false;
     if (isDeclAsSpecializedAs(tc, cs.DC, decl1, decl2)) {
-      score1 += weight;
+      ++score1;
       firstAsSpecializedAs = true;
     }
     if (isDeclAsSpecializedAs(tc, cs.DC, decl2, decl1)) {
-      score2 += weight;
+      ++score2;
       secondAsSpecializedAs = true;
     }
 
@@ -849,9 +934,9 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
         if (auto ctor2 = dyn_cast<ConstructorDecl>(decl2)) {
           if (ctor1->getInitKind() != ctor2->getInitKind()) {
             if (ctor1->getInitKind() < ctor2->getInitKind())
-              score1 += weight;
+              ++score1;
             else
-              score2 += weight;
+              ++score2;
           } else if (ctor1->getInitKind() ==
                      CtorInitializerKind::Convenience) {
             
@@ -864,9 +949,9 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
             
             if (!resType1->isEqual(resType2)) {
               if (tc.isSubtypeOf(resType1, resType2, cs.DC)) {
-                score1 += weight;
+                ++score1;
               } else if (tc.isSubtypeOf(resType2, resType1, cs.DC)) {
-                score2 += weight;
+                ++score2;
               }
             }
           }
@@ -883,22 +968,22 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
          (isa<AbstractFunctionDecl>(decl1) &&
           isa<TypeDecl>(decl2)))) {
       if (isa<TypeDecl>(decl1))
-        score2 += weight;
+        ++score2;
       else
-        score1 += weight;
+        ++score1;
     }
 
     // A class member is always better than a curried instance member.
     // If the members agree on instance-ness, a property is better than a
     // method (because a method is usually immediately invoked).
     if (!decl1->isInstanceMember() && decl2->isInstanceMember())
-      score1 += weight;
+      ++score1;
     else if (!decl2->isInstanceMember() && decl1->isInstanceMember())
-      score2 += weight;
+      ++score2;
     else if (isa<VarDecl>(decl1) && isa<FuncDecl>(decl2))
-      score1 += weight;
+      ++score1;
     else if (isa<VarDecl>(decl2) && isa<FuncDecl>(decl1))
-      score2 += weight;
+      ++score2;
 
     // If both are class properties with the same name, prefer
     // the one attached to the subclass because it could only be
@@ -913,10 +998,10 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
           auto base2 = nominal2->getDeclaredType();
 
           if (isNominallySuperclassOf(base1, base2))
-            score2 += weight;
+            ++score2;
 
           if (isNominallySuperclassOf(base2, base1))
-            score1 += weight;
+            ++score1;
         }
       }
     }
@@ -930,6 +1015,19 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
       }
       
       if (isDeclMoreConstrainedThan(decl2, decl1)) {
+        foundRefinement2 = true;
+      }
+    }
+     
+    // If we still haven't found a refinement, check if there's a parameter-
+    // wise comparison between an empty existential collection and a non-
+    // existential type.
+    if (!(foundRefinement1 && foundRefinement2)) {
+      if (hasEmptyExistentialParameterMismatch(decl1, decl2)) {
+        foundRefinement1 = true;
+      }
+      
+      if (hasEmptyExistentialParameterMismatch(decl2, decl1)) {
         foundRefinement2 = true;
       }
     }
@@ -1084,14 +1182,12 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
       if (auto nominalType2 = type2->getNominalOrBoundGenericNominal()) {
         if ((nominalType2->getName() ==
              cs.TC.Context.Id_OptionalNilComparisonType)) {
-          ++score2;
+          ++score1;
         }
-      }
-
-      if (auto nominalType1 = type1->getNominalOrBoundGenericNominal()) {
+      } else if (auto nominalType1 = type1->getNominalOrBoundGenericNominal()) {
         if ((nominalType1->getName() ==
              cs.TC.Context.Id_OptionalNilComparisonType)) {
-          ++score1;
+          ++score2;
         }
       }
     }
@@ -1133,23 +1229,11 @@ SolutionCompareResult ConstraintSystem::compareSolutions(
 
 Optional<unsigned>
 ConstraintSystem::findBestSolution(SmallVectorImpl<Solution> &viable,
-                                   llvm::DenseMap<Expr *, unsigned> &weights,
                                    bool minimize) {
   if (viable.empty())
     return None;
   if (viable.size() == 1)
     return 0;
-
-  if (TC.getLangOpts().DebugConstraintSolver) {
-    auto &log = getASTContext().TypeCheckerDebug->getStream();
-    log.indent(solverState->depth * 2)
-        << "Comparing " << viable.size() << " viable solutions\n";
-
-    for (unsigned i = 0, n = viable.size(); i != n; ++i) {
-      log.indent(solverState->depth * 2) << "--- Solution #" << i << " ---\n";
-      viable[i].dump(log.indent(solverState->depth * 2));
-    }
-  }
 
   SolutionDiff diff(viable);
 
@@ -1157,7 +1241,7 @@ ConstraintSystem::findBestSolution(SmallVectorImpl<Solution> &viable,
   SmallVector<bool, 16> losers(viable.size(), false);
   unsigned bestIdx = 0;
   for (unsigned i = 1, n = viable.size(); i != n; ++i) {
-    switch (compareSolutions(*this, viable, diff, i, bestIdx, weights)) {
+    switch (compareSolutions(*this, viable, diff, i, bestIdx)) {
     case SolutionCompareResult::Identical:
       // FIXME: Might want to warn about this in debug builds, so we can
       // find a way to eliminate the redundancy in the search space.
@@ -1181,7 +1265,7 @@ ConstraintSystem::findBestSolution(SmallVectorImpl<Solution> &viable,
     if (i == bestIdx)
       continue;
 
-    switch (compareSolutions(*this, viable, diff, bestIdx, i, weights)) {
+    switch (compareSolutions(*this, viable, diff, bestIdx, i)) {
     case SolutionCompareResult::Identical:
       // FIXME: Might want to warn about this in debug builds, so we can
       // find a way to eliminate the redundancy in the search space.
@@ -1225,7 +1309,7 @@ ConstraintSystem::findBestSolution(SmallVectorImpl<Solution> &viable,
       if (losers[j])
         continue;
 
-      switch (compareSolutions(*this, viable, diff, i, j, weights)) {
+      switch (compareSolutions(*this, viable, diff, i, j)) {
       case SolutionCompareResult::Identical:
         // FIXME: Dub one of these the loser arbitrarily?
         break;
@@ -1347,16 +1431,20 @@ SolutionDiff::SolutionDiff(ArrayRef<Solution> solutions) {
     }
   }
 
+  // Look through the overload locators that have overload choices in all of
+  // the solutions, and add those that have differences to the diff.
   for (auto &overloadChoice : overloadChoices) {
     OverloadChoice singleChoice = overloadChoice.second[0];
     for (auto choice : overloadChoice.second) {
-      if (sameOverloadChoice(singleChoice, choice))
-        continue;
-
-      // We have a difference. Add this set of overload choices to the diff.
-      this->overloads.push_back(SolutionDiff::OverloadDiff{
-          overloadChoice.first, std::move(overloadChoice.second)});
-      break;
+      if (!sameOverloadChoice(singleChoice, choice)) {
+        // We have a difference. Add this set of overload choices to the diff.
+        this->overloads.push_back(
+          SolutionDiff::OverloadDiff{
+            overloadChoice.first,
+            overloadChoice.second
+          });
+        
+      }
     }
   }
 }

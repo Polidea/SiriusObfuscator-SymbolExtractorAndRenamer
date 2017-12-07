@@ -56,21 +56,21 @@ struct __PrivS2 {
   init(value: Int32)
 }
 var __PrivAnonymousA: Int { get }
-struct E0 : Equatable, RawRepresentable {
+struct E0 : RawRepresentable, Equatable {
   init(_ rawValue: UInt32)
   init(rawValue: UInt32)
   var rawValue: UInt32
   typealias RawValue = UInt32
 }
 var __E0PrivA: E0 { get }
-struct __PrivE1 : Equatable, RawRepresentable {
+struct __PrivE1 : RawRepresentable, Equatable {
   init(_ rawValue: UInt32)
   init(rawValue: UInt32)
   var rawValue: UInt32
   typealias RawValue = UInt32
 }
 var __PrivE1A: __PrivE1 { get }
-struct __PrivE2 : Equatable, RawRepresentable {
+struct __PrivE2 : RawRepresentable, Equatable {
   init(_ rawValue: UInt32)
   init(rawValue: UInt32)
   var rawValue: UInt32
@@ -80,13 +80,11 @@ var __PrivE2A: __PrivE2 { get }
 enum __PrivNSEnum : Int {
   init?(rawValue: Int)
   var rawValue: Int { get }
-  typealias RawValue = Int
   case A
 }
 enum NSEnum : Int {
   init?(rawValue: Int)
   var rawValue: Int { get }
-  typealias RawValue = Int
   case __privA
   @available(swift, obsoleted: 3, renamed: "__privA")
   static var __PrivA: NSEnum { get }
@@ -97,7 +95,6 @@ struct __PrivNSOptions : OptionSet {
   let rawValue: Int
   typealias RawValue = Int
   typealias Element = __PrivNSOptions
-  typealias ArrayLiteralElement = __PrivNSOptions
   static var A: __PrivNSOptions { get }
 }
 struct NSOptions : OptionSet {
@@ -105,13 +102,12 @@ struct NSOptions : OptionSet {
   let rawValue: Int
   typealias RawValue = Int
   typealias Element = NSOptions
-  typealias ArrayLiteralElement = NSOptions
   static var __privA: NSOptions { get }
   @available(swift, obsoleted: 3, renamed: "__privA")
   static var __PrivA: NSOptions { get }
   static var B: NSOptions { get }
 }
-class __PrivCFType : _CFObject {
+class __PrivCFType {
 }
 @available(swift, obsoleted: 3, renamed: "__PrivCFType")
 typealias __PrivCFTypeRef = __PrivCFType

@@ -16,6 +16,7 @@
 #include "swift/Basic/Mangler.h"
 #include "swift/AST/Types.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/GenericSignature.h"
 
 namespace swift {
 
@@ -46,7 +47,6 @@ public:
   enum class SymbolKind {
     Default,
     DynamicThunk,
-    SwiftDispatchThunk,
     SwiftAsObjCThunk,
     ObjCAsSwiftThunk,
     DirectMethodReferenceThunk,
@@ -73,7 +73,7 @@ public:
 
   std::string mangleAccessorEntity(AccessorKind kind,
                                    AddressorKind addressorKind,
-                                   const AbstractStorageDecl *decl,
+                                   const ValueDecl *decl,
                                    bool isStatic,
                                    SymbolKind SKind);
 
@@ -144,7 +144,7 @@ public:
 
   std::string mangleAccessorEntityAsUSR(AccessorKind kind,
                                         AddressorKind addressorKind,
-                                        const AbstractStorageDecl *decl,
+                                        const ValueDecl *decl,
                                         StringRef USRPrefix);
 
 protected:
@@ -187,28 +187,15 @@ protected:
 
   void appendAnyGenericType(const GenericTypeDecl *decl);
 
-  void appendFunctionType(AnyFunctionType *fn);
+  void appendFunctionType(AnyFunctionType *fn, bool forceSingleParam);
 
-  void appendFunctionSignature(AnyFunctionType *fn);
+  void appendFunctionSignature(AnyFunctionType *fn, bool forceSingleParam);
 
-  void appendFunctionInputType(ArrayRef<AnyFunctionType::Param> params);
-  void appendFunctionResultType(Type resultType);
+  void appendParams(Type ParamsTy, bool forceSingleParam);
 
   void appendTypeList(Type listTy);
-  void appendTypeListElement(Identifier name, Type elementType,
-                             ParameterTypeFlags flags);
 
-  /// Append a generic signature to the mangling.
-  ///
-  /// \param sig The generic signature.
-  ///
-  /// \param contextSig The signature of the known context. This function
-  /// will only mangle the difference between \c sig and \c contextSig.
-  ///
-  /// \returns \c true if a generic signature was appended, \c false
-  /// if it was empty.
-  bool appendGenericSignature(const GenericSignature *sig,
-                              GenericSignature *contextSig = nullptr);
+  void appendGenericSignature(const GenericSignature *sig);
 
   void appendRequirement(const Requirement &reqt);
 
@@ -231,8 +218,10 @@ protected:
   void appendInitializerEntity(const VarDecl *var);
 
   CanType getDeclTypeForMangling(const ValueDecl *decl,
-                                 GenericSignature *&genericSig,
-                                 GenericSignature *&parentGenericSig);
+                                 ArrayRef<GenericTypeParamType *> &genericParams,
+                                 unsigned &initialParamIndex,
+                                 ArrayRef<Requirement> &requirements,
+                                 SmallVectorImpl<Requirement> &requirementsBuf);
 
   void appendDeclType(const ValueDecl *decl, bool isFunctionMangling = false);
 
@@ -242,12 +231,10 @@ protected:
   
   void appendDestructorEntity(const DestructorDecl *decl, bool isDeallocating);
 
-  /// \param accessorKindCode The code to describe the accessor and addressor
-  /// kind. Usually retrieved using getCodeForAccessorKind.
-  /// \param decl The storage decl for which to mangle the accessor
-  /// \param isStatic Whether or not the accessor is static
-  void appendAccessorEntity(StringRef accessorKindCode,
-                            const AbstractStorageDecl *decl, bool isStatic);
+  void appendAccessorEntity(AccessorKind kind,
+                            AddressorKind addressorKind,
+                            const ValueDecl *decl,
+                            bool isStatic);
 
   void appendEntity(const ValueDecl *decl, StringRef EntityOp, bool isStatic);
 

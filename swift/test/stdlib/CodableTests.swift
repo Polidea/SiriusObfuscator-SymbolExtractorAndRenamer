@@ -39,35 +39,25 @@ func makePersonNameComponents(namePrefix: String? = nil,
     return result
 }
 
-func debugDescription<T>(_ value: T) -> String {
-    if let debugDescribable = value as? CustomDebugStringConvertible {
-        return debugDescribable.debugDescription
-    } else if let describable = value as? CustomStringConvertible {
-        return describable.description
-    } else {
-        return "\(value)"
-    }
-}
-
-func expectRoundTripEquality<T : Codable>(of value: T, encode: (T) throws -> Data, decode: (Data) throws -> T, lineNumber: Int) where T : Equatable {
+func expectRoundTripEquality<T : Codable>(of value: T, encode: (T) throws -> Data, decode: (Data) throws -> T) where T : Equatable {
     let data: Data
     do {
         data = try encode(value)
     } catch {
-        fatalError("\(#file):\(lineNumber): Unable to encode \(T.self) <\(debugDescription(value))>: \(error)")
+        fatalError("Unable to encode \(T.self) <\(value)>: \(error)")
     }
 
     let decoded: T
     do {
         decoded = try decode(data)
     } catch {
-        fatalError("\(#file):\(lineNumber): Unable to decode \(T.self) <\(debugDescription(value))>: \(error)")
+        fatalError("Unable to decode \(T.self) <\(value)>: \(error)")
     }
 
-    expectEqual(value, decoded, "\(#file):\(lineNumber): Decoded \(T.self) <\(debugDescription(decoded))> not equal to original <\(debugDescription(value))>")
+    expectEqual(value, decoded, "Decoded \(T.self) <\(decoded)> not equal to original <\(value)>")
 }
 
-func expectRoundTripEqualityThroughJSON<T : Codable>(for value: T, lineNumber: Int) where T : Equatable {
+func expectRoundTripEqualityThroughJSON<T : Codable>(for value: T) where T : Equatable {
     let inf = "INF", negInf = "-INF", nan = "NaN"
     let encode = { (_ value: T) throws -> Data in
         let encoder = JSONEncoder()
@@ -85,10 +75,10 @@ func expectRoundTripEqualityThroughJSON<T : Codable>(for value: T, lineNumber: I
         return try decoder.decode(T.self, from: data)
     }
 
-    expectRoundTripEquality(of: value, encode: encode, decode: decode, lineNumber: lineNumber)
+    expectRoundTripEquality(of: value, encode: encode, decode: decode)
 }
 
-func expectRoundTripEqualityThroughPlist<T : Codable>(for value: T, lineNumber: Int) where T : Equatable {
+func expectRoundTripEqualityThroughPlist<T : Codable>(for value: T) where T : Equatable {
     let encode = { (_ value: T) throws -> Data in
         return try PropertyListEncoder().encode(value)
     }
@@ -97,7 +87,7 @@ func expectRoundTripEqualityThroughPlist<T : Codable>(for value: T, lineNumber: 
         return try PropertyListDecoder().decode(T.self, from: data)
     }
 
-    expectRoundTripEquality(of: value, encode: encode, decode: decode, lineNumber: lineNumber)
+    expectRoundTripEquality(of: value, encode: encode, decode: decode)
 }
 
 // MARK: - Helper Types
@@ -118,236 +108,240 @@ struct UUIDCodingWrapper : Codable, Equatable {
 class TestCodable : TestCodableSuper {
     // MARK: - AffineTransform
 #if os(OSX)
-    lazy var affineTransformValues: [Int : AffineTransform] = [
-        #line : AffineTransform.identity,
-        #line : AffineTransform(),
-        #line : AffineTransform(translationByX: 2.0, byY: 2.0),
-        #line : AffineTransform(scale: 2.0),
-        #line : AffineTransform(rotationByDegrees: .pi / 2),
+    // FIXME: Comment the tests back in once rdar://problem/33363218 is in the SDK.
+    lazy var affineTransformValues: [AffineTransform] = [
+        AffineTransform.identity,
+        AffineTransform(),
+        AffineTransform(translationByX: 2.0, byY: 2.0),
+        AffineTransform(scale: 2.0),
+        AffineTransform(rotationByDegrees: .pi / 2),
 
-        #line : AffineTransform(m11: 1.0, m12: 2.5, m21: 66.2, m22: 40.2, tX: -5.5, tY: 3.7),
-        #line : AffineTransform(m11: -55.66, m12: 22.7, m21: 1.5, m22: 0.0, tX: -22, tY: -33),
-        #line : AffineTransform(m11: 4.5, m12: 1.1, m21: 0.025, m22: 0.077, tX: -0.55, tY: 33.2),
-        #line : AffineTransform(m11: 7.0, m12: -2.3, m21: 6.7, m22: 0.25, tX: 0.556, tY: 0.99),
-        #line : AffineTransform(m11: 0.498, m12: -0.284, m21: -0.742, m22: 0.3248, tX: 12, tY: 44)
+        AffineTransform(m11: 1.0, m12: 2.5, m21: 66.2, m22: 40.2, tX: -5.5, tY: 3.7),
+        // AffineTransform(m11: -55.66, m12: 22.7, m21: 1.5, m22: 0.0, tX: -22, tY: -33),
+        AffineTransform(m11: 4.5, m12: 1.1, m21: 0.025, m22: 0.077, tX: -0.55, tY: 33.2),
+        // AffineTransform(m11: 7.0, m12: -2.3, m21: 6.7, m22: 0.25, tX: 0.556, tY: 0.99),
+        // AffineTransform(m11: 0.498, m12: -0.284, m21: -0.742, m22: 0.3248, tX: 12, tY: 44)
     ]
 
     func test_AffineTransform_JSON() {
-        for (testLine, transform) in affineTransformValues {
-            expectRoundTripEqualityThroughJSON(for: transform, lineNumber: testLine)
+        for transform in affineTransformValues {
+            expectRoundTripEqualityThroughJSON(for: transform)
         }
     }
 
     func test_AffineTransform_Plist() {
-        for (testLine, transform) in affineTransformValues {
-            expectRoundTripEqualityThroughPlist(for: transform, lineNumber: testLine)
+        for transform in affineTransformValues {
+            expectRoundTripEqualityThroughPlist(for: transform)
         }
     }
 #endif
 
     // MARK: - Calendar
-    lazy var calendarValues: [Int : Calendar] = [
-        #line : Calendar(identifier: .gregorian),
-        #line : Calendar(identifier: .buddhist),
-        #line : Calendar(identifier: .chinese),
-        #line : Calendar(identifier: .coptic),
-        #line : Calendar(identifier: .ethiopicAmeteMihret),
-        #line : Calendar(identifier: .ethiopicAmeteAlem),
-        #line : Calendar(identifier: .hebrew),
-        #line : Calendar(identifier: .iso8601),
-        #line : Calendar(identifier: .indian),
-        #line : Calendar(identifier: .islamic),
-        #line : Calendar(identifier: .islamicCivil),
-        #line : Calendar(identifier: .japanese),
-        #line : Calendar(identifier: .persian),
-        #line : Calendar(identifier: .republicOfChina),
+    lazy var calendarValues: [Calendar] = [
+        Calendar(identifier: .gregorian),
+        Calendar(identifier: .buddhist),
+        Calendar(identifier: .chinese),
+        Calendar(identifier: .coptic),
+        Calendar(identifier: .ethiopicAmeteMihret),
+        Calendar(identifier: .ethiopicAmeteAlem),
+        Calendar(identifier: .hebrew),
+        Calendar(identifier: .iso8601),
+        Calendar(identifier: .indian),
+        Calendar(identifier: .islamic),
+        Calendar(identifier: .islamicCivil),
+        Calendar(identifier: .japanese),
+        Calendar(identifier: .persian),
+        Calendar(identifier: .republicOfChina),
     ]
 
     func test_Calendar_JSON() {
-        for (testLine, calendar) in calendarValues {
-            expectRoundTripEqualityThroughJSON(for: calendar, lineNumber: testLine)
+        for calendar in calendarValues {
+            expectRoundTripEqualityThroughJSON(for: calendar)
         }
     }
 
     func test_Calendar_Plist() {
-        for (testLine, calendar) in calendarValues {
-            expectRoundTripEqualityThroughPlist(for: calendar, lineNumber: testLine)
+        for calendar in calendarValues {
+            expectRoundTripEqualityThroughPlist(for: calendar)
         }
     }
 
     // MARK: - CharacterSet
-    lazy var characterSetValues: [Int : CharacterSet] = [
-        #line : CharacterSet.controlCharacters,
-        #line : CharacterSet.whitespaces,
-        #line : CharacterSet.whitespacesAndNewlines,
-        #line : CharacterSet.decimalDigits,
-        #line : CharacterSet.letters,
-        #line : CharacterSet.lowercaseLetters,
-        #line : CharacterSet.uppercaseLetters,
-        #line : CharacterSet.nonBaseCharacters,
-        #line : CharacterSet.alphanumerics,
-        #line : CharacterSet.decomposables,
-        #line : CharacterSet.illegalCharacters,
-        #line : CharacterSet.punctuationCharacters,
-        #line : CharacterSet.capitalizedLetters,
-        #line : CharacterSet.symbols,
-        #line : CharacterSet.newlines
+    lazy var characterSetValues: [CharacterSet] = [
+        CharacterSet.controlCharacters,
+        CharacterSet.whitespaces,
+        CharacterSet.whitespacesAndNewlines,
+        CharacterSet.decimalDigits,
+        CharacterSet.letters,
+        CharacterSet.lowercaseLetters,
+        CharacterSet.uppercaseLetters,
+        CharacterSet.nonBaseCharacters,
+        CharacterSet.alphanumerics,
+        CharacterSet.decomposables,
+        CharacterSet.illegalCharacters,
+        CharacterSet.punctuationCharacters,
+        CharacterSet.capitalizedLetters,
+        CharacterSet.symbols,
+        CharacterSet.newlines
     ]
 
     func test_CharacterSet_JSON() {
-        for (testLine, characterSet) in characterSetValues {
-            expectRoundTripEqualityThroughJSON(for: characterSet, lineNumber: testLine)
+        for characterSet in characterSetValues {
+            expectRoundTripEqualityThroughJSON(for: characterSet)
         }
     }
 
     func test_CharacterSet_Plist() {
-        for (testLine, characterSet) in characterSetValues {
-            expectRoundTripEqualityThroughPlist(for: characterSet, lineNumber: testLine)
+        for characterSet in characterSetValues {
+            expectRoundTripEqualityThroughPlist(for: characterSet)
         }
     }
 
     // MARK: - CGAffineTransform
-    lazy var cg_affineTransformValues: [Int : CGAffineTransform] = {
+    lazy var cg_affineTransformValues: [CGAffineTransform] = {
+        // FIXME: Comment the tests back in once rdar://problem/33363218 is in the SDK.
         var values = [
-            #line : CGAffineTransform.identity,
-            #line : CGAffineTransform(),
-            #line : CGAffineTransform(translationX: 2.0, y: 2.0),
-            #line : CGAffineTransform(scaleX: 2.0, y: 2.0),
-            #line : CGAffineTransform(a: 1.0, b: 2.5, c: 66.2, d: 40.2, tx: -5.5, ty: 3.7),
-            #line : CGAffineTransform(a: -55.66, b: 22.7, c: 1.5, d: 0.0, tx: -22, ty: -33),
-            #line : CGAffineTransform(a: 4.5, b: 1.1, c: 0.025, d: 0.077, tx: -0.55, ty: 33.2),
-            #line : CGAffineTransform(a: 7.0, b: -2.3, c: 6.7, d: 0.25, tx: 0.556, ty: 0.99),
-            #line : CGAffineTransform(a: 0.498, b: -0.284, c: -0.742, d: 0.3248, tx: 12, ty: 44)
+            CGAffineTransform.identity,
+            CGAffineTransform(),
+            CGAffineTransform(translationX: 2.0, y: 2.0),
+            CGAffineTransform(scaleX: 2.0, y: 2.0),
+            CGAffineTransform(a: 1.0, b: 2.5, c: 66.2, d: 40.2, tx: -5.5, ty: 3.7),
+            // CGAffineTransform(a: -55.66, b: 22.7, c: 1.5, d: 0.0, tx: -22, ty: -33),
+            CGAffineTransform(a: 4.5, b: 1.1, c: 0.025, d: 0.077, tx: -0.55, ty: 33.2),
+            // CGAffineTransform(a: 7.0, b: -2.3, c: 6.7, d: 0.25, tx: 0.556, ty: 0.99),
+            // CGAffineTransform(a: 0.498, b: -0.284, c: -0.742, d: 0.3248, tx: 12, ty: 44)
         ]
 
         if #available(OSX 10.13, iOS 11.0, watchOS 4.0, tvOS 11.0, *) {
-            values[#line] = CGAffineTransform(rotationAngle: .pi / 2)
+            values.append(CGAffineTransform(rotationAngle: .pi / 2))
         }
 
         return values
     }()
 
     func test_CGAffineTransform_JSON() {
-        for (testLine, transform) in cg_affineTransformValues {
-            expectRoundTripEqualityThroughJSON(for: transform, lineNumber: testLine)
+        for transform in cg_affineTransformValues {
+            expectRoundTripEqualityThroughJSON(for: transform)
         }
     }
 
     func test_CGAffineTransform_Plist() {
-        for (testLine, transform) in cg_affineTransformValues {
-            expectRoundTripEqualityThroughPlist(for: transform, lineNumber: testLine)
+        for transform in cg_affineTransformValues {
+            expectRoundTripEqualityThroughPlist(for: transform)
         }
     }
 
     // MARK: - CGPoint
-    lazy var cg_pointValues: [Int : CGPoint] = {
+    lazy var cg_pointValues: [CGPoint] = {
         var values = [
-            #line : CGPoint.zero,
-            #line : CGPoint(x: 10, y: 20)
+            CGPoint.zero,
+            CGPoint(x: 10, y: 20)
         ]
 
         if #available(OSX 10.13, iOS 11.0, watchOS 4.0, tvOS 11.0, *) {
             // Limit on magnitude in JSON. See rdar://problem/12717407
-            values[#line] = CGPoint(x: CGFloat.greatestFiniteMagnitude,
-                                    y: CGFloat.greatestFiniteMagnitude)
+            values.append(CGPoint(x: CGFloat.greatestFiniteMagnitude,
+                                  y: CGFloat.greatestFiniteMagnitude))
         }
 
         return values
     }()
 
     func test_CGPoint_JSON() {
-        for (testLine, point) in cg_pointValues {
-            expectRoundTripEqualityThroughJSON(for: point, lineNumber: testLine)
+        for point in cg_pointValues {
+            expectRoundTripEqualityThroughJSON(for: point)
         }
     }
 
     func test_CGPoint_Plist() {
-        for (testLine, point) in cg_pointValues {
-            expectRoundTripEqualityThroughPlist(for: point, lineNumber: testLine)
+        for point in cg_pointValues {
+            expectRoundTripEqualityThroughPlist(for: point)
         }
     }
 
     // MARK: - CGSize
-    lazy var cg_sizeValues: [Int : CGSize] = {
+    lazy var cg_sizeValues: [CGSize] = {
         var values = [
-            #line : CGSize.zero,
-            #line : CGSize(width: 30, height: 40)
+            CGSize.zero,
+            CGSize(width: 30, height: 40)
         ]
 
         if #available(OSX 10.13, iOS 11.0, watchOS 4.0, tvOS 11.0, *) {
             // Limit on magnitude in JSON. See rdar://problem/12717407
-            values[#line] = CGSize(width: CGFloat.greatestFiniteMagnitude,
-                                   height: CGFloat.greatestFiniteMagnitude)
+            values.append(CGSize(width: CGFloat.greatestFiniteMagnitude,
+                                 height: CGFloat.greatestFiniteMagnitude))
         }
 
         return values
     }()
 
     func test_CGSize_JSON() {
-        for (testLine, size) in cg_sizeValues {
-            expectRoundTripEqualityThroughJSON(for: size, lineNumber: testLine)
+        for size in cg_sizeValues {
+            expectRoundTripEqualityThroughJSON(for: size)
         }
     }
 
     func test_CGSize_Plist() {
-        for (testLine, size) in cg_sizeValues {
-            expectRoundTripEqualityThroughPlist(for: size, lineNumber: testLine)
+        for size in cg_sizeValues {
+            expectRoundTripEqualityThroughPlist(for: size)
         }
     }
 
     // MARK: - CGRect
-    lazy var cg_rectValues: [Int : CGRect] = {
+    lazy var cg_rectValues: [CGRect] = {
+        // FIXME: Comment the tests back in once rdar://problem/33363218 is in the SDK.
         var values = [
-            #line : CGRect.zero,
-            #line : CGRect.null,
-            #line : CGRect(x: 10, y: 20, width: 30, height: 40)
+            CGRect.zero,
+            // CGRect.null,
+            CGRect(x: 10, y: 20, width: 30, height: 40)
         ]
 
         if #available(OSX 10.13, iOS 11.0, watchOS 4.0, tvOS 11.0, *) {
             // Limit on magnitude in JSON. See rdar://problem/12717407
-            values[#line] = CGRect.infinite
+            // values.append(CGRect.infinite)
         }
 
         return values
     }()
 
     func test_CGRect_JSON() {
-        for (testLine, rect) in cg_rectValues {
-            expectRoundTripEqualityThroughJSON(for: rect, lineNumber: testLine)
+        for rect in cg_rectValues {
+            expectRoundTripEqualityThroughJSON(for: rect)
         }
     }
 
     func test_CGRect_Plist() {
-        for (testLine, rect) in cg_rectValues {
-            expectRoundTripEqualityThroughPlist(for: rect, lineNumber: testLine)
+        for rect in cg_rectValues {
+            expectRoundTripEqualityThroughPlist(for: rect)
         }
     }
 
     // MARK: - CGVector
-    lazy var cg_vectorValues: [Int : CGVector] = {
+    lazy var cg_vectorValues: [CGVector] = {
+        // FIXME: Comment the tests back in once rdar://problem/33363218 is in the SDK.
         var values = [
-            #line : CGVector.zero,
-            #line : CGVector(dx: 0.0, dy: -9.81)
+            CGVector.zero,
+            // CGVector(dx: 0.0, dy: -9.81)
         ]
 
         if #available(OSX 10.13, iOS 11.0, watchOS 4.0, tvOS 11.0, *) {
             // Limit on magnitude in JSON. See rdar://problem/12717407
-            values[#line] = CGVector(dx: CGFloat.greatestFiniteMagnitude,
-                                     dy: CGFloat.greatestFiniteMagnitude)
+            values.append(CGVector(dx: CGFloat.greatestFiniteMagnitude,
+                                   dy: CGFloat.greatestFiniteMagnitude))
         }
 
         return values
     }()
 
     func test_CGVector_JSON() {
-        for (testLine, vector) in cg_vectorValues {
-            expectRoundTripEqualityThroughJSON(for: vector, lineNumber: testLine)
+        for vector in cg_vectorValues {
+            expectRoundTripEqualityThroughJSON(for: vector)
         }
     }
 
     func test_CGVector_Plist() {
-        for (testLine, vector) in cg_vectorValues {
-            expectRoundTripEqualityThroughPlist(for: vector, lineNumber: testLine)
+        for vector in cg_vectorValues {
+            expectRoundTripEqualityThroughPlist(for: vector)
         }
     }
 
@@ -361,363 +355,265 @@ class TestCodable : TestCodableSuper {
     func test_DateComponents_JSON() {
         let calendar = Calendar(identifier: .gregorian)
         let components = calendar.dateComponents(dateComponents, from: Date())
-        expectRoundTripEqualityThroughJSON(for: components, lineNumber: #line - 1)
+        expectRoundTripEqualityThroughJSON(for: components)
     }
 
     func test_DateComponents_Plist() {
         let calendar = Calendar(identifier: .gregorian)
         let components = calendar.dateComponents(dateComponents, from: Date())
-        expectRoundTripEqualityThroughPlist(for: components, lineNumber: #line - 1)
+        expectRoundTripEqualityThroughPlist(for: components)
     }
 
     // MARK: - DateInterval
     @available(OSX 10.12, iOS 10.10, watchOS 3.0, tvOS 10.0, *)
-    lazy var dateIntervalValues: [Int : DateInterval] = [
-        #line : DateInterval(),
-        #line : DateInterval(start: Date.distantPast, end: Date()),
-        #line : DateInterval(start: Date(), end: Date.distantFuture),
-        #line : DateInterval(start: Date.distantPast, end: Date.distantFuture)
+    lazy var dateIntervalValues: [DateInterval] = [
+        DateInterval(),
+        DateInterval(start: Date.distantPast, end: Date()),
+        DateInterval(start: Date(), end: Date.distantFuture),
+        DateInterval(start: Date.distantPast, end: Date.distantFuture)
     ]
 
     @available(OSX 10.12, iOS 10.10, watchOS 3.0, tvOS 10.0, *)
     func test_DateInterval_JSON() {
-        for (testLine, interval) in dateIntervalValues {
-            expectRoundTripEqualityThroughJSON(for: interval, lineNumber: testLine)
+        for interval in dateIntervalValues {
+            expectRoundTripEqualityThroughJSON(for: interval)
         }
     }
 
     @available(OSX 10.12, iOS 10.10, watchOS 3.0, tvOS 10.0, *)
     func test_DateInterval_Plist() {
-        for (testLine, interval) in dateIntervalValues {
-            expectRoundTripEqualityThroughPlist(for: interval, lineNumber: testLine)
+        for interval in dateIntervalValues {
+            expectRoundTripEqualityThroughPlist(for: interval)
         }
     }
 
     // MARK: - Decimal
-    lazy var decimalValues: [Int : Decimal] = [
-        #line : Decimal.leastFiniteMagnitude,
-        #line : Decimal.greatestFiniteMagnitude,
-        #line : Decimal.leastNormalMagnitude,
-        #line : Decimal.leastNonzeroMagnitude,
-        #line : Decimal(),
+    lazy var decimalValues: [Decimal] = [
+        Decimal.leastFiniteMagnitude,
+        Decimal.greatestFiniteMagnitude,
+        Decimal.leastNormalMagnitude,
+        Decimal.leastNonzeroMagnitude,
+        Decimal(),
 
-        // See 33996620 for re-enabling this test.
-        // #line : Decimal.pi,
+        // Decimal.pi does not round-trip at the moment.
+        // See rdar://problem/33165355
+        // Decimal.pi,
     ]
 
     func test_Decimal_JSON() {
-        for (testLine, decimal) in decimalValues {
+        for decimal in decimalValues {
             // Decimal encodes as a number in JSON and cannot be encoded at the top level.
-            expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(decimal), lineNumber: testLine)
+            expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(decimal))
         }
     }
 
     func test_Decimal_Plist() {
-        for (testLine, decimal) in decimalValues {
-            expectRoundTripEqualityThroughPlist(for: decimal, lineNumber: testLine)
+        for decimal in decimalValues {
+            expectRoundTripEqualityThroughPlist(for: decimal)
         }
     }
 
     // MARK: - IndexPath
-    lazy var indexPathValues: [Int : IndexPath] = [
-        #line : IndexPath(), // empty
-        #line : IndexPath(index: 0), // single
-        #line : IndexPath(indexes: [1, 2]), // pair
-        #line : IndexPath(indexes: [3, 4, 5, 6, 7, 8]), // array
+    lazy var indexPathValues: [IndexPath] = [
+        IndexPath(), // empty
+        IndexPath(index: 0), // single
+        IndexPath(indexes: [1, 2]), // pair
+        IndexPath(indexes: [3, 4, 5, 6, 7, 8]), // array
     ]
 
     func test_IndexPath_JSON() {
-        for (testLine, indexPath) in indexPathValues {
-            expectRoundTripEqualityThroughJSON(for: indexPath, lineNumber: testLine)
+        for indexPath in indexPathValues {
+            expectRoundTripEqualityThroughJSON(for: indexPath)
         }
     }
 
     func test_IndexPath_Plist() {
-        for (testLine, indexPath) in indexPathValues {
-            expectRoundTripEqualityThroughPlist(for: indexPath, lineNumber: testLine)
+        for indexPath in indexPathValues {
+            expectRoundTripEqualityThroughPlist(for: indexPath)
         }
     }
 
     // MARK: - IndexSet
-    lazy var indexSetValues: [Int : IndexSet] = [
-        #line : IndexSet(),
-        #line : IndexSet(integer: 42),
-        #line : IndexSet(integersIn: 0 ..< Int.max)
+    lazy var indexSetValues: [IndexSet] = [
+        IndexSet(),
+        IndexSet(integer: 42),
+        IndexSet(integersIn: 0 ..< Int.max)
     ]
 
     func test_IndexSet_JSON() {
-        for (testLine, indexSet) in indexSetValues {
-            expectRoundTripEqualityThroughJSON(for: indexSet, lineNumber: testLine)
+        for indexSet in indexSetValues {
+            expectRoundTripEqualityThroughJSON(for: indexSet)
         }
     }
 
     func test_IndexSet_Plist() {
-        for (testLine, indexSet) in indexSetValues {
-            expectRoundTripEqualityThroughPlist(for: indexSet, lineNumber: testLine)
+        for indexSet in indexSetValues {
+            expectRoundTripEqualityThroughPlist(for: indexSet)
         }
     }
 
     // MARK: - Locale
-    lazy var localeValues: [Int : Locale] = [
-        #line : Locale(identifier: ""),
-        #line : Locale(identifier: "en"),
-        #line : Locale(identifier: "en_US"),
-        #line : Locale(identifier: "en_US_POSIX"),
-        #line : Locale(identifier: "uk"),
-        #line : Locale(identifier: "fr_FR"),
-        #line : Locale(identifier: "fr_BE"),
-        #line : Locale(identifier: "zh-Hant-HK")
+    lazy var localeValues: [Locale] = [
+        Locale(identifier: ""),
+        Locale(identifier: "en"),
+        Locale(identifier: "en_US"),
+        Locale(identifier: "en_US_POSIX"),
+        Locale(identifier: "uk"),
+        Locale(identifier: "fr_FR"),
+        Locale(identifier: "fr_BE"),
+        Locale(identifier: "zh-Hant-HK")
     ]
 
     func test_Locale_JSON() {
-        for (testLine, locale) in localeValues {
-            expectRoundTripEqualityThroughJSON(for: locale, lineNumber: testLine)
+        for locale in localeValues {
+            expectRoundTripEqualityThroughJSON(for: locale)
         }
     }
 
     func test_Locale_Plist() {
-        for (testLine, locale) in localeValues {
-            expectRoundTripEqualityThroughPlist(for: locale, lineNumber: testLine)
+        for locale in localeValues {
+            expectRoundTripEqualityThroughPlist(for: locale)
         }
     }
 
     // MARK: - Measurement
     @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
-    lazy var unitValues: [Int : Dimension] = [
-        #line : UnitAcceleration.metersPerSecondSquared,
-        #line : UnitMass.kilograms,
-        #line : UnitLength.miles
+    lazy var unitValues: [Dimension] = [
+        UnitAcceleration.metersPerSecondSquared,
+        UnitMass.kilograms,
+        UnitLength.miles
     ]
 
     @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
     func test_Measurement_JSON() {
-        for (testLine, unit) in unitValues {
-            expectRoundTripEqualityThroughJSON(for: Measurement(value: 42, unit: unit), lineNumber: testLine)
+        for unit in unitValues {
+            expectRoundTripEqualityThroughJSON(for: Measurement(value: 42, unit: unit))
         }
     }
 
     @available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
     func test_Measurement_Plist() {
-        for (testLine, unit) in unitValues {
-            expectRoundTripEqualityThroughJSON(for: Measurement(value: 42, unit: unit), lineNumber: testLine)
+        for unit in unitValues {
+            expectRoundTripEqualityThroughJSON(for: Measurement(value: 42, unit: unit))
         }
     }
 
     // MARK: - NSRange
-    lazy var nsrangeValues: [Int : NSRange] = [
-        #line : NSRange(),
-        #line : NSRange(location: 0, length: Int.max),
-        #line : NSRange(location: NSNotFound, length: 0),
+    lazy var nsrangeValues: [NSRange] = [
+        NSRange(),
+        NSRange(location: 0, length: Int.max),
+        NSRange(location: NSNotFound, length: 0),
     ]
 
     func test_NSRange_JSON() {
-        for (testLine, range) in nsrangeValues {
-            expectRoundTripEqualityThroughJSON(for: range, lineNumber: testLine)
+        for range in nsrangeValues {
+            expectRoundTripEqualityThroughJSON(for: range)
         }
     }
 
     func test_NSRange_Plist() {
-        for (testLine, range) in nsrangeValues {
-            expectRoundTripEqualityThroughPlist(for: range, lineNumber: testLine)
+        for range in nsrangeValues {
+            expectRoundTripEqualityThroughPlist(for: range)
         }
     }
 
     // MARK: - PersonNameComponents
     @available(OSX 10.11, iOS 9.0, *)
-    lazy var personNameComponentsValues: [Int : PersonNameComponents] = [
-        #line : makePersonNameComponents(givenName: "John", familyName: "Appleseed"),
-        #line : makePersonNameComponents(givenName: "John", familyName: "Appleseed", nickname: "Johnny"),
-        #line : makePersonNameComponents(namePrefix: "Dr.", givenName: "Jane", middleName: "A.", familyName: "Appleseed", nameSuffix: "Esq.", nickname: "Janie")
+    lazy var personNameComponentsValues: [PersonNameComponents] = [
+        makePersonNameComponents(givenName: "John", familyName: "Appleseed"),
+        makePersonNameComponents(givenName: "John", familyName: "Appleseed", nickname: "Johnny"),
+        makePersonNameComponents(namePrefix: "Dr.", givenName: "Jane", middleName: "A.", familyName: "Appleseed", nameSuffix: "Esq.", nickname: "Janie")
     ]
 
     @available(OSX 10.11, iOS 9.0, *)
     func test_PersonNameComponents_JSON() {
-        for (testLine, components) in personNameComponentsValues {
-            expectRoundTripEqualityThroughJSON(for: components, lineNumber: testLine)
+        for components in personNameComponentsValues {
+            expectRoundTripEqualityThroughJSON(for: components)
         }
     }
 
     @available(OSX 10.11, iOS 9.0, *)
     func test_PersonNameComponents_Plist() {
-        for (testLine, components) in personNameComponentsValues {
-            expectRoundTripEqualityThroughPlist(for: components, lineNumber: testLine)
+        for components in personNameComponentsValues {
+            expectRoundTripEqualityThroughPlist(for: components)
         }
     }
 
     // MARK: - TimeZone
-    lazy var timeZoneValues: [Int : TimeZone] = [
-        #line : TimeZone(identifier: "America/Los_Angeles")!,
-        #line : TimeZone(identifier: "UTC")!,
-        #line : TimeZone.current
+    lazy var timeZoneValues: [TimeZone] = [
+        TimeZone(identifier: "America/Los_Angeles")!,
+        TimeZone(identifier: "UTC")!,
+        TimeZone.current
     ]
 
     func test_TimeZone_JSON() {
-        for (testLine, timeZone) in timeZoneValues {
-            expectRoundTripEqualityThroughJSON(for: timeZone, lineNumber: testLine)
+        for timeZone in timeZoneValues {
+            expectRoundTripEqualityThroughJSON(for: timeZone)
         }
     }
 
     func test_TimeZone_Plist() {
-        for (testLine, timeZone) in timeZoneValues {
-            expectRoundTripEqualityThroughPlist(for: timeZone, lineNumber: testLine)
+        for timeZone in timeZoneValues {
+            expectRoundTripEqualityThroughPlist(for: timeZone)
         }
     }
 
     // MARK: - URL
-    lazy var urlValues: [Int : URL] = {
-        var values: [Int : URL] = [
-            #line : URL(fileURLWithPath: NSTemporaryDirectory()),
-            #line : URL(fileURLWithPath: "/"),
-            #line : URL(string: "http://swift.org")!,
-            #line : URL(string: "documentation", relativeTo: URL(string: "http://swift.org")!)!
+    lazy var urlValues: [URL] = {
+        var values: [URL] = [
+            URL(fileURLWithPath: NSTemporaryDirectory()),
+            URL(fileURLWithPath: "/"),
+            URL(string: "http://apple.com")!,
+            URL(string: "swift", relativeTo: URL(string: "http://apple.com")!)!
         ]
 
         if #available(OSX 10.11, iOS 9.0, *) {
-            values[#line] = URL(fileURLWithPath: "bin/sh", relativeTo: URL(fileURLWithPath: "/"))
+            values.append(URL(fileURLWithPath: "bin/sh", relativeTo: URL(fileURLWithPath: "/")))
         }
 
         return values
     }()
 
     func test_URL_JSON() {
-        for (testLine, url) in urlValues {
+        for url in urlValues {
             // URLs encode as single strings in JSON. They lose their baseURL this way.
             // For relative URLs, we don't expect them to be equal to the original.
             if url.baseURL == nil {
                 // This is an absolute URL; we can expect equality.
-                expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(url), lineNumber: testLine)
+                expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(url))
             } else {
                 // This is a relative URL. Make it absolute first.
                 let absoluteURL = URL(string: url.absoluteString)!
-                expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(absoluteURL), lineNumber: testLine)
+                expectRoundTripEqualityThroughJSON(for: TopLevelWrapper(absoluteURL))
             }
         }
     }
 
     func test_URL_Plist() {
-        for (testLine, url) in urlValues {
-            expectRoundTripEqualityThroughPlist(for: url, lineNumber: testLine)
-        }
-    }
-
-    // MARK: - URLComponents
-    lazy var urlComponentsValues: [Int : URLComponents] = [
-        #line : URLComponents(),
-
-        #line : URLComponents(string: "http://swift.org")!,
-        #line : URLComponents(string: "http://swift.org:80")!,
-        #line : URLComponents(string: "https://www.mywebsite.org/api/v42/something.php#param1=hi&param2=hello")!,
-        #line : URLComponents(string: "ftp://johnny:apples@myftpserver.org:4242/some/path")!,
-
-        #line : URLComponents(url: URL(string: "http://swift.org")!, resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(string: "http://swift.org:80")!, resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(string: "https://www.mywebsite.org/api/v42/something.php#param1=hi&param2=hello")!, resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(string: "ftp://johnny:apples@myftpserver.org:4242/some/path")!, resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(fileURLWithPath: NSTemporaryDirectory()), resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(fileURLWithPath: "/"), resolvingAgainstBaseURL: false)!,
-        #line : URLComponents(url: URL(string: "documentation", relativeTo: URL(string: "http://swift.org")!)!, resolvingAgainstBaseURL: false)!,
-
-        #line : URLComponents(url: URL(string: "http://swift.org")!, resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(string: "http://swift.org:80")!, resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(string: "https://www.mywebsite.org/api/v42/something.php#param1=hi&param2=hello")!, resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(string: "ftp://johnny:apples@myftpserver.org:4242/some/path")!, resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(fileURLWithPath: NSTemporaryDirectory()), resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(fileURLWithPath: "/"), resolvingAgainstBaseURL: true)!,
-        #line : URLComponents(url: URL(string: "documentation", relativeTo: URL(string: "http://swift.org")!)!, resolvingAgainstBaseURL: true)!,
-
-        #line : {
-            var components = URLComponents()
-            components.scheme = "https"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.user = "johnny"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.password = "apples"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.host = "0.0.0.0"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.port = 8080
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.path = ".."
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.query = "param1=hi&param2=there"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.fragment = "anchor"
-            return components
-        }(),
-
-        #line : {
-            var components = URLComponents()
-            components.scheme = "ftp"
-            components.user = "johnny"
-            components.password = "apples"
-            components.host = "0.0.0.0"
-            components.port = 4242
-            components.path = "/some/file"
-            components.query = "utf8=✅"
-            components.fragment = "anchor"
-            return components
-        }()
-    ]
-
-    func test_URLComponents_JSON() {
-        for (testLine, components) in urlComponentsValues {
-            expectRoundTripEqualityThroughJSON(for: components, lineNumber: testLine)
-        }
-    }
-
-    func test_URLComponents_Plist() {
-    for (testLine, components) in urlComponentsValues {
-            expectRoundTripEqualityThroughPlist(for: components, lineNumber: testLine)
+        for url in urlValues {
+            expectRoundTripEqualityThroughPlist(for: url)
         }
     }
 
     // MARK: - UUID
-    lazy var uuidValues: [Int : UUID] = [
-        #line : UUID(),
-        #line : UUID(uuidString: "E621E1F8-C36C-495A-93FC-0C247A3E6E5F")!,
-        #line : UUID(uuidString: "e621e1f8-c36c-495a-93fc-0c247a3e6e5f")!,
-        #line : UUID(uuid: uuid_t(0xe6,0x21,0xe1,0xf8,0xc3,0x6c,0x49,0x5a,0x93,0xfc,0x0c,0x24,0x7a,0x3e,0x6e,0x5f))
+    lazy var uuidValues: [UUID] = [
+        UUID(),
+        UUID(uuidString: "E621E1F8-C36C-495A-93FC-0C247A3E6E5F")!,
+        UUID(uuidString: "e621e1f8-c36c-495a-93fc-0c247a3e6e5f")!,
+        UUID(uuid: uuid_t(0xe6,0x21,0xe1,0xf8,0xc3,0x6c,0x49,0x5a,0x93,0xfc,0x0c,0x24,0x7a,0x3e,0x6e,0x5f))
     ]
 
     func test_UUID_JSON() {
-        for (testLine, uuid) in uuidValues {
+        for uuid in uuidValues {
             // We have to wrap the UUID since we cannot have a top-level string.
-            expectRoundTripEqualityThroughJSON(for: UUIDCodingWrapper(uuid), lineNumber: testLine)
+            expectRoundTripEqualityThroughJSON(for: UUIDCodingWrapper(uuid))
         }
     }
 
     func test_UUID_Plist() {
-        for (testLine, uuid) in uuidValues {
+        for uuid in uuidValues {
             // We have to wrap the UUID since we cannot have a top-level string.
-            expectRoundTripEqualityThroughPlist(for: UUIDCodingWrapper(uuid), lineNumber: testLine)
+            expectRoundTripEqualityThroughPlist(for: UUIDCodingWrapper(uuid))
         }
     }
 }
@@ -739,64 +635,62 @@ struct TopLevelWrapper<T> : Codable, Equatable where T : Codable, T : Equatable 
 // MARK: - Tests
 
 #if !FOUNDATION_XCTEST
-var tests = [
-    "test_Calendar_JSON" : TestCodable.test_Calendar_JSON,
-    "test_Calendar_Plist" : TestCodable.test_Calendar_Plist,
-    "test_CharacterSet_JSON" : TestCodable.test_CharacterSet_JSON,
-    "test_CharacterSet_Plist" : TestCodable.test_CharacterSet_Plist,
-    "test_CGAffineTransform_JSON" : TestCodable.test_CGAffineTransform_JSON,
-    "test_CGAffineTransform_Plist" : TestCodable.test_CGAffineTransform_Plist,
-    "test_CGPoint_JSON" : TestCodable.test_CGPoint_JSON,
-    "test_CGPoint_Plist" : TestCodable.test_CGPoint_Plist,
-    "test_CGSize_JSON" : TestCodable.test_CGSize_JSON,
-    "test_CGSize_Plist" : TestCodable.test_CGSize_Plist,
-    "test_CGRect_JSON" : TestCodable.test_CGRect_JSON,
-    "test_CGRect_Plist" : TestCodable.test_CGRect_Plist,
-    "test_CGVector_JSON" : TestCodable.test_CGVector_JSON,
-    "test_CGVector_Plist" : TestCodable.test_CGVector_Plist,
-    "test_DateComponents_JSON" : TestCodable.test_DateComponents_JSON,
-    "test_DateComponents_Plist" : TestCodable.test_DateComponents_Plist,
-    "test_Decimal_JSON" : TestCodable.test_Decimal_JSON,
-    "test_Decimal_Plist" : TestCodable.test_Decimal_Plist,
-    "test_IndexPath_JSON" : TestCodable.test_IndexPath_JSON,
-    "test_IndexPath_Plist" : TestCodable.test_IndexPath_Plist,
-    "test_IndexSet_JSON" : TestCodable.test_IndexSet_JSON,
-    "test_IndexSet_Plist" : TestCodable.test_IndexSet_Plist,
-    "test_Locale_JSON" : TestCodable.test_Locale_JSON,
-    "test_Locale_Plist" : TestCodable.test_Locale_Plist,
-    "test_NSRange_JSON" : TestCodable.test_NSRange_JSON,
-    "test_NSRange_Plist" : TestCodable.test_NSRange_Plist,
-    "test_TimeZone_JSON" : TestCodable.test_TimeZone_JSON,
-    "test_TimeZone_Plist" : TestCodable.test_TimeZone_Plist,
-    "test_URL_JSON" : TestCodable.test_URL_JSON,
-    "test_URL_Plist" : TestCodable.test_URL_Plist,
-    "test_URLComponents_JSON" : TestCodable.test_URLComponents_JSON,
-    "test_URLComponents_Plist" : TestCodable.test_URLComponents_Plist,
-    "test_UUID_JSON" : TestCodable.test_UUID_JSON,
-    "test_UUID_Plist" : TestCodable.test_UUID_Plist,
-]
+var CodableTests = TestSuite("TestCodable")
 
 #if os(OSX)
-    tests["test_AffineTransform_JSON"] = TestCodable.test_AffineTransform_JSON
-    tests["test_AffineTransform_Plist"] = TestCodable.test_AffineTransform_Plist
+    CodableTests.test("test_AffineTransform_JSON") { TestCodable().test_AffineTransform_JSON() }
+    CodableTests.test("test_AffineTransform_Plist") { TestCodable().test_AffineTransform_Plist() }
 #endif
 
-if #available(OSX 10.11, iOS 9.0, *) {
-    tests["test_PersonNameComponents_JSON"] = TestCodable.test_PersonNameComponents_JSON
-    tests["test_PersonNameComponents_Plist"] = TestCodable.test_PersonNameComponents_Plist
-}
+CodableTests.test("test_Calendar_JSON") { TestCodable().test_Calendar_JSON() }
+CodableTests.test("test_Calendar_Plist") { TestCodable().test_Calendar_Plist() }
+CodableTests.test("test_CharacterSet_JSON") { TestCodable().test_CharacterSet_JSON() }
+CodableTests.test("test_CharacterSet_Plist") { TestCodable().test_CharacterSet_Plist() }
+CodableTests.test("test_CGAffineTransform_JSON") { TestCodable().test_CGAffineTransform_JSON() }
+CodableTests.test("test_CGAffineTransform_Plist") { TestCodable().test_CGAffineTransform_Plist() }
+CodableTests.test("test_CGPoint_JSON") { TestCodable().test_CGPoint_JSON() }
+CodableTests.test("test_CGPoint_Plist") { TestCodable().test_CGPoint_Plist() }
+CodableTests.test("test_CGSize_JSON") { TestCodable().test_CGSize_JSON() }
+CodableTests.test("test_CGSize_Plist") { TestCodable().test_CGSize_Plist() }
+CodableTests.test("test_CGRect_JSON") { TestCodable().test_CGRect_JSON() }
+CodableTests.test("test_CGRect_Plist") { TestCodable().test_CGRect_Plist() }
+CodableTests.test("test_CGVector_JSON") { TestCodable().test_CGVector_JSON() }
+CodableTests.test("test_CGVector_Plist") { TestCodable().test_CGVector_Plist() }
+CodableTests.test("test_DateComponents_JSON") { TestCodable().test_DateComponents_JSON() }
+CodableTests.test("test_DateComponents_Plist") { TestCodable().test_DateComponents_Plist() }
 
 if #available(OSX 10.12, iOS 10.10, watchOS 3.0, tvOS 10.0, *) {
-    // tests["test_DateInterval_JSON"] = TestCodable.test_DateInterval_JSON
-    tests["test_DateInterval_Plist"] = TestCodable.test_DateInterval_Plist
-    // tests["test_Measurement_JSON"] = TestCodable.test_Measurement_JSON
-    // tests["test_Measurement_Plist"] = TestCodable.test_Measurement_Plist
+    // CodableTests.test("test_DateInterval_JSON") { TestCodable().test_DateInterval_JSON() }
+    CodableTests.test("test_DateInterval_Plist") { TestCodable().test_DateInterval_Plist() }
 }
 
-var CodableTests = TestSuite("TestCodable")
-for (name, test) in tests {
-    CodableTests.test(name) { test(TestCodable())() }
+CodableTests.test("test_Decimal_JSON") { TestCodable().test_Decimal_JSON() }
+CodableTests.test("test_Decimal_Plist") { TestCodable().test_Decimal_Plist() }
+CodableTests.test("test_IndexPath_JSON") { TestCodable().test_IndexPath_JSON() }
+CodableTests.test("test_IndexPath_Plist") { TestCodable().test_IndexPath_Plist() }
+CodableTests.test("test_IndexSet_JSON") { TestCodable().test_IndexSet_JSON() }
+CodableTests.test("test_IndexSet_Plist") { TestCodable().test_IndexSet_Plist() }
+CodableTests.test("test_Locale_JSON") { TestCodable().test_Locale_JSON() }
+CodableTests.test("test_Locale_Plist") { TestCodable().test_Locale_Plist() }
+
+if #available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *) {
+    // CodableTests.test("test_Measurement_JSON") { TestCodable().test_Measurement_JSON() }
+    // CodableTests.test("test_Measurement_Plist") { TestCodable().test_Measurement_Plist() }
 }
 
+CodableTests.test("test_NSRange_JSON") { TestCodable().test_NSRange_JSON() }
+CodableTests.test("test_NSRange_Plist") { TestCodable().test_NSRange_Plist() }
+
+if #available(OSX 10.11, iOS 9.0, *) {
+    CodableTests.test("test_PersonNameComponents_JSON") { TestCodable().test_PersonNameComponents_JSON() }
+    CodableTests.test("test_PersonNameComponents_Plist") { TestCodable().test_PersonNameComponents_Plist() }
+}
+
+CodableTests.test("test_TimeZone_JSON") { TestCodable().test_TimeZone_JSON() }
+CodableTests.test("test_TimeZone_Plist") { TestCodable().test_TimeZone_Plist() }
+CodableTests.test("test_URL_JSON") { TestCodable().test_URL_JSON() }
+CodableTests.test("test_URL_Plist") { TestCodable().test_URL_Plist() }
+CodableTests.test("test_UUID_JSON") { TestCodable().test_UUID_JSON() }
+CodableTests.test("test_UUID_Plist") { TestCodable().test_UUID_Plist() }
 runAllTests()
 #endif

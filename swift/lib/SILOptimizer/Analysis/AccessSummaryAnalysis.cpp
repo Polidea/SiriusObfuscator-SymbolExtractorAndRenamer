@@ -64,7 +64,7 @@ void AccessSummaryAnalysis::processArgument(FunctionInfo *info,
     SILInstruction *user = operand->getUser();
 
     switch (user->getKind()) {
-    case SILInstructionKind::BeginAccessInst: {
+    case ValueKind::BeginAccessInst: {
       auto *BAI = cast<BeginAccessInst>(user);
       const IndexTrieNode *subPath = findSubPathAccessed(BAI);
       summary.mergeWith(BAI->getAccessKind(), BAI->getLoc(), subPath);
@@ -75,33 +75,31 @@ void AccessSummaryAnalysis::processArgument(FunctionInfo *info,
       // elsewhere.
       break;
     }
-    case SILInstructionKind::EndUnpairedAccessInst:
+    case ValueKind::EndUnpairedAccessInst:
       // Don't diagnose unpaired access statically.
       assert(cast<EndUnpairedAccessInst>(user)->getEnforcement() ==
              SILAccessEnforcement::Dynamic);
       break;
-    case SILInstructionKind::StructElementAddrInst:
-    case SILInstructionKind::TupleElementAddrInst: {
+    case ValueKind::StructElementAddrInst:
+    case ValueKind::TupleElementAddrInst:
       // Eventually we'll summarize individual struct elements separately.
       // For now an access to a part of the struct is treated as an access
       // to the whole struct.
-      auto inst = cast<SingleValueInstruction>(user);
-      worklist.append(inst->use_begin(), inst->use_end());
+      worklist.append(user->use_begin(), user->use_end());
       break;
-    }
-    case SILInstructionKind::DebugValueAddrInst:
-    case SILInstructionKind::AddressToPointerInst:
+    case ValueKind::DebugValueAddrInst:
+    case ValueKind::AddressToPointerInst:
       // Ignore these uses, they don't affect formal accesses.
       break;
-    case SILInstructionKind::PartialApplyInst:
+    case ValueKind::PartialApplyInst:
       processPartialApply(info, argumentIndex, cast<PartialApplyInst>(user),
                           operand, order);
       break;
-    case SILInstructionKind::ApplyInst:
+    case ValueKind::ApplyInst:
       processFullApply(info, argumentIndex, cast<ApplyInst>(user), operand,
                        order);
       break;
-    case SILInstructionKind::TryApplyInst:
+    case ValueKind::TryApplyInst:
       processFullApply(info, argumentIndex, cast<TryApplyInst>(user), operand,
                        order);
       break;
@@ -110,9 +108,8 @@ void AccessSummaryAnalysis::processArgument(FunctionInfo *info,
       // begin access markers. Ignore these for now. But we really should
       // add SIL verification to ensure all loads and stores have associated
       // access markers. Once SIL verification is implemented, enable the
-      // following assert to verify that the cases handled above are
-      // comprehensive, which guarantees that exclusivity enforcement is
-      // complete.
+      // following assert to verify that the whitelist above is comprehensive,
+      // which guarnatees that exclusivity enforcement is complete.
       //   assert(false && "Unrecognized argument use");
       break;
     }
@@ -130,28 +127,19 @@ static bool hasExpectedUsesOfNoEscapePartialApply(Operand *partialApplyUse) {
 
   // It is fine to call the partial apply
   switch (user->getKind()) {
-  case SILInstructionKind::ApplyInst:
-  case SILInstructionKind::TryApplyInst:
+  case ValueKind::ApplyInst:
+  case ValueKind::TryApplyInst:
     return true;
 
-  case SILInstructionKind::ConvertFunctionInst:
-    return llvm::all_of(cast<ConvertFunctionInst>(user)->getUses(),
+  case ValueKind::ConvertFunctionInst:
+    return llvm::all_of(user->getUses(),
                         hasExpectedUsesOfNoEscapePartialApply);
 
-  case SILInstructionKind::PartialApplyInst:
+  case ValueKind::PartialApplyInst:
     return partialApplyUse->get() != cast<PartialApplyInst>(user)->getCallee();
 
-  // Look through begin_borrow.
-  case SILInstructionKind::BeginBorrowInst:
-    return llvm::all_of(cast<BeginBorrowInst>(user)->getUses(),
-                        hasExpectedUsesOfNoEscapePartialApply);
-
-  // End borrow is always ok.
-  case SILInstructionKind::EndBorrowInst:
-    return true;
-
-  case SILInstructionKind::StoreInst:
-  case SILInstructionKind::DestroyValueInst:
+  case ValueKind::StoreInst:
+  case ValueKind::DestroyValueInst:
     // @block_storage is passed by storing it to the stack. We know this is
     // still nonescaping simply because our original argument convention is
     // @inout_aliasable. In this SIL, both store and destroy_value are users
@@ -443,9 +431,9 @@ SILAnalysis *swift::createAccessSummaryAnalysis(SILModule *M) {
 /// user return a pair of the single user and the projection index.
 /// Otherwise, return a pair with the component nullptr and the second
 /// unspecified.
-static std::pair<SingleValueInstruction *, unsigned>
-getSingleAddressProjectionUser(SingleValueInstruction *I) {
-  SingleValueInstruction *SingleUser = nullptr;
+static std::pair<SILInstruction *, unsigned>
+getSingleAddressProjectionUser(SILInstruction *I) {
+  SILInstruction *SingleUser = nullptr;
   unsigned ProjectionIndex = 0;
 
   for (Operand *Use : I->getUses()) {
@@ -458,18 +446,14 @@ getSingleAddressProjectionUser(SingleValueInstruction *I) {
       return std::make_pair(nullptr, 0);
 
     switch (User->getKind()) {
-    case SILInstructionKind::StructElementAddrInst: {
-      auto inst = cast<StructElementAddrInst>(User);
-      ProjectionIndex = inst->getFieldNo();
-      SingleUser = inst;
+    case ValueKind::StructElementAddrInst:
+      ProjectionIndex = cast<StructElementAddrInst>(User)->getFieldNo();
+      SingleUser = User;
       break;
-    }
-    case SILInstructionKind::TupleElementAddrInst: {
-      auto inst = cast<TupleElementAddrInst>(User);
-      ProjectionIndex = inst->getFieldNo();
-      SingleUser = inst;
+    case ValueKind::TupleElementAddrInst:
+      ProjectionIndex = cast<TupleElementAddrInst>(User)->getFieldNo();
+      SingleUser = User;
       break;
-    }
     default:
       return std::make_pair(nullptr, 0);
     }
@@ -485,9 +469,9 @@ AccessSummaryAnalysis::findSubPathAccessed(BeginAccessInst *BAI) {
   // For each single-user projection of BAI, construct or get a node
   // from the trie representing the index of the field or tuple element
   // accessed by that projection.
-  SingleValueInstruction *Iter = BAI;
+  SILInstruction *Iter = BAI;
   while (true) {
-    std::pair<SingleValueInstruction *, unsigned> ProjectionUser =
+    std::pair<SILInstruction *, unsigned> ProjectionUser =
         getSingleAddressProjectionUser(Iter);
     if (!ProjectionUser.first)
       break;

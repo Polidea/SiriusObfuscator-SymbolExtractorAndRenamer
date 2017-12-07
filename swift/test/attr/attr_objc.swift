@@ -121,7 +121,7 @@ func subject_genericFunc<T>(t: T) { // expected-error {{@objc can only be used w
 func subject_funcParam(a: @objc Int) { // expected-error {{attribute can only be applied to declarations, not types}} {{1-1=@objc }} {{27-33=}}
 }
 
-@objc // expected-error {{'@objc' attribute cannot be applied to this declaration}} {{1-7=}}
+@objc // expected-error {{@objc cannot be applied to this declaration}} {{1-7=}}
 struct subject_struct {
   @objc
   var subject_instanceVar: Int // expected-error {{@objc can only be used with members of classes, @objc protocols, and concrete extensions of classes}} {{3-8=}}
@@ -133,7 +133,7 @@ struct subject_struct {
   func subject_instanceFunc() {} // expected-error {{@objc can only be used with members of classes, @objc protocols, and concrete extensions of classes}} {{3-8=}}
 }
 
-@objc   // expected-error {{'@objc' attribute cannot be applied to this declaration}} {{1-7=}}
+@objc   // expected-error {{@objc cannot be applied to this declaration}} {{1-7=}}
 struct subject_genericStruct<T> {
   @objc
   var subject_instanceVar: Int // expected-error {{@objc can only be used with members of classes, @objc protocols, and concrete extensions of classes}} {{3-8=}}
@@ -204,12 +204,12 @@ enum subject_enum: Int {
   case subject_enumElement2
 
   @objc(subject_enumElement3)
-  case subject_enumElement3, subject_enumElement4 // expected-error {{'@objc' enum case declaration defines multiple enum cases with the same Objective-C name}}{{3-30=}}
+  case subject_enumElement3, subject_enumElement4 // expected-error {{'@objc' enum case declaration defines multiple enum cases with the same Objective-C name}}{{3-8=}}
 
   @objc   // expected-error {{attribute has no effect; cases within an '@objc' enum are already exposed to Objective-C}} {{3-9=}}
   case subject_enumElement5, subject_enumElement6
 
-  @nonobjc // expected-error {{'@nonobjc' attribute cannot be applied to this declaration}}
+  @nonobjc // expected-error {{@nonobjc cannot be applied to this declaration}}
   case subject_enumElement7
 
   @objc   
@@ -221,7 +221,7 @@ enum subject_enum: Int {
 
 enum subject_enum2 {
   @objc(subject_enum2Element1)
-  case subject_enumElement1 // expected-error{{'@objc' enum case is not allowed outside of an '@objc' enum}}{{3-31=}}
+  case subject_enumElement1 // expected-error{{'@objc' enum case is not allowed outside of an '@objc' enum}}{{3-8=}}
 }
 
 @objc
@@ -1629,7 +1629,7 @@ protocol infer_protocol4 : Protocol_Class1, Protocol_ObjC1 {
 }
 
 protocol infer_protocol5 : Protocol_ObjC1, Protocol_Class1 {
-// CHECK-LABEL: {{^}}protocol infer_protocol5 : Protocol_Class1, Protocol_ObjC1 {
+// CHECK-LABEL: {{^}}protocol infer_protocol5 : Protocol_ObjC1, Protocol_Class1 {
   func nonObjC1()
   // CHECK: {{^}} func nonObjC1()
 }
@@ -1650,7 +1650,7 @@ class HasIBOutlet {
   init() {}
 
   @IBOutlet weak var goodOutlet: Class_ObjC1!
-  // CHECK-LABEL: {{^}} @IBOutlet @_implicitly_unwrapped_optional @objc weak var goodOutlet: @sil_weak Class_ObjC1!
+  // CHECK-LABEL: {{^}} @IBOutlet @objc weak var goodOutlet: @sil_weak Class_ObjC1!
 
   @IBOutlet var badOutlet: PlainStruct
   // expected-error@-1 {{@IBOutlet property cannot have non-object type 'PlainStruct'}} {{3-13=}}
@@ -1839,7 +1839,7 @@ class BadClass2 {
   }
 
   var prop3: Int {
-    @objc(setProperty:) didSet { } // expected-error{{observing accessors are not allowed to be marked @objc}} {{5-25=}}
+    @objc(setProperty:) didSet { } // expected-error{{observing accessors are not allowed to be marked @objc}} {{5-10=}}
   }
 
   @objc
@@ -2182,18 +2182,18 @@ func ==(lhs: ObjC_Class1, rhs: ObjC_Class1) -> Bool {
 
 // CHECK-LABEL: @objc class OperatorInClass
 @objc class OperatorInClass {
-  // CHECK: {{^}} static func == (lhs: OperatorInClass, rhs: OperatorInClass) -> Bool
+  // CHECK: {{^}} static func ==(lhs: OperatorInClass, rhs: OperatorInClass) -> Bool
   static func ==(lhs: OperatorInClass, rhs: OperatorInClass) -> Bool {
     return true
   }
-  // CHECK: {{^}} @objc static func + (lhs: OperatorInClass, rhs: OperatorInClass) -> OperatorInClass
+  // CHECK: {{^}} @objc static func +(lhs: OperatorInClass, rhs: OperatorInClass) -> OperatorInClass
   @objc static func +(lhs: OperatorInClass, rhs: OperatorInClass) -> OperatorInClass { // expected-error {{operator methods cannot be declared @objc}}
     return lhs
   }
 } // CHECK: {{^}$}}
 
 @objc protocol OperatorInProtocol {
-  static func +(lhs: Self, rhs: Self) -> Self // expected-error {{@objc protocols must not have operator requirements}}
+  static func +(lhs: Self, rhs: Self) -> Self // expected-error {{@objc protocols may not have operator requirements}}
 }
 
 class AdoptsOperatorInProtocol : OperatorInProtocol {
@@ -2281,13 +2281,4 @@ class User: NSObject {
     unsafeAddress { // expected-error{{addressors are not allowed to be marked @objc}}
     }
   }
-}
-
-// 'dynamic' methods cannot be @_inlineable or @_versioned
-class BadClass {
-  @_inlineable @objc dynamic func badMethod1() {}
-  // expected-error@-1 {{'@_inlineable' attribute cannot be applied to 'dynamic' declarations}}
-
-  @_versioned @objc dynamic func badMethod2() {}
-  // expected-error@-1 {{'@_versioned' attribute cannot be applied to 'dynamic' declarations}}
 }

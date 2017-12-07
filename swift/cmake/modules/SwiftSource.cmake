@@ -59,6 +59,9 @@ function(handle_swift_sources
   if (NOT SWIFTSOURCES_IS_MAIN)
     list(APPEND swift_compile_flags "-module-link-name" "${name}")
   endif()
+  if("${SWIFTSOURCES_SDK}" STREQUAL "CYGWIN")
+    list(APPEND swift_compile_flags -DCYGWIN)
+  endif()
 
   if(swift_sources)
     compute_library_subdir(SWIFTSOURCES_LIBRARY_SUBDIR
@@ -240,6 +243,10 @@ function(_compile_swift_files
     list(APPEND swift_flags "-Xfrontend" "-assume-single-threaded")
   endif()
 
+  if(SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS)
+    list(APPEND swift_flags "-Xfrontend" "-enable-cow-existentials")
+  endif()
+
   if(SWIFT_STDLIB_ENABLE_SIL_OWNERSHIP AND SWIFTFILE_IS_STDLIB)
     list(APPEND swift_flags "-Xfrontend" "-enable-sil-ownership")
   endif()
@@ -254,16 +261,16 @@ function(_compile_swift_files
         "-nostdimport" "-parse-stdlib" "-module-name" "Swift")
     list(APPEND swift_flags "-Xfrontend" "-group-info-path"
                             "-Xfrontend" "${GROUP_INFO_JSON_FILE}")
+    if (NOT SWIFT_STDLIB_ENABLE_RESILIENCE)
+      if (SWIFT_STDLIB_SIL_SERIALIZE_ALL)
+        list(APPEND swift_flags "-Xfrontend" "-sil-serialize-all")
+      endif()
+    endif()
   endif()
 
-  # Force swift 3 compatibility mode for Standard Library.
-  if (SWIFTFILE_IS_STDLIB)
+  # Force swift 3 compatibility mode for Standard Library and overlay.
+  if (SWIFTFILE_IS_STDLIB OR SWIFTFILE_IS_SDK_OVERLAY)
     list(APPEND swift_flags "-swift-version" "3")
-  endif()
-  
-  # Force swift 4 compatibility mode for overlays.
-  if (SWIFTFILE_IS_SDK_OVERLAY)
-    list(APPEND swift_flags "-swift-version" "4")
   endif()
 
   if(SWIFTFILE_IS_SDK_OVERLAY)
@@ -472,7 +479,7 @@ function(_compile_swift_files
       OUTPUT ${standard_outputs}
       DEPENDS
         ${swift_compiler_tool_dep}
-        ${file_path} ${source_files} ${SWIFTFILE_DEPENDS}
+        ${source_files} ${SWIFTFILE_DEPENDS}
         ${swift_ide_test_dependency} ${api_notes_dependency_target}
         ${obj_dirs_dependency_target}
       COMMENT "Compiling ${first_output}")

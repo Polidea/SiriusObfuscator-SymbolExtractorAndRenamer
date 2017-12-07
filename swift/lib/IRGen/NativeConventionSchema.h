@@ -55,8 +55,7 @@ public:
   /// Map from a non-native explosion to an explosion that follows the native
   /// calling convention's schema.
   Explosion mapIntoNative(IRGenModule &IGM, IRGenFunction &IGF,
-                          Explosion &fromNonNative, SILType type,
-                          bool isOutlined) const;
+                          Explosion &fromNonNative, SILType type) const;
 
   /// Map form a native explosion that follows the native calling convention's
   /// schema to a non-native explosion whose schema is described by

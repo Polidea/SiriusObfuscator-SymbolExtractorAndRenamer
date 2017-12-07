@@ -38,7 +38,6 @@
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_12 | %FileCheck %s -check-prefix=INFIX_12
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_13 | %FileCheck %s -check-prefix=NO_OPERATORS
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_14 | %FileCheck %s -check-prefix=NO_OPERATORS
-
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_15 | %FileCheck %s -check-prefix=INFIX_15
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_16 | %FileCheck %s -check-prefix=INFIX_16
 // RUN: %target-swift-ide-test -code-completion -source-filename=%s -code-completion-token=INFIX_17 | %FileCheck %s -check-prefix=VOID_OPERATORS
@@ -244,7 +243,6 @@ func testInfix10<T: P where T.T: Fooable>(x: T) {
 func testInfix11() {
   S2#^INFIX_11^#
 }
-
 // INFIX_11: Begin completions, 1 items
 // INFIX_11-DAG: Decl[Constructor]/CurrNominal:      ()[#S2#]; name=()
 // INFIX_11: End completions
@@ -276,7 +274,6 @@ func testInfix15<T: P where T.T == S2>() {
 func testInfix16<T: P where T.T == S2>() {
   T.foo#^INFIX_16^#
 }
-
 // INFIX_16: Begin completions, 1 items
 // INFIX_16-NEXT: Pattern/ExprSpecific:               ({#(self): T#})[#() -> S2#]; name=(self: T)
 // INFIX_16: End completions

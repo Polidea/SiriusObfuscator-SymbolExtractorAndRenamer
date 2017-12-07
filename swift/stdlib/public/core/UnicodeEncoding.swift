@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-public protocol _UnicodeEncoding {
+public protocol _UnicodeEncoding_ {
   /// The basic unit of encoding
   associatedtype CodeUnit : UnsignedInteger, FixedWidthInteger
   
@@ -44,12 +44,12 @@ public protocol _UnicodeEncoding {
   /// A type that can be used to parse `CodeUnits` into
   /// `EncodedScalar`s.
   associatedtype ForwardParser : Unicode.Parser
-    where ForwardParser.Encoding == Self
+  // where ForwardParser.Encoding == Self
   
   /// A type that can be used to parse a reversed sequence of
   /// `CodeUnits` into `EncodedScalar`s.
   associatedtype ReverseParser : Unicode.Parser
-    where ReverseParser.Encoding == Self
+  // where ReverseParser.Encoding == Self
 
   //===--------------------------------------------------------------------===//
   // FIXME: this requirement shouldn't be here and is mitigated by the default
@@ -60,12 +60,15 @@ public protocol _UnicodeEncoding {
   static func _isScalar(_ x: CodeUnit) -> Bool
 }
 
-extension _UnicodeEncoding {
+extension _UnicodeEncoding_ {
   // See note on declaration of requirement, above
-  @_inlineable // FIXME(sil-serialize-all)
   public static func _isScalar(_ x: CodeUnit) -> Bool { return false }
+}
 
-  @_inlineable // FIXME(sil-serialize-all)
+public protocol _UnicodeEncoding : _UnicodeEncoding_
+where ForwardParser.Encoding == Self, ReverseParser.Encoding == Self {}
+
+extension _UnicodeEncoding_ {
   public static func transcode<FromEncoding : Unicode.Encoding>(
     _ content: FromEncoding.EncodedScalar, from _: FromEncoding.Type
   ) -> EncodedScalar? {
@@ -75,7 +78,6 @@ extension _UnicodeEncoding {
   /// Converts from encoding-independent to encoded representation, returning
   /// `encodedReplacementCharacter` if the scalar can't be represented in this
   /// encoding.
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal static func _encode(_ content: Unicode.Scalar) -> EncodedScalar {
     return encode(content) ?? encodedReplacementCharacter
@@ -84,7 +86,6 @@ extension _UnicodeEncoding {
   /// Converts a scalar from another encoding's representation, returning
   /// `encodedReplacementCharacter` if the scalar can't be represented in this
   /// encoding.
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal static func _transcode<FromEncoding : Unicode.Encoding>(
     _ content: FromEncoding.EncodedScalar, from _: FromEncoding.Type
@@ -93,7 +94,6 @@ extension _UnicodeEncoding {
       ?? encodedReplacementCharacter
   }
 
-  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal static func _transcode<
   Source: Sequence, SourceEncoding: Unicode.Encoding>(

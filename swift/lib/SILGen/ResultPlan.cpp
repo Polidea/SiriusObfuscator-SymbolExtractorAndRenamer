@@ -12,7 +12,6 @@
 
 #include "ResultPlan.h"
 #include "Callee.h"
-#include "Conversion.h"
 #include "Initialization.h"
 #include "LValue.h"
 #include "RValue.h"
@@ -38,7 +37,7 @@ public:
   RValue finish(SILGenFunction &SGF, SILLocation loc, CanType substType,
                 ArrayRef<ManagedValue> &directResults) override {
     init->finishInitialization(SGF);
-    return RValue::forInContext();
+    return RValue();
   }
   void
   gatherIndirectResultAddrs(SILGenFunction &SGF, SILLocation loc,
@@ -93,37 +92,21 @@ public:
 
     // Reabstract the value if the types don't match.  This can happen
     // due to either substitution reabstractions or bridging.
-    SILType loweredResultTy = substTL.getLoweredType();
-    if (value.getType().hasAbstractionDifference(rep, loweredResultTy)) {
-      Conversion conversion = [&] {
-        // Assume that a C-language API doesn't have substitution
-        // reabstractions.  This shouldn't be necessary, but
-        // emitOrigToSubstValue can get upset.
-        if (getSILFunctionLanguage(rep) == SILFunctionLanguage::C) {
-          return Conversion::getBridging(Conversion::BridgeResultFromObjC,
-                                         origType.getType(), substType,
-                                         loweredResultTy);
-        } else {
-          return Conversion::getOrigToSubst(origType, substType);
-        }
-      }();
+    if (value.getType().hasAbstractionDifference(rep,
+                                                 substTL.getLoweredType())) {
+      // Assume that a C-language API doesn't have substitution
+      // reabstractions.  This shouldn't be necessary, but
+      // emitOrigToSubstValue can get upset.
+      if (getSILFunctionLanguage(rep) == SILFunctionLanguage::C) {
+        value = SGF.emitBridgedToNativeValue(loc, value, rep, substType);
 
-      // Attempt to peephole this conversion into the context.
-      if (init) {
-        if (auto outerConversion = init->getAsConversion()) {
-          if (outerConversion->tryPeephole(SGF, loc, value, conversion)) {
-            outerConversion->finishInitialization(SGF);
-            return RValue::forInContext();
-          }
-        }
-      }
+      } else {
+        value = SGF.emitOrigToSubstValue(loc, value, origType, substType,
+                                         SGFContext(init));
 
-      // If that wasn't possible, just apply the conversion.
-      value = conversion.emit(SGF, loc, value, SGFContext(init));
-
-      // If that successfully emitted into the initialization, we're done.
-      if (value.isInContext()) {
-        return RValue::forInContext();
+        // If that successfully emitted into the initialization, we're done.
+        if (value.isInContext())
+          return RValue();
       }
     }
 
@@ -131,7 +114,7 @@ public:
     if (init) {
       init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
       init->finishInitialization(SGF);
-      return RValue::forInContext();
+      return RValue();
 
       // Otherwise, we've got the r-value we want.
     } else {
@@ -165,14 +148,14 @@ public:
   RValue finish(SILGenFunction &SGF, SILLocation loc, CanType substType,
                 ArrayRef<ManagedValue> &directResults) override {
     RValue subResult = subPlan->finish(SGF, loc, substType, directResults);
-    assert(subResult.isInContext() && "sub-plan didn't emit into context?");
+    assert(subResult.isUsed() && "sub-plan didn't emit into context?");
     (void)subResult;
 
     ManagedValue value = temporary->getManagedAddress();
     init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
     init->finishInitialization(SGF);
 
-    return RValue::forInContext();
+    return RValue();
   }
 
   void
@@ -200,7 +183,7 @@ public:
     init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
     init->finishInitialization(SGF);
 
-    return RValue::forInContext();
+    return RValue();
   }
 
   void
@@ -288,12 +271,12 @@ public:
     for (auto i : indices(substTupleType.getElementTypes())) {
       auto eltType = substTupleType.getElementType(i);
       RValue eltRV = eltPlans[i]->finish(SGF, loc, eltType, directResults);
-      assert(eltRV.isInContext());
+      assert(eltRV.isUsed());
       (void)eltRV;
     }
     tupleInit->finishInitialization(SGF);
 
-    return RValue::forInContext();
+    return RValue();
   }
 
   void
@@ -395,7 +378,7 @@ ResultPlanPtr ResultPlanBuilder::buildTopLevelResult(Initialization *init,
   // build.
   auto foreignError = calleeTypeInfo.foreignError;
   if (!foreignError) {
-    return build(init, calleeTypeInfo.origResultType.getValue(),
+    return build(init, calleeTypeInfo.origResultType,
                  calleeTypeInfo.substResultType);
   }
 
@@ -428,7 +411,7 @@ ResultPlanPtr ResultPlanBuilder::buildTopLevelResult(Initialization *init,
   }
   }
 
-  ResultPlanPtr subPlan = build(init, calleeTypeInfo.origResultType.getValue(),
+  ResultPlanPtr subPlan = build(init, calleeTypeInfo.origResultType,
                                 calleeTypeInfo.substResultType);
   return ResultPlanPtr(new ForeignErrorInitializationPlan(
       SGF, loc, calleeTypeInfo, std::move(subPlan)));

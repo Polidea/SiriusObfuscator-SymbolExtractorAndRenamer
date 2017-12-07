@@ -12,7 +12,6 @@ module SwiftShims {
   header "SwiftStdbool.h"
   header "SwiftStddef.h"
   header "SwiftStdint.h"
-  header "System.h"
   header "UnicodeShims.h"
   header "Visibility.h"
   export *

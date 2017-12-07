@@ -9,7 +9,8 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 //
 // RUN: if [ %target-runtime == "objc" ]; \
 // RUN: then \
@@ -103,7 +104,7 @@ mirrors.test("struct/StructHasNativeWeakReference") {
 import Foundation
 
 @objc protocol ObjCClassExistential : class {
-  var weakProperty: AnyObject? { get set }
+  weak var weakProperty: AnyObject? { get set }
   var x: Int { get }
 }
 

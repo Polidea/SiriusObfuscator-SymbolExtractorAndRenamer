@@ -85,12 +85,12 @@ public:
   GenericEnvironment *getGenericEnvironment() const { return GenericEnv; }
 
   void unwrapLValueOrInOutType() {
-    Type = Type->getWithoutSpecifierType().getPointer();
+    Type = Type->getLValueOrInOutObjectType().getPointer();
   }
 
   // Determine whether this type is an Archetype itself.
   bool isArchetype() const {
-    return Type->getWithoutSpecifierType()->is<ArchetypeType>();
+    return Type->getLValueOrInOutObjectType()->is<ArchetypeType>();
   }
 
   /// LValues, inout args, and Archetypes are implicitly indirect by
@@ -100,7 +100,8 @@ public:
   // instead? Otherwise optionals of archetypes etc will still have
   // 'isImplicitlyIndirect()' return false.
   bool isImplicitlyIndirect() const {
-    return Type->hasLValueType() || isArchetype() || Type->is<InOutType>();
+    return Type->isLValueType() || isArchetype() ||
+      Type->is<InOutType>();
   }
 
   bool isNull() const { return Type == nullptr; }

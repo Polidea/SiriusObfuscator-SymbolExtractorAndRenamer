@@ -21,6 +21,40 @@
 namespace swift {
 namespace syntax {
 
+#pragma mark unknown-syntax Data
+
+class UnknownSyntaxData : public SyntaxData {
+  friend class SyntaxData;
+  friend class UnknownSyntax;
+  friend struct SyntaxFactory;
+  friend class LegacyASTTransformer;
+
+protected:
+  std::vector<RC<SyntaxData>> CachedChildren;
+
+  UnknownSyntaxData(const RC<RawSyntax> Raw,
+                    const SyntaxData *Parent = nullptr,
+                    const CursorIndex IndexInParent = 0);
+public:
+
+  static RC<UnknownSyntaxData> make(RC<RawSyntax> Raw,
+                                    const SyntaxData *Parent = nullptr,
+                                    CursorIndex IndexInParent = 0);
+
+  size_t getNumChildren() const {
+    return CachedChildren.size();
+  }
+
+  /// Get the child at the given Index.
+  ///
+  /// Precondition: Index <= getNumChildren();
+  Syntax getChild(size_t Index) const;
+
+  static bool classof(const SyntaxData *SD) {
+    return SD->isUnknown();
+  }
+};
+
 #pragma mark unknown-syntax API
 
 /// A chunk of "unknown" syntax.
@@ -29,10 +63,20 @@ namespace syntax {
 ///
 /// This should not be vended by SyntaxFactory.
 class UnknownSyntax : public Syntax {
-  void validate() const;
+  friend struct SyntaxFactory;
+  friend class Syntax;
+
+  using DataType = UnknownSyntaxData;
+
 public:
-  UnknownSyntax(const RC<SyntaxData> Root, const SyntaxData *Data)
-    : Syntax(Root, Data) {}
+  UnknownSyntax(const RC<SyntaxData> Root, const UnknownSyntaxData *Data);
+
+  /// Get the number of child nodes in this piece of syntax, not including
+  /// tokens.
+  size_t getNumChildren() const;
+
+  /// Get the Nth child of this piece of syntax.
+  Syntax getChild(const size_t N) const;
 
   static bool classof(const Syntax *S) {
     return S->isUnknown();

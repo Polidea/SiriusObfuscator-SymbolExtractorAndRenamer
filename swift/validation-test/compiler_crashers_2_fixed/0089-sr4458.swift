@@ -4,7 +4,7 @@
 
 import Foundation
 
-extension MutableCollection {
+extension _MutableIndexable {
   typealias SubSequence = MutableRangeReplaceableRandomAccessSlice<Data>
 }
 

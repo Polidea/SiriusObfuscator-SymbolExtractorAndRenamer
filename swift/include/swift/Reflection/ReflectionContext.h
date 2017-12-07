@@ -50,6 +50,7 @@ public:
   using super::getBuilder;
   using super::readIsaMask;
   using super::readTypeFromMetadata;
+  using super::readParentFromMetadata;
   using super::readGenericArgFromMetadata;
   using super::readMetadataFromInstance;
   using typename super::StoredPointer;
@@ -66,7 +67,7 @@ public:
 
   unsigned getSizeOfHeapObject() {
     // This must match sizeof(HeapObject) for the target.
-    return sizeof(StoredPointer) * 2;
+    return sizeof(StoredPointer) + 8;
   }
 
   void dumpAllSections(std::ostream &OS) {
@@ -147,7 +148,7 @@ public:
       if (CD == nullptr)
         return nullptr;
 
-      auto Info = getBuilder().getClosureContextInfo(*CD, 0);
+      auto Info = getBuilder().getClosureContextInfo(*CD);
 
       return getClosureContextInfo(ObjectAddress, Info);
     }
@@ -243,12 +244,16 @@ public:
         if (!getReader().readInteger(ExistentialAddress, &BoxAddress))
           return false;
 
+#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
         // Address = BoxAddress + (sizeof(HeapObject) + alignMask) & ~alignMask)
         auto Alignment = InstanceTI->getAlignment();
         auto StartOfValue = BoxAddress + getSizeOfHeapObject();
         // Align.
         StartOfValue += Alignment - StartOfValue % Alignment;
         *OutInstanceAddress = RemoteAddress(StartOfValue);
+#else
+        *OutInstanceAddress = RemoteAddress(BoxAddress);
+#endif
       }
       return true;
     }
@@ -459,6 +464,10 @@ private:
       auto Base = cast<GenericArgumentMetadataSource>(MS)->getSource();
       return isMetadataSourceReady(Base, Builder);
     }
+    case MetadataSourceKind::Parent: {
+      auto Base = cast<ParentMetadataSource>(MS)->getChild();
+      return isMetadataSourceReady(Base, Builder);
+    }
     case MetadataSourceKind::Self:
     case MetadataSourceKind::SelfWitnessTable:
       return true;
@@ -483,8 +492,9 @@ private:
     case MetadataSourceKind::ClosureBinding: {
       unsigned Index = cast<ClosureBindingMetadataSource>(MS)->getIndex();
 
-      // Skip the context's HeapObject header
-      // (one word each for isa pointer and reference counts).
+      // Skip the context's isa pointer (4 or 8 bytes) and reference counts
+      // (4 bytes each regardless of platform word size). This is just
+      // sizeof(HeapObject) in the target.
       //
       // Metadata and conformance tables are stored consecutively after
       // the heap object header, in the 'necessary bindings' area.
@@ -541,6 +551,19 @@ private:
         break;
 
       return Arg;
+    }
+    case MetadataSourceKind::Parent: {
+      auto Base = readMetadataSource(Context,
+          cast<ParentMetadataSource>(MS)->getChild(),
+          Builder);
+      if (!Base.first)
+        break;
+
+      auto Parent = readParentFromMetadata(Base.second);
+      if (!Parent.first)
+        break;
+
+      return Parent;
     }
     case MetadataSourceKind::Self:
     case MetadataSourceKind::SelfWitnessTable:

@@ -89,12 +89,6 @@ extension PrivAccess {
 private extension PubAccess {
   func privExtFunc() {}
 }
-internal extension DefAccess {
-  func internalExtFunc() {}
-}
-public extension PubAccess {
-  func publicExtFunc() {}
-}
 
 typealias defAlias = Int
 public typealias pubAlias = Int

@@ -1,4 +1,5 @@
-// RUN: %empty-directory(%t)
+// RUN: rm -rf %t
+// RUN: mkdir -p %t
 // RUN: %target-build-swift %s -o %t/a.out
 // RUN: not --crash %t/a.out 2>&1 | %utils/backtrace-check
 

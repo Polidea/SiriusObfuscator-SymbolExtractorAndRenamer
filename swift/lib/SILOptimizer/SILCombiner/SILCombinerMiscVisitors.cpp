@@ -28,7 +28,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/CommandLine.h"
 
 using namespace swift;
 using namespace swift::PatternMatch;
@@ -431,7 +430,7 @@ SILInstruction *SILCombiner::visitAllocStackInst(AllocStackInst *AS) {
 
   // Erase the 'live-range'
   for (auto *Inst : ToDelete) {
-    Inst->replaceAllUsesOfAllResultsWithUndef();
+    Inst->replaceAllUsesWithUndef();
     eraseInstFromFunction(*Inst);
   }
   return eraseInstFromFunction(*AS);
@@ -447,8 +446,7 @@ SILInstruction *SILCombiner::visitAllocRefInst(AllocRefInst *AR) {
     auto *Op = *UI;
     ++UI;
     auto *User = Op->getUser();
-    if (!isa<DeallocRefInst>(User) && !isa<SetDeallocatingInst>(User) &&
-        !isa<FixLifetimeInst>(User)) {
+    if (!isa<DeallocRefInst>(User) && !isa<SetDeallocatingInst>(User)) {
       HasNonRemovableUses = true;
       break;
     }
@@ -477,7 +475,7 @@ SILInstruction *SILCombiner::visitLoadInst(LoadInst *LI) {
   // Given a load with multiple struct_extracts/tuple_extracts and no other
   // uses, canonicalize the load into several (struct_element_addr (load))
   // pairs.
-  using ProjInstPairTy = std::pair<Projection, SingleValueInstruction *>;
+  using ProjInstPairTy = std::pair<Projection, SILInstruction *>;
 
   // Go through the loads uses and add any users that are projections to the
   // projection list.
@@ -489,8 +487,7 @@ SILInstruction *SILCombiner::visitLoadInst(LoadInst *LI) {
     if (!isa<StructExtractInst>(User) && !isa<TupleExtractInst>(User))
       return nullptr;
 
-    auto extract = cast<SingleValueInstruction>(User);
-    Projections.push_back({Projection(extract), extract});
+    Projections.push_back({Projection(User), User});
   }
 
   // The reason why we sort the list is so that we will process projections with
@@ -668,7 +665,7 @@ SILInstruction *SILCombiner::visitCondFailInst(CondFailInst *CFI) {
 
   for (auto *Inst : ToRemove) {
     // Replace any still-remaining uses with undef and erase.
-    Inst->replaceAllUsesOfAllResultsWithUndef();
+    Inst->replaceAllUsesWithUndef();
     eraseInstFromFunction(*Inst);
   }
 
@@ -681,11 +678,7 @@ SILInstruction *SILCombiner::visitCondFailInst(CondFailInst *CFI) {
 
 SILInstruction *SILCombiner::visitStrongRetainInst(StrongRetainInst *SRI) {
   // Retain of ThinToThickFunction is a no-op.
-  SILValue funcOper = SRI->getOperand();
-  if (auto *CFI = dyn_cast<ConvertFunctionInst>(funcOper))
-    funcOper = CFI->getOperand();
-
-  if (isa<ThinToThickFunctionInst>(funcOper))
+  if (isa<ThinToThickFunctionInst>(SRI->getOperand()))
     return eraseInstFromFunction(*SRI);
 
   if (isa<ObjCExistentialMetatypeToObjectInst>(SRI->getOperand()) ||
@@ -1060,7 +1053,7 @@ visitUnreachableInst(UnreachableInst *UI) {
 
   for (auto *Inst : ToRemove) {
     // Replace any still-remaining uses with undef values and erase.
-    Inst->replaceAllUsesOfAllResultsWithUndef();
+    Inst->replaceAllUsesWithUndef();
     eraseInstFromFunction(*Inst);
   }
 
@@ -1363,7 +1356,7 @@ visitAllocRefDynamicInst(AllocRefDynamicInst *ARDI) {
   if (auto *UC = dyn_cast<UpcastInst>(MDVal))
     MDVal = UC->getOperand();
 
-  SingleValueInstruction *NewInst = nullptr;
+  SILInstruction *NewInst = nullptr;
   if (auto *MI = dyn_cast<MetatypeInst>(MDVal)) {
     auto &Mod = ARDI->getModule();
     auto SILInstanceTy = MI->getType().getMetatypeInstanceType(Mod);

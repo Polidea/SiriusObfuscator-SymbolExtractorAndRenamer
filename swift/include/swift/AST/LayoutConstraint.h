@@ -150,25 +150,9 @@ class LayoutConstraintInfo : public llvm::FoldingSetNode {
     return SizeInBits;
   }
 
-  unsigned getAlignmentInBits() const {
-    return Alignment;
-  }
-
-  unsigned getAlignmentInBytes() const {
+  unsigned getAlignment() const {
     assert(isKnownSizeTrivial());
-    if (Alignment)
-      return Alignment;
-
-    // There is no explicitly defined alignment. Try to come up with a
-    // reasonable one.
-
-    // If the size is a power of 2, use it also for the default alignment.
-    auto SizeInBytes = getTrivialSizeInBytes();
-    if (llvm::isPowerOf2_32(SizeInBytes))
-      return SizeInBytes * 8;
-
-    // Otherwise assume the alignment of 8 bytes.
-    return 8*8;
+    return Alignment;
   }
 
   operator bool() const {
