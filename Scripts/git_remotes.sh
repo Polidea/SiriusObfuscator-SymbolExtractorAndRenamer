@@ -180,8 +180,8 @@ for i in ${!names[@]}; do
   git read-tree --prefix=${names[$i]} -u ${names[$i]}/${branches[$i]}
 done
 
-echo "APPLY PATCH: git apply obfuscator.patch"
-git apply obfuscator.patch
+echo "APPLY PATCH: git am < obfuscator.patch"
+git am < obfuscator.patch
 
 echo "REMOVE PATCH: rm obfuscator.patch"
 rm obfuscator.patch
