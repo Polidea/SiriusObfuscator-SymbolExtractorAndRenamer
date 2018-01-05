@@ -1,6 +1,6 @@
 #include "swift/Basic/LLVMInitialize.h"
-#include "llvm/Support/FileSystem.h"
-#include "swift/AST/Decl.h"
+#include "llvm/Support/CommandLine.h"
+
 #include "swift/Obfuscation/Obfuscation.h"
 #include "swift/Obfuscation/FileIO.h"
 
@@ -19,7 +19,7 @@ namespace options {
 
 void printSymbols(std::vector<Symbol> Symbols) {
   for (auto Symbol : Symbols) {
-    std::cout << "symbol: " << Symbol.symbol << "\n" << "name: " << Symbol.name << "\n";
+    std::cout << "identifier: " << Symbol.identifier << "\n" << "name: " << Symbol.name << "\n";
   }
 }
 
@@ -44,11 +44,13 @@ int main(int argc, char *argv[]) {
   std::string PathToJson = options::FilesJsonPath;
   std::string MainExecutablePath = llvm::sys::fs::getMainExecutable(argv[0],
                                                                     reinterpret_cast<void *>(&anchorForGetMainExecutable));
-  llvm::ErrorOr<CompilerInvocationConfiguration> ConfigurationOrError = parseFilesJson(PathToJson, MainExecutablePath);
-  if (std::error_code ec = ConfigurationOrError.getError()) {
+  llvm::ErrorOr<FilesJson> FilesJsonOrErr = parseJson<FilesJson>(PathToJson);
+  if (std::error_code ec = FilesJsonOrErr.getError()) {
     return ec.value();
   }
-  llvm::ErrorOr<SymbolsJson> SymbolsOrError = extractSymbols(ConfigurationOrError.get());
+  auto compilerInvocation = createCompilerInvocationConfiguration(FilesJsonOrErr.get(), MainExecutablePath);
+  
+  llvm::ErrorOr<SymbolsJson> SymbolsOrError = extractSymbols(compilerInvocation);
   if (std::error_code ec = SymbolsOrError.getError()) {
     return ec.value();
   }

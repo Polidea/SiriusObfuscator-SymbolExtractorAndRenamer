@@ -19,6 +19,8 @@ namespace swift {
       : ModuleName(ModuleName), MainExecutablePath(MainExecutablePath), SdkPath(SdkPath), InputFilenames(InputFilenames), Paths(Paths) { }
     };
     
+    CompilerInvocationConfiguration createCompilerInvocationConfiguration(FilesJson filesJson, std::string MainExecutablePath);
+    
     CompilerInvocation createInvocation(CompilerInvocationConfiguration Configuration);
     
     llvm::ErrorOr<SymbolsJson> extractSymbols(CompilerInvocationConfiguration Configuration);

@@ -7,9 +7,11 @@
 namespace swift {
   namespace obfuscation {
     
-    llvm::ErrorOr<CompilerInvocationConfiguration> parseFilesJson(std::string PathToJson, std::string MainExecutablePath);
-    
-    int writeSymbolsToFile(SymbolsJson Symbols, std::string PathToOutput);
+    template<class T>
+    llvm::ErrorOr<T> parseJson(std::string PathToJson);
+
+    template<class T>
+    int writeSymbolsToFile(T Symbols, std::string PathToOutput);
     
   } //namespace obfuscation
 } //namespace swift
