@@ -9,38 +9,35 @@
 
 namespace swift {
   namespace obfuscation {
-    
-    llvm::ErrorOr<CompilerInvocationConfiguration> parseFilesJson(std::string PathToJson, std::string MainExecutablePath) {
+        
+    template<class T>
+    llvm::ErrorOr<T> parseJson(std::string PathToJson) {
       auto Buffer = llvm::MemoryBuffer::getFile(PathToJson);
       if (auto ErrorCode = Buffer.getError()) {
         std::cout << "Error during JSON file read: " << ErrorCode.message();
-        return llvm::ErrorOr<CompilerInvocationConfiguration>(std::error_code(1, std::generic_category()));
+        return llvm::ErrorOr<T>(std::error_code(1, std::generic_category()));
       }
       
       llvm::yaml::Input Input(std::move(Buffer.get())->getBuffer());
-      FilesJson filesJson;
-      Input >> filesJson;
+      T json;
+      Input >> json;
       std::error_code ParsingError = Input.error();
       if (ParsingError) {
         std::cout << "Error during JSON parse: " << ParsingError.message();
-        return llvm::ErrorOr<CompilerInvocationConfiguration>(std::error_code(1, std::generic_category()));
+        return llvm::ErrorOr<T>(std::error_code(1, std::generic_category()));
       }
       
-      StringRef ModuleName = filesJson.module.name;
-      
-      StringRef SdkPath = filesJson.sdk.path;
-      
-      std::vector<std::string> InputFilenames = filesJson.filenames;
-      std::vector<SearchPathOptions::FrameworkSearchPath> Paths;
-      for (auto Framework : filesJson.explicitelyLinkedFrameworks) {
-        Paths.push_back(SearchPathOptions::FrameworkSearchPath(Framework.path, false));
-      }
-      
-      return llvm::ErrorOr<CompilerInvocationConfiguration>(CompilerInvocationConfiguration(ModuleName, MainExecutablePath, SdkPath, InputFilenames, Paths));
+      return llvm::ErrorOr<T>(json);
     }
     
+    template llvm::ErrorOr<FilesJson> parseJson(std::string);
     
-    int writeSymbolsToFile(SymbolsJson Symbols, std::string PathToOutput) {
+    template llvm::ErrorOr<SymbolsJson> parseJson(std::string);
+    
+    template llvm::ErrorOr<RenamesJson> parseJson(std::string);
+
+    template<class T>
+    int writeSymbolsToFile(T Symbols, std::string PathToOutput) {
       
       std::string outputStr;
       llvm::raw_string_ostream rso(outputStr);
@@ -62,6 +59,10 @@ namespace swift {
       
       return 0;
     }
+    
+    template int writeSymbolsToFile(SymbolsJson Symbols, std::string PathToOutput);
+    
+    template int writeSymbolsToFile(RenamesJson Symbols, std::string PathToOutput);
     
   } //namespace obfuscation
 } //namespace swift

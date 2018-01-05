@@ -42,7 +42,7 @@ namespace swift {
         }
         
         auto SymbolStruct = Symbol();
-        SymbolStruct.symbol = StringParts;
+        SymbolStruct.identifier = StringParts;
         SymbolStruct.name = SymbolName;
         return SymbolStruct;
       }
@@ -92,13 +92,28 @@ namespace swift {
       return Collector.Bucket;
     }
     
+    CompilerInvocationConfiguration createCompilerInvocationConfiguration(FilesJson filesJson, std::string MainExecutablePath) {
+      
+      StringRef ModuleName = filesJson.module.name;
+      
+      StringRef SdkPath = filesJson.sdk.path;
+      
+      std::vector<std::string> InputFilenames = filesJson.filenames;
+      std::vector<SearchPathOptions::FrameworkSearchPath> Paths;
+      for (auto Framework : filesJson.explicitelyLinkedFrameworks) {
+        Paths.push_back(SearchPathOptions::FrameworkSearchPath(Framework.path, false));
+      }
+      
+      return CompilerInvocationConfiguration(ModuleName, MainExecutablePath, SdkPath, InputFilenames, Paths);
+    }
+    
     llvm::ErrorOr<SymbolsJson> extractSymbols(CompilerInvocationConfiguration Configuration) {
       auto Invocation = createInvocation(Configuration);
       CompilerInstance CI;
       PrintingDiagnosticConsumer PrintDiags;
       CI.addDiagnosticConsumer(&PrintDiags);
       if (CI.setup(Invocation)) {
-        return llvm::ErrorOr<std::vector<Symbol>>(std::error_code(1, std::generic_category()));
+        return llvm::ErrorOr<SymbolsJson>(std::error_code(1, std::generic_category()));
       }
       CI.performSema();
       
@@ -111,9 +126,12 @@ namespace swift {
           std::copy(CurrentSymbols.begin(), CurrentSymbols.end(), std::back_inserter(Symbols));
         }
       }
-      SymbolsJson Json = SymbolsJson(Symbols);
+      SymbolsJson Json = SymbolsJson();
+      Json.symbols = Symbols;
       return llvm::ErrorOr<SymbolsJson>(Json);
     }
+    
+
     
   } //namespace obfuscation
   
