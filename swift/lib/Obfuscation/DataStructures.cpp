@@ -10,7 +10,7 @@ namespace swift {
   namespace obfuscation {
     
     bool Symbol::operator< (const Symbol &right) const {
-      return (symbol < right.symbol);
+      return (identifier < right.identifier);
     }
     
   } //namespace obfuscation
@@ -46,8 +46,18 @@ namespace llvm {
     }
     
     void MappingTraits<Symbol>::mapping(IO &io, Symbol &info) {
-      io.mapRequired("symbol", info.symbol);
+      io.mapRequired("identifier", info.identifier);
       io.mapRequired("name", info.name);
+    }
+    
+    void MappingTraits<RenamesJson>::mapping(IO &io, RenamesJson &info) {
+      io.mapRequired("symbols", info.symbols);
+    }
+    
+    void MappingTraits<SymbolRenaming>::mapping(IO &io, SymbolRenaming &info) {
+      io.mapRequired("identifier", info.identifier);
+      io.mapRequired("originalName", info.originalName);
+      io.mapRequired("obfuscatedName", info.obfuscatedName);
     }
     
     template <typename U> size_t SequenceTraits<std::vector<U>>::size(IO &Io, std::vector<U> &Vec) {
@@ -73,7 +83,17 @@ namespace swift {
     
     void ObjectTraits<Symbol>::mapping(Output &out, Symbol &s) {
       out.mapRequired("name", s.name);
-      out.mapRequired("symbol", s.symbol);
+      out.mapRequired("identifier", s.identifier);
+    }
+    
+    void ObjectTraits<RenamesJson>::mapping(Output &out, RenamesJson &s) {
+      out.mapRequired("symbols", s.symbols);
+    }
+    
+    void ObjectTraits<SymbolRenaming>::mapping(Output &out, SymbolRenaming &s) {
+      out.mapRequired("identifier", s.identifier);
+      out.mapRequired("originalName", s.originalName);
+      out.mapRequired("obfuscatedName", s.obfuscatedName);
     }
     
   } // namespace json
