@@ -32,7 +32,7 @@ namespace swift {
     };
     
     struct Symbol {
-      std::string symbol;
+      std::string identifier;
       std::string name;
       
       bool operator< (const Symbol &right) const;
@@ -40,9 +40,18 @@ namespace swift {
     
     struct SymbolsJson {
       std::vector<Symbol> symbols;
+    };
+    
+    struct SymbolRenaming {
+      std::string identifier;
+      std::string originalName;
+      std::string obfuscatedName;
       
-    public:
-      SymbolsJson(std::vector<Symbol> symbols) : symbols(symbols) { }
+      bool operator< (const SymbolRenaming &right) const;
+    };
+    
+    struct RenamesJson {
+      std::vector<SymbolRenaming> symbols;
     };
     
   } //namespace obfuscation
@@ -85,6 +94,15 @@ namespace llvm {
       static void mapping(IO &io, Symbol &info);
     };
     
+    template <>
+    struct MappingTraits<RenamesJson> {
+      static void mapping(IO &io, RenamesJson &info);
+    };
+    
+    template <>
+    struct MappingTraits<SymbolRenaming> {
+      static void mapping(IO &io, SymbolRenaming &info);
+    };
     
     template <typename U>
     struct SequenceTraits<std::vector<U>> {
@@ -108,6 +126,16 @@ namespace swift {
     template <>
     struct ObjectTraits<Symbol> {
       static void mapping(Output &out, Symbol &s);
+    };
+    
+    template <>
+    struct ObjectTraits<RenamesJson> {
+      static void mapping(Output &out, RenamesJson &s);
+    };
+    
+    template <>
+    struct ObjectTraits<SymbolRenaming> {
+      static void mapping(Output &out, SymbolRenaming &s);
     };
     
   } // namespace json
