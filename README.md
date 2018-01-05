@@ -153,8 +153,8 @@ The input data formats are `Files.json` and `Renames.json` and are described in 
    `/bin/bash Scripts/git_remotes.sh`  
    Script takes the parameter defining which version of Swift will be used as the basis of the changes to the compiler.
 
-5. Build the Swift compiler in the Xcode-friendly way  
-   `swift/utils/build-script --xcode --release-debuginfo --debug-swift`
+5. Build the Swift compiler in the Xcode-friendly way.  
+   `swift/utils/build-script --clean --xcode --release-debuginfo --debug-swift`
 
 6. (optional) Build the Swift compiler in the version allowing for the fast incremental compilation with ninja  
    `swift/utils/build-script --release-debuginfo`
