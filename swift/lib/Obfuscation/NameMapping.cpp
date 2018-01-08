@@ -1,76 +1,84 @@
 #include "swift/Obfuscation/NameMapping.h"
 #include "swift/Obfuscation/Random.h"
-#include <stdio.h>
+
+#include <string>
+#include <vector>
+#include <set>
 
 namespace swift {
+namespace obfuscation {
+
+class UniqueTypeNameGenerator {
   
-  namespace obfuscation {
-    
-    class UniqueTypeNameGenerator {
-      
-    private:
-      std::set<std::string> generatedSymbols;
-      const std::vector<std::string> headSymbols = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
-      std::vector<std::string> tailSymbols;
-      RandomElementChooser<std::string>* headGenerator;
-      RandomStringGenerator* tailGenerator;
-      const size_t identifierLength = 32;
-      
-      llvm::ErrorOr<std::string> generateName(int numbersOfTriesLeft) {
-        if (numbersOfTriesLeft <= 0) {
-          return llvm::ErrorOr<std::string>(std::error_code(1, std::generic_category()));
-        }
-        auto head = headGenerator->rand();
-        auto tail = tailGenerator->rand(identifierLength - 1);
-        auto name = head + tail;
-        
-        if (generatedSymbols.insert(name).second) {
-          return name;
-        } else {
-          return this->generateName(numbersOfTriesLeft - 1);
-        }
-      }
-      
-    public:
-      
-      UniqueTypeNameGenerator() {
-        tailSymbols = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
-        tailSymbols.insert(tailSymbols.end(), headSymbols.begin(), headSymbols.end());
-        headGenerator = new RandomElementChooser<std::string>(headSymbols);
-        tailGenerator = new RandomStringGenerator(tailSymbols);
-      }
-      
-      
-      llvm::ErrorOr<std::string> generateName() {
-        return generateName(100);
-      }
-      
-    };
-    
-    llvm::ErrorOr<RenamesJson> proposeRenamings(SymbolsJson symbolsJson) {
-      
-      auto typeNameGenerator = new UniqueTypeNameGenerator();
-      
-      std::vector<SymbolRenaming> Symbols;
-      
-      for (std::size_t i = 0; i < symbolsJson.symbols.size(); ++i) {
-        auto Symbol = symbolsJson.symbols.at(i);
-        auto Renaming = SymbolRenaming();
-        Renaming.identifier = Symbol.identifier;
-        Renaming.originalName = Symbol.name;
-        auto NameOrError = typeNameGenerator->generateName();
-        if (std::error_code ec = NameOrError.getError()) {
-          return llvm::ErrorOr<RenamesJson>(ec);
-        }
-        Renaming.obfuscatedName = NameOrError.get();
-        Symbols.push_back(Renaming);
-      }
-      
-      RenamesJson renamesJson = RenamesJson();
-      renamesJson.symbols = Symbols;
-      return renamesJson;
+private:
+  std::set<std::string> GeneratedSymbols;
+  const std::vector<std::string> HeadSymbols = {"a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
+  std::vector<std::string> TailSymbols;
+  RandomElementChooser<std::string>* HeadGenerator;
+  RandomStringGenerator* TailGenerator;
+  const std::string::size_type IdentifierLength = 32;
+  
+  llvm::Expected<std::string> generateName(int NumbersOfTriesLeft) {
+    if (NumbersOfTriesLeft <= 0) {
+      return llvm::make_error<llvm::StringError>("couldn't generate unique type name",
+                                                 std::error_code(1, std::generic_category()));
     }
+    auto Head = HeadGenerator->rand();
+    auto Tail = TailGenerator->rand(IdentifierLength - 1);
+    auto Name = Head + Tail;
     
-  } //namespace obfuscation
+    if (GeneratedSymbols.insert(Name).second) {
+      return Name;
+    } else {
+      return this->generateName(NumbersOfTriesLeft - 1);
+    }
+  }
   
+public:
+  
+  UniqueTypeNameGenerator() {
+    TailSymbols = {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
+    TailSymbols.insert(TailSymbols.end(),
+                       HeadSymbols.begin(),
+                       HeadSymbols.end());
+    HeadGenerator = new RandomElementChooser<std::string>(HeadSymbols);
+    TailGenerator = new RandomStringGenerator(TailSymbols);
+  }
+  
+  
+  llvm::Expected<std::string> generateName() {
+    return generateName(100);
+  }
+  
+  ~UniqueTypeNameGenerator() {
+    delete HeadGenerator;
+    delete TailGenerator;
+  }
+  
+};
+
+llvm::Expected<RenamesJson> proposeRenamings(const SymbolsJson &SymbolsJson) {
+  
+  auto TypeNameGenerator = new UniqueTypeNameGenerator();
+  
+  RenamesJson RenamesJson;
+  
+  for (const auto &Symbol : SymbolsJson.Symbols) {
+    SymbolRenaming Renaming;
+    Renaming.Identifier = Symbol.Identifier;
+    Renaming.OriginalName = Symbol.Name;
+    auto NameOrError = TypeNameGenerator->generateName();
+    if (auto Error = NameOrError.takeError()) {
+      return std::move(Error);
+    }
+    Renaming.ObfuscatedName = NameOrError.get();
+    RenamesJson.Symbols.push_back(Renaming);
+  }
+  
+  delete TypeNameGenerator;
+
+  return RenamesJson;
+}
+
+} //namespace obfuscation
 } //namespace swift
