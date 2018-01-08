@@ -1,25 +1,33 @@
-#include "swift/Basic/LLVMInitialize.h"
-#include "llvm/Support/CommandLine.h"
-
-#include "swift/Obfuscation/Obfuscation.h"
+#include "swift/Obfuscation/SymbolExtracting.h"
 #include "swift/Obfuscation/FileIO.h"
 
-#include <iostream>
+#include "swift/Basic/LLVMInitialize.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace swift;
 using namespace swift::obfuscation;
 
 namespace options {
-  static llvm::cl::opt<std::string>
-  FilesJsonPath("filejson", llvm::cl::desc("Name of the file containing File Extractor data"));
+  
+static llvm::cl::OptionCategory
+ObfuscatorSymbolExtractor("Obfuscator Symbol Extractor");
+  
+static llvm::cl::opt<std::string>
+FilesJsonPath("filesjson",
+              llvm::cl::desc("Name of the file containing File Extractor data"),
+              llvm::cl::cat(ObfuscatorSymbolExtractor));
 
-  static llvm::cl::opt<std::string>
-  SymbolJsonPath("symbolsjson", llvm::cl::desc("Name of the file to write extracted Symbols"));
+static llvm::cl::opt<std::string>
+SymbolJsonPath("symbolsjson",
+               llvm::cl::desc("Name of the file to write extracted Symbols"),
+               llvm::cl::cat(ObfuscatorSymbolExtractor));
+  
 }
 
-void printSymbols(std::vector<Symbol> Symbols) {
-  for (auto Symbol : Symbols) {
-    std::cout << "identifier: " << Symbol.identifier << "\n" << "name: " << Symbol.name << "\n";
+void printSymbols(const std::vector<Symbol> &Symbols) {
+  for (const auto &Symbol : Symbols) {
+    llvm::outs() << "identifier: " << Symbol.Identifier << '\n'
+      << "name: " << Symbol.Name << '\n';
   }
 }
 
@@ -32,36 +40,44 @@ void anchorForGetMainExecutable() {}
 
 int main(int argc, char *argv[]) {
   INITIALIZE_LLVM(argc, argv);
-  std::cout << "Swift obfuscator symbol extractor tool\n";
+  llvm::cl::HideUnrelatedOptions(options::ObfuscatorSymbolExtractor);
   
-  llvm::cl::ParseCommandLineOptions(argc, argv, "obfuscator-symbol-extractor\n");
+  llvm::ExitOnError ExitOnError;
+  ExitOnError.setExitCodeMapper(
+    [](const llvm::Error &Err) { return 1; }
+  );
+  llvm::outs() << "Swift obfuscator symbol extractor tool" << '\n';
+  
+  llvm::cl::ParseCommandLineOptions(argc, argv, "obfuscator-symbol-extractor");
   
   if (options::FilesJsonPath.empty()) {
-    llvm::errs() << "cannot find Files Extractor json file\n";
+    llvm::errs() << "cannot find Files Extractor json file" << '\n';
     return 1;
   }
 
   std::string PathToJson = options::FilesJsonPath;
   std::string MainExecutablePath = llvm::sys::fs::getMainExecutable(argv[0],
                                                                     reinterpret_cast<void *>(&anchorForGetMainExecutable));
-  llvm::ErrorOr<FilesJson> FilesJsonOrErr = parseJson<FilesJson>(PathToJson);
-  if (std::error_code ec = FilesJsonOrErr.getError()) {
-    return ec.value();
-  }
-  auto compilerInvocation = createCompilerInvocationConfiguration(FilesJsonOrErr.get(), MainExecutablePath);
-  
-  llvm::ErrorOr<SymbolsJson> SymbolsOrError = extractSymbols(compilerInvocation);
-  if (std::error_code ec = SymbolsOrError.getError()) {
-    return ec.value();
+  auto FilesJsonOrError = parseJson<FilesJson>(PathToJson);
+  if (auto Error = FilesJsonOrError.takeError()) {
+    ExitOnError(std::move(Error));
   }
   
-  printSymbols(SymbolsOrError.get().symbols);
+  auto SymbolsOrError = extractSymbols(FilesJsonOrError.get(), MainExecutablePath);
+  if (auto Error = SymbolsOrError.takeError()) {
+    ExitOnError(std::move(Error));
+  }
+
+  printSymbols(SymbolsOrError.get().Symbols);
   if (options::SymbolJsonPath.empty()) {
-    llvm::errs() << "there is no path to write extracted symbols to\n";
+    llvm::errs() << "there is no path to write extracted symbols to" << '\n';
     return 1;
   }
   std::string PathToOutput = options::SymbolJsonPath;
-  writeSymbolsToFile(SymbolsOrError.get(), PathToOutput);
+  auto WriteErrorCode = writeToFile(SymbolsOrError.get(),
+                                    PathToOutput,
+                                    llvm::outs());
+  ExitOnError(std::move(WriteErrorCode));
   return 0;
 }
 

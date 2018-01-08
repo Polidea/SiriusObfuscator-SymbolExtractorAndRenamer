@@ -3,13 +3,15 @@
 
 #include "swift/Obfuscation/DataStructures.h"
 
-namespace swift {
-  namespace obfuscation {
-    
-    llvm::ErrorOr<RenamesJson> proposeRenamings(SymbolsJson symbolsJson);
+#include "llvm/Support/Error.h"
 
-  } //namespace obfuscation
-  
+namespace swift {
+namespace obfuscation {
+
+llvm::Expected<RenamesJson> proposeRenamings(const SymbolsJson &SymbolsJson);
+
+} //namespace obfuscation
+
 } //namespace swift
 
 #endif /* NameMapping_h */
