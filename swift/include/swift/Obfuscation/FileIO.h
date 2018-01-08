@@ -1,19 +1,22 @@
 #ifndef FileIO_h
 #define FileIO_h
 
-#include "swift/Frontend/Frontend.h"
-#include "swift/Obfuscation/Obfuscation.h"
+#include "llvm/Support/Error.h"
+
+#include <string>
 
 namespace swift {
-  namespace obfuscation {
-    
-    template<class T>
-    llvm::ErrorOr<T> parseJson(std::string PathToJson);
+namespace obfuscation {
 
-    template<class T>
-    int writeSymbolsToFile(T Symbols, std::string PathToOutput);
-    
-  } //namespace obfuscation
+template<typename T>
+llvm::Expected<T> parseJson(std::string PathToJson);
+
+template<typename T>
+llvm::Error writeToFile(T &Object,
+                        std::string PathToOutput,
+                        llvm::raw_ostream &LogStream);
+
+} //namespace obfuscation
 } //namespace swift
 
 #endif /* FileIO_h */

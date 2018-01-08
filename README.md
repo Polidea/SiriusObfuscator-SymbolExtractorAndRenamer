@@ -25,7 +25,7 @@ It performs the analysis of Swift source code files and identifies the symbols t
 ## Usage
 
 ```bash
-$ obfuscator-symbol-extractor -filejson <path-to-input-files-json> -symbolsjson <path-to-output-symbols-json>
+$ obfuscator-symbol-extractor -filesjson <path-to-input-files-json> -symbolsjson <path-to-output-symbols-json>
 ```
 
 where 
@@ -173,5 +173,4 @@ In the alphabetical order:
 
 * [Jerzy Kleszcz](mailto:jerzy.kleszcz@polidea.com)
 * [Krzysztof Siejkowski](krzysztof.siejkowski@polidea.com)
-
 

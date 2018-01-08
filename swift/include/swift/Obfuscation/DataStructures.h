@@ -1,60 +1,61 @@
 #ifndef DataStructures_h
 #define DataStructures_h
 
-#include "swift/Frontend/Frontend.h"
 #include "llvm/Support/YAMLTraits.h"
-#include "llvm/Support/YAMLParser.h"
 #include "swift/Basic/JSONSerialization.h"
 
-namespace swift {
-  namespace obfuscation {
+#include <vector>
+#include <string>
 
-    struct Module {
-      std::string name;
-    };
-    
-    struct Sdk {
-      std::string name;
-      std::string path;
-    };
-    
-    struct ExplicitelyLinkedFrameworks {
-      std::string name;
-      std::string path;
-    };
-    
-    struct FilesJson {
-      Module module;
-      Sdk sdk;
-      std::vector<std::string> filenames;
-      std::vector<std::string> systemLinkedFrameworks;
-      std::vector<ExplicitelyLinkedFrameworks> explicitelyLinkedFrameworks;
-    };
-    
-    struct Symbol {
-      std::string identifier;
-      std::string name;
-      
-      bool operator< (const Symbol &right) const;
-    };
-    
-    struct SymbolsJson {
-      std::vector<Symbol> symbols;
-    };
-    
-    struct SymbolRenaming {
-      std::string identifier;
-      std::string originalName;
-      std::string obfuscatedName;
-      
-      bool operator< (const SymbolRenaming &right) const;
-    };
-    
-    struct RenamesJson {
-      std::vector<SymbolRenaming> symbols;
-    };
-    
-  } //namespace obfuscation
+namespace swift {
+namespace obfuscation {
+
+struct Module {
+  std::string Name;
+};
+
+struct Sdk {
+  std::string Name;
+  std::string Path;
+};
+
+struct ExplicitelyLinkedFrameworks {
+  std::string Name;
+  std::string Path;
+};
+
+struct FilesJson {
+  Module Module;
+  Sdk Sdk;
+  std::vector<std::string> Filenames;
+  std::vector<std::string> SystemLinkedFrameworks;
+  std::vector<ExplicitelyLinkedFrameworks> ExplicitelyLinkedFrameworks;
+};
+
+struct Symbol {
+  std::string Identifier;
+  std::string Name;
+  
+  bool operator< (const Symbol &Right) const;
+};
+
+struct SymbolsJson {
+  std::vector<Symbol> Symbols;
+};
+
+struct SymbolRenaming {
+  std::string Identifier;
+  std::string OriginalName;
+  std::string ObfuscatedName;
+  
+  bool operator< (const SymbolRenaming &Right) const;
+};
+
+struct RenamesJson {
+  std::vector<SymbolRenaming> Symbols;
+};
+
+} //namespace obfuscation
 } //namespace swift
 
 using namespace swift::obfuscation;
@@ -62,83 +63,83 @@ using namespace swift::obfuscation;
 // MARK: - Deserialization
 
 namespace llvm {
-  namespace yaml {
-    
-    template <>
-    struct MappingTraits<FilesJson> {
-      static void mapping(IO &io, FilesJson &info);
-    };
-    
-    template <>
-    struct MappingTraits<swift::obfuscation::Module> {
-      static void mapping(IO &io, swift::obfuscation::Module &info);
-    };
-    
-    template <>
-    struct MappingTraits<Sdk> {
-      static void mapping(IO &io, Sdk &info);
-    };
-    
-    template <>
-    struct MappingTraits<ExplicitelyLinkedFrameworks> {
-      static void mapping(IO &io, ExplicitelyLinkedFrameworks &info);
-    };
-    
-    template <>
-    struct MappingTraits<SymbolsJson> {
-      static void mapping(IO &io, SymbolsJson &info);
-    };
-    
-    template <>
-    struct MappingTraits<Symbol> {
-      static void mapping(IO &io, Symbol &info);
-    };
-    
-    template <>
-    struct MappingTraits<RenamesJson> {
-      static void mapping(IO &io, RenamesJson &info);
-    };
-    
-    template <>
-    struct MappingTraits<SymbolRenaming> {
-      static void mapping(IO &io, SymbolRenaming &info);
-    };
-    
-    template <typename U>
-    struct SequenceTraits<std::vector<U>> {
-      static size_t size(IO &Io, std::vector<U> &Vec);
-      static U& element(IO &Io, std::vector<U> &Vec, size_t Index);
-    };
-    
-  } // namespace yaml
+namespace yaml {
+
+template <>
+struct MappingTraits<FilesJson> {
+  static void mapping(IO &Io, FilesJson &Object);
+};
+
+template <>
+struct MappingTraits<swift::obfuscation::Module> {
+  static void mapping(IO &Io, swift::obfuscation::Module &Object);
+};
+
+template <>
+struct MappingTraits<Sdk> {
+  static void mapping(IO &Io, Sdk &Object);
+};
+
+template <>
+struct MappingTraits<ExplicitelyLinkedFrameworks> {
+  static void mapping(IO &Io, ExplicitelyLinkedFrameworks &Object);
+};
+
+template <>
+struct MappingTraits<SymbolsJson> {
+  static void mapping(IO &Io, SymbolsJson &Object);
+};
+
+template <>
+struct MappingTraits<Symbol> {
+  static void mapping(IO &Io, Symbol &Object);
+};
+
+template <>
+struct MappingTraits<RenamesJson> {
+  static void mapping(IO &Io, RenamesJson &Object);
+};
+
+template <>
+struct MappingTraits<SymbolRenaming> {
+  static void mapping(IO &Io, SymbolRenaming &Object);
+};
+
+template <typename U>
+struct SequenceTraits<std::vector<U>> {
+  static size_t size(IO &Io, std::vector<U> &Vec);
+  static U &element(IO &Io, std::vector<U> &Vec, size_t Index);
+};
+
+} // namespace yaml
 } // namespace llvm
 
 // MARK: - Serialization
 
 namespace swift {
-  namespace json  {
-    
-    template <>
-    struct ObjectTraits<SymbolsJson> {
-      static void mapping(Output &out, SymbolsJson &s);
-    };
-    
-    template <>
-    struct ObjectTraits<Symbol> {
-      static void mapping(Output &out, Symbol &s);
-    };
-    
-    template <>
-    struct ObjectTraits<RenamesJson> {
-      static void mapping(Output &out, RenamesJson &s);
-    };
-    
-    template <>
-    struct ObjectTraits<SymbolRenaming> {
-      static void mapping(Output &out, SymbolRenaming &s);
-    };
-    
-  } // namespace json
+namespace json  {
+
+template <>
+struct ObjectTraits<SymbolsJson> {
+  static void mapping(Output &Out, SymbolsJson &Object);
+};
+
+template <>
+struct ObjectTraits<Symbol> {
+  static void mapping(Output &Out, Symbol &Object);
+};
+
+template <>
+struct ObjectTraits<RenamesJson> {
+  static void mapping(Output &Out, RenamesJson &Object);
+};
+
+template <>
+struct ObjectTraits<SymbolRenaming> {
+  static void mapping(Output &Out, SymbolRenaming &Object);
+};
+
+} // namespace json
 } // namespace swift
 
 #endif /* DataStructures_h */
