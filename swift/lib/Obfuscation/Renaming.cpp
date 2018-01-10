@@ -83,8 +83,8 @@ performRenaming(std::string MainExecutablePath,
       auto &SourceManager = Current->getASTContext().SourceMgr;
       std::error_code Error;
       llvm::raw_fd_ostream DescriptorStream(Path, Error, llvm::sys::fs::F_None);
-      if (DescriptorStream.has_error()) {
-        return llvm::make_error<llvm::StringError>("Cannot open output file", Error);
+      if (DescriptorStream.has_error() || Error) {
+        return llvm::make_error<llvm::StringError>("Cannot open output file: " + Path, Error);
       }
       
       auto BufferId = Current->getBufferID().getValue();
