@@ -1,4 +1,5 @@
 #include "swift/Obfuscation/SymbolProvider.h"
+#include "swift/Obfuscation/Utils.h"
 
 #include <sstream>
 #include <string>
@@ -26,12 +27,10 @@ llvm::Expected<Symbol> extractSymbol(Decl* Declaration) {
       SymbolName = StructDeclaration->getDeclaredInterfaceType()->getString();
       Parts.push_back("struct." + SymbolName);
     } else {
-      return llvm::make_error<llvm::StringError>("found unsupported declaration type",
-                                                 std::error_code(1, std::generic_category()));
+      return stringError("found unsupported declaration type");
     }
   } else {
-    return llvm::make_error<llvm::StringError>("found unsupported declaration type",
-                                               std::error_code(1, std::generic_category()));
+    return stringError("found unsupported declaration type");
   }
   
   std::string StringParts;

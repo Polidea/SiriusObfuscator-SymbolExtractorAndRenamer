@@ -9,6 +9,10 @@
 
 namespace swift {
 namespace obfuscation {
+  
+struct Project {
+  std::string RootPath;
+};
 
 struct Module {
   std::string Name;
@@ -25,6 +29,7 @@ struct ExplicitelyLinkedFrameworks {
 };
 
 struct FilesJson {
+  Project Project;
   Module Module;
   Sdk Sdk;
   std::vector<std::string> Filenames;
@@ -68,6 +73,11 @@ namespace yaml {
 template <>
 struct MappingTraits<FilesJson> {
   static void mapping(IO &Io, FilesJson &Object);
+};
+  
+template <>
+struct MappingTraits<Project> {
+  static void mapping(IO &Io, Project &Object);
 };
 
 template <>
