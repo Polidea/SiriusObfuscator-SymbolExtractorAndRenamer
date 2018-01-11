@@ -17,6 +17,9 @@ RandomElementChooser<T>::~RandomElementChooser() {
   delete Generator;
 }
 
+template std::string RandomElementChooser<std::string>::rand() const;
+template std::string RandomElementChooser<std::string>::~RandomElementChooser();
+  
 template<typename T>
 std::vector<T> RandomVectorGenerator<T>::rand(size_type Length) const {
   std::vector<T> Result;
@@ -25,6 +28,7 @@ std::vector<T> RandomVectorGenerator<T>::rand(size_type Length) const {
   }
   return Result;
 }
+
 template<typename T>
 RandomVectorGenerator<T>::~RandomVectorGenerator() {
   delete Chooser;
