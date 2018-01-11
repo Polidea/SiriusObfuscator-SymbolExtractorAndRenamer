@@ -1,5 +1,6 @@
 #include "swift/Obfuscation/FileIO.h"
 #include "swift/Obfuscation/DataStructures.h"
+#include "swift/Obfuscation/Utils.h"
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -13,16 +14,14 @@ template<class T>
 llvm::Expected<T> parseJson(std::string PathToJson) {
   auto Buffer = llvm::MemoryBuffer::getFile(PathToJson);
   if (auto ErrorCode = Buffer.getError()) {
-    return llvm::make_error<llvm::StringError>("Error during JSON file read",
-                                               ErrorCode);
+    return stringError("Error during JSON file read", ErrorCode);
   }
   
   llvm::yaml::Input Input(std::move(Buffer.get())->getBuffer());
   T Json;
   Input >> Json;
   if (auto ErrorCode = Input.error()) {
-    return llvm::make_error<llvm::StringError>("Error during JSON parse:",
-                                               ErrorCode);
+    return stringError("Error during JSON parse", ErrorCode);
   }
   
   return Json;
@@ -48,8 +47,7 @@ llvm::Error writeToFile(T &Object,
   std::error_code Error;
   llvm::raw_fd_ostream File(PathToOutput, Error, llvm::sys::fs::F_None);
   if (File.has_error() || Error) {
-    auto Message = "Failed to open file: " + PathToOutput;
-    return llvm::make_error<llvm::StringError>(Message, Error);
+    return stringError("Failed to open file: " + PathToOutput, Error);
   }
   File << OutputStringStream.str();
   File.close();

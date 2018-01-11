@@ -10,7 +10,7 @@ namespace swift {
 namespace obfuscation {
 
 std::set<Symbol> findSymbolsToObfuscate(SourceFile &SourceFile) {
-  std::set<SymbolWithRange> Source = findSymbolsWithRanges(SourceFile);
+  auto Source = findSymbolsWithRanges(SourceFile);
   std::set<Symbol> Result;
   for (const auto &Symbol : Source) {
     Result.insert(Symbol.Symbol);
