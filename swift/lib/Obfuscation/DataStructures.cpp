@@ -16,12 +16,17 @@ namespace llvm {
 namespace yaml {
 
 void MappingTraits<FilesJson>::mapping(IO &Io, FilesJson &Object) {
+  Io.mapRequired("project", Object.Project);
   Io.mapRequired("module", Object.Module);
   Io.mapRequired("sdk", Object.Sdk);
   Io.mapRequired("filenames", Object.Filenames);
   Io.mapRequired("systemLinkedFrameworks", Object.SystemLinkedFrameworks);
   Io.mapRequired("explicitelyLinkedFrameworks",
                  Object.ExplicitelyLinkedFrameworks);
+}
+  
+void MappingTraits<Project>::mapping(IO &Io, Project &Object) {
+  Io.mapRequired("rootPath", Object.RootPath);
 }
 
 typedef swift::obfuscation::Module ObfuscationModule;
