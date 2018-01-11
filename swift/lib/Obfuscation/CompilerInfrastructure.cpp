@@ -1,4 +1,5 @@
 #include "swift/Obfuscation/CompilerInfrastructure.h"
+#include "swift/Obfuscation/Utils.h"
 
 #include "swift/Frontend/PrintingDiagnosticConsumer.h"
 #include "llvm/Support/FileSystem.h"
@@ -24,8 +25,7 @@ struct CompilerInvocationConfiguration {
   InputFilenames(FilesJson.Filenames) {
     std::vector<SearchPathOptions::FrameworkSearchPath> Paths;
     for (const auto &Framework : FilesJson.ExplicitelyLinkedFrameworks) {
-      auto Path = SearchPathOptions::FrameworkSearchPath(Framework.Path,
-                                                         false);
+      SearchPathOptions::FrameworkSearchPath Path(Framework.Path, false);
       Paths.push_back(Path);
     }
     this->Paths = Paths;
@@ -50,14 +50,12 @@ llvm::Error
 setupCompilerInstance(CompilerInstance &CompilerInstance,
                       const FilesJson &FilesJson,
                       std::string MainExecutablePath) {
-  auto Configuration = CompilerInvocationConfiguration(FilesJson,
-                                                       MainExecutablePath);
+  CompilerInvocationConfiguration Configuration(FilesJson, MainExecutablePath);
   auto Invocation = createInvocation(Configuration);
   PrintingDiagnosticConsumer PrintDiags;
   CompilerInstance.addDiagnosticConsumer(&PrintDiags);
   if (CompilerInstance.setup(Invocation)) {
-    return llvm::make_error<llvm::StringError>("Error during JSON file read",
-                                               std::error_code(1, std::generic_category()));
+    return stringError("Error during JSON file read");
   }
   CompilerInstance.performSema();
   return llvm::Error::success();

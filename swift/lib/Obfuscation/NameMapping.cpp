@@ -1,5 +1,6 @@
 #include "swift/Obfuscation/NameMapping.h"
 #include "swift/Obfuscation/Random.h"
+#include "swift/Obfuscation/Utils.h"
 
 #include <string>
 #include <vector>
@@ -20,8 +21,7 @@ private:
   
   llvm::Expected<std::string> generateName(int NumbersOfTriesLeft) {
     if (NumbersOfTriesLeft <= 0) {
-      return llvm::make_error<llvm::StringError>("couldn't generate unique type name",
-                                                 std::error_code(1, std::generic_category()));
+      return stringError("couldn't generate unique type name");
     }
     auto Head = HeadGenerator->rand();
     auto Tail = TailGenerator->rand(IdentifierLength - 1);
@@ -59,7 +59,7 @@ public:
 
 llvm::Expected<RenamesJson> proposeRenamings(const SymbolsJson &SymbolsJson) {
   
-  auto TypeNameGenerator = new UniqueTypeNameGenerator();
+  auto *TypeNameGenerator = new UniqueTypeNameGenerator();
   
   RenamesJson RenamesJson;
   

@@ -7,6 +7,7 @@ add_swift_library(swiftObfuscation STATIC
   Renaming.cpp
   SymbolProvider.cpp
   CompilerInfrastructure.cpp
+  Utils.cpp
   LINK_LIBRARIES
   swiftParse
   swiftAST
