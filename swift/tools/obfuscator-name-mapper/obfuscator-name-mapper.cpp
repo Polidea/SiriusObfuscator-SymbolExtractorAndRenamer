@@ -25,9 +25,11 @@ RenamesJsonPath("renamesjson",
 
 void printRenamings(const std::vector<SymbolRenaming> &Renamings) {
   for (const auto &Renaming : Renamings) {
-    llvm::outs() << "identifier: " << Renaming.Identifier << '\n'
+    llvm::outs()
+      << "identifier: " << Renaming.Identifier << '\n'
       << "originalName: " << Renaming.OriginalName << '\n'
-      << "obfuscatedName: " << Renaming.ObfuscatedName << '\n';
+      << "obfuscatedName: " << Renaming.ObfuscatedName << '\n'
+      << "module: " << Renaming.Module << '\n';
   }
 }
 

@@ -11,9 +11,11 @@ namespace obfuscation {
 llvm::Expected<Symbol> extractSymbol(Decl* Declaration) {
   std::vector<std::string> Parts;
   std::string SymbolName;
+  std::string ModuleName;
   if (const auto *NominalTypeDeclaration = dyn_cast<NominalTypeDecl>(Declaration)) {
+    ModuleName = NominalTypeDeclaration->getModuleContext()->getBaseName().getIdentifier().get();
     Parts.push_back("module");
-    Parts.push_back(NominalTypeDeclaration->getModuleContext()->getBaseName().getIdentifier().get());
+    Parts.push_back(ModuleName);
     if (auto *EnumDeclaration = dyn_cast<EnumDecl>(NominalTypeDeclaration)) {
       SymbolName = EnumDeclaration->getDeclaredInterfaceType()->getString();
       Parts.push_back("enum." + SymbolName);
@@ -49,6 +51,7 @@ llvm::Expected<Symbol> extractSymbol(Decl* Declaration) {
   Symbol SymbolStruct;
   SymbolStruct.Identifier = StringParts;
   SymbolStruct.Name = SymbolName;
+  SymbolStruct.Module = ModuleName;
   return SymbolStruct;
 }
 
@@ -58,9 +61,8 @@ bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
 
 struct RenamesCollector: public SourceEntityWalker {
   std::set<SymbolWithRange> Bucket;
-  RenamesCollector() {}
   
-  void handleSymbol(const Symbol &Symbol, const CharSourceRange &Range) {
+  void handleSymbol(Symbol &Symbol, const CharSourceRange &Range) {
     Bucket.insert(SymbolWithRange(Symbol, Range));
   }
   

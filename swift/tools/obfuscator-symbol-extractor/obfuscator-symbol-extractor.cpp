@@ -26,8 +26,10 @@ SymbolJsonPath("symbolsjson",
 
 void printSymbols(const std::vector<Symbol> &Symbols) {
   for (const auto &Symbol : Symbols) {
-    llvm::outs() << "identifier: " << Symbol.Identifier << '\n'
-      << "name: " << Symbol.Name << '\n';
+    llvm::outs()
+      << "identifier: " << Symbol.Identifier << '\n'
+      << "name: " << Symbol.Name << '\n'
+      << "module: " << Symbol.Module << '\n';
   }
 }
 
