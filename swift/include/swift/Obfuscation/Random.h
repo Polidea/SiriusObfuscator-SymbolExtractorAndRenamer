@@ -1,6 +1,7 @@
 #ifndef Random_h
 #define Random_h
 
+#include <cassert>
 #include <vector>
 #include <string>
 #include <random>
@@ -12,15 +13,13 @@ class RandomIntegerGenerator {
   
 private:
   
-  std::random_device RandomDevice;
   std::mt19937 Engine;
   std::uniform_int_distribution<int> Distribution;
   
 public:
   
   RandomIntegerGenerator(int Min, int Max)
-  : RandomDevice(),
-  Engine(RandomDevice()),
+  : Engine(std::random_device()()),
   Distribution(std::uniform_int_distribution<int>(Min, Max)) {}
   
   int rand();
@@ -32,38 +31,39 @@ class RandomElementChooser {
   
 private:
   
-  RandomIntegerGenerator* Generator;
+  RandomIntegerGenerator Generator;
   std::vector<T> List;
   
 public:
   
-  RandomElementChooser(const std::vector<T> &ListToChooseFrom) :
-  Generator(new RandomIntegerGenerator(0, ListToChooseFrom.size() - 1)),
-  List(ListToChooseFrom) {}
+  RandomElementChooser(const std::vector<T> &ListToChooseFrom)
+  : Generator(0, ListToChooseFrom.empty() ? 0 : ListToChooseFrom.size() - 1),
+  List(ListToChooseFrom) {
+    assert(!ListToChooseFrom.empty() && "list of elements to choose from must not be empty");
+  };
   
-  T rand() const;
-  
-  ~RandomElementChooser();
+  T rand() {
+    return List.at(Generator.rand());
+  }
 
 };
+
+template<typename T>
+using length_type = typename std::vector<T>::size_type;
 
 template<typename T>
 class RandomVectorGenerator {
   
 private:
   
-  RandomElementChooser<T>* Chooser;
+  RandomElementChooser<T> Chooser;
   
 public:
   
-  RandomVectorGenerator(const std::vector<T> &ListToChooseFrom) :
-  Chooser(new RandomElementChooser<T>(ListToChooseFrom)) {}
+  RandomVectorGenerator(const std::vector<T> &ListToChooseFrom)
+  : Chooser(RandomElementChooser<T>(ListToChooseFrom)) {}
   
-  typedef typename std::vector<T>::size_type size_type;
-  
-  std::vector<T> rand(size_type Length) const;
-  
-  ~RandomVectorGenerator();
+  std::vector<T> rand(length_type<T> Length);
 
 };
 
@@ -71,18 +71,14 @@ class RandomStringGenerator {
   
 private:
   
-  RandomVectorGenerator<std::string>* Generator;
+  RandomVectorGenerator<std::string> Generator;
   
 public:
   
-  typedef std::vector<std::string>::size_type size_type;
-  
   RandomStringGenerator(const std::vector<std::string> &ListToChooseFrom)
-  : Generator(new RandomVectorGenerator<std::string>(ListToChooseFrom)) {}
+  : Generator(ListToChooseFrom) {}
   
-  std::string rand(size_type Length) const;
-  
-  ~RandomStringGenerator();
+  std::string rand(length_type<std::string> Length);
 
 };
 
