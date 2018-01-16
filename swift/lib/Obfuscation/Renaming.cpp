@@ -1,6 +1,6 @@
 #include "swift/Obfuscation/Renaming.h"
 #include "swift/Obfuscation/CompilerInfrastructure.h"
-#include "swift/Obfuscation/SymbolProvider.h"
+#include "swift/Obfuscation/SourceFileWalker.h"
 #include "swift/Obfuscation/Utils.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -76,7 +76,7 @@ llvm::Expected<bool> performActualRenaming(SourceFile &Current,
                                            unsigned int BufferId,
                                            StringRef Path) {
   bool performedRenaming = false;
-  auto SymbolsWithRanges = findSymbolsWithRanges(Current);
+  auto SymbolsWithRanges = walkAndCollectSymbols(Current);
   
   std::unique_ptr<llvm::raw_fd_ostream> DescriptorStream(nullptr);
   std::unique_ptr<swift::ide::SourceEditOutputConsumer> Editor(nullptr);

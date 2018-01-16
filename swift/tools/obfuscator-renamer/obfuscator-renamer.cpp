@@ -31,8 +31,7 @@ ObfuscatedProjectPath("obfuscatedproject",
 void printObfuscatedFiles(const std::vector<std::pair<std::string, std::string>> &Files) {
   llvm::outs() << "obfuscated files:" << '\n';
   for (const auto &File : Files) {
-    llvm::outs() << "file: " << File.first << '\n'
-      << "path: " << File.second << '\n';
+    llvm::outs() << File.second << '\n';
   }
 }
 
