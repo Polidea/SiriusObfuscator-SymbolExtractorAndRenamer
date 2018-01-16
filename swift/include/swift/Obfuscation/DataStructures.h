@@ -42,6 +42,11 @@ struct Symbol {
   std::string Name;
   std::string Module;
   
+  Symbol() = default;
+  
+  Symbol(const std::string &Identifier, const std::string &Name, const std::string &Module)
+  : Identifier(Identifier), Name(Name), Module(Module) {};
+  
   bool operator< (const Symbol &Right) const;
 };
 

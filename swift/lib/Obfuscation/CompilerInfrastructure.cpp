@@ -50,8 +50,6 @@ setupCompilerInstance(CompilerInstance &CompilerInstance,
                       std::string MainExecutablePath) {
   CompilerInvocationConfiguration Configuration(FilesJson, MainExecutablePath);
   auto Invocation = createInvocation(Configuration);
-  PrintingDiagnosticConsumer PrintDiags;
-  CompilerInstance.addDiagnosticConsumer(&PrintDiags);
   if (CompilerInstance.setup(Invocation)) {
     return stringError("Error during JSON file read");
   }

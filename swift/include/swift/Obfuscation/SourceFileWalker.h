@@ -1,5 +1,5 @@
-#ifndef SymbolProvider_h
-#define SymbolProvider_h
+#ifndef SourceFileWalker_h
+#define SourceFileWalker_h
 
 #include "swift/Frontend/Frontend.h"
 #include "swift/Obfuscation/DataStructures.h"
@@ -20,9 +20,9 @@ struct SymbolWithRange {
   bool operator< (const SymbolWithRange &Right) const;
 };
 
-std::set<SymbolWithRange> findSymbolsWithRanges(SourceFile &SourceFile);
+std::set<SymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile);
 
 } //namespace obfuscation
 } //namespace swift
 
-#endif /* SymbolProvider_h */
+#endif /* SourceFileWalker_h */
