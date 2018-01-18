@@ -18,17 +18,19 @@ FilesJsonPath("filesjson",
 
 static llvm::cl::opt<std::string>
 RenamesJsonPath("renamesjson",
-                llvm::cl::desc("Name of the output file to write extracted symbols with proposed renamings"),
+                llvm::cl::desc("Name of the output file to write extracted "
+                               "symbols with proposed renamings"),
                 llvm::cl::cat(ObfuscatorRenamer));
 
 static llvm::cl::opt<std::string>
 ObfuscatedProjectPath("obfuscatedproject",
-                      llvm::cl::desc("Path to the directory for obfuscated project"),
+                      llvm::cl::desc("Path to the directory for obfuscated "
+                                     "project"),
                       llvm::cl::cat(ObfuscatorRenamer));
   
 }
 
-void printObfuscatedFiles(const std::vector<std::pair<std::string, std::string>> &Files) {
+void printObfuscatedFiles(const FilesList &Files) {
   llvm::outs() << "obfuscated files:" << '\n';
   for (const auto &File : Files) {
     llvm::outs() << File.second << '\n';
@@ -75,8 +77,10 @@ int main(int argc, char *argv[]) {
     ExitOnError(std::move(Error));
   }
   
-  std::string MainExecutablePath = llvm::sys::fs::getMainExecutable(argv[0],
-                                                                    reinterpret_cast<void *>(&anchorForGetMainExecutable));
+  void *MainExecutablePointer =
+    reinterpret_cast<void *>(&anchorForGetMainExecutable);
+  std::string MainExecutablePath =
+    llvm::sys::fs::getMainExecutable(argv[0], MainExecutablePointer);
   
   auto FilesOrError = performRenaming(MainExecutablePath,
                                       FilesJsonOrError.get(),
