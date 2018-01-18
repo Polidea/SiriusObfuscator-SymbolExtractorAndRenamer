@@ -39,7 +39,8 @@ public:
   RandomElementChooser(const std::vector<T> &ListToChooseFrom)
   : Generator(0, ListToChooseFrom.empty() ? 0 : ListToChooseFrom.size() - 1),
   List(ListToChooseFrom) {
-    assert(!ListToChooseFrom.empty() && "list of elements to choose from must not be empty");
+    assert(!ListToChooseFrom.empty() && "list of elements to choose from "
+                                        "must not be empty");
   };
   
   T rand() {

@@ -6,15 +6,21 @@
 namespace swift {
 namespace obfuscation {
   
+const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
+  auto Pointer = Symbol.Range.getStart().getOpaquePointerValue();
+  return static_cast<const char *>(Pointer);
+}
+  
 bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
   auto less = std::less<const char *>();
-  if (const auto *RangeValuePointer = static_cast<const char *>(Range.getStart().getOpaquePointerValue())) {
-    if (const auto *RightRangeValuePointer = static_cast<const char *>(Right.Range.getStart().getOpaquePointerValue())) {
+  if (const auto* RangeValuePointer = pointerToRangeValue(*this)) {
+    if (const auto* RightRangeValuePointer = pointerToRangeValue(Right)) {
       auto isRangeLess = less(RangeValuePointer, RightRangeValuePointer);
       return Symbol < Right.Symbol || isRangeLess;
     }
   }
-  assert(false && "Comparing Symbols with Ranges requires Ranges Start Location Values Pointers to be of const char type");
+  assert(false && "Comparing Symbols with Ranges requires Ranges Start "
+                  "Location Values Pointers to be of const char type");
 }
 
 struct RenamesCollector: public SourceEntityWalker {
@@ -43,9 +49,11 @@ struct RenamesCollector: public SourceEntityWalker {
     
     std::unique_ptr<llvm::Expected<Symbol>> SymbolOrError(nullptr);
     if (CtorTyRef) {
-      SymbolOrError = llvm::make_unique<llvm::Expected<Symbol>>(extractSymbol(CtorTyRef));
+      SymbolOrError =
+        llvm::make_unique<llvm::Expected<Symbol>>(extractSymbol(CtorTyRef));
     } else {
-       SymbolOrError = llvm::make_unique<llvm::Expected<Symbol>>(extractSymbol(Declaration));
+       SymbolOrError =
+        llvm::make_unique<llvm::Expected<Symbol>>(extractSymbol(Declaration));
     }
     if (auto Error = SymbolOrError->takeError()) {
       llvm::consumeError(std::move(Error));
