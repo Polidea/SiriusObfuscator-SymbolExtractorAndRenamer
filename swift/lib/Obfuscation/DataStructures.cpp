@@ -102,7 +102,8 @@ void ObjectTraits<RenamesJson>::mapping(Output &Out, RenamesJson &Object) {
   Out.mapRequired("symbols", Object.Symbols);
 }
 
-void ObjectTraits<SymbolRenaming>::mapping(Output &Out, SymbolRenaming &Object) {
+void ObjectTraits<SymbolRenaming>::mapping(Output &Out,
+                                           SymbolRenaming &Object) {
   Out.mapRequired("identifier", Object.Identifier);
   Out.mapRequired("originalName", Object.OriginalName);
   Out.mapRequired("obfuscatedName", Object.ObfuscatedName);

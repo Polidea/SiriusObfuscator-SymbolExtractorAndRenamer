@@ -26,7 +26,8 @@ namespace obfuscation {
 ///
 /// \returns the constructed llvm::Error object.
 llvm::Error stringError(const std::string Message,
-                        const std::error_code Error = std::error_code(1, std::generic_category()));
+                        const std::error_code Error =
+                          std::error_code(1, std::generic_category()));
 
 } //namespace obfuscation
 } //namespace swift

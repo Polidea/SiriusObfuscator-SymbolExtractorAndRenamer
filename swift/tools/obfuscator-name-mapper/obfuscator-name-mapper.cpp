@@ -18,7 +18,8 @@ SymbolsJsonPath("symbolsjson",
 
 static llvm::cl::opt<std::string>
 RenamesJsonPath("renamesjson",
-                llvm::cl::desc("Name of the output file to write extracted symbols with proposed renamings"),
+                llvm::cl::desc("Name of the output file to write extracted "
+                               "symbols with proposed renamings"),
                 llvm::cl::cat(ObfuscatorNameMapper));
 
 }
