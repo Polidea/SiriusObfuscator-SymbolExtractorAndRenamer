@@ -52,11 +52,11 @@ class RandomTests : public ::testing::Test {
     FakeDistribution::CatchedInstance = nullptr;
   }
   
-  virtual void SetUp() {
+  virtual void SetUp() override {
     cleanStatics();
   }
   
-  virtual void TearDown() {
+  virtual void TearDown() override {
     cleanStatics();
   }
 };
