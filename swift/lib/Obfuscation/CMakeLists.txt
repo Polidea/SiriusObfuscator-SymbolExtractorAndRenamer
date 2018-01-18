@@ -4,7 +4,6 @@ add_swift_library(swiftObfuscation STATIC
   DeclarationParser.cpp
   FileIO.cpp
   NameMapping.cpp
-  Random.cpp
   Renaming.cpp
   SourceFileWalker.cpp
   SymbolExtracting.cpp
