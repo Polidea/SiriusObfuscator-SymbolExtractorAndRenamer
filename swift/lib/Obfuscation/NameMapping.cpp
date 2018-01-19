@@ -16,8 +16,8 @@ private:
   static const std::vector<std::string> UniquelyTailSymbols;
   static const std::vector<std::string> HeadSymbols;
   std::vector<std::string> TailSymbols;
-  RandomElementChooser<std::string> HeadGenerator;
-  RandomStringGenerator TailGenerator;
+  RandomUniformCharacterChooser HeadGenerator;
+  RandomUniformStringGenerator TailGenerator;
   const std::string::size_type IdentifierLength = 32;
   
   llvm::Expected<std::string> generateName(int NumbersOfTriesLeft) {
