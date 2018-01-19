@@ -161,7 +161,21 @@ The input data formats are `Files.json` and `Renames.json` and are described in 
    `swift/utils/build-script --clean --xcode --release-debuginfo --debug-swift`
 
 6. (optional) Build the Swift compiler in the version allowing for the fast incremental compilation with ninja  
-   `swift/utils/build-script --release-debuginfo`
+   `swift/utils/build-script -R`
+
+### Build documentation (optional)
+
+1. Install doxygen
+   `brew install doxygen`
+
+2. Install graphviz
+   `brew install graphviz`
+
+3. Build documentation
+   `doxygen Doxyfile`
+
+4. Open documentation
+   `open Documentation/doxygen/index.html`
 
 ## Further read
 
