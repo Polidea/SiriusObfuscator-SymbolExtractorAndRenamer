@@ -5,11 +5,18 @@ using namespace swift::obfuscation;
 
 namespace swift {
 namespace obfuscation {
+  
+namespace SymbolTypeKeys {
+  static const char* Type = "type";
+  static const char* NamedFunction = "namedFunction";
+  static const char* Operator = "operator";
+}
 
 Symbol::Symbol(const std::string &Identifier,
        const std::string &Name,
-       const std::string &Module)
-: Identifier(Identifier), Name(Name), Module(Module) {};
+       const std::string &Module,
+       SymbolType Type)
+: Identifier(Identifier), Name(Name), Module(Module), Type(Type) {};
 
 bool Symbol::operator< (const Symbol &Right) const {
   return Identifier < Right.Identifier;
@@ -18,20 +25,27 @@ bool Symbol::operator< (const Symbol &Right) const {
 bool Symbol::operator== (const Symbol &Right) const {
   return Identifier == Right.Identifier
   && Name == Right.Name
-  && Module == Right.Module;
+  && Module == Right.Module
+  && Type == Right.Type;
 }
   
 SymbolRenaming::SymbolRenaming(const std::string &Identifier,
                                const std::string &OriginalName,
                                const std::string &ObfuscatedName,
-                               const std::string &Module)
-: Identifier(Identifier), OriginalName(OriginalName), ObfuscatedName(ObfuscatedName), Module(Module) {};
+                               const std::string &Module,
+                               SymbolType Type)
+: Identifier(Identifier),
+  OriginalName(OriginalName),
+  ObfuscatedName(ObfuscatedName),
+  Module(Module),
+  Type(Type) {};
 
 bool SymbolRenaming::operator== (const SymbolRenaming &Right) const {
   return Identifier == Right.Identifier
   && ObfuscatedName == Right.ObfuscatedName
   && OriginalName == Right.OriginalName
-  && Module == Right.Module;
+  && Module == Right.Module
+  && Type == Right.Type;
 }
 
 const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
@@ -39,6 +53,10 @@ const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
   return static_cast<const char *>(Pointer);
 }
 
+SymbolWithRange::SymbolWithRange(const swift::obfuscation::Symbol &Symbol,
+                                 const CharSourceRange &Range)
+: Symbol(Symbol), Range(Range) {}
+  
 bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
   auto less = std::less<const char *>();
   if (const auto* RangeValuePointer = pointerToRangeValue(*this)) {
@@ -91,11 +109,19 @@ void MappingTraits<ELF>::mapping(IO &Io, ELF &Object) {
 void MappingTraits<SymbolsJson>::mapping(IO &Io, SymbolsJson &Object) {
   Io.mapRequired("symbols", Object.Symbols);
 }
+  
+void ScalarEnumerationTraits<SymbolType>::enumeration(IO &Io,
+                                                      SymbolType &Enum) {
+  Io.enumCase(Enum, SymbolTypeKeys::Type, SymbolType::Type);
+  Io.enumCase(Enum, SymbolTypeKeys::NamedFunction, SymbolType::NamedFunction);
+  Io.enumCase(Enum, SymbolTypeKeys::Operator, SymbolType::Operator);
+}
 
 void MappingTraits<Symbol>::mapping(IO &Io, Symbol &Object) {
   Io.mapRequired("identifier", Object.Identifier);
   Io.mapRequired("name", Object.Name);
   Io.mapRequired("module", Object.Module);
+  Io.mapRequired("type", Object.Type);
 }
 
 void MappingTraits<RenamesJson>::mapping(IO &Io, RenamesJson &Object) {
@@ -107,6 +133,7 @@ void MappingTraits<SymbolRenaming>::mapping(IO &Io, SymbolRenaming &Object) {
   Io.mapRequired("originalName", Object.OriginalName);
   Io.mapRequired("obfuscatedName", Object.ObfuscatedName);
   Io.mapRequired("module", Object.Module);
+  Io.mapRequired("type", Object.Type);
 }
 
 template <typename U>
@@ -154,11 +181,19 @@ namespace json {
 void ObjectTraits<SymbolsJson>::mapping(Output &Out, SymbolsJson &Object) {
   Out.mapRequired("symbols", Object.Symbols);
 }
+  
+void ScalarEnumerationTraits<SymbolType>::enumeration(Output &Out,
+                                                      SymbolType &Enum) {
+  Out.enumCase(Enum, SymbolTypeKeys::Type, SymbolType::Type);
+  Out.enumCase(Enum, SymbolTypeKeys::NamedFunction, SymbolType::NamedFunction);
+  Out.enumCase(Enum, SymbolTypeKeys::Operator, SymbolType::Operator);
+}
 
 void ObjectTraits<Symbol>::mapping(Output &Out, Symbol &Object) {
   Out.mapRequired("name", Object.Name);
   Out.mapRequired("identifier", Object.Identifier);
   Out.mapRequired("module", Object.Module);
+  Out.mapRequired("type", Object.Type);
 }
 
 void ObjectTraits<RenamesJson>::mapping(Output &Out, RenamesJson &Object) {
@@ -171,6 +206,7 @@ void ObjectTraits<SymbolRenaming>::mapping(Output &Out,
   Out.mapRequired("originalName", Object.OriginalName);
   Out.mapRequired("obfuscatedName", Object.ObfuscatedName);
   Out.mapRequired("module", Object.Module);
+  Out.mapRequired("type", Object.Type);
 }
 
 template<class T>

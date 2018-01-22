@@ -90,12 +90,20 @@ TEST(DataStructuresDeserialization, DeserializeSymbolsJson) {
   "{\n"
   "\"name\": \"sampleName0\",\n"
   "\"identifier\": \"sampleIdentifier0\",\n"
-  "\"module\": \"sampleModule0\"\n"
+  "\"module\": \"sampleModule0\",\n"
+  "\"type\": \"type\"\n"
   "},\n"
   "{\n"
   "\"name\": \"sampleName1\",\n"
   "\"identifier\": \"sampleIdentifier1\",\n"
-  "\"module\": \"sampleModule1\"\n"
+  "\"module\": \"sampleModule1\",\n"
+  "\"type\": \"namedFunction\"\n"
+  "},\n"
+  "{\n"
+  "\"name\": \"sampleName2\",\n"
+  "\"identifier\": \"sampleIdentifier2\",\n"
+  "\"module\": \"sampleModule2\",\n"
+  "\"type\": \"operator\"\n"
   "}\n"
   "]\n"
   "}";
@@ -108,25 +116,28 @@ TEST(DataStructuresDeserialization, DeserializeSymbolsJson) {
   }
   auto Deserialized = DeserializedOrError.get();
   
-  size_t ExpectedSize = 2;
+  size_t ExpectedSize = 3;
   EXPECT_EQ(Deserialized.Symbols.size(), ExpectedSize);
 
-  Symbol Expected0("sampleIdentifier0", "sampleName0", "sampleModule0");
-  Symbol Expected1("sampleIdentifier1", "sampleName1", "sampleModule1");
+  Symbol Expected0("sampleIdentifier0", "sampleName0", "sampleModule0", SymbolType::Type);
+  Symbol Expected1("sampleIdentifier1", "sampleName1", "sampleModule1", SymbolType::NamedFunction);
+  Symbol Expected2("sampleIdentifier2", "sampleName2", "sampleModule2", SymbolType::Operator);
 
   EXPECT_TRUE(vectorContains<Symbol>(Deserialized.Symbols, Expected0));
   EXPECT_TRUE(vectorContains<Symbol>(Deserialized.Symbols, Expected1));
+  EXPECT_TRUE(vectorContains<Symbol>(Deserialized.Symbols, Expected2));
 }
 
 TEST(DataStructuresDeserialization, DeserializeSymbol) {
   std::string JsonString = "{\n"
   "\"name\": \"sampleName\"\n,"
   "\"identifier\": \"sampleIdentifier\",\n"
+  "\"type\": \"type\",\n"
   "\"module\": \"sampleModule\"\n}";
 
   auto DeserializedOrError = deserialize<Symbol>(JsonString);
 
-  Symbol Expected("sampleIdentifier", "sampleName", "sampleModule");
+  Symbol Expected("sampleIdentifier", "sampleName", "sampleModule", SymbolType::Type);
 
   if (auto ErrorCode = DeserializedOrError.takeError()) {
     llvm::consumeError(std::move(ErrorCode));
@@ -145,13 +156,22 @@ TEST(DataStructuresDeserialization, DeserializeRenamesJson) {
   "\"identifier\": \"sampleIdentifier0\",\n"
   "\"originalName\": \"sampleName0\",\n"
   "\"obfuscatedName\": \"sampleObfuscatedName0\",\n"
-  "\"module\": \"sampleModule0\"\n"
+  "\"module\": \"sampleModule0\",\n"
+  "\"type\": \"type\"\n"
   "},\n"
   "{\n"
   "\"identifier\": \"sampleIdentifier1\",\n"
   "\"originalName\": \"sampleName1\",\n"
   "\"obfuscatedName\": \"sampleObfuscatedName1\",\n"
-  "\"module\": \"sampleModule1\"\n"
+  "\"module\": \"sampleModule1\",\n"
+  "\"type\": \"namedFunction\"\n"
+  "},\n"
+  "{\n"
+  "\"identifier\": \"sampleIdentifier2\",\n"
+  "\"originalName\": \"sampleName2\",\n"
+  "\"obfuscatedName\": \"sampleObfuscatedName2\",\n"
+  "\"module\": \"sampleModule2\",\n"
+  "\"type\": \"operator\"\n"
   "}\n"
   "]\n"
   "}";
@@ -164,14 +184,16 @@ TEST(DataStructuresDeserialization, DeserializeRenamesJson) {
   }
   auto Deserialized = DeserializedOrError.get();
   
-  size_t ExpectedSize = 2;
+  size_t ExpectedSize = 3;
   EXPECT_EQ(Deserialized.Symbols.size(), ExpectedSize);
 
-  SymbolRenaming Expected0("sampleIdentifier0", "sampleName0", "sampleObfuscatedName0", "sampleModule0");
-  SymbolRenaming Expected1("sampleIdentifier1", "sampleName1", "sampleObfuscatedName1", "sampleModule1");
+  SymbolRenaming Expected0("sampleIdentifier0", "sampleName0", "sampleObfuscatedName0", "sampleModule0", SymbolType::Type);
+  SymbolRenaming Expected1("sampleIdentifier1", "sampleName1", "sampleObfuscatedName1", "sampleModule1", SymbolType::NamedFunction);
+  SymbolRenaming Expected2("sampleIdentifier2", "sampleName2", "sampleObfuscatedName2", "sampleModule2", SymbolType::Operator);
 
   EXPECT_TRUE(vectorContains<SymbolRenaming>(Deserialized.Symbols, Expected0));
   EXPECT_TRUE(vectorContains<SymbolRenaming>(Deserialized.Symbols, Expected1));
+  EXPECT_TRUE(vectorContains<SymbolRenaming>(Deserialized.Symbols, Expected2));
 }
 
 TEST(DataStructuresDeserialization, DeserializeSymbolRenaming) {
@@ -179,15 +201,16 @@ TEST(DataStructuresDeserialization, DeserializeSymbolRenaming) {
   "\"originalName\": \"sampleName\"\n,"
   "\"identifier\": \"sampleIdentifier\",\n"
   "\"obfuscatedName\": \"sampleObfuscatedName\",\n"
+  "\"type\": \"type\",\n"
   "\"module\": \"sampleModule\"\n}";
 
   auto DeserializedOrError = deserialize<SymbolRenaming>(JsonString);
 
-  auto Expected = SymbolRenaming();
-  Expected.Identifier = "sampleIdentifier";
-  Expected.OriginalName = "sampleName";
-  Expected.ObfuscatedName = "sampleObfuscatedName";
-  Expected.Module = "sampleModule";
+  auto Expected = SymbolRenaming("sampleIdentifier",
+                                 "sampleName",
+                                 "sampleObfuscatedName",
+                                 "sampleModule",
+                                 SymbolType::Type);
   
   if (auto ErrorCode = DeserializedOrError.takeError()) {
     llvm::consumeError(std::move(ErrorCode));

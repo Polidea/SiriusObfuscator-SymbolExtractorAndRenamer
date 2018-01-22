@@ -5,11 +5,12 @@ using namespace swift;
 using namespace swift::obfuscation;
 using namespace llvm;
 
-auto Symbol1 = Symbol("a_id", "a_name", "a_module");
-auto Symbol1_1 = Symbol("a_id", "a_name", "a_module");
-auto Symbol2 = Symbol("b_id", "a_name", "a_module");
-auto Symbol3 = Symbol("a_id", "b_name", "a_module");
-auto Symbol4 = Symbol("a_id", "a_name", "b_module");
+auto Symbol1 = Symbol("a_id", "a_name", "a_module", SymbolType::Operator);
+auto Symbol1_1 = Symbol("a_id", "a_name", "a_module", SymbolType::Operator);
+auto Symbol2 = Symbol("b_id", "a_name", "a_module", SymbolType::Operator);
+auto Symbol3 = Symbol("a_id", "b_name", "a_module", SymbolType::Operator);
+auto Symbol4 = Symbol("a_id", "a_name", "b_module", SymbolType::Operator);
+auto Symbol5 = Symbol("a_id", "a_name", "a_module", SymbolType::NamedFunction);
 
 TEST(SymbolLessThanOperator, ComparingIdentifierLess) {
   EXPECT_TRUE(Symbol1 < Symbol2);
@@ -37,6 +38,10 @@ TEST(SymbolEqualOperator, ComparingSymbolNotEqualName) {
 
 TEST(SymbolEqualOperator, ComparingSymbolNotEqualModule) {
   EXPECT_FALSE(Symbol1 == Symbol4);
+}
+
+TEST(SymbolEqualOperator, ComparingSymbolNotEqualType) {
+  EXPECT_FALSE(Symbol1 == Symbol5);
 }
 
 std::string SourceContents = "sample source contents";
@@ -92,12 +97,13 @@ TEST(SymbolWithRangeLessThanOperator, ComparingSymbolsEqualRangesEqual) {
                < SymbolWithRange(Symbol1, SourceRange1));
 }
 
-auto SymbolRenaming1 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "a_module");
-auto SymbolRenaming1_1 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "a_module");
-auto SymbolRenaming2 = SymbolRenaming("b_id", "a_name", "a_obfuscated_name", "a_module");
-auto SymbolRenaming3 = SymbolRenaming("a_id", "b_name", "a_obfuscated_name", "a_module");
-auto SymbolRenaming4 = SymbolRenaming("a_id", "a_name", "b_obfuscated_name", "a_module");
-auto SymbolRenaming5 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "b_module");
+auto SymbolRenaming1 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "a_module", SymbolType::Type);
+auto SymbolRenaming1_1 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "a_module", SymbolType::Type);
+auto SymbolRenaming2 = SymbolRenaming("b_id", "a_name", "a_obfuscated_name", "a_module", SymbolType::Type);
+auto SymbolRenaming3 = SymbolRenaming("a_id", "b_name", "a_obfuscated_name", "a_module", SymbolType::Type);
+auto SymbolRenaming4 = SymbolRenaming("a_id", "a_name", "b_obfuscated_name", "a_module", SymbolType::Type);
+auto SymbolRenaming5 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "b_module", SymbolType::Type);
+auto SymbolRenaming6 = SymbolRenaming("a_id", "a_name", "a_obfuscated_name", "a_module", SymbolType::Operator);
 
 TEST(SymbolRenamingEqualOperator, ComparingSymbolRenamingsEqual) {
   EXPECT_TRUE(SymbolRenaming1 == SymbolRenaming1_1);
@@ -117,4 +123,8 @@ TEST(SymbolRenamingEqualOperator, ComparingSymbolRenamingsNotEqualObfuscatedName
 
 TEST(SymbolRenamingEqualOperator, ComparingSymbolRenamingsNotEqualModule) {
   EXPECT_FALSE(SymbolRenaming1 == SymbolRenaming5);
+}
+
+TEST(SymbolRenamingEqualOperator, ComparingSymbolRenamingsNotEqualType) {
+  EXPECT_FALSE(SymbolRenaming1 == SymbolRenaming6);
 }
