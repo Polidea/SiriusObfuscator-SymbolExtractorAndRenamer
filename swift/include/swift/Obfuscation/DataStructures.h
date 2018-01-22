@@ -2,6 +2,7 @@
 #define DataStructures_h
 
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm/Support/Error.h"
 #include "swift/Basic/JSONSerialization.h"
 
 #include <vector>
@@ -157,6 +158,9 @@ template <>
 struct ObjectTraits<SymbolRenaming> {
   static void mapping(Output &Out, SymbolRenaming &Object);
 };
+
+template<class T>
+llvm::Expected<std::string> serialize(T &Object);
 
 } // namespace json
 } // namespace swift
