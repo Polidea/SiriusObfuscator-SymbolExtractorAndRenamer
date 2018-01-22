@@ -110,6 +110,18 @@ void ObjectTraits<SymbolRenaming>::mapping(Output &Out,
   Out.mapRequired("module", Object.Module);
 }
 
+template<class T>
+llvm::Expected<std::string> serialize(T &Object) {
+    std::string OutputString;
+    llvm::raw_string_ostream OutputStringStream(OutputString);
+    swift::json::Output Output(OutputStringStream);
+    Output << Object;
+    return OutputStringStream.str();
+}
+
+template llvm::Expected<std::string> serialize(SymbolsJson &Object);
+template llvm::Expected<std::string> serialize(RenamesJson &Object);
+
 } // namespace json
 } // namespace swift
 
