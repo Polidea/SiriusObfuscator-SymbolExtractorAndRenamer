@@ -128,10 +128,10 @@ TEST(ParseJson, SuccessParsingText) {
     EXPECT_EQ(FilesJson.Sdk.Path, SdkPath);
     std::vector<std::string> ExpectedFilenames = {FileName1, FileName2};
     EXPECT_EQ(FilesJson.Filenames, ExpectedFilenames);
-    EXPECT_EQ(FilesJson.ExplicitelyLinkedFrameworks.size(), 1);
+    EXPECT_EQ(FilesJson.ExplicitelyLinkedFrameworks.size(), 1U);
     EXPECT_EQ(FilesJson.ExplicitelyLinkedFrameworks[0].Name, ExplicitFrameworkName);
     EXPECT_EQ(FilesJson.ExplicitelyLinkedFrameworks[0].Path, ExplicitFrameworkPath);
-    EXPECT_EQ(FilesJson.SystemLinkedFrameworks.size(), 1);
+    EXPECT_EQ(FilesJson.SystemLinkedFrameworks.size(), 1U);
     EXPECT_EQ(FilesJson.SystemLinkedFrameworks[0], SystemFramework);
 }
 
@@ -174,7 +174,10 @@ struct FakeFileFactory: FileFactory<FakeFile> {
 
 TEST(WriteToFile, SuccessWriting) {
     std::string PathToOutput = "";
-    Symbol FakeSymbol = Symbol("testIdentifier", "testName", "testModule");
+    Symbol FakeSymbol = Symbol("testIdentifier",
+                               "testName",
+                               "testModule",
+                               SymbolType::Type);
     SymbolsJson JsonToWrite;
     JsonToWrite.Symbols.push_back(FakeSymbol);
     FakeFileFactory Factory = FakeFileFactory();
@@ -182,7 +185,9 @@ TEST(WriteToFile, SuccessWriting) {
     std::string Expected = "{\n  \"symbols\": [\n    {\n      "
         "\"name\": \"testName\",\n      "
         "\"identifier\": \"testIdentifier\",\n      "
-        "\"module\": \"testModule\"\n    }\n  ]\n}";
+        "\"module\": \"testModule\",\n      "
+        "\"type\": \"type\"\n    "
+        "}\n  ]\n}";
 
     auto Error = writeToPath(JsonToWrite,
                              PathToOutput,

@@ -70,7 +70,10 @@ llvm::Expected<Symbol> parse(const NominalTypeDecl* Declaration) {
     return stringError("found unsupported declaration type");
   }
   
-  return Symbol(combineIdentifier(Parts), SymbolName, ModuleNameAndParts.first);
+  return Symbol(combineIdentifier(Parts),
+                SymbolName,
+                ModuleNameAndParts.first,
+                SymbolType::Type);
 }
   
 std::string functionName(const FuncDecl* Declaration) {
@@ -78,11 +81,6 @@ std::string functionName(const FuncDecl* Declaration) {
 }
   
 llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
-  if (Declaration->getOverriddenDecl() != nullptr) {
-    return stringError("don't support overriding methods right now, since it "
-                       "requires information over what module the overriding "
-                       "method is from");
-  }
   if (Declaration->isBinaryOperator() || Declaration->isUnaryOperator()) {
     return stringError("don't support operators right now, since it requires "
                        "the special obfuscated identifier");
@@ -98,14 +96,21 @@ llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
   return llvm::Error::success();
 }
   
-llvm::Expected<Symbol> parse(const FuncDecl* Declaration) {
-  if (auto Error = isDeclarationSupported(Declaration)) {
-    return std::move(Error);
+const FuncDecl*
+baseOverridenDeclarationWithModules(const FuncDecl* Declaration,
+                                    std::set<std::string> &Modules) {
+  if (auto* OverrideDeclaration = Declaration->getOverriddenDecl()) {
+    Modules.insert(moduleName(OverrideDeclaration));
+    return baseOverridenDeclarationWithModules(OverrideDeclaration, Modules);
+  } else {
+    return Declaration;
   }
+}
   
-  auto ModuleNameAndParts = moduleNameAndParts(Declaration);
-  std::string ModuleName = ModuleNameAndParts.first;
-  std::vector<std::string> Parts = ModuleNameAndParts.second;
+Symbol symbolFromFunctionDeclaration(const swift::FuncDecl *Declaration,
+                                     std::string &ModuleName,
+                                     std::vector<std::string> &Parts) {
+  
   std::string SymbolName = functionName(Declaration);
   
   auto ProtocolRequirements = Declaration->getSatisfiedProtocolRequirements();
@@ -119,9 +124,9 @@ llvm::Expected<Symbol> parse(const FuncDecl* Declaration) {
       Parts.push_back("function." + SymbolName);
     } else {
       Parts.push_back("type." + TypeNameOrError.get());
-      Parts.push_back("method." + SymbolName);  
+      Parts.push_back("method." + SymbolName);
     }
-      
+    
   } else {
     
     // TODO: right now we're renaming all the methods in the protocols with
@@ -140,7 +145,6 @@ llvm::Expected<Symbol> parse(const FuncDecl* Declaration) {
     }
     Parts.push_back("protocol");
     Parts.push_back("method." + SymbolName);
-    
   }
   
   if (Declaration->getDeclContext()->isTypeContext()) {
@@ -150,7 +154,38 @@ llvm::Expected<Symbol> parse(const FuncDecl* Declaration) {
     Parts.push_back("signature." + Declaration->getInterfaceType().getString());
   }
   
-  return Symbol(combineIdentifier(Parts), SymbolName, ModuleName);
+  return Symbol(combineIdentifier(Parts),
+                SymbolName,
+                ModuleName,
+                SymbolType::NamedFunction);
+}
+  
+llvm::Expected<Symbol> parse(const FuncDecl* Declaration) {
+
+  if (auto Error = isDeclarationSupported(Declaration)) {
+    return std::move(Error);
+  }
+  
+  auto ModuleNameAndParts = moduleNameAndParts(Declaration);
+  std::string ModuleName = ModuleNameAndParts.first;
+  std::vector<std::string> Parts = ModuleNameAndParts.second;
+  
+  if (Declaration->getOverriddenDecl() != nullptr) {
+    
+    std::set<std::string> Modules;
+    auto Base = baseOverridenDeclarationWithModules(Declaration, Modules);
+    
+    if (Modules.size() == 1 && Modules.count(ModuleName) == 1) {
+      
+      return symbolFromFunctionDeclaration(Base, ModuleName, Parts);
+      
+    } else {
+      return stringError("only method overriding methods from the same module "
+                         "might be safely obfuscated");
+    }
+    
+  }
+  return symbolFromFunctionDeclaration(Declaration, ModuleName, Parts);
 }
 
 llvm::Expected<Symbol> parse(const ValueDecl* Declaration) {
