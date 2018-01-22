@@ -39,16 +39,28 @@ struct FilesJson {
   std::vector<ExplicitelyLinkedFrameworks> ExplicitelyLinkedFrameworks;
 };
 
+enum class SymbolType: int {
+  
+  Type,
+  
+  NamedFunction,
+  
+  Operator
+  
+};
+
 struct Symbol {
   std::string Identifier;
   std::string Name;
   std::string Module;
+  SymbolType Type;
   
   Symbol() = default;
   
   Symbol(const std::string &Identifier,
          const std::string &Name,
-         const std::string &Module);
+         const std::string &Module,
+         SymbolType Type);
   
   bool operator< (const Symbol &Right) const;
   bool operator== (const Symbol &Right) const;
@@ -63,13 +75,15 @@ struct SymbolRenaming {
   std::string OriginalName;
   std::string ObfuscatedName;
   std::string Module;
+  SymbolType Type;
   
   SymbolRenaming() = default;
   
   SymbolRenaming(const std::string &Identifier,
          const std::string &OriginalName,
          const std::string &ObfuscatedName,
-         const std::string &Module);
+         const std::string &Module,
+         SymbolType Type);
   
   bool operator== (const SymbolRenaming &Right) const;
 };
@@ -86,8 +100,7 @@ struct SymbolWithRange {
   
   /// @brief Trivial memberwise-like constructor
   SymbolWithRange(const swift::obfuscation::Symbol &Symbol,
-                  const CharSourceRange &Range)
-  : Symbol(Symbol), Range(Range) {}
+                  const CharSourceRange &Range);
   
   /// @brief Comparison operator required for containing SymbolWithRange in
   /// sets. It's taking into consideration both symbol identifier and range.
@@ -133,6 +146,11 @@ template <>
 struct MappingTraits<SymbolsJson> {
   static void mapping(IO &Io, SymbolsJson &Object);
 };
+  
+template <>
+struct ScalarEnumerationTraits<SymbolType> {
+  static void enumeration(IO &Io, SymbolType &Enum);
+};
 
 template <>
 struct MappingTraits<Symbol> {
@@ -169,6 +187,11 @@ namespace json  {
 template <>
 struct ObjectTraits<SymbolsJson> {
   static void mapping(Output &Out, SymbolsJson &Object);
+};
+  
+template <>
+struct ScalarEnumerationTraits<SymbolType> {
+  static void enumeration(Output &Out, SymbolType &Enum);
 };
 
 template <>
