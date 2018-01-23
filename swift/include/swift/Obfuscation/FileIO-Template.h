@@ -46,10 +46,7 @@ llvm::Error writeToFile(T &Object,
 
 
     auto SerializedObject = json::serialize(Object);
-    if (auto Error = SerializedObject.takeError()) {
-        return Error;
-    }
-    *File << SerializedObject.get();
+    *File << SerializedObject;
     File->close();
 
     LogStream << "Written to file: " << '\n'
