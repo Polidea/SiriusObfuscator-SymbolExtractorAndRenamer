@@ -1,6 +1,7 @@
 #ifndef DataStructures_h
 #define DataStructures_h
 
+#include "swift/Frontend/Frontend.h"
 #include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/Error.h"
 #include "swift/Basic/JSONSerialization.h"
@@ -47,10 +48,10 @@ struct Symbol {
   
   Symbol(const std::string &Identifier,
          const std::string &Name,
-         const std::string &Module)
-  : Identifier(Identifier), Name(Name), Module(Module) {};
+         const std::string &Module);
   
   bool operator< (const Symbol &Right) const;
+  bool operator== (const Symbol &Right) const;
 };
 
 struct SymbolsJson {
@@ -63,11 +64,34 @@ struct SymbolRenaming {
   std::string ObfuscatedName;
   std::string Module;
   
-  bool operator< (const SymbolRenaming &Right) const;
+  SymbolRenaming() = default;
+  
+  SymbolRenaming(const std::string &Identifier,
+         const std::string &OriginalName,
+         const std::string &ObfuscatedName,
+         const std::string &Module);
+  
+  bool operator== (const SymbolRenaming &Right) const;
 };
 
 struct RenamesJson {
   std::vector<SymbolRenaming> Symbols;
+};
+  
+/// SymbolWithRange - struct for linking the symbol identified in the Swift
+/// source code with the range in which it was encountered.
+struct SymbolWithRange {
+  Symbol Symbol;
+  CharSourceRange Range;
+  
+  /// @brief Trivial memberwise-like constructor
+  SymbolWithRange(const swift::obfuscation::Symbol &Symbol,
+                  const CharSourceRange &Range)
+  : Symbol(Symbol), Range(Range) {}
+  
+  /// @brief Comparison operator required for containing SymbolWithRange in
+  /// sets. It's taking into consideration both symbol identifier and range.
+  bool operator< (const SymbolWithRange &Right) const;
 };
 
 } //namespace obfuscation
@@ -130,6 +154,9 @@ struct SequenceTraits<std::vector<U>> {
   static size_t size(IO &Io, std::vector<U> &Vec);
   static U &element(IO &Io, std::vector<U> &Vec, size_t Index);
 };
+  
+template<class T>
+Expected<T> deserialize(StringRef Json);
 
 } // namespace yaml
 } // namespace llvm
@@ -160,7 +187,7 @@ struct ObjectTraits<SymbolRenaming> {
 };
 
 template<class T>
-llvm::Expected<std::string> serialize(T &Object);
+std::string serialize(T &Object);
 
 } // namespace json
 } // namespace swift

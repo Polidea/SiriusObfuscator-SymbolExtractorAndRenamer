@@ -1,14 +1,56 @@
 #include "swift/Obfuscation/DataStructures.h"
+#include "swift/Obfuscation/Utils.h"
 
 using namespace swift::obfuscation;
 
 namespace swift {
 namespace obfuscation {
 
+Symbol::Symbol(const std::string &Identifier,
+       const std::string &Name,
+       const std::string &Module)
+: Identifier(Identifier), Name(Name), Module(Module) {};
+
 bool Symbol::operator< (const Symbol &Right) const {
   return Identifier < Right.Identifier;
 }
+  
+bool Symbol::operator== (const Symbol &Right) const {
+  return Identifier == Right.Identifier
+  && Name == Right.Name
+  && Module == Right.Module;
+}
+  
+SymbolRenaming::SymbolRenaming(const std::string &Identifier,
+                               const std::string &OriginalName,
+                               const std::string &ObfuscatedName,
+                               const std::string &Module)
+: Identifier(Identifier), OriginalName(OriginalName), ObfuscatedName(ObfuscatedName), Module(Module) {};
 
+bool SymbolRenaming::operator== (const SymbolRenaming &Right) const {
+  return Identifier == Right.Identifier
+  && ObfuscatedName == Right.ObfuscatedName
+  && OriginalName == Right.OriginalName
+  && Module == Right.Module;
+}
+
+const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
+  auto Pointer = Symbol.Range.getStart().getOpaquePointerValue();
+  return static_cast<const char *>(Pointer);
+}
+
+bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
+  auto less = std::less<const char *>();
+  if (const auto* RangeValuePointer = pointerToRangeValue(*this)) {
+    if (const auto* RightRangeValuePointer = pointerToRangeValue(Right)) {
+      auto isRangeLess = less(RangeValuePointer, RightRangeValuePointer);
+      return Symbol < Right.Symbol || isRangeLess;
+    }
+  }
+  assert(false && "Comparing Symbols with Ranges requires Ranges Start "
+         "Location Values Pointers to be of const char type");
+}
+  
 } //namespace obfuscation
 } //namespace swift
 
@@ -81,6 +123,27 @@ U& SequenceTraits<std::vector<U>>::element(IO &Io,
   }
   return Vec[Index];
 }
+  
+template<class T>
+Expected<T> deserialize(StringRef Json) {
+  Input Input(Json);
+  T Deserialized;
+  Input >> Deserialized;
+  if (auto ErrorCode = Input.error()) {
+    return stringError("Error during JSON parse", ErrorCode);
+  }
+  return Deserialized;
+}
+  
+template Expected<FilesJson> deserialize(StringRef Json);
+template Expected<Project> deserialize(StringRef Json);
+template Expected<ObfuscationModule> deserialize(StringRef Json);
+template Expected<Sdk> deserialize(StringRef Json);
+template Expected<ELF> deserialize(StringRef Json);
+template Expected<SymbolsJson> deserialize(StringRef Json);
+template Expected<Symbol> deserialize(StringRef Json);
+template Expected<RenamesJson> deserialize(StringRef Json);
+template Expected<SymbolRenaming> deserialize(StringRef Json);
 
 } // namespace yaml
 } // namespace llvm
@@ -111,7 +174,7 @@ void ObjectTraits<SymbolRenaming>::mapping(Output &Out,
 }
 
 template<class T>
-llvm::Expected<std::string> serialize(T &Object) {
+std::string serialize(T &Object) {
     std::string OutputString;
     llvm::raw_string_ostream OutputStringStream(OutputString);
     swift::json::Output Output(OutputStringStream);
@@ -119,8 +182,10 @@ llvm::Expected<std::string> serialize(T &Object) {
     return OutputStringStream.str();
 }
 
-template llvm::Expected<std::string> serialize(SymbolsJson &Object);
-template llvm::Expected<std::string> serialize(RenamesJson &Object);
+template std::string serialize(SymbolsJson &Object);
+template std::string serialize(Symbol &Object);
+template std::string serialize(RenamesJson &Object);
+template std::string serialize(SymbolRenaming &Object);
 
 } // namespace json
 } // namespace swift
