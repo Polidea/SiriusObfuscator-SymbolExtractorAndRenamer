@@ -69,11 +69,13 @@ int main(int argc, char *argv[]) {
   }
 
   MemoryBufferProvider BufferProvider = MemoryBufferProvider();
-  auto FilesJsonOrError = parseJson<FilesJson>(options::FilesJsonPath, BufferProvider);
+  auto FilesJsonOrError =
+  parseJson<FilesJson>(options::FilesJsonPath, BufferProvider);
   if (auto Error = FilesJsonOrError.takeError()) {
     ExitOnError(std::move(Error));
   }
-  auto RenamesJsonOrError = parseJson<RenamesJson>(options::RenamesJsonPath, BufferProvider);
+  auto RenamesJsonOrError =
+  parseJson<RenamesJson>(options::RenamesJsonPath, BufferProvider);
   if (auto Error = RenamesJsonOrError.takeError()) {
     ExitOnError(std::move(Error));
   }
