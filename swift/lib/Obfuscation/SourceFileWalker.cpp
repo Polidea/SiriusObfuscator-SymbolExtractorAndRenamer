@@ -5,23 +5,6 @@
 
 namespace swift {
 namespace obfuscation {
-  
-const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
-  auto Pointer = Symbol.Range.getStart().getOpaquePointerValue();
-  return static_cast<const char *>(Pointer);
-}
-  
-bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
-  auto less = std::less<const char *>();
-  if (const auto* RangeValuePointer = pointerToRangeValue(*this)) {
-    if (const auto* RightRangeValuePointer = pointerToRangeValue(Right)) {
-      auto isRangeLess = less(RangeValuePointer, RightRangeValuePointer);
-      return Symbol < Right.Symbol || isRangeLess;
-    }
-  }
-  assert(false && "Comparing Symbols with Ranges requires Ranges Start "
-                  "Location Values Pointers to be of const char type");
-}
 
 struct RenamesCollector: public SourceEntityWalker {
   std::set<SymbolWithRange> Bucket;

@@ -21,15 +21,8 @@ llvm::Expected<T> parseJson(std::string PathToJson,
   if (auto ErrorCode = Buffer.getError()) {
     return stringError("Error during JSON file read", ErrorCode);
   }
-
-  llvm::yaml::Input Input(std::move(Buffer.get())->getBuffer());
-  T Json;
-  Input >> Json;
-  if (auto ErrorCode = Input.error()) {
-    return stringError("Error during JSON parse", ErrorCode);
-  }
   
-  return Json;
+  return llvm::yaml::deserialize<T>(std::move(Buffer.get())->getBuffer());
 }
 
 template llvm::Expected<FilesJson> parseJson(std::string,
