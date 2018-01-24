@@ -5,6 +5,7 @@ obfuscator_debug:
         - /bin/bash Scripts/setup_from_cache.sh
     script:
         - /bin/bash Scripts/build.sh
+        - /bin/bash Scripts/run_tests_on_ci.sh
         - /bin/bash Scripts/process_build_artifacts.sh
     tags:
         - xcode-9.0
@@ -18,6 +19,7 @@ obfuscator_master:
         - /bin/bash Scripts/setup_from_cache.sh
     script:
         - /bin/bash Scripts/build.sh
+        - /bin/bash Scripts/run_tests_on_ci.sh
         - /bin/bash Scripts/process_build_artifacts.sh
     tags:
         - xcode-9.0
@@ -28,6 +30,7 @@ obfuscator_release:
     stage: test
     script:
         - /bin/bash Scripts/build.sh
+        - /bin/bash Scripts/run_tests_on_ci.sh
         - /bin/bash Scripts/process_build_artifacts.sh
     tags:
         - xcode-9.0
