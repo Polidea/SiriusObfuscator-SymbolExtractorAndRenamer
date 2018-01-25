@@ -45,6 +45,14 @@ enum class SymbolType: int {
   
   NamedFunction,
   
+  SingleParameter,
+  
+  ExternalParameter,
+  
+  InternalParameter,
+  
+  Variable,
+  
   Operator
   
 };
@@ -106,6 +114,8 @@ struct SymbolWithRange {
   /// sets. It's taking into consideration both symbol identifier and range.
   bool operator< (const SymbolWithRange &Right) const;
 };
+  
+using SymbolsOrError = llvm::Expected<std::vector<SymbolWithRange>>;
 
 } //namespace obfuscation
 } //namespace swift
