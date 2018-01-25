@@ -1,14 +1,16 @@
 #include "swift/Obfuscation/DataStructures.h"
 #include "swift/Obfuscation/Utils.h"
 
-using namespace swift::obfuscation;
-
 namespace swift {
 namespace obfuscation {
   
 namespace SymbolTypeKeys {
   static const char* Type = "type";
   static const char* NamedFunction = "namedFunction";
+  static const char* ExternalParameter = "externalParameter";
+  static const char* InternalParameter = "internalParameter";
+  static const char* SingleParameter = "singleParameter";
+  static const char* Variable = "variable";
   static const char* Operator = "operator";
 }
 
@@ -53,7 +55,7 @@ const char* pointerToRangeValue(const SymbolWithRange &Symbol) {
   return static_cast<const char *>(Pointer);
 }
 
-SymbolWithRange::SymbolWithRange(const swift::obfuscation::Symbol &Symbol,
+SymbolWithRange::SymbolWithRange(const struct Symbol &Symbol,
                                  const CharSourceRange &Range)
 : Symbol(Symbol), Range(Range) {}
   
@@ -113,6 +115,16 @@ void MappingTraits<SymbolsJson>::mapping(IO &Io, SymbolsJson &Object) {
 void ScalarEnumerationTraits<SymbolType>::enumeration(IO &Io,
                                                       SymbolType &Enum) {
   Io.enumCase(Enum, SymbolTypeKeys::Type, SymbolType::Type);
+  Io.enumCase(Enum,
+              SymbolTypeKeys::ExternalParameter,
+              SymbolType::ExternalParameter);
+  Io.enumCase(Enum,
+              SymbolTypeKeys::InternalParameter,
+              SymbolType::InternalParameter);
+  Io.enumCase(Enum,
+              SymbolTypeKeys::SingleParameter,
+              SymbolType::SingleParameter);
+  Io.enumCase(Enum, SymbolTypeKeys::Variable, SymbolType::Variable);
   Io.enumCase(Enum, SymbolTypeKeys::NamedFunction, SymbolType::NamedFunction);
   Io.enumCase(Enum, SymbolTypeKeys::Operator, SymbolType::Operator);
 }
@@ -185,6 +197,16 @@ void ObjectTraits<SymbolsJson>::mapping(Output &Out, SymbolsJson &Object) {
 void ScalarEnumerationTraits<SymbolType>::enumeration(Output &Out,
                                                       SymbolType &Enum) {
   Out.enumCase(Enum, SymbolTypeKeys::Type, SymbolType::Type);
+  Out.enumCase(Enum,
+               SymbolTypeKeys::ExternalParameter,
+               SymbolType::ExternalParameter);
+  Out.enumCase(Enum,
+               SymbolTypeKeys::InternalParameter,
+               SymbolType::InternalParameter);
+  Out.enumCase(Enum,
+               SymbolTypeKeys::SingleParameter,
+               SymbolType::SingleParameter);
+  Out.enumCase(Enum, SymbolTypeKeys::Variable, SymbolType::Variable);
   Out.enumCase(Enum, SymbolTypeKeys::NamedFunction, SymbolType::NamedFunction);
   Out.enumCase(Enum, SymbolTypeKeys::Operator, SymbolType::Operator);
 }
@@ -213,7 +235,7 @@ template<class T>
 std::string serialize(T &Object) {
     std::string OutputString;
     llvm::raw_string_ostream OutputStringStream(OutputString);
-    swift::json::Output Output(OutputStringStream);
+    Output Output(OutputStringStream);
     Output << Object;
     return OutputStringStream.str();
 }

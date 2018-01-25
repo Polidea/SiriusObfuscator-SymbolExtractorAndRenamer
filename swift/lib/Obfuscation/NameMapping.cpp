@@ -77,6 +77,14 @@ generateNameForType(ObfuscatedIdentifiersGenerators &Generators,
       return Generators.IdentifierGenerator.generateName();
     case SymbolType::NamedFunction:
       return Generators.IdentifierGenerator.generateName();
+    case SymbolType::ExternalParameter:
+      return Generators.IdentifierGenerator.generateName();
+    case SymbolType::InternalParameter:
+      return Generators.IdentifierGenerator.generateName();
+    case SymbolType::SingleParameter:
+      return Generators.IdentifierGenerator.generateName();
+    case SymbolType::Variable:
+      return Generators.IdentifierGenerator.generateName();
     case SymbolType::Operator:
       return stringError("Operator names are not supported yet");
   }
@@ -98,7 +106,7 @@ proposeRenamings(const SymbolsJson &SymbolsJson) {
     if (auto Error = NameOrError.takeError()) {
       return std::move(Error);
     }
-    Renaming.ObfuscatedName = NameOrError.get();
+    Renaming.ObfuscatedName = NameOrError.get(); // "obfuscated" + Symbol.Name;
     RenamesJson.Symbols.push_back(Renaming);
   }
   

@@ -25,14 +25,20 @@ llvm::Expected<T> parseJson(std::string PathToJson,
   return llvm::yaml::deserialize<T>(std::move(Buffer.get())->getBuffer());
 }
 
-template llvm::Expected<FilesJson> parseJson(std::string,
-                                             const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
+template
+llvm::Expected<FilesJson>
+parseJson(std::string,
+          const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
 
-template llvm::Expected<SymbolsJson> parseJson(std::string,
-                                               const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
+template
+llvm::Expected<SymbolsJson>
+parseJson(std::string,
+          const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
 
-template llvm::Expected<RenamesJson> parseJson(std::string,
-                                               const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
+template
+llvm::Expected<RenamesJson>
+parseJson(std::string,
+          const MemoryBufferProvider &BufferProvider = MemoryBufferProvider());
 
 } //namespace obfuscation
 } //namespace swift
