@@ -1,6 +1,8 @@
 #ifndef Random_h
 #define Random_h
 
+#include "swift/Obfuscation/Utils.h"
+
 #include <cassert>
 #include <vector>
 #include <string>
