@@ -1,5 +1,82 @@
-{
-    "symbols": [ 
-        
+{  
+    "symbols":[  
+       {  
+          "name":"fatalError",
+          "identifier":"module.Swift.function.fatalError.signature.(@autoclosure () -> String, StaticString, UInt) -> Never",
+          "module":"Swift",
+          "type":"namedFunction"
+       },
+       {  
+          "name":"Int",
+          "identifier":"module.Swift.struct.Int",
+          "module":"Swift",
+          "type":"type"
+       },
+       {  
+          "name":"AppDelegate",
+          "identifier":"module.TestModuleName.class.AppDelegate",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"ClassWithInit",
+          "identifier":"module.TestModuleName.class.ClassWithInit",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"CustomInitViewController",
+          "identifier":"module.TestModuleName.class.CustomInitViewController",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"SampleClass",
+          "identifier":"module.TestModuleName.class.SampleClass",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"ViewController",
+          "identifier":"module.TestModuleName.class.ViewController",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"SampleStruct",
+          "identifier":"module.TestModuleName.struct.SampleStruct",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"StructWithInit",
+          "identifier":"module.TestModuleName.struct.StructWithInit",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"StructWithMemberwiseInit",
+          "identifier":"module.TestModuleName.struct.StructWithMemberwiseInit",
+          "module":"TestModuleName",
+          "type":"type"
+       },
+       {  
+          "name":"applicationDidFinishLaunching",
+          "identifier":"module.TestModuleName.type.AppDelegate.method.applicationDidFinishLaunching.signature.<<error type>>",
+          "module":"TestModuleName",
+          "type":"namedFunction"
+       },
+       {  
+          "name":"applicationWillTerminate",
+          "identifier":"module.TestModuleName.type.AppDelegate.method.applicationWillTerminate.signature.<<error type>>",
+          "module":"TestModuleName",
+          "type":"namedFunction"
+       },
+       {  
+          "name":"viewDidLoad",
+          "identifier":"module.TestModuleName.type.ViewController.method.viewDidLoad.signature.() -> ()",
+          "module":"TestModuleName",
+          "type":"namedFunction"
+       }
     ]
-}
+ }
