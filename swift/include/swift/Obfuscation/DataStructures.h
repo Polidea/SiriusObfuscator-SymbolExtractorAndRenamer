@@ -73,6 +73,8 @@ struct Symbol {
   bool operator< (const Symbol &Right) const;
   bool operator== (const Symbol &Right) const;
 };
+  
+using SingleSymbolOrError = llvm::Expected<Symbol>;
 
 struct SymbolsJson {
   std::vector<Symbol> Symbols;
