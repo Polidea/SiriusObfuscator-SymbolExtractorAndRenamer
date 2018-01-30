@@ -7,11 +7,13 @@ add_swift_library(swiftObfuscation STATIC
   FileIO.cpp
   FunctionDeclarationParser.cpp
   NameMapping.cpp
+  NominalTypeDeclarationParser.cpp
   ParameterDeclarationParser.cpp
   Renaming.cpp
   SourceFileWalker.cpp
   SymbolExtracting.cpp
   Utils.cpp
+  VariableDeclarationParser.cpp
   LINK_LIBRARIES
   swiftParse
   swiftAST

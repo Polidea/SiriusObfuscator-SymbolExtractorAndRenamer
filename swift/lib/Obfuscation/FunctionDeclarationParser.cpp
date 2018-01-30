@@ -1,6 +1,5 @@
 #include "swift/Obfuscation/FunctionDeclarationParser.h"
 #include "swift/Obfuscation/ParameterDeclarationParser.h"
-#include "swift/Obfuscation/DeclarationParsingUtils.h"
 #include "swift/Obfuscation/Utils.h"
 
 #include <string>
@@ -27,17 +26,6 @@ llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
     return stringError("don't support property accessors right now");
   }
   return llvm::Error::success();
-}
-
-const FuncDecl*
-baseOverridenDeclarationWithModules(const FuncDecl* Declaration,
-                                    std::set<std::string> &Modules) {
-  if (auto* OverrideDeclaration = Declaration->getOverriddenDecl()) {
-    Modules.insert(moduleName(OverrideDeclaration));
-    return baseOverridenDeclarationWithModules(OverrideDeclaration, Modules);
-  } else {
-    return Declaration;
-  }
 }
 
 std::string functionSignature(const FuncDecl *Declaration) {
