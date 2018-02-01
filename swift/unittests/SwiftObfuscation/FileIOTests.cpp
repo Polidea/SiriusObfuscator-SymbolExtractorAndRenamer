@@ -90,6 +90,7 @@ TEST(ParseJson, SuccessParsingText) {
     FakeMemoryBufferProvider FakeProvider = FakeMemoryBufferProvider();
     std::string RootPath = "testRootPath";
     std::string ModuleName = "testModuleName";
+    std::string ModuleTriple = "testModuleTriple";
     std::string SdkName = "testName";
     std::string SdkPath = "testSDKPath";
     std::string FileName1 = "testFileName1";
@@ -100,7 +101,8 @@ TEST(ParseJson, SuccessParsingText) {
     FakeMemoryBuffer::Payload = "{\r\n  \"project\":{\r\n"
         "\"rootPath\":\"" + RootPath + "\"\r\n   },"
         "\"module\":{\r\n"
-        "\"name\":\"" + ModuleName + "\"\r\n   },\r\n"
+        "\"name\":\"" + ModuleName + "\",\r\n"
+        "\"triple\": \"" + ModuleTriple + "\"\r\n   },\r\n"
         "\"sdk\":{\r\n"
         "\"name\":\"" + SdkName + "\",\r\n"
         "\"path\":\"" + SdkPath + "\"\r\n   },\r\n"
@@ -124,6 +126,7 @@ TEST(ParseJson, SuccessParsingText) {
     auto FilesJson = Result.get();
     EXPECT_EQ(FilesJson.Project.RootPath, RootPath);
     EXPECT_EQ(FilesJson.Module.Name, ModuleName);
+    EXPECT_EQ(FilesJson.Module.TargetTriple, ModuleTriple);
     EXPECT_EQ(FilesJson.Sdk.Name, SdkName);
     EXPECT_EQ(FilesJson.Sdk.Path, SdkPath);
     std::vector<std::string> ExpectedFilenames = {FileName1, FileName2};
