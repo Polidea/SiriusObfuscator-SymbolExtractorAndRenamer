@@ -18,6 +18,7 @@ struct Project {
 
 struct Module {
   std::string Name;
+  std::string TargetTriple;
 };
 
 struct Sdk {
