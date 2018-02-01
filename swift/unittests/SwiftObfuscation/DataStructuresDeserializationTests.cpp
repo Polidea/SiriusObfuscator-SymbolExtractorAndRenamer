@@ -27,12 +27,14 @@ TEST(DataStructuresDeserialization, DeserializeProject) {
 }
 
 TEST(DataStructuresDeserialization, DeserializeModule) {
-  std::string JsonString = "{\n\"name\": \"sampleName\"\n}";
+  std::string JsonString = "{\n\"name\": \"sampleName\","
+                           "\"triple\": \"sampleTriple\"\n}";
 
   auto DeserializedOrError = deserialize<Module>(JsonString);
 
   auto Expected = Module();
   Expected.Name = "sampleName";
+  Expected.TargetTriple = "sampleTriple";
   
   if (auto ErrorCode = DeserializedOrError.takeError()) {
     llvm::consumeError(std::move(ErrorCode));
@@ -41,6 +43,7 @@ TEST(DataStructuresDeserialization, DeserializeModule) {
   auto Deserialized = DeserializedOrError.get();
 
   EXPECT_EQ(Deserialized.Name, Expected.Name);
+  EXPECT_EQ(Deserialized.TargetTriple, Expected.TargetTriple);
 }
 
 TEST(DataStructuresDeserialization, DeserializeSdk) {

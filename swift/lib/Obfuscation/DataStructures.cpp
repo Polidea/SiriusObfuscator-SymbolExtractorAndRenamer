@@ -95,6 +95,7 @@ using ObfuscationModule = swift::obfuscation::Module;
 void MappingTraits<ObfuscationModule>::mapping(IO &Io,
                                                ObfuscationModule &Object) {
   Io.mapRequired("name", Object.Name);
+  Io.mapRequired("triple", Object.TargetTriple);
 }
 
 void MappingTraits<Sdk>::mapping(IO &Io, Sdk &Object) {
