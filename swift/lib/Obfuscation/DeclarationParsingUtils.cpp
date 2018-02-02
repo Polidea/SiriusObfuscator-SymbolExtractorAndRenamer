@@ -27,6 +27,10 @@ std::string moduleName(const Decl* Declaration) {
   return Declaration->getModuleContext()->getBaseName().getIdentifier().get();
 }
 
+std::string declarationName(const ValueDecl* Declaration) {
+  return Declaration->getName().str().str();
+}
+
 ModuleNameAndParts moduleNameAndParts(const Decl *Declaration) {
   std::vector<std::string> Parts;
   std::string ModuleName = moduleName(Declaration);
