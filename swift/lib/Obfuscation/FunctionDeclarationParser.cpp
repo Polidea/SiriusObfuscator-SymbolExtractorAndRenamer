@@ -46,6 +46,9 @@ ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration,
       Parts.push_back("function." + SymbolName);
     } else {
       Parts.push_back("type." + TypeNameOrError.get());
+      if (Declaration->isStatic()) {
+        Parts.push_back("static");
+      }
       Parts.push_back("method." + SymbolName);
     }
     
@@ -66,6 +69,9 @@ ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration,
       UpdatedModuleName = moduleName(ProtocolDeclaration);
     }
     Parts.push_back("protocol");
+    if (Declaration->isStatic()) {
+      Parts.push_back("static");
+    }
     Parts.push_back("method." + SymbolName);
   }
   
