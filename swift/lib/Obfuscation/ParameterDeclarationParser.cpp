@@ -34,6 +34,9 @@ llvm::Expected<std::string> position(const ParamDecl *Declaration,
 }
   
 SymbolsOrError parse(const ParamDecl* Declaration) {
+  if (Declaration->isImplicit()) {
+    return stringError("We shouldn't rename implicit parameters");
+  }
   if (const auto *FunctionDeclaration =
       dyn_cast<FuncDecl>(Declaration->getDeclContext())) {
     
