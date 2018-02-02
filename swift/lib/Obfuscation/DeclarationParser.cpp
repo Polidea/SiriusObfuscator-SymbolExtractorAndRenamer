@@ -1,6 +1,7 @@
 #include "swift/Obfuscation/DeclarationParser.h"
 #include "swift/Obfuscation/NominalTypeDeclarationParser.h"
 #include "swift/Obfuscation/VariableDeclarationParser.h"
+#include "swift/Obfuscation/OperatorParser.h"
 #include "swift/Obfuscation/FunctionDeclarationParser.h"
 #include "swift/Obfuscation/ParameterDeclarationParser.h"
 #include "swift/Obfuscation/Utils.h"
@@ -18,8 +19,16 @@ SymbolsOrError extractSymbol(Decl* Declaration, CharSourceRange Range) {
     SingleSymbolOrErrorPointer =
       llvm::make_unique<SingleSymbolOrError>(parse(NominalTypeDeclaration));
   } else if (const auto *FuncDeclaration = dyn_cast<FuncDecl>(Declaration)) {
-    SymbolsOrErrorPointer =
-      llvm::make_unique<SymbolsOrError>(parse(FuncDeclaration, Range));
+      if (FuncDeclaration->isOperator()) {
+          SymbolsOrErrorPointer =
+          llvm::make_unique<SymbolsOrError>(parseOperator(FuncDeclaration, Range));
+      } else {
+          SymbolsOrErrorPointer =
+          llvm::make_unique<SymbolsOrError>(parse(FuncDeclaration, Range));
+      }
+  } else if (const auto *OperatorDeclaration = dyn_cast<OperatorDecl>(Declaration)) {
+      SingleSymbolOrErrorPointer =
+      llvm::make_unique<SingleSymbolOrError>(parse(OperatorDeclaration));
   } else if (const auto *ParamDeclaration = dyn_cast<ParamDecl>(Declaration)) {
     auto Symbols = parseSeparateDeclarationWithRange(ParamDeclaration, Range);
     SymbolsOrErrorPointer =

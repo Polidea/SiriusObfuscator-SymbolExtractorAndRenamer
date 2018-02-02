@@ -1,6 +1,7 @@
 #include "swift/Obfuscation/FunctionDeclarationParser.h"
 #include "swift/Obfuscation/ParameterDeclarationParser.h"
 #include "swift/Obfuscation/Utils.h"
+#include "swift/Obfuscation/DeclarationParsingUtils.h"
 
 #include <string>
 #include <vector>
@@ -8,15 +9,7 @@
 namespace swift {
 namespace obfuscation {
 
-std::string functionName(const FuncDecl* Declaration) {
-  return Declaration->getName().str().str();
-}
-
 llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
-  if (Declaration->isBinaryOperator() || Declaration->isUnaryOperator()) {
-    return stringError("don't support operators right now, since it requires "
-                       "the special obfuscated identifier");
-  }
   if (Declaration->isGetterOrSetter()) {
     return stringError("don't support getters and setters right now, since "
                        "it's the computed property name that should be "
@@ -93,7 +86,7 @@ SymbolsOrError parseOverridenDeclaration(const FuncDecl *Declaration,
                        "might be safely obfuscated");
   }
 }
-  
+
 SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {
   
   if (auto Error = isDeclarationSupported(Declaration)) {
@@ -109,7 +102,7 @@ SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {
     return parseOverridenDeclaration(Declaration, ModuleName, Range);
   }
   
-  std::string SymbolName = functionName(Declaration);
+  std::string SymbolName = declarationName(Declaration);
   
   auto IdentifierParts = functionIdentifierParts(Declaration,
                                                  ModuleName,
