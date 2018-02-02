@@ -20,7 +20,9 @@ std::string moduleName(const Decl* Declaration);
 ModuleNameAndParts moduleNameAndParts(const Decl *Declaration);
   
 std::string typeName(const NominalTypeDecl* Declaration);
-  
+
+std::string declarationName(const ValueDecl* Declaration);
+
 llvm::Expected<std::string> enclosingTypeName(const Decl* Declaration);
 
 template<class T>

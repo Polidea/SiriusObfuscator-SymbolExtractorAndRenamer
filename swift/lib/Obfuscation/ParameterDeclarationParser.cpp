@@ -54,7 +54,7 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
     
     std::vector<SymbolWithRange> Symbols;
     
-    std::string FunctionName = functionName(BaseFunctionDeclaration);
+    std::string FunctionName = declarationName(BaseFunctionDeclaration);
     auto ModuleAndParts = functionIdentifierParts(BaseFunctionDeclaration,
                                                   ModuleName,
                                                   FunctionName);
@@ -116,26 +116,25 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
   
 SymbolsOrError parametersSymbolsFromFunction(const FuncDecl* Declaration) {
     
-    std::vector<SymbolWithRange> Symbols;
-    
-    auto ParameterLists = Declaration->getParameterLists();
-    for (auto *ParameterList : ParameterLists) {
-      for (auto *Parameter : *ParameterList) {
-        if (!Parameter->isImplicit()) {
-          auto SymbolsOrError = parse(Parameter);
-          if (auto Error = SymbolsOrError.takeError()) {
-            return std::move(Error);
-          } else {
-            copyToVector(SymbolsOrError.get(), Symbols);
-          }
+  std::vector<SymbolWithRange> Symbols;
+
+  auto ParameterLists = Declaration->getParameterLists();
+  for (auto *ParameterList : ParameterLists) {
+    for (auto *Parameter : *ParameterList) {
+      if (!Parameter->isImplicit()) {
+        auto SymbolsOrError = parse(Parameter);
+        if (auto Error = SymbolsOrError.takeError()) {
+          return std::move(Error);
+        } else {
+          copyToVector(SymbolsOrError.get(), Symbols);
         }
       }
     }
-    
-    return Symbols;
   }
 
-  
+  return Symbols;
+}
+
 SymbolsOrError
 parseSeparateFunctionDeclarationForParameters(const FuncDecl* Declaration) {
   return parametersSymbolsFromFunction(Declaration);

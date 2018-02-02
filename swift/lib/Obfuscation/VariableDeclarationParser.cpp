@@ -36,7 +36,7 @@ llvm::Error appendContextToParts(const VarDecl *Declaration,
     
   } else if (auto *FunctionDeclaration =
              dyn_cast<FuncDecl>(Declaration->getDeclContext())) {
-    std::string FunctionName = functionName(FunctionDeclaration);
+    std::string FunctionName = declarationName(FunctionDeclaration);
     auto ModuleAndParts = functionIdentifierParts(FunctionDeclaration,
                                                   ModuleName,
                                                   FunctionName);
