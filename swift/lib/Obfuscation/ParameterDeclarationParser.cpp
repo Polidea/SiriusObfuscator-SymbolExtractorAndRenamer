@@ -40,17 +40,13 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
   if (const auto *FunctionDeclaration =
       dyn_cast<FuncDecl>(Declaration->getDeclContext())) {
     
-    auto ModuleNameAndParts = moduleNameAndParts(Declaration);
-    std::string ModuleName = ModuleNameAndParts.first;
-    std::vector<std::string> Parts = ModuleNameAndParts.second;
-    
     std::set<std::string> Modules;
     auto *BaseFunctionDeclaration =
       baseOverridenDeclarationWithModules(FunctionDeclaration, Modules);
     
     bool OverridenMethodIsFromTheSameModule =
       Modules.size() == 0
-      || (Modules.size() == 1 && Modules.count(ModuleName) == 1);
+      || (Modules.size() == 1 && Modules.count(moduleName(Declaration)) == 1);
     
     std::string ExternalName = Declaration->getArgumentName().str().str();
     std::string InternalName = Declaration->getName().str().str();
@@ -58,12 +54,10 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
     std::vector<SymbolWithRange> Symbols;
     
     std::string FunctionName = declarationName(BaseFunctionDeclaration);
-    auto ModuleAndParts = functionIdentifierParts(BaseFunctionDeclaration,
-                                                  ModuleName,
-                                                  FunctionName);
-    copyToVector(ModuleAndParts.second, Parts);
-    
+    auto ModuleAndParts = functionIdentifierParts(BaseFunctionDeclaration);
     std::string FunctionModuleName = ModuleAndParts.first;
+    std::vector<std::string> Parts = ModuleAndParts.second;
+    
     auto PositionOrError = position(Declaration, BaseFunctionDeclaration);
     if (auto Error = PositionOrError.takeError()) {
       return std::move(Error);
@@ -100,12 +94,21 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
           
         }
         
+        //  TODO: improve handling internal parameters cases:
+        //  Case1: if we have two implementations of the same protocol
+        //  method in the same module and those implementations have the same
+        //  internal parameter name - this internal parameter will be renamed
+        //  to the same obfuscated name in both implementations.
+        //  Case2: internal parameter in protocol method implementation,
+        //  where declaration and implementation are in different modules -
+        //  Symbol object will have different module name in Identifier
+        //  and in Module field.
         Parts.push_back("internal." + InternalName);
         CharSourceRange InternalRange(Declaration->getNameLoc(),
                                       InternalName.length());
         Symbol InternalSymbol(combineIdentifier(Parts),
                               InternalName,
-                              ModuleName,
+                              moduleName(Declaration),
                               SymbolType::InternalParameter);
         Symbols.push_back(SymbolWithRange(InternalSymbol, InternalRange));
       }

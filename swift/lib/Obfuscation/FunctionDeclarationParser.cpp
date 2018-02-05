@@ -30,15 +30,17 @@ std::string functionSignature(const FuncDecl *Declaration) {
   }
 }
 
-ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration,
-                                           const std::string &ModuleName,
-                                           const std::string &SymbolName) {
+ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration) {
+  std::string ModuleName;
+  std::string SymbolName = declarationName(Declaration);
   std::vector<std::string> Parts;
-  std::string UpdatedModuleName = ModuleName;
+  
   auto ProtocolRequirements = Declaration->getSatisfiedProtocolRequirements();
   auto *ProtocolDeclaration =
   dyn_cast<ProtocolDecl>(Declaration->getDeclContext());
   if (ProtocolRequirements.empty() && ProtocolDeclaration == nullptr) {
+    ModuleName = moduleName(Declaration);
+    Parts.push_back("module." + ModuleName);
     
     auto TypeNameOrError = enclosingTypeName(Declaration);
     if (auto Error = TypeNameOrError.takeError()) {
@@ -64,10 +66,12 @@ ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration,
     //       protocols. it's just a name that's the same.
     //       this simplified handling should be improved in the future.
     if (!ProtocolRequirements.empty()) {
-      UpdatedModuleName = moduleName(ProtocolRequirements.front());
+      ModuleName = moduleName(ProtocolRequirements.front());
     } else {
-      UpdatedModuleName = moduleName(ProtocolDeclaration);
+      ModuleName = moduleName(ProtocolDeclaration);
     }
+    Parts.push_back("module." + ModuleName);
+    
     Parts.push_back("protocol");
     if (Declaration->isStatic()) {
       Parts.push_back("static");
@@ -77,7 +81,7 @@ ModuleNameAndParts functionIdentifierParts(const FuncDecl *Declaration,
   
   Parts.push_back(functionSignature(Declaration));
   
-  return std::make_pair(UpdatedModuleName, Parts);
+  return std::make_pair(ModuleName, Parts);
 }
 
 SymbolsOrError parseOverridenDeclaration(const FuncDecl *Declaration,
@@ -99,27 +103,22 @@ SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {
     return std::move(Error);
   }
   
-  std::vector<SymbolWithRange> Symbols;
-  auto ModuleNameAndParts = moduleNameAndParts(Declaration);
-  std::string ModuleName = ModuleNameAndParts.first;
-  std::vector<std::string> Parts = ModuleNameAndParts.second;
-  
   if (Declaration->getOverriddenDecl() != nullptr) {
-    return parseOverridenDeclaration(Declaration, ModuleName, Range);
+    return parseOverridenDeclaration(Declaration,
+                                     moduleName(Declaration),
+                                     Range);
   }
   
-  std::string SymbolName = declarationName(Declaration);
-  
-  auto IdentifierParts = functionIdentifierParts(Declaration,
-                                                 ModuleName,
-                                                 SymbolName);
-  ModuleName = IdentifierParts.first;
-  copyToVector(IdentifierParts.second, Parts);
+  auto ModuleAndParts = functionIdentifierParts(Declaration);
+  std::string ModuleName = ModuleAndParts.first;
+  std::vector<std::string> Parts = ModuleAndParts.second;
   
   Symbol Symbol(combineIdentifier(Parts),
-                SymbolName,
+                declarationName(Declaration),
                 ModuleName,
                 SymbolType::NamedFunction);
+  
+  std::vector<SymbolWithRange> Symbols;
   Symbols.push_back(SymbolWithRange(Symbol, Range));
   
   auto ParametersSymbolsOrError =
