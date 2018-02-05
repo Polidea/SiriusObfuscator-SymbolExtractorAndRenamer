@@ -81,14 +81,16 @@ void MappingTraits<FilesJson>::mapping(IO &Io, FilesJson &Object) {
   Io.mapRequired("project", Object.Project);
   Io.mapRequired("module", Object.Module);
   Io.mapRequired("sdk", Object.Sdk);
-  Io.mapRequired("filenames", Object.Filenames);
+  Io.mapRequired("sourceFiles", Object.SourceFiles);
+  Io.mapRequired("layoutFiles", Object.LayoutFiles);
   Io.mapRequired("systemLinkedFrameworks", Object.SystemLinkedFrameworks);
-  Io.mapRequired("explicitelyLinkedFrameworks",
-                 Object.ExplicitelyLinkedFrameworks);
+  Io.mapRequired("explicitlyLinkedFrameworks",
+                 Object.ExplicitlyLinkedFrameworks);
 }
   
 void MappingTraits<Project>::mapping(IO &Io, Project &Object) {
   Io.mapRequired("rootPath", Object.RootPath);
+  Io.mapRequired("projectFilePath", Object.ProjectFilePath);
 }
 
 using ObfuscationModule = swift::obfuscation::Module;
@@ -103,7 +105,7 @@ void MappingTraits<Sdk>::mapping(IO &Io, Sdk &Object) {
   Io.mapRequired("path", Object.Path);
 }
 
-using ELF = ExplicitelyLinkedFrameworks;
+using ELF = ExplicitlyLinkedFrameworks;
 void MappingTraits<ELF>::mapping(IO &Io, ELF &Object) {
   Io.mapRequired("name", Object.Name);
   Io.mapRequired("path", Object.Path);

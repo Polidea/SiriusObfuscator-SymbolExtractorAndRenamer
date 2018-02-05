@@ -35,6 +35,7 @@ extractSymbols(const FilesJson &FilesJson,
     }
   }
   copyToVector(Result, Json.Symbols);
+  std::sort(Json.Symbols.begin(), Json.Symbols.end());
   return Json;
 }
 
