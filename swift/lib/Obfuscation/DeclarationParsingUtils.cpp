@@ -23,17 +23,17 @@ std::string combineIdentifier(std::vector<std::string> &Parts) {
   }
 }
 
+std::string declarationName(const ValueDecl* Declaration) {
+  return Declaration->getName().str().str();
+}
+  
 std::string moduleName(const Decl* Declaration) {
   return Declaration->getModuleContext()->getBaseName().getIdentifier().get();
 }
 
-std::string declarationName(const ValueDecl* Declaration) {
-  return Declaration->getName().str().str();
-}
-
 ModuleNameAndParts moduleNameAndParts(const Decl *Declaration) {
-  std::vector<std::string> Parts;
   std::string ModuleName = moduleName(Declaration);
+  std::vector<std::string> Parts;
   Parts.push_back("module");
   Parts.push_back(ModuleName);
   return std::make_pair(ModuleName, Parts);

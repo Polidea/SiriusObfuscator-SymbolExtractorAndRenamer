@@ -20,67 +20,69 @@ parseOverridenDeclaration(const VarDecl *Declaration,
   }
 }
 
-llvm::Error appendContextToParts(const VarDecl *Declaration,
-                                    std::string &ModuleName,
-                                    std::vector<std::string> &Parts) {
+llvm::Expected<ModuleNameAndParts>
+variableContextParts(const VarDecl *Declaration) {
+  std::string ModuleName;
+  std::vector<std::string> Parts;
+  
   auto ProtocolRequirements = Declaration->getSatisfiedProtocolRequirements();
   auto *ProtocolDeclaration =
   dyn_cast<ProtocolDecl>(Declaration->getDeclContext());
   // TODO: for now, we're renaming all protocol properties with the same name
   // to the same obfuscated name. this should be improved in the future.
   if (!ProtocolRequirements.empty() || ProtocolDeclaration != nullptr) {
-    auto UpdatedModuleName = ProtocolRequirements.empty() ?
+    ModuleName = ProtocolRequirements.empty() ?
     moduleName(ProtocolDeclaration) : moduleName(ProtocolRequirements.front());
-    ModuleName = UpdatedModuleName;
+    Parts.push_back("module." + ModuleName);
     Parts.push_back("protocol");
     
   } else if (auto *FunctionDeclaration =
              dyn_cast<FuncDecl>(Declaration->getDeclContext())) {
-    std::string FunctionName = declarationName(FunctionDeclaration);
-    auto ModuleAndParts = functionIdentifierParts(FunctionDeclaration,
-                                                  ModuleName,
-                                                  FunctionName);
-    copyToVector(ModuleAndParts.second, Parts);
+    auto ModuleAndParts = functionIdentifierParts(FunctionDeclaration);
+    ModuleName = moduleName(Declaration);
+    Parts = ModuleAndParts.second;
     
   } else if (auto *NominalTypeDeclaration =
              dyn_cast<NominalTypeDecl>(Declaration->getDeclContext())) {
+    ModuleName = moduleName(Declaration);
+    Parts.push_back("module." + ModuleName);
     std::string TypeName = typeName(NominalTypeDeclaration);
     auto ModuleAndParts = nominalTypeIdentifierParts(NominalTypeDeclaration,
-                                                     ModuleName,
                                                      TypeName);
     if (auto Error = ModuleAndParts.takeError()) {
-      return Error;
+      return std::move(Error);
     }
-    copyToVector(ModuleAndParts.get().second, Parts);
+    copyToVector(ModuleAndParts.get(), Parts);
+  } else if (Declaration->getDeclContext()->isModuleScopeContext()) {
+    ModuleName = moduleName(Declaration);
+    Parts.push_back("module." + ModuleName);
   }
   
-  return llvm::Error::success();
+  return std::make_pair(ModuleName, Parts);
 }
 
 SingleSymbolOrError parse(const VarDecl* Declaration) {
   
-  auto ModuleNameAndParts = moduleNameAndParts(Declaration);
-  std::string ModuleName = ModuleNameAndParts.first;
-  std::vector<std::string> Parts = ModuleNameAndParts.second;
-  std::string SymbolName = Declaration->getName().str().str();
-  
   if (Declaration->getOverriddenDecl() != nullptr) {
-    return parseOverridenDeclaration(Declaration, ModuleName);
+    return parseOverridenDeclaration(Declaration, moduleName(Declaration));
   }
   
-  if (auto Error = appendContextToParts(Declaration, ModuleName, Parts)) {
+  auto ModuleAndPartsOrError = variableContextParts(Declaration);
+  if (auto Error = ModuleAndPartsOrError.takeError()) {
     return std::move(Error);
   }
+  auto ModuleAndParts = ModuleAndPartsOrError.get();
   
   if (Declaration->isStatic()) {
-    Parts.push_back("static");
+    ModuleAndParts.second.push_back("static");
   }
   
-  Parts.push_back("variable." + SymbolName);
+  std::string SymbolName = declarationName(Declaration);
+  ModuleAndParts.second.push_back("variable." + SymbolName);
   
-  return Symbol(combineIdentifier(Parts),
+  return Symbol(combineIdentifier(ModuleAndParts.second),
                 SymbolName,
-                ModuleName,
+                ModuleAndParts.first,
                 SymbolType::Variable);
 }
   
