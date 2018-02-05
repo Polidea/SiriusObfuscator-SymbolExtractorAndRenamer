@@ -4,9 +4,8 @@
 namespace swift {
 namespace obfuscation {
     
-llvm::Expected<ModuleNameAndParts>
+llvm::Expected<std::vector<std::string>>
 nominalTypeIdentifierParts(const NominalTypeDecl *Declaration,
-                           const std::string &ModuleName,
                            const std::string &SymbolName) {
   
   std::vector<std::string> Parts;
@@ -22,7 +21,7 @@ nominalTypeIdentifierParts(const NominalTypeDecl *Declaration,
   } else {
     return stringError("found unsupported declaration type");
   }
-  return std::make_pair(ModuleName, Parts);
+  return Parts;
 }
 
 SingleSymbolOrError parse(const NominalTypeDecl* Declaration) {
@@ -33,15 +32,16 @@ SingleSymbolOrError parse(const NominalTypeDecl* Declaration) {
   std::string SymbolName = typeName(Declaration);
   
   auto NominalTypeParts = nominalTypeIdentifierParts(Declaration,
-                                                     ModuleName,
                                                      SymbolName);
   if (auto Error = NominalTypeParts.takeError()) {
     return std::move(Error);
   }
   
-  return Symbol(combineIdentifier(NominalTypeParts.get().second),
+  copyToVector(NominalTypeParts.get(), Parts);
+  
+  return Symbol(combineIdentifier(Parts),
                 SymbolName,
-                NominalTypeParts.get().first,
+                ModuleName,
                 SymbolType::Type);
 }
 
