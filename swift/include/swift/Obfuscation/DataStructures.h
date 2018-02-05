@@ -14,6 +14,7 @@ namespace obfuscation {
   
 struct Project {
   std::string RootPath;
+  std::string ProjectFilePath;
 };
 
 struct Module {
@@ -26,7 +27,7 @@ struct Sdk {
   std::string Path;
 };
 
-struct ExplicitelyLinkedFrameworks {
+struct ExplicitlyLinkedFrameworks {
   std::string Name;
   std::string Path;
 };
@@ -35,9 +36,10 @@ struct FilesJson {
   Project Project;
   Module Module;
   Sdk Sdk;
-  std::vector<std::string> Filenames;
+  std::vector<std::string> SourceFiles;
+  std::vector<std::string> LayoutFiles;
   std::vector<std::string> SystemLinkedFrameworks;
-  std::vector<ExplicitelyLinkedFrameworks> ExplicitelyLinkedFrameworks;
+  std::vector<ExplicitlyLinkedFrameworks> ExplicitlyLinkedFrameworks;
 };
 
 enum class SymbolType: int {
@@ -151,8 +153,8 @@ struct MappingTraits<Sdk> {
 };
 
 template <>
-struct MappingTraits<ExplicitelyLinkedFrameworks> {
-  static void mapping(IO &Io, ExplicitelyLinkedFrameworks &Object);
+struct MappingTraits<ExplicitlyLinkedFrameworks> {
+  static void mapping(IO &Io, ExplicitlyLinkedFrameworks &Object);
 };
 
 template <>

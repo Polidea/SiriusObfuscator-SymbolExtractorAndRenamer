@@ -1,15 +1,51 @@
 {
   "symbols": [
     {
+      "name": "AppDelegate",
+      "identifier": "class.AppDelegate",
+      "module": "TestModuleName",
+      "type": "type"
+    },
+    {
+      "name": "ClassWithInit",
+      "identifier": "class.ClassWithInit",
+      "module": "TestModuleName",
+      "type": "type"
+    },
+    {
+      "name": "CustomInitViewController",
+      "identifier": "class.CustomInitViewController",
+      "module": "TestModuleName",
+      "type": "type"
+    },
+    {
+      "name": "NSCoder",
+      "identifier": "class.NSCoder",
+      "module": "Foundation",
+      "type": "type"
+    },
+    {
+      "name": "NSObject",
+      "identifier": "class.NSObject",
+      "module": "ObjectiveC",
+      "type": "type"
+    },
+    {
       "name": "NSViewController",
-      "identifier": "module.AppKit.class.NSViewController",
+      "identifier": "class.NSViewController",
       "module": "AppKit",
       "type": "type"
     },
     {
-      "name": "NSApplicationDelegate",
-      "identifier": "module.AppKit.protocol.NSApplicationDelegate",
-      "module": "AppKit",
+      "name": "SampleClass",
+      "identifier": "class.SampleClass",
+      "module": "TestModuleName",
+      "type": "type"
+    },
+    {
+      "name": "ViewController",
+      "identifier": "class.ViewController",
+      "module": "TestModuleName",
       "type": "type"
     },
     {
@@ -19,64 +55,10 @@
       "type": "namedFunction"
     },
     {
-      "name": "NSCoder",
-      "identifier": "module.Foundation.class.NSCoder",
-      "module": "Foundation",
-      "type": "type"
-    },
-    {
-      "name": "Notification",
-      "identifier": "module.Foundation.struct.Notification",
-      "module": "Foundation",
-      "type": "type"
-    },
-    {
-      "name": "NSObject",
-      "identifier": "module.ObjectiveC.class.NSObject",
-      "module": "ObjectiveC",
-      "type": "type"
-    },
-    {
       "name": "fatalError",
       "identifier": "module.Swift.function.fatalError.signature.(@autoclosure () -> String, StaticString, UInt) -> Never",
       "module": "Swift",
       "type": "namedFunction"
-    },
-    {
-      "name": "Int",
-      "identifier": "module.Swift.struct.Int",
-      "module": "Swift",
-      "type": "type"
-    },
-    {
-      "name": "AppDelegate",
-      "identifier": "module.TestModuleName.class.AppDelegate",
-      "module": "TestModuleName",
-      "type": "type"
-    },
-    {
-      "name": "ClassWithInit",
-      "identifier": "module.TestModuleName.class.ClassWithInit",
-      "module": "TestModuleName",
-      "type": "type"
-    },
-    {
-      "name": "CustomInitViewController",
-      "identifier": "module.TestModuleName.class.CustomInitViewController",
-      "module": "TestModuleName",
-      "type": "type"
-    },
-    {
-      "name": "SampleClass",
-      "identifier": "module.TestModuleName.class.SampleClass",
-      "module": "TestModuleName",
-      "type": "type"
-    },
-    {
-      "name": "ViewController",
-      "identifier": "module.TestModuleName.class.ViewController",
-      "module": "TestModuleName",
-      "type": "type"
     },
     {
       "name": "applicationDidFinishLaunching",
@@ -199,28 +181,46 @@
       "type": "internalParameter"
     },
     {
+      "name": "property",
+      "identifier": "module.TestModuleName.struct.StructWithMemberwiseInit.variable.property",
+      "module": "TestModuleName",
+      "type": "variable"
+    },
+    {
+      "name": "NSApplicationDelegate",
+      "identifier": "protocol.NSApplicationDelegate",
+      "module": "AppKit",
+      "type": "type"
+    },
+    {
+      "name": "Int",
+      "identifier": "struct.Int",
+      "module": "Swift",
+      "type": "type"
+    },
+    {
+      "name": "Notification",
+      "identifier": "struct.Notification",
+      "module": "Foundation",
+      "type": "type"
+    },
+    {
       "name": "SampleStruct",
-      "identifier": "module.TestModuleName.struct.SampleStruct",
+      "identifier": "struct.SampleStruct",
       "module": "TestModuleName",
       "type": "type"
     },
     {
       "name": "StructWithInit",
-      "identifier": "module.TestModuleName.struct.StructWithInit",
+      "identifier": "struct.StructWithInit",
       "module": "TestModuleName",
       "type": "type"
     },
     {
       "name": "StructWithMemberwiseInit",
-      "identifier": "module.TestModuleName.struct.StructWithMemberwiseInit",
+      "identifier": "struct.StructWithMemberwiseInit",
       "module": "TestModuleName",
       "type": "type"
-    },
-    {
-      "name": "property",
-      "identifier": "module.TestModuleName.variable.property",
-      "module": "TestModuleName",
-      "type": "variable"
     }
   ]
 }
