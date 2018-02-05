@@ -8,9 +8,8 @@
 namespace swift {
 namespace obfuscation {
 
-llvm::Expected<ModuleNameAndParts>
+llvm::Expected<std::vector<std::string>>
 nominalTypeIdentifierParts(const NominalTypeDecl *Declaration,
-                           const std::string &ModuleName,
                            const std::string &SymbolName);
   
 SingleSymbolOrError parse(const NominalTypeDecl* Declaration);
