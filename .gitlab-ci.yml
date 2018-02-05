@@ -4,7 +4,7 @@ obfuscator_debug:
         - /bin/bash $CACHE_DIR/ninjaScript.bash "./Scripts/build_vanilla_compiler.sh"
         - /bin/bash Scripts/setup_from_cache.sh
     script:
-        - /bin/bash Scripts/build.sh
+        - /bin/bash Scripts/build_from_cache.sh
         - /bin/bash Scripts/run_tests_on_ci.sh
         - /bin/bash Scripts/process_build_artifacts.sh
     tags:
@@ -18,7 +18,7 @@ obfuscator_master:
         - /bin/bash $CACHE_DIR/ninjaScript.bash "./Scripts/build_vanilla_compiler.sh"
         - /bin/bash Scripts/setup_from_cache.sh
     script:
-        - /bin/bash Scripts/build.sh
+        - /bin/bash Scripts/build_from_cache.sh
         - /bin/bash Scripts/run_tests_on_ci.sh
         - /bin/bash Scripts/process_build_artifacts.sh
     tags:
