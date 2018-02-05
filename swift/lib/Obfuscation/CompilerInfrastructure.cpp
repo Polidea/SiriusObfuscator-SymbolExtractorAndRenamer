@@ -24,8 +24,8 @@ struct CompilerInvocationConfiguration {
   Triple(FilesJson.Module.TargetTriple),
   MainExecutablePath(MainExecutablePath),
   SdkPath(FilesJson.Sdk.Path),
-  InputFilenames(FilesJson.Filenames) {
-    for (const auto &Framework : FilesJson.ExplicitelyLinkedFrameworks) {
+  InputFilenames(FilesJson.SourceFiles) {
+    for (const auto &Framework : FilesJson.ExplicitlyLinkedFrameworks) {
       SearchPathOptions::FrameworkSearchPath Path(Framework.Path, false);
       Paths.push_back(Path);
     }
