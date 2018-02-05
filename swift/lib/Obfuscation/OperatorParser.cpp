@@ -33,23 +33,18 @@ SymbolsOrError parseOperator(const FuncDecl* Declaration, CharSourceRange Range)
     }
     copyToVector(ParametersSymbolsOrError.get(), Symbols);
 
-    auto ModuleNameAndParts = moduleNameAndParts(Declaration);
-    std::string ModuleName = ModuleNameAndParts.first;
-
     if (auto OperatorDecl = Declaration->getOperatorDecl()) {
         auto OperatorModuleName = moduleName(OperatorDecl);
-        if (ModuleName != OperatorModuleName) {
+        if (moduleName(Declaration) != OperatorModuleName) {
             return Symbols;
         }
     }
-
-    std::vector<std::string> Parts = ModuleNameAndParts.second;
-    std::string SymbolName = declarationName(Declaration);
-
-    auto IdentifierParts = functionIdentifierParts(Declaration,
-                                                   ModuleName,
-                                                   SymbolName);
-    ModuleName = IdentifierParts.first;
+  
+    auto ModuleAndParts = functionIdentifierParts(Declaration);
+    auto ModuleName = ModuleAndParts.first;
+    auto Parts = ModuleAndParts.second;
+  
+    auto SymbolName = declarationName(Declaration);
     Parts.push_back("operator." + SymbolName);
 
     Symbol Symbol(combineIdentifier(Parts),
