@@ -87,19 +87,14 @@ struct RenamesCollector: public SourceEntityWalker {
   bool visitDeclReference(ValueDecl *Declaration, CharSourceRange Range,
                           TypeDecl *CtorTyRef, ExtensionDecl *ExtTyRef,
                           Type T, ReferenceMetaData Data) override {
-
     auto Symbols = extractSymbol(CtorTyRef ? CtorTyRef : Declaration, Range);
     handleExtractionResult(Symbols);
-
     return true;
   }
 
   void handleExtractionResult(SymbolsOrError &Symbols) {
     if (auto Error = Symbols.takeError()) {
-      llvm::handleAllErrors(std::move(Error),
-                            [](const llvm::StringError &StringError) {
-                                llvm::errs() << "Error: " << StringError.message();
-                            });
+      llvm::consumeError(std::move(Error));
     } else {
       handleSymbols(Symbols.get());
     }
