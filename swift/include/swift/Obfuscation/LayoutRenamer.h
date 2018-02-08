@@ -9,7 +9,17 @@
 
 namespace swift {
 namespace obfuscation {
-        
+
+/// Base class for renaming strategies. If a new layout file appears then
+/// a new strategy should be created and applied to that new type of file.
+/// Old files should use old strategies to ensure compatibility.
+class BaseLayoutRenamingStrategy {
+  
+public:
+  virtual  void performActualRenaming(xmlNode *Node, const std::unordered_map<std::string, SymbolRenaming> &RenamedSymbols, bool &performedRenaming) = 0;
+  virtual ~BaseLayoutRenamingStrategy() = default;
+};
+  
 class LayoutRenamer {
 
 private:
@@ -17,27 +27,17 @@ private:
   std::string FileName;
   
   xmlDoc *XmlDocument;
-  
-  bool shouldRename(const SymbolRenaming &Symbol, const std::string &CustomClass, const std::string &CustomModule);
-  
-  void performActualRenaming(xmlNode *Node, const std::unordered_map<std::string, SymbolRenaming> &RenamedSymbols, bool &performedRenaming);
+    
+  llvm::Expected<std::unique_ptr<BaseLayoutRenamingStrategy>> createRenamingStrategy(xmlNode *RootNode);
 
 public:
 
   LayoutRenamer(std::string FileName);
 
-  
   /// Performs renaming of layout (.xib and .storyboard) files from FilesJson in the following steps:
   ///
   /// 1. Gathers all renamed symbols (see Renaming.h) and stores them in RenamedSymbols map.
-  /// 2. Iterates through FilesJson.LayoutFiles list and performs renames if needed based
-  /// on RenamedSymbols map. Layout files are xmls, it looks for a specific attributes
-  /// such as "customClass" and retrieves their values. These values are then used to
-  /// look up RenamedSymbols map. If a "customClass" value is present inside RenamedSymbols, then
-  /// it means that this symbol was renamed in the source code in previous step and it should be
-  /// renamed in layout file as well. "customModule" attribute is also taken into account - if it's
-  /// present then it's value is compared with symbol's module value (the one found in RenamedSymbols) and
-  /// if it's not present then we assume that it's inherited from target project.
+  /// 2. Iterates through FilesJson.LayoutFiles list and picks renaming strategy based on file type and version.
   /// 3. Performs actual renaming if all conditions are met.
   /// 4. Saves renamed layout files in OutputPath.
   ///
@@ -66,7 +66,7 @@ public:
 
   ~LayoutRenamer();
 };
-        
+
 } //namespace obfuscation
 } //namespace swift
 
