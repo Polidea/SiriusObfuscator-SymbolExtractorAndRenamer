@@ -58,9 +58,11 @@ struct RenamesCollector: public SourceEntityWalker {
           if (auto Error = Symbols.takeError()) {
             return std::move(Error);
           } else {
-            auto Symbol = Symbols.get()[0];
-            Symbol.Range = Range;
-            return Symbol;
+            if (Symbols.get().size() > 0) {
+              auto Symbol = Symbols.get()[0];
+              Symbol.Range = Range;
+              return Symbol;
+            }
           }
         }
       }
