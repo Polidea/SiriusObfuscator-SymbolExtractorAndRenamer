@@ -53,3 +53,21 @@ class ViewClass: NSView {
   override var subviews: [NSView] { get { return [] } set { } }
   override var window: NSWindow? { return nil }
 }
+
+// properties with generic parameters
+class GenericUsingClass {
+  let array: Array<Int> = []
+  let map: [String : Int] = {:}
+}
+
+// properties usage
+class PropertiesUsingClass {
+  var array: Array<Int> = []
+  var map: [String : Int] = {:}
+
+  func foo() {
+    array = [42]
+    map["42"] = array[0]
+  }
+}
+
