@@ -51,3 +51,20 @@ class T1_ViewClass: NSView {
   override var subviews: [NSView] { get { return [] } set { } }
   override var window: NSWindow? { return nil }
 }
+
+// properties with generic parameters
+class T1_GenericUsingClass {
+  let V1_array: Array<Int> = []
+  let V1_map: [String : Int] = {:}
+}
+
+// properties usage
+class T1_PropertiesUsingClass {
+  var V2_array: Array<Int> = []
+  var V2_map: [String : Int] = {:}
+
+  func NF1_foo() {
+    V2_array = [42]
+    V2_map["42"] = V2_array[0]
+  }
+}
