@@ -120,6 +120,19 @@ struct SymbolWithRange {
   /// sets. It's taking into consideration both symbol identifier and range.
   bool operator< (const SymbolWithRange &Right) const;
 };
+
+struct IndexedSymbolWithRange {
+  int Index;
+  SymbolWithRange SymbolWithRange;
+
+  /// @brief Trivial memberwise-like constructor
+  IndexedSymbolWithRange(const int Index,
+                         const struct SymbolWithRange &SymbolWithRange);
+
+  /// @brief Comparison operator required for containing IndexedSymbolWithRange
+  /// in sets. It's taking only symbol into consideration, not range nor index.
+  bool operator< (const IndexedSymbolWithRange &Right) const;
+};
   
 using SymbolsOrError = llvm::Expected<std::vector<SymbolWithRange>>;
 

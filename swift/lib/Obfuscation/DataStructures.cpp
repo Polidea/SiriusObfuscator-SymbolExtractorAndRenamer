@@ -70,6 +70,17 @@ bool SymbolWithRange::operator< (const SymbolWithRange &Right) const {
   assert(false && "Comparing Symbols with Ranges requires Ranges Start "
          "Location Values Pointers to be of const char type");
 }
+
+IndexedSymbolWithRange::
+  IndexedSymbolWithRange(const int Index,
+                         const struct SymbolWithRange &SymbolWithRange)
+: Index(Index), SymbolWithRange(SymbolWithRange) {}
+
+bool IndexedSymbolWithRange::
+  operator< (const IndexedSymbolWithRange &Right) const {
+    return SymbolWithRange.Symbol < Right.SymbolWithRange.Symbol;
+}
+
   
 } //namespace obfuscation
 } //namespace swift
