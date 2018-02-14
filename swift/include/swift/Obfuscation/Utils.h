@@ -38,7 +38,15 @@ void copyToVector(const std::vector<ElementType> &FromVector,
 template<typename ElementType>
 void copyToVector(const std::set<ElementType> &FromSet,
                   std::vector<ElementType> &ToVector);
-  
+
+template<typename ElementType>
+void copyToSet(const std::set<ElementType> &FromSet,
+               std::set<ElementType> &ToSet);
+
+template<typename ElementType>
+void copyToSet(const std::vector<ElementType> &FromVector,
+               std::set<ElementType> &ToSet);
+
 template<typename ElementType>
 void copyToStream(const std::vector<ElementType> &FromVector,
                   std::ostream_iterator<ElementType> Inserter);

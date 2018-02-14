@@ -19,7 +19,23 @@ void copyToVector(const std::set<ElementType> &FromSet,
             FromSet.cend(),
             std::back_inserter(ToVector));
 };
-  
+
+template<typename ElementType>
+void copyToSet(const std::set<ElementType> &FromSet,
+               std::set<ElementType> &ToSet) {
+  std::copy(FromSet.cbegin(),
+            FromSet.cend(),
+            std::inserter(ToSet, ToSet.begin()));
+};
+
+template<typename ElementType>
+void copyToSet(const std::vector<ElementType> &FromVector,
+               std::set<ElementType> &ToSet) {
+  std::copy(FromVector.cbegin(),
+            FromVector.cend(),
+            std::inserter(ToSet, ToSet.begin()));
+}
+
 template<typename ElementType>
 void copyToStream(const std::vector<ElementType> &FromVector,
           std::ostream_iterator<ElementType> Inserter) {
