@@ -101,7 +101,7 @@ public:
     
     auto &MapForType = SymbolTypeMap[Symbol.Type];
     int SymbolNameCount = MapForType[Symbol.Name];
-    MapForType[Symbol.Name] =  ++SymbolNameCount;
+    MapForType[Symbol.Name] = ++SymbolNameCount;
     
     return SymbolShortNameMap[Symbol.Type] + std::to_string(SymbolNameCount) + "_" + Symbol.Name;
   }

@@ -25,17 +25,41 @@ extractSymbols(const FilesJson &FilesJson,
   }
   
   SymbolsJson Json;
-  std::set<Symbol> Result;
+
+  using FileWithName = std::pair<std::string, SourceFile *>;
+  std::vector<FileWithName> Files;
   for (auto* Unit : CompilerInstance.getMainModule()->getFiles()) {
     if (auto* Current = dyn_cast<SourceFile>(Unit)) {
-      auto CurrentSymbols = walkAndCollectSymbols(*Current);
-      for (const auto &Symbol : CurrentSymbols) {
-        Result.insert(Symbol.Symbol);
-      }
+      Files.push_back(std::make_pair(Current->getFilename().str(), Current));
     }
   }
-  copyToVector(Result, Json.Symbols);
-  std::sort(Json.Symbols.begin(), Json.Symbols.end());
+  std::sort(Files.begin(),
+            Files.end(),
+            [](const FileWithName &Left, const FileWithName &Right) {
+              return Left.first < Right.first;
+            });
+
+  std::set<IndexedSymbolWithRange> Symbols;
+  for (auto &Unit : Files) {
+    auto CurrentSymbols = walkAndCollectSymbols(*Unit.second);
+    copyToSet(CurrentSymbols, Symbols);
+  }
+
+  std::vector<IndexedSymbolWithRange> Result;
+  copyToVector(Symbols, Result);
+
+  std::sort(Result.begin(),
+            Result.end(),
+            [](const IndexedSymbolWithRange &Left,
+               const IndexedSymbolWithRange &Right) {
+              return Left.Index < Right.Index;
+            });
+  std::transform(Result.cbegin(),
+                 Result.cend(),
+                 std::back_inserter(Json.Symbols),
+                 [](const IndexedSymbolWithRange &Symbol) -> struct Symbol {
+                   return Symbol.SymbolWithRange.Symbol;
+                 });
   return Json;
 }
 

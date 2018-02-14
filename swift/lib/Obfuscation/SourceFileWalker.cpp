@@ -13,11 +13,20 @@ namespace swift {
 namespace obfuscation {
 
 struct RenamesCollector: public SourceEntityWalker {
-  std::set<SymbolWithRange> Bucket;
+  static int SymbolIndex;
+  std::set<IndexedSymbolWithRange> Bucket;
   
   void handleSymbols(std::vector<SymbolWithRange> &Symbols) {
     for (auto &Symbol : Symbols) {
-      Bucket.insert(Symbol);
+      handleSymbol(Symbol);
+    }
+  }
+
+  void handleSymbol(SymbolWithRange & Symbol) {
+    auto InsertionResult =
+      Bucket.insert(IndexedSymbolWithRange(SymbolIndex, Symbol));
+    if (InsertionResult.second == true) {
+      ++RenamesCollector::SymbolIndex;
     }
   }
 
@@ -81,7 +90,7 @@ struct RenamesCollector: public SourceEntityWalker {
       if (auto Error = Symbol.takeError()) {
         llvm::consumeError(std::move(Error));
       } else {
-        Bucket.insert(Symbol.get());
+        handleSymbol(Symbol.get());
       }
       return true;
   }
@@ -103,7 +112,9 @@ struct RenamesCollector: public SourceEntityWalker {
   }
 };
 
-std::set<SymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile) {
+int RenamesCollector::SymbolIndex;
+
+std::set<IndexedSymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile) {
   RenamesCollector Collector;
   Collector.walk(SourceFile);
   return Collector.Bucket;
