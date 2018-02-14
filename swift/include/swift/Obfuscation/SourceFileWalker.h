@@ -9,7 +9,8 @@
 namespace swift {
 namespace obfuscation {
 
-/// Identifies the symbols in the given Swift AST SourceFile object.
+/// Identifies the symbols in the given Swift AST SourceFile object with
+/// the index of their occurence among all files.
 ///
 /// The SourceFile might be extracted from the compiler after it consumes and
 /// performs the semantic analysis of the Swift cource code file. It's an AST
@@ -28,8 +29,9 @@ namespace obfuscation {
 ///
 /// \param SourceFile AST tree representing the Swift source file.
 ///
-/// \returns the occurences of symbols with their metadata and place.
-std::set<SymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile);
+/// \returns the occurrences of symbols with their metadata, place
+///          and occurrence index.
+std::set<IndexedSymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile);
 
 } //namespace obfuscation
 } //namespace swift
