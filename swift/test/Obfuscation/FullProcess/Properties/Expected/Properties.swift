@@ -43,7 +43,7 @@ struct T1_ComputedStruct {
 //computed properties required by other modules
 class T1_OtherStruct: NSValidatedUserInterfaceItem {
   var action: Selector? { return nil }
-  var tag: Int
+  var tag: Int = 0
 }
 
 // stored properties required by other modules
@@ -55,13 +55,13 @@ class T1_ViewClass: NSView {
 // properties with generic parameters
 class T1_GenericUsingClass {
   let V1_array: Array<Int> = []
-  let V1_map: [String : Int] = {:}
+  let V1_map: [String : Int] = [:]
 }
 
 // properties usage
 class T1_PropertiesUsingClass {
   var V2_array: Array<Int> = []
-  var V2_map: [String : Int] = {:}
+  var V2_map: [String : Int] = [:]
 
   func NF1_foo() {
     V2_array = [42]

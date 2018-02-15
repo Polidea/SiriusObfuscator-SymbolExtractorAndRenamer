@@ -14,7 +14,8 @@ namespace obfuscation {
 
 struct RenamesCollector: public SourceEntityWalker {
   static int SymbolIndex;
-  std::set<IndexedSymbolWithRange> Bucket;
+  std::set<IndexedSymbolWithRange,
+           IndexedSymbolWithRange::SymbolWithRangeCompare> Bucket;
   
   void handleSymbols(std::vector<SymbolWithRange> &Symbols) {
     for (auto &Symbol : Symbols) {
@@ -114,7 +115,8 @@ struct RenamesCollector: public SourceEntityWalker {
 
 int RenamesCollector::SymbolIndex;
 
-std::set<IndexedSymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile) {
+std::set<IndexedSymbolWithRange, IndexedSymbolWithRange::SymbolWithRangeCompare>
+  walkAndCollectSymbols(SourceFile &SourceFile) {
   RenamesCollector Collector;
   Collector.walk(SourceFile);
   return Collector.Bucket;

@@ -76,12 +76,18 @@ IndexedSymbolWithRange::
                          const struct SymbolWithRange &SymbolWithRange)
 : Index(Index), SymbolWithRange(SymbolWithRange) {}
 
-bool IndexedSymbolWithRange::
-  operator< (const IndexedSymbolWithRange &Right) const {
-    return SymbolWithRange.Symbol < Right.SymbolWithRange.Symbol;
+bool IndexedSymbolWithRange::SymbolCompare::
+  operator() (const IndexedSymbolWithRange& Left,
+              const IndexedSymbolWithRange& Right) const {
+  return Left.SymbolWithRange.Symbol < Right.SymbolWithRange.Symbol;
 }
 
-  
+bool IndexedSymbolWithRange::SymbolWithRangeCompare::
+  operator() (const IndexedSymbolWithRange& Left,
+              const IndexedSymbolWithRange& Right) const {
+  return Left.SymbolWithRange < Right.SymbolWithRange;
+}
+
 } //namespace obfuscation
 } //namespace swift
 

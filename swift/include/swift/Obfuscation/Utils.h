@@ -35,17 +35,17 @@ template<typename ElementType>
 void copyToVector(const std::vector<ElementType> &FromVector,
                   std::vector<ElementType> &ToVector);
   
-template<typename ElementType>
-void copyToVector(const std::set<ElementType> &FromSet,
+template<typename ElementType, typename CompareFrom>
+void copyToVector(const std::set<ElementType, CompareFrom> &FromSet,
                   std::vector<ElementType> &ToVector);
 
-template<typename ElementType>
-void copyToSet(const std::set<ElementType> &FromSet,
-               std::set<ElementType> &ToSet);
+template<typename ElementType, typename CompareFrom, typename CompareTo>
+void copyToSet(const std::set<ElementType, CompareFrom> &FromSet,
+               std::set<ElementType, CompareTo> &ToSet);
 
-template<typename ElementType>
+template<typename ElementType, typename CompareTo>
 void copyToSet(const std::vector<ElementType> &FromVector,
-               std::set<ElementType> &ToSet);
+               std::set<ElementType, CompareTo> &ToSet);
 
 template<typename ElementType>
 void copyToStream(const std::vector<ElementType> &FromVector,
