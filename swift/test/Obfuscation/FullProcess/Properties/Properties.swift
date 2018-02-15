@@ -45,7 +45,7 @@ struct ComputedStruct {
 //computed properties required by other modules
 class OtherStruct: NSValidatedUserInterfaceItem {
   var action: Selector? { return nil }
-  var tag: Int
+  var tag: Int = 0
 }
 
 // stored properties required by other modules
@@ -57,13 +57,13 @@ class ViewClass: NSView {
 // properties with generic parameters
 class GenericUsingClass {
   let array: Array<Int> = []
-  let map: [String : Int] = {:}
+  let map: [String : Int] = [:]
 }
 
 // properties usage
 class PropertiesUsingClass {
   var array: Array<Int> = []
-  var map: [String : Int] = {:}
+  var map: [String : Int] = [:]
 
   func foo() {
     array = [42]
