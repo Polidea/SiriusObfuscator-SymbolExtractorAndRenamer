@@ -39,10 +39,20 @@ extractSymbols(const FilesJson &FilesJson,
               return Left.first < Right.first;
             });
 
-  std::set<IndexedSymbolWithRange> Symbols;
+  std::set<IndexedSymbolWithRange,
+           IndexedSymbolWithRange::SymbolCompare> Symbols;
+
   for (auto &Unit : Files) {
     auto CurrentSymbols = walkAndCollectSymbols(*Unit.second);
-    copyToSet(CurrentSymbols, Symbols);
+    std::vector<IndexedSymbolWithRange> SortedSymbols;
+    copyToVector(CurrentSymbols, SortedSymbols);
+    std::sort(SortedSymbols.begin(),
+              SortedSymbols.end(),
+              [](const IndexedSymbolWithRange &Left,
+                 const IndexedSymbolWithRange &Right) {
+                return Left.Index < Right.Index;
+              });
+    copyToSet(SortedSymbols, Symbols);
   }
 
   std::vector<IndexedSymbolWithRange> Result;

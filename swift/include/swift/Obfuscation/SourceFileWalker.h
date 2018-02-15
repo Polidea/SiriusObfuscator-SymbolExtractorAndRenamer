@@ -31,7 +31,8 @@ namespace obfuscation {
 ///
 /// \returns the occurrences of symbols with their metadata, place
 ///          and occurrence index.
-std::set<IndexedSymbolWithRange> walkAndCollectSymbols(SourceFile &SourceFile);
+std::set<IndexedSymbolWithRange, IndexedSymbolWithRange::SymbolWithRangeCompare>
+  walkAndCollectSymbols(SourceFile &SourceFile);
 
 } //namespace obfuscation
 } //namespace swift
