@@ -1,6 +1,6 @@
 //XFAIL: *
 
-//RUN: %target-prepare-obfuscation-for-file "TypesFailing" %target-run-full-obfuscation
+//RUN: %target-prepare-obfuscation-for-file "UnsupportedTypes" %target-run-full-obfuscation
 
 protocol SampleProtocol { }
 
