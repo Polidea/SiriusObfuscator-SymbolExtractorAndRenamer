@@ -1,4 +1,4 @@
-//RUN: %target-prepare-obfuscation-for-file "FailingSelectors" %target-run-full-obfuscation
+//RUN: %target-prepare-obfuscation-for-file "Selectors" %target-run-full-obfuscation
 
 import Foundation
 
