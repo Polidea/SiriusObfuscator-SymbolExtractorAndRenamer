@@ -107,7 +107,7 @@ SymbolsOrError parseOverridenDeclaration(const FuncDecl *Declaration,
 }
 
 SymbolsOrError parse(const ConstructorDecl* Declaration, CharSourceRange Range) {
-    return parseSeparateFunctionDeclarationForParameters(Declaration);
+  return parseSeparateFunctionDeclarationForParameters(Declaration);
 }
   
 SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {

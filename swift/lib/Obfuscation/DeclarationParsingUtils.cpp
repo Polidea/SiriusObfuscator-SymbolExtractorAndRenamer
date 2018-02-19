@@ -91,6 +91,27 @@ template const AbstractFunctionDecl*
 baseOverridenDeclarationWithModules(const AbstractFunctionDecl *Declaration,
                                     std::set<std::string> &Modules);
 
+// Determines if the ConstructorDecl represents the Struct Memberwise
+// Initializer. Checks if the declaration is implicit. Also checks if
+// parameters list (other than self parameter) is not empty to exclude
+// Default Initializers.
+bool isMemberwiseConstructor(const ConstructorDecl* Declaration) {
+  auto ConstructsStruct = Declaration->getResultInterfaceType()->
+  getStructOrBoundGenericStruct() != nullptr;
+  
+  return ConstructsStruct
+  && Declaration->isImplicit()
+  && Declaration->getParameters()->size() != 0;
+}
+  
+bool isMemberwiseConstructorParameter(const ParamDecl* Declaration) {
+  auto *Context = Declaration->getDeclContext();
+  if (const auto *ConstructorDeclaration = dyn_cast<ConstructorDecl>(Context)) {
+    return isMemberwiseConstructor(ConstructorDeclaration);
+  }
+  return false;
+}
+
 } //namespace obfuscation
 } //namespace swift
 
