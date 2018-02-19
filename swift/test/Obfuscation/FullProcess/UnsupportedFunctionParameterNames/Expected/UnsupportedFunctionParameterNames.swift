@@ -27,14 +27,6 @@ class T1_Derived: T1_Base {
   override subscript(indexExt IP4_indexInt: Int) -> String { return "" }
 }
 
-// implicit constructor params
-struct T1_SampleStruct {
-  let V1_fieldA: Int
-  let V1_fieldB: String
-}
-
-let V1_test = T1_SampleStruct(V1_fieldA: 1, V1_fieldB:"")
-
 //protocol functions
 protocol T1_ProtocolFunc {
   func NF1_pFunc2(_ IP1_pFunc: Int)

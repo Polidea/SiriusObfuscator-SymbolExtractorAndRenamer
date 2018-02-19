@@ -85,6 +85,12 @@
       "type": "type"
     },
     {
+      "name": "property",
+      "identifier": "module.TestModuleName.struct.StructWithMemberwiseInit.variable.property",
+      "module": "TestModuleName",
+      "type": "variable"
+    },
+    {
       "name": "swmiei",
       "identifier": "module.AppKit.protocol.method.applicationDidFinishLaunching.signature.(Notification) -> ().variable.swmiei",
       "module": "TestModuleName",
@@ -191,12 +197,6 @@
       "identifier": "module.AppKit.protocol.method.applicationWillTerminate.signature.(Notification) -> ().parameter.position.list1_parameter0.internal.aNotification",
       "module": "TestModuleName",
       "type": "internalParameter"
-    },
-    {
-      "name": "property",
-      "identifier": "module.TestModuleName.struct.StructWithMemberwiseInit.variable.property",
-      "module": "TestModuleName",
-      "type": "variable"
     },
     {
       "name": "Int",

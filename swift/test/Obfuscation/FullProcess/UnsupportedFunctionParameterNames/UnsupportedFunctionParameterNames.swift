@@ -30,14 +30,6 @@ class Derived: Base {
   override subscript(indexExt indexInt: Int) -> String { return "" }
 }
 
-// implicit constructor params
-struct SampleStruct {
-  let fieldA: Int
-  let fieldB: String
-}
-
-let test = SampleStruct(fieldA: 1, fieldB:"")
-
 //protocol functions
 protocol ProtocolFunc {
   func pFunc2(_ pFunc: Int)
