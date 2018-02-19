@@ -48,6 +48,26 @@ class ConstructorParam {
   init(extP intP: SampleClass) {}
 }
 
+let _ = ConstructorParam(str: "")
+let _ = ConstructorParam(1)
+let _ = ConstructorParam(extP: SampleClass())
+
+// memberwise constructor params
+struct MemberwiseConstructorParam {
+  let fieldA: Int
+  let fieldB: String
+}
+
+let test = MemberwiseConstructorParam(fieldA: 1, fieldB: "")
+
+// default constructor params
+struct DefaultConstructorParam {
+  let fieldA: Int = 1
+  let fieldB: String = ""
+}
+
+let _ = DefaultConstructorParam()
+
 //protocol functions
 protocol ProtocolFunc {
   func pFunc(pFunc: Int)

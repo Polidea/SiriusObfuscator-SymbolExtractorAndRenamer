@@ -38,6 +38,10 @@ template<class T>
 const T* baseOverridenDeclarationWithModules(const T *Declaration,
                                             std::set<std::string> &Modules);
 
+bool isMemberwise(const ConstructorDecl* Declaration);
+
+bool isMemberwiseConstructorParameter(const ParamDecl* Declaration);
+
 } //namespace obfuscation
 } //namespace swift
   

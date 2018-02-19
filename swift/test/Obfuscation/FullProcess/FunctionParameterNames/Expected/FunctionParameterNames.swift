@@ -47,6 +47,26 @@ class T1_ConstructorParam {
   init(EP1_extP IP1_intP: T1_SampleClass) {}
 }
 
+let _ = T1_ConstructorParam(SP1_str: "")
+let _ = T1_ConstructorParam(1)
+let _ = T1_ConstructorParam(EP1_extP: T1_SampleClass())
+
+// memberwise constructor params
+struct T1_MemberwiseConstructorParam {
+  let V1_fieldA: Int
+  let V1_fieldB: String
+}
+
+let V1_test = T1_MemberwiseConstructorParam(V1_fieldA: 1, V1_fieldB: "")
+
+// default constructor params
+struct T1_DefaultConstructorParam {
+  let V2_fieldA: Int = 1
+  let V2_fieldB: String = ""
+}
+
+let _ = T1_DefaultConstructorParam()
+
 //protocol functions
 protocol T1_ProtocolFunc {
   func NF1_pFunc(SP1_pFunc: Int)
