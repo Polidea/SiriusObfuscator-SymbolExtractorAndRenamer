@@ -55,7 +55,10 @@ Yes, layout files are being renamed.
 First [`FileExtractor` tool](./ImportantTopics.md) extracts information about all layout (`.xib` and `.storyboard`) files that are present in the project.
 Then when `Renamer` is renaming symbols, it also stores each successfully renamed symbol in a set. After that it iterates over gathered layout files and renames them one by one. Both `.xib` and `.storyboard` are `.xml` files. `Renamer` parses them using `libxml` and then traverses the tree looking for types and functions that can be renamed. It decides if a found name should be renamed by checking if such symbol was renamed during symbol renaming. Such check is possible because it has access to the set containing all renamed symbols. After the file is finally processed `Renamer` saves the result in obfuscated project directory.
 
-Currently only class names are being obfuscated. Support for outlets and actions is in the future plans.
+Currently the tool renames:
+  - class names
+  - outlets
+  - actions (without parameters or with one default parameter, support for general selectors support is in the future plans)
 
 # <a name="exclude"></a> Excluding parts of code from obfuscation
 

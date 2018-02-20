@@ -6,6 +6,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <sstream>
 
 namespace swift {
 namespace obfuscation {
@@ -51,6 +52,8 @@ template<typename ElementType>
 void copyToStream(const std::vector<ElementType> &FromVector,
                   std::ostream_iterator<ElementType> Inserter);
 
+std::vector<std::string> split(const std::string &String, char Delimiter);
+  
 } //namespace obfuscation
 } //namespace swift
 
