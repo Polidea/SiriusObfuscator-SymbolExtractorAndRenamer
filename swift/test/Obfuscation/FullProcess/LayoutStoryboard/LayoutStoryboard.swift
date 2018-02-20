@@ -1,4 +1,12 @@
 //RUN: %target-prepare-obfuscation-with-storyboard "LayoutStoryboard" %target-run-full-obfuscation
 
-class AppDelegate {}
-class ViewController {}
+import Cocoa
+
+class ViewController {
+  
+  @IBOutlet weak var informativeLabel: NSButton!
+
+  @IBAction func switchInputRepresentation(_ sender: NSButton) {
+  }
+
+}
