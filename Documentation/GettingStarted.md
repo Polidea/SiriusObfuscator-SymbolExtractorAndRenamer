@@ -141,3 +141,11 @@ To make use of some Swift Compiler library (e.g. `swiftObfuscation` library) you
 ## Creating new SymbolExtractorAndRenamer tools
 
 To create new Swift Compiler tool create the directory in `swift/tools/` and follow the structure of existing tools, e.g. `obfuscator-symbol-extactor`. You need to create proper `CMakeLists.txt` build file starting with `add_swift_host_tool(<tool-name>` and include all the tool's dependecies and  `.cpp` files of the tool.
+
+## Adding new parameters to command line tool
+
+In the directory `swift/tools/<tool-name>` please find the `.cpp` file that defines the tool in question. There'll a namespace definition called `options` at the top of the file. This is the place that all the parameters are defined in. 
+
+We're using the `llvm::cl` for the parameters definition and parsing. The definition is done by creating static global variables of the type from `llvm::cl`. They do not have to be enclosed in the `options` namespace, but we're doing it by convention to increase readability. The possible types of parameters as well as the possible options for each of them are documented in the [LLVM CommandLine Library Manual](https://llvm.org/docs/CommandLine.html).
+
+The actual parsing is done in the `llvm::cl::ParseCommandLineOptions` function.
