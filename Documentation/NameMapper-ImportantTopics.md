@@ -5,7 +5,8 @@ The goal of this document is to be a bag of important ideas, decisions, concepts
 1. [Why is NameMapper a separate command line tool?](#separate)
 2. [Why does NameMapper need to know about the symbol type to generate the obfuscated name proposal?](#type)
 3. [Where are the characters to build the obfuscated name taken from?](#symbols)
-4. [How can we snsure that the generated name will be unique and there will be no name collision?](#unique)
+4. [How can we ensure that the generated name will be unique and there will be no name collision?](#unique)
+5. [Why is there a random and deterministic name generation option available?](#deterministic)
 
 # <a name="separate"></a> `NameMapper` as the separate tool
 
@@ -29,4 +30,16 @@ Similar analysis is used for all supported constructs, like function names or op
 
 There's no name collision preventing at the time, however, that ensures that the generated name is different than some already existing original symbol name. The feature is in the future plans.
 
+# <a name="deterministic"></a> Why is there a random and deterministic name generation option available?
 
+The random generation is the default one and it leads to the obfuscation in its main purpose: to render the code unreadable and more difficult to understand for the attacker that's looking for symbols in the binary file.
+
+The deterministic name generation was created for the testing purpose as it enables to write the expected obfuscated code for the given original source file. It's done with three steps:
+
+* each symbol has a known prefix (dependant on its kind) added to the name instead of replacing its name with the random name (`NF` for functions, `T` for types etc.),
+
+* the strictly incremental index number is appended to the prefix, so that if there's more than one symbol of the same kind and the same name in the source code, the obfuscated name differs between them (for example, `NF1_foo` and `NF2_foo`),
+
+* the symbol extraction is done in the deterministic order from the top of the file to the bottom of the file, with files parsed in the alphabetical order (`a-zA-Z`).
+
+These three rules are enough to know what obfuscated name would a particular symbol get. It's enough to know it's kind, name and the first occurence.
