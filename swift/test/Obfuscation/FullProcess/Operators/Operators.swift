@@ -1,6 +1,5 @@
 // XFAIL: *
-// PLEASE TURN THEM ON AFTER SET COMPARATOR FIX!
-// RUN: %target-prepare-obfuscation-for-file "UnsupportedOperators" %target-run-full-obfuscation
+// RUN: %target-prepare-obfuscation-for-file "Operators" %target-run-full-obfuscation
 
 prefix operator ---
 infix operator ^^^
