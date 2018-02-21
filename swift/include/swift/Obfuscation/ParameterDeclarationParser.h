@@ -24,6 +24,10 @@ SymbolsOrError parseSeparateDeclarationWithRange(const ParamDecl* Declaration,
 
 SymbolsOrError parse(const ParamDecl* Declaration);
 
+llvm::Expected<SymbolWithRange> buildSymbol(Identifier Name,
+                                            ValueDecl *Decl,
+                                            CharSourceRange Range);
+
   
 } //namespace obfuscation
 } //namespace swift
