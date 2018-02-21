@@ -189,5 +189,37 @@ SymbolsOrError parseSeparateDeclarationWithRange(const ParamDecl* Declaration,
   return Result;
 }
 
+llvm::Expected<SymbolWithRange> buildSymbol(Identifier Name,
+                                            ValueDecl *Decl,
+                                            CharSourceRange Range) {
+  if (const auto *FunctionDecl = dyn_cast<AbstractFunctionDecl>(Decl)) {
+    auto ParameterLists = FunctionDecl->getParameterLists();
+    auto ParameterName = Name.str();
+
+    for (auto *ParameterList: ParameterLists) {
+      for (auto *Parameter : *ParameterList) {
+        if (ParameterName == internalParameterName(Parameter)
+            || ParameterName == externalParameterName(Parameter)) {
+          SymbolsOrError Symbols = parse(Parameter);
+          if (auto Error = Symbols.takeError()) {
+            return std::move(Error);
+          } else {
+            if (Symbols.get().size() > 0) {
+              auto Symbol = Symbols.get()[0];
+              Symbol.Range = Range;
+              return Symbol;
+            }
+          }
+        }
+      }
+    }
+    return stringError("Cannot find parameter identifier in function declaration");
+  } else {
+    return stringError("Cannot build symbol for argument without "
+                       "function declaration");
+  }
+}
+
+
 } //namespace obfuscation
 } //namespace swift
