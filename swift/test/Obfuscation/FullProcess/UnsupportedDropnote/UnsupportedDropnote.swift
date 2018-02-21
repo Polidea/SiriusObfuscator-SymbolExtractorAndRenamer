@@ -29,11 +29,11 @@ final class DebugBlock {
   }
 }
 
-//protocol stuff
-protocol Proto {
-  func hello()
+//override init
+class Parent{
+  init(p1: String, p2: Int) {}
 }
-extension NSString: Proto {}
-extension Proto where Self: NSString {
-  func hello() {}
+class Child: Parent {
+  override init(p1: String, p2: Int){}
 }
+let c = Child(p1: "p1", p2:42)
