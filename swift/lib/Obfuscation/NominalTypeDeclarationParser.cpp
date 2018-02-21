@@ -29,10 +29,10 @@ SingleSymbolOrError parse(const NominalTypeDecl* Declaration) {
   auto ModuleNameAndParts = moduleNameAndParts(Declaration);
   std::string ModuleName = ModuleNameAndParts.first;
   std::vector<std::string> Parts = ModuleNameAndParts.second;
-  std::string SymbolName = typeName(Declaration);
+  std::string SymbolName = Declaration->getBaseName().getIdentifier().str();
   
   auto NominalTypeParts = nominalTypeIdentifierParts(Declaration,
-                                                     SymbolName);
+                                                     typeName(Declaration));
   if (auto Error = NominalTypeParts.takeError()) {
     return std::move(Error);
   }
