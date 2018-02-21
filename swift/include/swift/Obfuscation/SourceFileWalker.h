@@ -10,7 +10,7 @@ namespace swift {
 namespace obfuscation {
 
 /// Identifies the symbols in the given Swift AST SourceFile object with
-/// the index of their occurence among all files.
+/// the index of their occurrence among all files.
 ///
 /// The SourceFile might be extracted from the compiler after it consumes and
 /// performs the semantic analysis of the Swift cource code file. It's an AST
@@ -25,6 +25,8 @@ namespace obfuscation {
 /// for (auto* File : CompilerInstance.getMainModule()->getFiles()) {
 ///   if (auto* SourceFile = dyn_cast<SourceFile>(File)) {
 ///     auto SymbolsWithRanges = walkAndCollectSymbols(*SourceFile);
+///   }
+/// }
 /// \endcode
 ///
 /// \param SourceFile AST tree representing the Swift source file.
