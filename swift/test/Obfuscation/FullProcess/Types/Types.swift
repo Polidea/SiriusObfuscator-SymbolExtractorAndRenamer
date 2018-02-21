@@ -17,8 +17,6 @@ class Outer {
     struct InnerStruct: SampleProtocol{
       func foo() {
         class InsideFunc: Array<SampleClass?> {}
-        
-        extension InsideFunc {}
       }
     }
   }
@@ -36,3 +34,16 @@ struct CustomCFLocaleKey: CFLocaleKey {
   class CustomGenericNSString: Array<NSString> {}
 }
 
+struct Generic<GenericParam> {
+  class InsideGeneric: Generic<String> {}
+}
+
+class RenameGenericTypeConcretization: Generic<SampleProtocol> {}
+
+class A {
+  struct B {}
+}
+
+class C {
+  struct B {}
+}
