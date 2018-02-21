@@ -5,7 +5,7 @@
 #include "swift/Obfuscation/ParameterDeclarationParser.h"
 #include "swift/Obfuscation/Utils-Template.h"
 #include "swift/Obfuscation/Utils.h"
-#include "swift/Obfuscation/DeclarationParsingUtils.h"
+#include "swift/Obfuscation/WhereClauseParser.h"
 
 #include <string>
 
@@ -27,20 +27,29 @@ struct SymbolsWalkerAndCollector: public SourceEntityWalker {
   }
   
   bool walkToDeclPre(Decl *Declaration, CharSourceRange Range) override {
-    if (Declaration->isImplicit()) {
-      return false;
-    }
     auto Symbols = extractSymbol(Declaration, Range);
     handleExtractionResult(Symbols);
     return true;
   }
 
+  void handleWhereClausesIfNeeded(const std::vector<Decl*> &&Declarations) {
+    WhereClauseParser WhereClauseParser;
+    for (auto *Declaration : Declarations) {
+      WhereClauseParser.collectSymbolsFromDeclaration(Declaration);
+    }
+    handleSymbols(WhereClauseParser.harvestSymbols());
+  }
+
   // We need to extract symbols here even though we might have already seen
   // this node in the walkToDeclPre because here we have additional
   // contextual information like CtorTyRef
-  bool visitDeclReference(ValueDecl *Declaration, CharSourceRange Range,
-                          TypeDecl *CtorTyRef, ExtensionDecl *ExtTyRef,
-                          Type T, ReferenceMetaData Data) override {
+  bool visitDeclReference(ValueDecl *Declaration,
+                          CharSourceRange Range,
+                          TypeDecl *CtorTyRef,
+                          ExtensionDecl *ExtTyRef,
+                          Type T,
+                          ReferenceMetaData Data) override {
+    handleWhereClausesIfNeeded({ Declaration, CtorTyRef, ExtTyRef });
     auto Symbols = extractSymbol(CtorTyRef ? CtorTyRef : Declaration, Range);
     handleExtractionResult(Symbols);
     return true;
@@ -60,7 +69,7 @@ struct SymbolsWalkerAndCollector: public SourceEntityWalker {
 
 // Methods for handling the extracted symbols
 
-  void handleSymbol(SymbolWithRange & Symbol) {
+  void handleSymbol(const SymbolWithRange &Symbol) {
     auto InsertionResult =
       Symbols.insert(IndexedSymbolWithRange(SymbolIndex, Symbol));
     if (InsertionResult.second == true) {
@@ -69,7 +78,13 @@ struct SymbolsWalkerAndCollector: public SourceEntityWalker {
   }
 
   void handleSymbols(std::vector<SymbolWithRange> &Symbols) {
-    for (auto &Symbol : Symbols) {
+    for (const auto &Symbol : Symbols) {
+      handleSymbol(Symbol);
+    }
+  }
+
+  void handleSymbols(std::set<SymbolWithRange> &&Symbols) {
+    for (const auto &Symbol : Symbols) {
       handleSymbol(Symbol);
     }
   }
