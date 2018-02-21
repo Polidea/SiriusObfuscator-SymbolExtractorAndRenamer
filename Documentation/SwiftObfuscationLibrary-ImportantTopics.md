@@ -5,6 +5,8 @@ The goal of this document is to be a bag of important ideas, decisions, concepts
 * [What is `swiftObfuscation` library?](#what)
 * [Why do we write the templates implementations in *-template.h files?](#templates)
 * [Why do we use llvm::yaml for json deserialization and swift::json for json serialization?](#json)
+* [Why are we using the main module when working with the compiler instance?](#main-module)
+* [Why do we use index in the symbol walker and collector to index the symbols?](#index)
 
 # <a name="what"></a> What is `swiftObfuscation` library?
 
@@ -28,3 +30,13 @@ LLVM contains the YAML parser with the serialization and deserialization support
 - http://yaml.org/spec/1.2/spec.html#id2759572
 
 Therefore to deserialize JSON (read JSON from file) the already existing `llvm::yaml` parser is perfectly fine. However, the serialization (write JSON to file) cannot be done with `llvm::yaml` because it prints YAML, not JSON. Thankfully, the Swift compiler community has provided the tool for JSON serialization (not deserialization) in the `swift::json` namespace. It keeps almost the same API as the LLVM YAML parser and therefore is easy to use. That's why we're using it.
+
+# <a name="main-module"></a> Why are we using the main module when working with the compiler instance?
+
+While setting up the compiler instance it requires that the module name is given. All the input files will be parsed as part of this modules. All the identifiers from the source code that is written in the input files will also be treated as part of this module.
+
+That's why when we want to traverse the AST that represents the input Swift source files we're asking the `CompilerInstance` object to give us the main module and then to give the files that are parts of this module.
+
+# <a name="index"></a> Why do we use index in the symbol walker and collector to index the symbols?
+
+The symbol walker and collector parses the AST and identifies the symbols in the order of occurrence in the source file. This order is persisted across all the files with the static integer representing the symbol index. If one symbol's index is smaller than the other's, it's guaranteed that the former symbol was encountered before the latter in the AST traversal. This order is kept during the symbol extraction. We're sure that when we print the symbols to `Symbols.json`, the deterministic and identifier-agnostic order is preserved. This is what makes the [integration testing](./IntegrationTesting.md) possible.
