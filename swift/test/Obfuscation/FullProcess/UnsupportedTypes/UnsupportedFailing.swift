@@ -4,10 +4,6 @@
 
 protocol SampleProtocol { }
 
-struct Generic<GenericParam> {
-  class InsideGeneric: Generic<SampleProtocol> {}
-}
-
 class `BackticksName` {}
 
 class `BackticksNameGeneric`<`BackticksGenericParam`> {

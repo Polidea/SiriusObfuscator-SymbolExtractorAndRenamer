@@ -1,10 +1,6 @@
 
 protocol T1_SampleProtocol { }
 
-struct T1_Generic<GenericParam> {
-  class T1_InsideGeneric: Generic<T1_SampleProtocol> { }
-}
-
 class T1_`BackticksName` {}
 
 class T1_`BackticksNameGeneric`<`BackticksGenericParam`> {
