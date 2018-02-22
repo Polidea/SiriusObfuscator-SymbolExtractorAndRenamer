@@ -25,13 +25,18 @@ SymbolsOrError parseOperator(const FuncDecl* Declaration, CharSourceRange Range)
 
   std::vector<SymbolWithRange> Symbols;
 
+  // Creates the symbols for the parameters of the operator implementation
   auto ParametersSymbolsOrError =
     parseSeparateFunctionDeclarationForParameters(Declaration);
   if (auto Error = ParametersSymbolsOrError.takeError()) {
     return std::move(Error);
   }
+  // Parameters for the operator implementation might be always renamed because
+  // they are not part of the interface that the operator defines
   copyToVector(ParametersSymbolsOrError.get(), Symbols);
 
+  // We don't rename the operator if the operator is from other module
+  // than the operator's implementation
   if (auto OperatorDecl = Declaration->getOperatorDecl()) {
     auto OperatorModuleName = moduleName(OperatorDecl);
     if (moduleName(Declaration) != OperatorModuleName) {

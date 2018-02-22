@@ -88,29 +88,39 @@ llvm::Expected<std::string> enclosingTypeName(const Decl* Declaration) {
   }
   return stringError("enclosing context of this declaration is not supported");
 }
-  
+
 template<class T>
-const T* baseOverridenDeclarationWithModules(const T *Declaration,
-                                            std::set<std::string> &Modules) {
+const T* findRecursivelyBaseOverridenDeclarationWithModules
+(const T *Declaration, std::set<std::string> &Modules) {
   static_assert(std::is_base_of<Decl, T>::value, "T is not a subclass of Decl");
   if (auto* OverrideDeclaration = Declaration->getOverriddenDecl()) {
     Modules.insert(moduleName(OverrideDeclaration));
-    return baseOverridenDeclarationWithModules(OverrideDeclaration, Modules);
+    return
+    findRecursivelyBaseOverridenDeclarationWithModules(OverrideDeclaration,
+                                                       Modules);
   } else {
     return Declaration;
   }
 }
+  
+template<class T>
+std::pair<const T*, std::set<std::string>>
+getBaseOverridenDeclarationWithModules(const T *Declaration) {
+  std::set<std::string> Modules;
+  auto Base = findRecursivelyBaseOverridenDeclarationWithModules(Declaration,
+                                                                 Modules);
+  return std::make_pair(Base, Modules);
+}
 
-template const VarDecl*
-baseOverridenDeclarationWithModules(const VarDecl *Declaration,
-                                    std::set<std::string> &Modules);
-template const FuncDecl*
-baseOverridenDeclarationWithModules(const FuncDecl *Declaration,
-                                    std::set<std::string> &Modules);
-
-template const AbstractFunctionDecl*
-baseOverridenDeclarationWithModules(const AbstractFunctionDecl *Declaration,
-                                    std::set<std::string> &Modules);
+template
+std::pair<const VarDecl*, std::set<std::string>>
+getBaseOverridenDeclarationWithModules(const VarDecl *Declaration);
+template
+std::pair<const FuncDecl*, std::set<std::string>>
+getBaseOverridenDeclarationWithModules(const FuncDecl *Declaration);
+template
+std::pair<const AbstractFunctionDecl*, std::set<std::string>>
+getBaseOverridenDeclarationWithModules(const AbstractFunctionDecl *Declaration);
 
 // Determines if the ConstructorDecl represents the Struct Memberwise
 // Initializer. Checks if the declaration is implicit. Also checks if
