@@ -34,11 +34,20 @@ struct CustomCFLocaleKey: CFLocaleKey {
   class CustomGenericNSString: Array<NSString> {}
 }
 
-struct Generic<GenericParam> {
+class Generic<GenericParam> {
   class InsideGeneric: Generic<String> {}
 }
 
 class RenameGenericTypeConcretization: Generic<SampleProtocol> {}
+
+class Generic2<T: SampleProtocol> {}
+class RenameGenericTypeConcretization2: Generic2<DerivedClass> {}
+
+class Generic3<T: SampleProtocol, R: NSString, U: DerivedClass> {}
+class RenameGenericTypeConcretization3: Generic3<DerivedClass, NSString, DerivedClass> {}
+
+class Generic4<T: SampleProtocol where T: DerivedClass> {}
+class RenameGenericTypeConcretization4: Generic4<DerivedClass> {}
 
 class A {
   struct B {}
