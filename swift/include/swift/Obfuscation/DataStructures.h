@@ -143,6 +143,8 @@ struct IndexedSymbolWithRange {
                      const IndexedSymbolWithRange& Right) const;
   };
 };
+
+using SingleSymbolOrError = llvm::Expected<Symbol>;
   
 using SymbolsOrError = llvm::Expected<std::vector<SymbolWithRange>>;
 
