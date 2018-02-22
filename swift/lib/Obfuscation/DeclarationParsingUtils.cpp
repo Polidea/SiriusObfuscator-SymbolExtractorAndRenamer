@@ -47,7 +47,28 @@ std::string functionName(const AbstractFunctionDecl* Declaration) {
     return Declaration->getName().str().str();
 }
 
-ModuleNameAndParts moduleNameAndParts(const Decl *Declaration) {
+llvm::Expected<std::vector<std::string>>
+nominalTypeIdentifierParts(const NominalTypeDecl *Declaration,
+                           const std::string &SymbolName) {
+
+  std::vector<std::string> Parts;
+
+  if (auto *EnumDeclaration = dyn_cast<EnumDecl>(Declaration)) {
+    Parts.push_back("enum." + SymbolName);
+  } else if (auto *ClassDeclaration = dyn_cast<ClassDecl>(Declaration)) {
+    Parts.push_back("class." + SymbolName);
+  } else if (auto *ProtocolDeclaration = dyn_cast<ProtocolDecl>(Declaration)) {
+    Parts.push_back("protocol." + SymbolName);
+  } else if (auto *StructDeclaration = dyn_cast<StructDecl>(Declaration)) {
+    Parts.push_back("struct." + SymbolName);
+  } else {
+    return stringError("found unsupported declaration type");
+  }
+
+  return Parts;
+}
+
+ModuleNameAndParts moduleNameAndIdentifierParts(const Decl *Declaration) {
   std::string ModuleName = moduleName(Declaration);
   std::vector<std::string> Parts;
   Parts.push_back("module");

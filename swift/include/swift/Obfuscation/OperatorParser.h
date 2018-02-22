@@ -6,7 +6,7 @@
 namespace swift {
 namespace obfuscation {
 
-llvm::Expected<Symbol> parse(const OperatorDecl* Declaration);
+SingleSymbolOrError parse(const OperatorDecl* Declaration);
 SymbolsOrError parseOperator(const FuncDecl* Declaration, CharSourceRange Range);
 
 } //namespace obfuscation
