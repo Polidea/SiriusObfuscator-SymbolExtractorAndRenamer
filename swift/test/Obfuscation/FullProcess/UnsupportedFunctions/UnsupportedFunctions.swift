@@ -16,3 +16,16 @@ _ = gcii.method()
 
 let gcsi = GenericClass<SampleClass>()
 _ = gcsi.method()
+
+// override and protocol combined
+class A {
+  func a() {}
+}
+
+protocol P {
+  func a()
+}
+
+class B: A, P {
+  override func a() {}
+}
