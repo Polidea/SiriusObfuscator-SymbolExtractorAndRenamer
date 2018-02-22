@@ -39,8 +39,8 @@ std::string typeName(const NominalTypeDecl* Declaration);
 llvm::Expected<std::string> enclosingTypeName(const Decl* Declaration);
 
 template<class T>
-const T* baseOverridenDeclarationWithModules(const T *Declaration,
-                                            std::set<std::string> &Modules);
+std::pair<const T*, std::set<std::string>>
+getBaseOverridenDeclarationWithModules(const T *Declaration);
 
 bool isMemberwise(const ConstructorDecl* Declaration);
 

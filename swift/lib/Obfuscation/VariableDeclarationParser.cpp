@@ -10,8 +10,9 @@ namespace obfuscation {
 SingleSymbolOrError
 parseOverridenDeclaration(const VarDecl *Declaration,
                           const std::string &ModuleName) {
-  std::set<std::string> Modules;
-  auto Base = baseOverridenDeclarationWithModules(Declaration, Modules);
+  auto BaseWithModules = getBaseOverridenDeclarationWithModules(Declaration);
+  auto Base = BaseWithModules.first;
+  auto Modules = BaseWithModules.second;
   if (Modules.size() == 1 && Modules.count(ModuleName) == 1) {
     return parse(Base);
   } else {

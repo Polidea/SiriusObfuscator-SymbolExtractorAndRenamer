@@ -41,8 +41,11 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
   if (const auto *FunctionDeclaration =
       dyn_cast<AbstractFunctionDecl>(Declaration->getDeclContext())) {
     
-    std::set<std::string> Modules;
-    auto *BaseFunctionDeclaration = baseOverridenDeclarationWithModules(FunctionDeclaration, Modules);
+
+    auto BaseWithModules =
+      getBaseOverridenDeclarationWithModules(FunctionDeclaration);
+    auto BaseFunctionDeclaration = BaseWithModules.first;
+    auto Modules = BaseWithModules.second;
     
     bool OverridenMethodIsFromTheSameModule =
       Modules.size() == 0
