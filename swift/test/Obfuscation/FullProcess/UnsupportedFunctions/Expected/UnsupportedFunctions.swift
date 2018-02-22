@@ -13,3 +13,16 @@ _ = V1_gcii.NF1_method()
 
 let V1_gcsi = T1_GenericClass<T1_SampleClass>()
 _ = V1_gcsi.NF1_method()
+
+// override and protocol combined
+class T1_A {
+  func NF1_a() {}
+}
+
+protocol T1_P {
+  func NF1_a()
+}
+
+class T1_B: T1_A, T1_P {
+  override func NF1_a() {}
+}

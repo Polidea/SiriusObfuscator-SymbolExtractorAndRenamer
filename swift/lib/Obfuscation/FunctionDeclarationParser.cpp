@@ -117,6 +117,8 @@ SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {
   }
   
   if (Declaration->getOverriddenDecl() != nullptr) {
+    // Overriden declaration must be treated separately because
+    // we mustn't rename function that overrides function from different module
     return parseOverridenDeclaration(Declaration,
                                      moduleName(Declaration),
                                      Range);
@@ -130,7 +132,7 @@ SymbolsOrError parse(const FuncDecl* Declaration, CharSourceRange Range) {
                 declarationName(Declaration),
                 ModuleName,
                 SymbolType::NamedFunction);
-  
+
   std::vector<SymbolWithRange> Symbols;
   Symbols.push_back(SymbolWithRange(Symbol, Range));
   

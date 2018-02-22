@@ -1,4 +1,4 @@
-
+//XFAIL: *
 //RUN: %target-prepare-obfuscation-for-file "UnsupportedDropnote" %target-run-full-obfuscation
 
 class Test {}
