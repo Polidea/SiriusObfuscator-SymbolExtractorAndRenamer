@@ -26,8 +26,12 @@ std::string internalParameterName(const ParamDecl *Declaration);
 std::string symbolName(const OperatorDecl *Declaration);
 
 std::string functionName(const AbstractFunctionDecl* Declaration);
+
+llvm::Expected<std::vector<std::string>>
+nominalTypeIdentifierParts(const NominalTypeDecl *Declaration,
+                           const std::string &SymbolName);
   
-ModuleNameAndParts moduleNameAndParts(const Decl *Declaration);
+ModuleNameAndParts moduleNameAndIdentifierParts(const Decl *Declaration);
   
 std::string typeName(const NominalTypeDecl* Declaration);
 
