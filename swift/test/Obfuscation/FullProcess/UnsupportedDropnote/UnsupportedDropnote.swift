@@ -39,6 +39,15 @@ func a() {
   }
 }
 
+//override init
+class Parent{
+  init(p1: String, p2: Int) {}
+}
+class Child: Parent {
+  override init(p1: String, p2: Int){}
+}
+let c = Child(p1: "p1", p2:42)
+
 //protocol stuff
 protocol Proto {
   func hello()
