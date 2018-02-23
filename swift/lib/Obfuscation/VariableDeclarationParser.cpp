@@ -7,6 +7,14 @@
 namespace swift {
 namespace obfuscation {
 
+llvm::Error isDeclarationSupported(const VarDecl *Declaration) {
+  if (Declaration->isCaptureList()) {
+    return stringError("The variable is the element of closure's "
+                       "capture list. It must not be renamed.");
+  }
+  return llvm::Error::success();
+}
+  
 SingleSymbolOrError
 parseOverridenDeclaration(const VarDecl *Declaration,
                           const std::string &ModuleName) {
@@ -63,6 +71,10 @@ variableContextParts(const VarDecl *Declaration) {
 }
 
 SingleSymbolOrError parse(const VarDecl* Declaration) {
+  
+  if (auto Error = isDeclarationSupported(Declaration)) {
+    return std::move(Error);
+  }
   
   if (Declaration->getOverriddenDecl() != nullptr) {
     return parseOverridenDeclaration(Declaration, moduleName(Declaration));
