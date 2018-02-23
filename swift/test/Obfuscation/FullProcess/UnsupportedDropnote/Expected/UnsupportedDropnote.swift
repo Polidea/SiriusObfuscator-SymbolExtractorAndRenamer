@@ -1,17 +1,7 @@
-
 import Foundation
 
 class T1_Test {
   func NF1_testFunc() {}
-}
-
-// capture list is not properly renamed - should be?
-class T1_ClosureTest {
-  let V1_test = T1_Test()
-  
-  lazy var someClosure = {
-    [unowned self, weak V2_test = self.V1_test] in
-  }
 }
 
 // init param FieldA is not renamed if there is a second param with default value

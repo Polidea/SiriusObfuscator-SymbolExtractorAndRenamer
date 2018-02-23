@@ -6,15 +6,6 @@ class Test {
   func testFunc() {}
 }
 
-// capture list is not properly renamed - should be?
-class ClosureTest {
-  let test = Test()
-  
-  lazy var someClosure = {
-    [unowned self, weak test = self.test] in
-  }
-}
-
 // init param FieldA is not renamed if there is a second param with default value
 class Foo {
   var FieldA: String
