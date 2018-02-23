@@ -38,16 +38,6 @@ class Child: Parent {
 }
 let c = Child(p1: "p1", p2:42)
 
-//error name in catch block should not be renamed
-func canThrowErrors() throws {}
-func a() {
-  do {
-    try canThrowErrors()
-  } catch {
-    error
-  }
-}
-
 //protocol stuff
 protocol Proto {
   func hello()

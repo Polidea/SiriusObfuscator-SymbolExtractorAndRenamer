@@ -71,3 +71,24 @@ class PropertiesUsingClass {
   }
 }
 
+// implicit error name in catch block should not be renamed
+func canThrowErrors() throws {}
+func a() {
+  do {
+    try canThrowErrors()
+  } catch {
+    error
+  }
+}
+
+// implicit variable name inside setter in catch block should not be renamed
+struct ImplicitSetter {
+  var foo: String {
+    get {
+      return "foo"
+    }
+    set {
+      newValue
+    }
+  }
+}

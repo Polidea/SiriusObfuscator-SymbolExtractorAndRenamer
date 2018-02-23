@@ -36,16 +36,6 @@ class T1_Child: T1_Parent {
 }
 let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
 
-//error name in catch block should not be renamed
-func NF1_canThrowErrors() throws {}
-func NF1_a() {
-  do {
-    try NF1_canThrowErrors()
-  } catch {
-    error
-  }
-}
-
 //protocol stuff
 protocol T1_Proto {
   func NF1_hello()
