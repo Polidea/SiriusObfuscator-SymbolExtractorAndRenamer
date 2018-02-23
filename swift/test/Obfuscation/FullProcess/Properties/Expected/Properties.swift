@@ -68,3 +68,25 @@ class T1_PropertiesUsingClass {
     V2_map["42"] = V2_array[0]
   }
 }
+
+// implicit error name in catch block should not be renamed
+func NF1_canThrowErrors() throws {}
+func NF1_a() {
+  do {
+    try NF1_canThrowErrors()
+  } catch {
+    error
+  }
+}
+
+// implicit variable name inside setter in catch block should not be renamed
+struct T1_ImplicitSetter {
+  var V1_foo: String {
+    get {
+      return "foo"
+    }
+    set {
+      newValue
+    }
+  }
+}
