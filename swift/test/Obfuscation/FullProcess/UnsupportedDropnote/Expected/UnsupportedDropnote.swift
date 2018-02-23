@@ -27,15 +27,6 @@ final class T1_DebugBlock {
   }
 }
 
-//override init
-class T1_Parent{
-  init(SP1_p1: String, SP1_p2: Int) {}
-}
-class T1_Child: T1_Parent {
-  override init(SP1_p1: String, SP1_p2: Int){}
-}
-let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
-
 //protocol stuff
 protocol T1_Proto {
   func NF1_hello()
