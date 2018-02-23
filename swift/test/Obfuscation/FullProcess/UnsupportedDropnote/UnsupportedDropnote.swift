@@ -29,16 +29,6 @@ final class DebugBlock {
   }
 }
 
-//error name in catch block should not be renamed
-func canThrowErrors() throws {}
-func a() {
-  do {
-    try canThrowErrors()
-  } catch {
-    error
-  }
-}
-
 //protocol stuff
 protocol Proto {
   func hello()

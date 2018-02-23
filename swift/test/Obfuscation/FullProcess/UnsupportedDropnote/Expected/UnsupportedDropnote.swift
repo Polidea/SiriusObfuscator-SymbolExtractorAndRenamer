@@ -27,16 +27,6 @@ final class T1_DebugBlock {
   }
 }
 
-//error name in catch block should not be renamed
-func NF1_canThrowErrors() throws {}
-func NF1_a() {
-  do {
-    try NF1_canThrowErrors()
-  } catch {
-    error
-  }
-}
-
 //protocol stuff
 protocol T1_Proto {
   func NF1_hello()
