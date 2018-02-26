@@ -17,7 +17,7 @@ SymbolsOrError
 parseSeparateFunctionDeclarationForParameters(const AbstractFunctionDecl* Declaration);
   
 SymbolsOrError
-parseFunctionFromCallExpressionForParameters(const FuncDecl* Declaration);
+parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl* Declaration);
 
 SingleSymbolOrError
 symbolFromMemberwiseConstructorParameter(const ParamDecl* Parameter);

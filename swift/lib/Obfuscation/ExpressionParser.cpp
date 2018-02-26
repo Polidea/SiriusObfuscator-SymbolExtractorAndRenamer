@@ -5,15 +5,27 @@
 namespace swift {
 namespace obfuscation {
   
-llvm::Expected<FuncDecl*>
+llvm::Expected<AbstractFunctionDecl*>
 declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
+  auto *App = dyn_cast<ApplyExpr>(CallExpression);
+  
   if (auto *DotSyntaxCallExpression =
         dyn_cast<DotSyntaxCallExpr>(CallExpression->getFn())) {
-    if (auto *DeclarationRefExpression =
-          dyn_cast<DeclRefExpr>(DotSyntaxCallExpression->getFn())) {
+    if(auto *OtherConstructor =
+       dyn_cast<OtherConstructorDeclRefExpr>(DotSyntaxCallExpression->getFn())) {
+      // It's a super call like super.init()
       if (auto *FunctionDeclaration =
-            dyn_cast<FuncDecl>(DeclarationRefExpression->getDecl())) {
+          dyn_cast<AbstractFunctionDecl>(OtherConstructor->getDecl())) {
         return FunctionDeclaration;
+      }
+    } else {
+      // It's not a super call
+      if (auto *DeclarationRefExpression =
+          dyn_cast<DeclRefExpr>(DotSyntaxCallExpression->getFn())) {
+        if (auto *FunctionDeclaration =
+            dyn_cast<AbstractFunctionDecl>(DeclarationRefExpression->getDecl())) {
+          return FunctionDeclaration;
+        }
       }
     }
   }

@@ -77,5 +77,11 @@ class ProtocolFunClass: ProtocolFunc {
   func pFunc(pFunc: Int) {}
 }
 
-
-
+//overriden constructors
+class Parent{
+  init(p1: String, p2: Int) {}
+}
+class Child: Parent {
+  override init(p1: String, p2: Int) { super.init(p1: p1, p2: p2) }
+}
+let c = Child(p1: "p1", p2:42)
