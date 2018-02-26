@@ -81,9 +81,7 @@ class T1_Parent{
   init(SP1_p1: String, SP1_p2: Int) {}
   init(EP3_foo IP2_foo:Int, EP4_foo IP2_bar: T1_SampleClass) { }
   init(EP1_extp1 IP1_p1: String, EP1_extp2 IP1_p2: Int) {}
-  init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {}
-  
-  func NF1_ffff(EP1_pa IP1_pa: SampleClass, SP1_pu: Int) {}
+  init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {}  
 }
 class T1_Child: T1_Parent {
   override init(SP1_p1: String, SP1_p2: Int) {
@@ -97,10 +95,6 @@ class T1_Child: T1_Parent {
   }
   override init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {
     super.init(IP1_p1, EP1_extp: IP1_p2)
-  }
-  
-  override func NF1_ffff(EP1_pa IP1_pa: SampleClass, SP1_pu: Int) {
-    super.ffff(EP1_pa: EP1_pa, SP1_pu: SP1_pu)
   }
 }
 let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
