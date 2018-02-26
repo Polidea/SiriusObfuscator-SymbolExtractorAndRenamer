@@ -83,6 +83,8 @@ class Parent{
   init(foo foo:Int, foo bar: SampleClass) { }
   init(extp1 p1: String, extp2 p2: Int) {}
   init(_ p1: String, extp p2: Int) {}
+  
+  func ffff(pa pa: SampleClass, pu: Int) {}
 }
 class Child: Parent {
   override init(p1: String, p2: Int) {
@@ -96,6 +98,10 @@ class Child: Parent {
   }
   override init(_ p1: String, extp p2: Int) {
     super.init(p1, extp: p2)
+  }
+  
+  override func ffff(pa pa: SampleClass, pu: Int) {
+    super.ffff(pa: pa, pu: pu)
   }
 }
 let c = Child(p1: "p1", p2:42)
