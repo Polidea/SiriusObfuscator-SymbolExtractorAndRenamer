@@ -26,9 +26,7 @@ llvm::Expected<std::string> position(const ParamDecl *Declaration,
         return "list" + std::to_string(ListIndex) +
                "_parameter" + std::to_string(ParameterIndex);
       }
-      
     }
-    
   }
   
   return stringError("Couldn't find parameter position");
@@ -170,7 +168,7 @@ parseSeparateFunctionDeclarationForParameters(const AbstractFunctionDecl* Declar
 }
   
 SymbolsOrError
-parseFunctionFromCallExpressionForParameters(const FuncDecl* Declaration) {
+parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl* Declaration) {
   
   auto SymbolsOrError = parametersSymbolsFromFunction(Declaration);
   
