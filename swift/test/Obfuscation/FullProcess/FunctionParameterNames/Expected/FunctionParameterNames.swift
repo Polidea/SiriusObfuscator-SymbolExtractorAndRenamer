@@ -75,3 +75,12 @@ protocol T1_ProtocolFunc {
 class T1_ProtocolFunClass: T1_ProtocolFunc {
   func NF1_pFunc(SP1_pFunc: Int) {}
 }
+
+//overriden constructors
+class T1_Parent{
+  init(SP1_p1: String, SP1_p2: Int) {}
+}
+class T1_Child: T1_Parent {
+  override init(SP1_p1: String, SP1_p2: Int) { super.init(SP1_p1: SP1_p1, SP1_p2: SP1_p2) }
+}
+let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
