@@ -79,8 +79,25 @@ class T1_ProtocolFunClass: T1_ProtocolFunc {
 //overriden constructors
 class T1_Parent{
   init(SP1_p1: String, SP1_p2: Int) {}
+  init(EP3_foo IP2_foo:Int, EP4_foo IP2_bar: T1_SampleClass) { }
+  init(EP1_extp1 IP1_p1: String, EP1_extp2 IP1_p2: Int) {}
+  init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {}
 }
 class T1_Child: T1_Parent {
-  override init(SP1_p1: String, SP1_p2: Int) { super.init(SP1_p1: SP1_p1, SP1_p2: SP1_p2) }
+  override init(SP1_p1: String, SP1_p2: Int) {
+    super.init(SP1_p1: SP1_p1, SP1_p2: SP1_p2)
+  }
+  override init(EP3_foo IP2_foo:Int, EP4_foo IP2_bar: T1_SampleClass) {
+    super.init(EP3_foo: IP2_foo, EP4_foo: IP2_bar)
+  }
+  override init(EP1_extp1 IP1_p1: String, EP1_extp2 IP1_p2: Int) {
+    super.init(EP1_extp1: IP1_p1, EP1_extp2: IP1_p2)
+  }
+  override init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {
+    super.init(IP1_p1, EP1_extp: IP1_p2)
+  }
 }
 let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
+let V1_c2 = T1_Child(EP3_foo: 42, EP3_foo:T1_SampleClass())
+let V1_c3 = T1_Child(EP1_extp1: "p1", EP1_extp2:42)
+let V1_c4 = T1_Child("p1", EP1_extp:42)
