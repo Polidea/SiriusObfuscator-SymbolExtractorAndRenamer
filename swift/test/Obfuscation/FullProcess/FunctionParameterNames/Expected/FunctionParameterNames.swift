@@ -101,3 +101,14 @@ let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
 let V1_c2 = T1_Child(EP3_foo: 42, EP3_foo:T1_SampleClass())
 let V1_c3 = T1_Child(EP1_extp1: "p1", EP1_extp2:42)
 let V1_c4 = T1_Child("p1", EP1_extp:42)
+
+//convenience constructor
+class T1_SuperTest {
+  init(SP1_convP1: Int) {}
+  
+  convenience init(SP2_convP1: Int, SP1_convP2: String) {
+    self.init(SP1_convP1: SP2_convP1)
+  }
+}
+
+let V1_conv = T1_SuperTest(SP2_convP1:1, SP1_convP2:"asd")
