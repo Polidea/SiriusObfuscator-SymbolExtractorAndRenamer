@@ -102,14 +102,3 @@ let c = Child(p1: "p1", p2:42)
 let c2 = Child(foo: 42, foo:SampleClass())
 let c3 = Child(extp1: "p1", extp2:42)
 let c4 = Child("p1", extp:42)
-
-//protocol constructor
-protocol ProtoInit {
-  init(protoInitParamA: String, protoInitParamB: Int)
-}
-
-class ProtoInitClass: ProtoInit {
-  required init(protoInitParamA: String, protoInitParamB: Int) {
-  }
-}
-let pic = ProtoInitClass(protoInitParamA: "", protoInitParamB: 42)
