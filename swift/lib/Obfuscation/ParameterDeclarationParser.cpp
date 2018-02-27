@@ -22,13 +22,14 @@ llvm::Expected<std::string> position(const ParamDecl *Declaration,
          ++ParameterIndex) {
       
       auto *ParamDeclaration = ParameterList->get(ParameterIndex);
-      if (ParamDeclaration == Declaration) {
+      
+      //this comparison may be wrong but I couldn't come up
+      //with a sample code that breaks it
+      if (Declaration->getName() == ParamDeclaration->getName()) {
         return "list" + std::to_string(ListIndex) +
                "_parameter" + std::to_string(ParameterIndex);
       }
-      
     }
-    
   }
   
   return stringError("Couldn't find parameter position");
@@ -170,7 +171,7 @@ parseSeparateFunctionDeclarationForParameters(const AbstractFunctionDecl* Declar
 }
   
 SymbolsOrError
-parseFunctionFromCallExpressionForParameters(const FuncDecl* Declaration) {
+parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl* Declaration) {
   
   auto SymbolsOrError = parametersSymbolsFromFunction(Declaration);
   

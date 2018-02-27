@@ -77,5 +77,40 @@ class ProtocolFunClass: ProtocolFunc {
   func pFunc(pFunc: Int) {}
 }
 
+//overriden constructors
+class Parent{
+  init(p1: String, p2: Int) {}
+  init(foo foo:Int, foo bar: SampleClass) { }
+  init(extp1 p1: String, extp2 p2: Int) {}
+  init(_ p1: String, extp p2: Int) {}
+}
+class Child: Parent {
+  override init(p1: String, p2: Int) {
+    super.init(p1: p1, p2: p2)
+  }
+  override init(foo foo:Int, foo bar: SampleClass) {
+    super.init(foo: foo, foo: bar)
+  }
+  override init(extp1 p1: String, extp2 p2: Int) {
+    super.init(extp1: p1, extp2: p2)
+  }
+  override init(_ p1: String, extp p2: Int) {
+    super.init(p1, extp: p2)
+  }
+}
+let c = Child(p1: "p1", p2:42)
+let c2 = Child(foo: 42, foo:SampleClass())
+let c3 = Child(extp1: "p1", extp2:42)
+let c4 = Child("p1", extp:42)
 
+//convenience constructor
+class SuperTest {
+  init(convP1: Int) {}
+  
+  convenience init(convP1: Int, convP2: String) {
+    self.init(convP1: convP1)
+  }
+}
+
+let conv = SuperTest(convP1:1, convP2:"asd")
 
