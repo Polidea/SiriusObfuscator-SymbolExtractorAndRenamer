@@ -101,14 +101,3 @@ let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
 let V1_c2 = T1_Child(EP3_foo: 42, EP3_foo:T1_SampleClass())
 let V1_c3 = T1_Child(EP1_extp1: "p1", EP1_extp2:42)
 let V1_c4 = T1_Child("p1", EP1_extp:42)
-
-//protocol constructor
-protocol T1_ProtoInit {
-  init(SP1_protoInitParamA: String, SP1_protoInitParamB: Int)
-}
-
-class T1_ProtoInitClass: T1_ProtoInit {
-  required init(SP1_protoInitParamA: String, SP1_protoInitParamB: Int) {
-  }
-}
-let V1_pic = T1_ProtoInitClass(SP1_protoInitParamA: "", SP1_protoInitParamB: 42)
