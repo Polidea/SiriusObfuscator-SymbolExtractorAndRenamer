@@ -7,7 +7,6 @@ namespace obfuscation {
   
 llvm::Expected<AbstractFunctionDecl*>
 declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
-  auto *App = dyn_cast<ApplyExpr>(CallExpression);
   
   if (auto *DotSyntaxCallExpression =
         dyn_cast<DotSyntaxCallExpr>(CallExpression->getFn())) {
