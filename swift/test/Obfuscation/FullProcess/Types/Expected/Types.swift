@@ -68,3 +68,24 @@ extension NSString: T1_Proto {}
 extension T1_Proto where Self: NSString {
   func NF1_hello() {}
 }
+
+// enum
+enum T1_SampleEnum: Int {
+  case case1, case2
+}
+
+let _ = T1_SampleEnum.case1
+let _ = T1_SampleEnum(rawValue: 1)
+
+enum T1_EnumWithUnnamedAssoc {
+  case case1(Int, String)
+}
+
+let V1_test: T1_EnumWithUnnamedAssoc = .case1(0, "")
+
+switch V1_test {
+  // variables created with value binding doesn't have to be renamed
+  case .case1(let bound1, let bound2):
+    print(bound1)
+    print(bound2)
+}
