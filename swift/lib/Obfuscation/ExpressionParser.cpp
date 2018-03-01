@@ -1,6 +1,8 @@
 #include "swift/Obfuscation/ExpressionParser.h"
 #include "swift/Obfuscation/ParameterDeclarationParser.h"
+#include "swift/Obfuscation/NominalTypeDeclarationParser.h"
 #include "swift/Obfuscation/Utils.h"
+#include "swift/Obfuscation/DeclarationParsingUtils.h"
 
 namespace swift {
 namespace obfuscation {
@@ -119,11 +121,80 @@ SymbolsOrError parse(CallExpr* CallExpression) {
   }
   return stringError("Unsupported type of expression");
 }
+  
+// This function handles the specific case of `is` cast of non-optional
+// to optional type or vice versa. In contrast to other castings
+// (represented as is_subtype_expr), this kind of cast is represented
+// in AST as enum_is_case_expr node. When parsing this kind of cast
+// we don't get the callback in SymbolsWalkerAndCollector with NominalTypeDecl
+// representing the CastType (cast-to type) so we have to extract it
+// from the EnumIsCaseExpression.
+SymbolsOrError parse(EnumIsCaseExpr* EnumIsCaseExpression) {
+  NominalTypeDecl *CastTypeDeclaration = nullptr;
+  SourceLoc IsKeywordSourceLoc;
+  
+  // This callback invoked using forEachChildExpr() is used to extract the
+  // declaration of the CastType and the location of the `is` keyword.
+  const std::function<Expr*(Expr*)> &callback =
+    [&CastTypeDeclaration, &IsKeywordSourceLoc](Expr* Child) -> Expr* {
+      
+    // We're looking for CoerceExpr (non-optional to optional type cast)
+    // or ConditionalCheckedCastExpr (optional to non-optional type cast)
+    // which both are subclasses of ExplicitCastExpr.
+    if (auto *ExplicitCastExpression = dyn_cast<ExplicitCastExpr>(Child)) {
+      
+      Type CastType = ExplicitCastExpression->getCastTypeLoc().getType();
+      
+      // The data representing the location of the CastType in the expression
+      // seems to be impossible to retrieve from the EnumIsCastExpression
+      // and its subexpressions. We have to calculate the CastType location
+      // later using `is` keyword and CastType name.
+      IsKeywordSourceLoc = ExplicitCastExpression->getAsLoc();
+      
+      if (ConditionalCheckedCastExpr::classof(ExplicitCastExpression)) {
+        CastTypeDeclaration = CastType->getAnyNominal();
+      } else if (CoerceExpr::classof(ExplicitCastExpression)) {
+        CastTypeDeclaration = CastType->getOptionalObjectType()->getAnyNominal();
+      }
+      
+    }
+    return Child;
+  };
+  EnumIsCaseExpression->forEachChildExpr(callback);
+  
+  if (CastTypeDeclaration != nullptr) {
+    auto SingleSymbolOrError = parse(CastTypeDeclaration);
+    if (auto Error = SingleSymbolOrError.takeError()) {
+      return std::move(Error);
+    }
+    auto CastTypeSymbol = SingleSymbolOrError.get();
+    
+    auto CastTypeName = typeName(CastTypeDeclaration);
+    auto RangeOrError =
+      rangeOfFirstOccurenceOfStringInSourceLoc(CastTypeName,
+                                               IsKeywordSourceLoc);
+    if (auto Error = RangeOrError.takeError()) {
+      return std::move(Error);
+    }
+    auto CastTypeRange = RangeOrError.get();
+    
+    std::vector<SymbolWithRange> Symbols;
+    Symbols.push_back(SymbolWithRange(CastTypeSymbol, CastTypeRange));
+    return Symbols;
+  }
+  
+  return stringError("Failed to extract the cast-to type symbol"
+                     "from the EnumIsCase expression");
+}
 
 SymbolsOrError extractSymbol(Expr* Expression) {
   if (auto *CallExpression = dyn_cast<CallExpr>(Expression)) {
     return parse(CallExpression);
+  } else if (auto *EnumIsCaseExpression = dyn_cast<EnumIsCaseExpr>(Expression)) {
+    // Expression of `is` casting non-optional to optional type or vice versa.
+    return parse(EnumIsCaseExpression);
   }
+  
   return stringError("Unsupported type of expression");
 }
   

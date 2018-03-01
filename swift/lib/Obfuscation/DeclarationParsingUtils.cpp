@@ -142,6 +142,25 @@ bool isMemberwiseConstructorParameter(const ParamDecl* Declaration) {
   }
   return false;
 }
+  
+llvm::Expected<CharSourceRange>
+rangeOfFirstOccurenceOfStringInSourceLoc(std::string String,
+                                         SourceLoc StartSourceLoc) {
+  auto StartLoc =
+    static_cast<const char*>(StartSourceLoc.getOpaquePointerValue());
+  std::string StartLocString(StartLoc);
+  
+  auto FoundPosition = StartLocString.find(String);
+  if (FoundPosition == std::string::npos) {
+    return stringError("Failed to find the string occurence"
+                       "in source location");
+  }
+  
+  auto FirstOccurenceSourceLoc = StartSourceLoc.getAdvancedLoc(FoundPosition);
+  auto Range = CharSourceRange(FirstOccurenceSourceLoc, String.size());
+  
+  return Range;
+}
 
 } //namespace obfuscation
 } //namespace swift
