@@ -9,15 +9,22 @@
 
 namespace swift {
 namespace obfuscation {
-  
+
 llvm::Expected<std::string>
-position(const ParamDecl *Declaration,
-         const AbstractFunctionDecl *FunctionDeclaration) {
+getIdentifierWithParameterPosition(const ParamDecl *Declaration,
+                                   const AbstractFunctionDecl *
+                                    FunctionDeclaration) {
   
   auto ParameterLists = FunctionDeclaration->getParameterLists();
+
+  // We use index, not iterator, because we want to use the index
+  // to build identifier
   for (unsigned ListIndex = 0; ListIndex < ParameterLists.size(); ++ListIndex) {
     
     auto *ParameterList = ParameterLists[ListIndex];
+
+    // We use index, not iterator, because we want to use the index
+    // to build identifier
     for (unsigned ParameterIndex = 0;
          ParameterIndex < ParameterList->size();
          ++ParameterIndex) {
@@ -35,20 +42,19 @@ position(const ParamDecl *Declaration,
   
   return stringError("Couldn't find parameter position");
 }
-  
+
 SymbolsOrError parse(const ParamDecl* Declaration) {
+
   if (const auto *FunctionDeclaration =
-      dyn_cast<AbstractFunctionDecl>(Declaration->getDeclContext())) {
-    
+        dyn_cast<AbstractFunctionDecl>(Declaration->getDeclContext())) {
+
     auto BaseWithModules =
       getBaseOverridenDeclarationWithModules(FunctionDeclaration);
     auto BaseFunctionDeclaration = BaseWithModules.first;
     auto Modules = BaseWithModules.second;
+
     
-    bool OverridenMethodIsFromTheSameModule =
-      Modules.size() == 0
-      || (Modules.size() == 1 && Modules.count(moduleName(Declaration)) == 1);
-    
+    auto ModuleName = moduleName(Declaration);
     auto ExternalName = externalParameterName(Declaration);
     auto InternalName = internalParameterName(Declaration);
     
@@ -59,16 +65,20 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
     std::string BaseFunctionModuleName = BaseModuleAndParts.first;
     std::vector<std::string> BaseParts = BaseModuleAndParts.second;
 
-    auto BasePositionOrError = position(Declaration, BaseFunctionDeclaration);
+    auto BasePositionOrError =
+      getIdentifierWithParameterPosition(Declaration, BaseFunctionDeclaration);
     if (auto Error = BasePositionOrError.takeError()) {
       return std::move(Error);
     } else {
       BaseParts.push_back("parameter.position." + BasePositionOrError.get());
     }
-    
+
+    // We check if parameter has a place that it's declared that we can reach
     if (Declaration->getNameLoc().isValid()) {
-      if (Declaration->getArgumentNameLoc().isInvalid()
-          && OverridenMethodIsFromTheSameModule) {
+
+      auto IsSingle = Declaration->getArgumentNameLoc().isInvalid()
+                   && isOverriddenMethodFromTheSameModule(Modules, ModuleName);
+      if (IsSingle) {
         
         BaseParts.push_back("single." + InternalName);
         CharSourceRange Range(Declaration->getNameLoc(),
@@ -80,8 +90,12 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
         Symbols.push_back(SymbolWithRange(Symbol, Range));
         
       } else {
-        
-        if (!ExternalName.empty() && OverridenMethodIsFromTheSameModule) {
+
+        auto IsExternal = !ExternalName.empty()
+                       && isOverriddenMethodFromTheSameModule(Modules,
+                                                              ModuleName);
+        if (IsExternal) {
+          auto ExternalParts = BaseParts;
           
           BaseParts.push_back("external." + ExternalName);
           CharSourceRange ExternalRange(Declaration->getArgumentNameLoc(),
@@ -106,8 +120,8 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
         std::vector<std::string> OriginalParts =
           functionIdentifierParts(FunctionDeclaration).second;
 
-        auto OriginalPositionOrError = position(Declaration,
-                                                FunctionDeclaration);
+        auto OriginalPositionOrError =
+          getIdentifierWithParameterPosition(Declaration, FunctionDeclaration);
         if (auto Error = OriginalPositionOrError.takeError()) {
           return std::move(Error);
         } else {
@@ -130,6 +144,31 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
   }
   
   return stringError("Couldn't identify what function parameter belong to");
+}
+
+
+SingleSymbolOrError
+symbolFromMemberwiseConstructorParameter(const ParamDecl* Parameter) {
+  auto *Context = Parameter->getDeclContext();
+  if (const auto *Constructor = dyn_cast<ConstructorDecl>(Context)) {
+    auto *StructDeclaration =
+    Constructor->getResultInterfaceType()->getStructOrBoundGenericStruct();
+    if (StructDeclaration == nullptr) {
+      return stringError("The supposedly memberwise constructor is not "
+                         "memberwise, because it doesn't come from struct");
+    }
+    auto Properties = StructDeclaration->getStoredProperties();
+    for (auto Variable : Properties) {
+      if (declarationName(Variable) == declarationName(Parameter)) {
+        return parse(Variable);
+      }
+    }
+    return stringError("Failed to find struct property with the same name as "
+                       "memberwise constructor parameter");
+  } else {
+    return stringError("Failed to parse constructor declaration"
+                       "from parameter");
+  }
 }
   
 SymbolsOrError
@@ -163,30 +202,6 @@ parametersSymbolsFromFunction(const AbstractFunctionDecl* Declaration) {
   }
 
   return Symbols;
-}
-
-SingleSymbolOrError
-symbolFromMemberwiseConstructorParameter(const ParamDecl* Parameter) {
-  auto *Context = Parameter->getDeclContext();
-  if (const auto *Constructor = dyn_cast<ConstructorDecl>(Context)) {
-    auto *StructDeclaration =
-      Constructor->getResultInterfaceType()->getStructOrBoundGenericStruct();
-    if (StructDeclaration == nullptr) {
-      return stringError("The supposedly memberwise constructor is not "
-                         "memberwise, because it doesn't come from struct");
-    }
-    auto Properties = StructDeclaration->getStoredProperties();
-    for (auto Variable : Properties) {
-      if (declarationName(Variable) == declarationName(Parameter)) {
-        return parse(Variable);
-      }
-    }
-    return stringError("Failed to find struct property with the same name as "
-                "memberwise constructor parameter");
-  } else {
-    return stringError("Failed to parse constructor declaration"
-                       "from parameter");
-  }
 }
 
 SymbolsOrError
