@@ -10,8 +10,9 @@
 namespace swift {
 namespace obfuscation {
   
-llvm::Expected<std::string> position(const ParamDecl *Declaration,
-                                     const AbstractFunctionDecl *FunctionDeclaration) {
+llvm::Expected<std::string>
+position(const ParamDecl *Declaration,
+         const AbstractFunctionDecl *FunctionDeclaration) {
   
   auto ParameterLists = FunctionDeclaration->getParameterLists();
   for (unsigned ListIndex = 0; ListIndex < ParameterLists.size(); ++ListIndex) {
@@ -36,13 +37,9 @@ llvm::Expected<std::string> position(const ParamDecl *Declaration,
 }
   
 SymbolsOrError parse(const ParamDecl* Declaration) {
-  if (Declaration->isImplicit()) {
-    return stringError("We shouldn't rename implicit parameters");
-  }
   if (const auto *FunctionDeclaration =
       dyn_cast<AbstractFunctionDecl>(Declaration->getDeclContext())) {
     
-
     auto BaseWithModules =
       getBaseOverridenDeclarationWithModules(FunctionDeclaration);
     auto BaseFunctionDeclaration = BaseWithModules.first;
@@ -56,63 +53,74 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
     auto InternalName = internalParameterName(Declaration);
     
     std::vector<SymbolWithRange> Symbols;
-    
-    std::string FunctionName = declarationName(BaseFunctionDeclaration);
-    auto ModuleAndParts = functionIdentifierParts(BaseFunctionDeclaration);
-    std::string FunctionModuleName = ModuleAndParts.first;
-    std::vector<std::string> Parts = ModuleAndParts.second;
-    
-    auto PositionOrError = position(Declaration, BaseFunctionDeclaration);
-    if (auto Error = PositionOrError.takeError()) {
+
+    std::string BaseFunctionName = declarationName(BaseFunctionDeclaration);
+    auto BaseModuleAndParts = functionIdentifierParts(BaseFunctionDeclaration);
+    std::string BaseFunctionModuleName = BaseModuleAndParts.first;
+    std::vector<std::string> BaseParts = BaseModuleAndParts.second;
+
+    auto BasePositionOrError = position(Declaration, BaseFunctionDeclaration);
+    if (auto Error = BasePositionOrError.takeError()) {
       return std::move(Error);
     } else {
-      Parts.push_back("parameter.position." + PositionOrError.get());
+      BaseParts.push_back("parameter.position." + BasePositionOrError.get());
     }
     
     if (Declaration->getNameLoc().isValid()) {
       if (Declaration->getArgumentNameLoc().isInvalid()
           && OverridenMethodIsFromTheSameModule) {
         
-        Parts.push_back("single." + InternalName);
+        BaseParts.push_back("single." + InternalName);
         CharSourceRange Range(Declaration->getNameLoc(),
                               InternalName.length());
-        Symbol Symbol(combineIdentifier(Parts),
+        Symbol Symbol(combineIdentifier(BaseParts),
                       InternalName,
-                      FunctionModuleName,
+                      BaseFunctionModuleName,
                       SymbolType::SingleParameter);
         Symbols.push_back(SymbolWithRange(Symbol, Range));
         
       } else {
         
         if (!ExternalName.empty() && OverridenMethodIsFromTheSameModule) {
-          auto ExternalParts = Parts;
           
-          ExternalParts.push_back("external." + ExternalName);
+          BaseParts.push_back("external." + ExternalName);
           CharSourceRange ExternalRange(Declaration->getArgumentNameLoc(),
                                         ExternalName.length());
-          Symbol ExternalSymbol(combineIdentifier(ExternalParts),
+          Symbol ExternalSymbol(combineIdentifier(BaseParts),
                                 ExternalName,
-                                FunctionModuleName,
+                                BaseFunctionModuleName,
                                 SymbolType::ExternalParameter);
           Symbols.push_back(SymbolWithRange(ExternalSymbol, ExternalRange));
           
         }
         
-        //  TODO: improve handling internal parameters cases:
-        //  Case1: if we have two implementations of the same protocol
-        //  method in the same module and those implementations have the same
-        //  internal parameter name - this internal parameter will be renamed
-        //  to the same obfuscated name in both implementations.
-        //  Case2: internal parameter in protocol method implementation,
+        //  TODO: improve handling internal parameters in following case:
+        //  internal parameter in protocol method implementation,
         //  where declaration and implementation are in different modules -
         //  Symbol object will have different module name in Identifier
         //  and in Module field.
-        Parts.push_back("internal." + InternalName);
+
+        std::string OriginalFunctionName = declarationName(FunctionDeclaration);
+        std::string OriginalFunctionModuleName =
+          moduleName(FunctionDeclaration);
+        std::vector<std::string> OriginalParts =
+          functionIdentifierParts(FunctionDeclaration).second;
+
+        auto OriginalPositionOrError = position(Declaration,
+                                                FunctionDeclaration);
+        if (auto Error = OriginalPositionOrError.takeError()) {
+          return std::move(Error);
+        } else {
+          auto OriginalPosition = OriginalPositionOrError.get();
+          OriginalParts.push_back("parameter.position." + OriginalPosition);
+        }
+
+        OriginalParts.push_back("internal." + InternalName);
         CharSourceRange InternalRange(Declaration->getNameLoc(),
                                       InternalName.length());
-        Symbol InternalSymbol(combineIdentifier(Parts),
+        Symbol InternalSymbol(combineIdentifier(OriginalParts),
                               InternalName,
-                              moduleName(Declaration),
+                              OriginalFunctionModuleName,
                               SymbolType::InternalParameter);
         Symbols.push_back(SymbolWithRange(InternalSymbol, InternalRange));
       }
@@ -124,14 +132,26 @@ SymbolsOrError parse(const ParamDecl* Declaration) {
   return stringError("Couldn't identify what function parameter belong to");
 }
   
-SymbolsOrError parametersSymbolsFromFunction(const AbstractFunctionDecl* Declaration) {
+SymbolsOrError
+parametersSymbolsFromFunction(const AbstractFunctionDecl* Declaration) {
     
   std::vector<SymbolWithRange> Symbols;
 
   auto ParameterLists = Declaration->getParameterLists();
   for (auto *ParameterList : ParameterLists) {
     for (auto *Parameter : *ParameterList) {
-      if (!Parameter->isImplicit()) {
+      if (isMemberwiseConstructorParameter(Parameter)) {
+        auto SingleSymbolOrError =
+          symbolFromMemberwiseConstructorParameter(Parameter);
+        if (auto Error = SingleSymbolOrError.takeError()) {
+          llvm::consumeError(std::move(Error));
+        } else {
+          CharSourceRange Range(Parameter->getNameLoc(),
+                                SingleSymbolOrError.get().Name.length());
+          SymbolWithRange SymbolWithRange(SingleSymbolOrError.get(), Range);
+          Symbols.push_back(SymbolWithRange);
+        }
+      } else if (!Parameter->isImplicit()) {
         auto SymbolsOrError = parse(Parameter);
         if (auto Error = SymbolsOrError.takeError()) {
           return std::move(Error);
@@ -150,7 +170,11 @@ symbolFromMemberwiseConstructorParameter(const ParamDecl* Parameter) {
   auto *Context = Parameter->getDeclContext();
   if (const auto *Constructor = dyn_cast<ConstructorDecl>(Context)) {
     auto *StructDeclaration =
-    Constructor->getResultInterfaceType()->getStructOrBoundGenericStruct();
+      Constructor->getResultInterfaceType()->getStructOrBoundGenericStruct();
+    if (StructDeclaration == nullptr) {
+      return stringError("The supposedly memberwise constructor is not "
+                         "memberwise, because it doesn't come from struct");
+    }
     auto Properties = StructDeclaration->getStoredProperties();
     for (auto Variable : Properties) {
       if (declarationName(Variable) == declarationName(Parameter)) {
@@ -166,12 +190,14 @@ symbolFromMemberwiseConstructorParameter(const ParamDecl* Parameter) {
 }
 
 SymbolsOrError
-parseSeparateFunctionDeclarationForParameters(const AbstractFunctionDecl* Declaration) {
+parseSeparateFunctionDeclarationForParameters(const AbstractFunctionDecl*
+                                                Declaration) {
   return parametersSymbolsFromFunction(Declaration);
 }
   
 SymbolsOrError
-parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl* Declaration) {
+parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl*
+                                              Declaration) {
   
   auto SymbolsOrError = parametersSymbolsFromFunction(Declaration);
   
@@ -193,6 +219,11 @@ parseFunctionFromCallExpressionForParameters(const AbstractFunctionDecl* Declara
 
 SymbolsOrError parseSeparateDeclarationWithRange(const ParamDecl* Declaration,
                                                  CharSourceRange Range) {
+
+  if (Declaration->isImplicit()) {
+    return stringError("We must not rename the implicit parameters "
+                       "at the usage place.");
+  }
   
   auto SymbolsOrError = parse(Declaration);
   if (auto Error = SymbolsOrError.takeError()) {
@@ -213,49 +244,6 @@ SymbolsOrError parseSeparateDeclarationWithRange(const ParamDecl* Declaration,
   }
   return Result;
 }
-
-llvm::Expected<SymbolWithRange> buildSymbol(Identifier Name, ValueDecl *Decl,
-                                            CharSourceRange Range) {
-  if (const auto *FunctionDecl = dyn_cast<AbstractFunctionDecl>(Decl)) {
-    auto ParameterLists = FunctionDecl->getParameterLists();
-    auto ParameterName = Name.str();
-    
-    for (auto *ParameterList: ParameterLists) {
-      for (auto *Parameter : *ParameterList) {
-        if (ParameterName == internalParameterName(Parameter)
-            || ParameterName == externalParameterName(Parameter)) {
-          
-          if (isMemberwiseConstructorParameter(Parameter)) {
-            auto SymbolOrError =
-            symbolFromMemberwiseConstructorParameter(Parameter);
-            if (auto Error = SymbolOrError.takeError()) {
-              return std::move(Error);
-            } else {
-              auto Symbol = SymbolOrError.get();
-              return SymbolWithRange(Symbol, Range);
-            }
-          } else {
-            SymbolsOrError Symbols = parse(Parameter);
-            if (auto Error = Symbols.takeError()) {
-              return std::move(Error);
-            } else {
-              if (Symbols.get().size() > 0) {
-                auto Symbol = Symbols.get()[0];
-                Symbol.Range = Range;
-                return Symbol;
-              }
-            }
-          }
-        }
-      }
-    }
-    return stringError("Cannot find parameter identifier in function declaration");
-  } else {
-    return stringError("Cannot build symbol for argument without "
-                       "function declaration");
-  }
-}
-
 
 } //namespace obfuscation
 } //namespace swift
