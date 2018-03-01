@@ -7,24 +7,37 @@ namespace obfuscation {
   
 llvm::Expected<AbstractFunctionDecl*>
 declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
-  
-  if (auto *DotSyntaxCallExpression =
-        dyn_cast<DotSyntaxCallExpr>(CallExpression->getFn())) {
-    if(auto *OtherConstructor =
-       dyn_cast<OtherConstructorDeclRefExpr>(DotSyntaxCallExpression->getFn())) {
+  auto *CallFn = CallExpression->getFn();
+
+  if (auto *DotSyntaxCallExpression = dyn_cast<DotSyntaxCallExpr>(CallFn)) {
+    auto *DotFn = DotSyntaxCallExpression->getFn();
+    
+    if (auto *OtherConstructor = dyn_cast<OtherConstructorDeclRefExpr>(DotFn)) {
       // It's a super call like super.init()
-      if (auto *FunctionDeclaration =
-          dyn_cast<AbstractFunctionDecl>(OtherConstructor->getDecl())) {
+      auto *Decl = OtherConstructor->getDecl();
+
+      if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
         return FunctionDeclaration;
       }
     } else {
-      // It's not a super call
-      if (auto *DeclarationRefExpression =
-          dyn_cast<DeclRefExpr>(DotSyntaxCallExpression->getFn())) {
-        if (auto *FunctionDeclaration =
-            dyn_cast<AbstractFunctionDecl>(DeclarationRefExpression->getDecl())) {
+      // It's not a super.init call, just a function call
+      if (auto *DeclRefExpression = dyn_cast<DeclRefExpr>(DotFn)) {
+        auto *Decl = DeclRefExpression->getDecl();
+
+        if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
           return FunctionDeclaration;
         }
+      }
+    }
+  } else if (auto *Constructor = dyn_cast<ConstructorRefCallExpr>(CallFn)) {
+    // It's a constructor call
+    auto * ConstructorFn = Constructor->getFn();
+
+    if (auto *DeclarationRefExpression = dyn_cast<DeclRefExpr>(ConstructorFn)) {
+      auto* Decl = DeclarationRefExpression->getDecl();
+
+      if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+        return FunctionDeclaration;
       }
     }
   }
@@ -62,20 +75,38 @@ SymbolsOrError parseCallExpressionWithArguments(CallExpr* CallExpression) {
   if (auto Error = SymbolsOrError.takeError()) {
     return std::move(Error);
   }
-  
+
+  auto CopyOfSymbols = SymbolsOrError.get();
+
   auto ValidArguments = validArguments(CallExpression);
-  
-  if (ValidArguments.size() != SymbolsOrError.get().size()) {
-    return stringError("Unsupported call expression");
-  }
-    
-  for (unsigned i = 0; i < ValidArguments.size(); ++i) {
-    auto Symbol = SymbolsOrError.get()[i];
+  for (size_t i = 0; i < ValidArguments.size(); ++i) {
+
     auto Label = ValidArguments[i].first;
     auto Location = ValidArguments[i].second;
-    if (Location.isValid() && Symbol.Symbol.Name == Label.str().str()) {
-      auto Range = CharSourceRange(Location, Label.getLength());
-      Symbols.push_back(SymbolWithRange(Symbol.Symbol, Range));
+    if (ValidArguments.size() == SymbolsOrError.get().size()) {
+      // The same number of named arguments in call and
+      // external/single parameters in function means that
+      // there are no parameters in this function that are default
+      // or with the external name
+      auto Symbol = SymbolsOrError.get()[i];
+      if (Location.isValid() && Symbol.Symbol.Name == Label.str().str()) {
+        auto Range = CharSourceRange(Location, Label.getLength());
+        Symbols.push_back(SymbolWithRange(Symbol.Symbol, Range));
+      }
+
+    } else {
+      // There is different number of named arguments in call
+      // and external/single parameters in function. It means that
+      // some of the parameters are not required
+      // (default or without external name)
+      for (auto Symbol : CopyOfSymbols) {
+        if (Location.isValid() && Symbol.Symbol.Name == Label.str().str()) {
+          removeFromVector(CopyOfSymbols, Symbol);
+          auto Range = CharSourceRange(Location, Label.getLength());
+          Symbols.push_back(SymbolWithRange(Symbol.Symbol, Range));
+          break;
+        }
+      }
     }
   }
 

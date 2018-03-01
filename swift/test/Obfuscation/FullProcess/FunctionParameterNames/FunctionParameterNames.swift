@@ -39,6 +39,8 @@ class Base {
 
 class Derived: Base {
   override func baseFunc(param: String) {}
+  override func baseFunc2(_ intParam: Int) {}
+  override func baseFunc3(extParam intParam: SampleClass) {}
 }
 
 // explicit constructor params
@@ -114,3 +116,30 @@ class SuperTest {
 
 let conv = SuperTest(convP1:1, convP2:"asd")
 
+// default values
+let defaultValue = 42.0
+
+func withDefaultValues(int: Int = 42, string string: String = "42", _ float: Double = defaultValue) {}
+
+class ClassWithDefaultValues {
+  func withDefaultValues(int: Int = 42, string string: String = "42", _ float: Double = defaultValue) {}
+}
+
+class ClassWithDefaultValuesInInit {
+  init(int: Int = 42, string string: String = "42", _ float: Double = defaultValue) {}
+}
+
+let someClassWithDefaultValuesInInit1 = ClassWithDefaultValuesInInit()
+let someClassWithDefaultValuesInInit2 = ClassWithDefaultValuesInInit(string: "42")
+let someClassWithDefaultValuesInInit3 = ClassWithDefaultValuesInInit(int: 42, defaultValue)
+let someClassWithDefaultValuesInInit4 = ClassWithDefaultValuesInInit(int: 42, string: "42", defaultValue)
+
+class Foo {
+  var FieldA: String
+  var FieldB: String?
+  
+  init(FieldA: String, FieldB: String? = nil) {}
+}
+
+let FooObj1 = Foo(FieldA: "test")
+let FooObj2 = Foo(FieldA: "test", FieldB: nil)

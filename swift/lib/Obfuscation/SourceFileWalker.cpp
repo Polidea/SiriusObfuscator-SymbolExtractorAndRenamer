@@ -55,18 +55,6 @@ struct SymbolsWalkerAndCollector: public SourceEntityWalker {
     return true;
   }
 
-  bool visitCallArgName(Identifier Name, CharSourceRange Range,
-                        ValueDecl *D) override {
-
-    auto Symbol = buildSymbol(Name, D, Range);
-    if (auto Error = Symbol.takeError()) {
-      llvm::consumeError(std::move(Error));
-    } else {
-      handleSymbol(Symbol.get());
-    }
-    return true;
-  }
-
 // Methods for handling the extracted symbols
 
   void handleSymbol(const SymbolWithRange &Symbol) {
