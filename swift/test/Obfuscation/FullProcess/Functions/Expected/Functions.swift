@@ -91,7 +91,7 @@ let V1_cvi = T1_CustomView()
 V1_cvi.prepareForReuse()
 
 // SDK protocol methods
-class T1_CustomFMDelegate: FileManagerDelegate {
+class T1_CustomFMDelegate: NSObject, FileManagerDelegate {
   func fileManager(_ IP1_fileManager: FileManager, shouldRemoveItemAtPath IP1_path: String) -> Bool {
     return false
   }

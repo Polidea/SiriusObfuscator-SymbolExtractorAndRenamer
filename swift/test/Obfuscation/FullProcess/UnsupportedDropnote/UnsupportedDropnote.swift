@@ -6,15 +6,6 @@ class Test {
   func testFunc() {}
 }
 
-// init param FieldA is not renamed if there is a second param with default value
-class Foo {
-  var FieldA: String
-  var FieldB: String?
-  
-  init(FieldA: String, FieldB: String? = nil) {}
-}
-let FooObj = Foo(FieldA: "test")
-
 // type is not renamed in if case
 let num = 42
 if case 0...225 = num, num is Test {
