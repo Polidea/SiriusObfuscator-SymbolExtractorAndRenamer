@@ -133,7 +133,7 @@ parseOverridenDeclaration(const FuncDecl *Declaration,
   // the same module and it's the module we've passed as ModuleName parameter.
   // Emitted symbol represents the base function so that all the functions that
   // override it are renamed to the same obfuscated name
-  if (Modules.size() == 1 && Modules.count(ModuleName) == 1) {
+  if (isOverriddenMethodFromTheSameModule(Modules, ModuleName)) {
     return getFunctionSymbol(Base, Range);
   } else {
     return stringError("only method overriding methods from the same module "

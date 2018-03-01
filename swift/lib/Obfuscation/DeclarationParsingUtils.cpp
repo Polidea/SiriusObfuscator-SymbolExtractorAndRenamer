@@ -23,6 +23,12 @@ std::string combineIdentifier(std::vector<std::string> &Parts) {
   }
 }
 
+bool isOverriddenMethodFromTheSameModule(const std::set<std::string> &Modules,
+                                         const std::string &OriginModuleName) {
+  return Modules.size() == 0
+     || (Modules.size() == 1 && Modules.count(OriginModuleName) == 1);
+}
+
 std::string declarationName(const ValueDecl* Declaration) {
   return Declaration->getName().str().str();
 }
