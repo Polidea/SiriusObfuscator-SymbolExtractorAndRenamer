@@ -92,7 +92,7 @@ let cvi = CustomView()
 cvi.prepareForReuse()
 
 // SDK protocol methods
-class CustomFMDelegate: FileManagerDelegate {
+class CustomFMDelegate: NSObject, FileManagerDelegate {
   func fileManager(_ fileManager: FileManager, shouldRemoveItemAtPath path: String) -> Bool {
     return false
   }
