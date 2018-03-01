@@ -6,11 +6,6 @@ class Test {
   func testFunc() {}
 }
 
-// type is not renamed in if case
-let num = 42
-if case 0...225 = num, num is Test {
-}
-
 // debug blocks are omitted
 final class DebugBlock {
   fileprivate init() {

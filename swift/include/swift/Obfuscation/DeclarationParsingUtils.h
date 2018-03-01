@@ -46,6 +46,10 @@ bool isMemberwise(const ConstructorDecl* Declaration);
 
 bool isMemberwiseConstructorParameter(const ParamDecl* Declaration);
 
+llvm::Expected<CharSourceRange>
+rangeOfFirstOccurenceOfStringInSourceLoc(std::string String,
+                                         SourceLoc StartSourceLoc);
+  
 } //namespace obfuscation
 } //namespace swift
   
