@@ -143,3 +143,4 @@ class T1_Foo {
 
 let V1_FooObj1 = T1_Foo(SP1_FieldA: "test")
 let V1_FooObj2 = T1_Foo(SP1_FieldA: "test", SP1_FieldB: nil)
+
