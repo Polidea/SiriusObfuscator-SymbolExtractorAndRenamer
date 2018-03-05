@@ -99,6 +99,28 @@ struct ImplicitSetter {
   }
 }
 
+// protocol vars in extensions and explicit setter
+class TestWithBool {
+  var isFoo = false
+}
+
+func foo(boolParam: Bool) {}
+
+protocol Activable {
+  var active: Bool { get set }
+}
+
+extension Activable where Self: TestWithBool {
+  var active: Bool {
+    get {
+      return isFoo
+    }
+    set(activeValue) {
+      foo(boolParam: activeValue)
+    }
+  }
+}
+
 class SampleClass {
   var prop: String = ""
 }
