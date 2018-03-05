@@ -64,29 +64,6 @@ final class T1_TestController: NSViewController {
   }
 }
 
-// protocol vars in extensions
-
-class T1_TestWithBool {
-  var V1_isFoo = false
-}
-
-func NF1_foo(SP1_boolParam: Bool) {}
-
-protocol T1_Activable {
-  var V1_active: Bool { get set }
-}
-
-extension T1_Activable where Self: T1_TestWithBool {
-  var V1_active: Bool {
-    get {
-      return V1_isFoo
-    }
-    set(activeValue) {
-      NF1_foo(activeValue)
-    }
-  }
-}
-
 // non working if case cast
 
 class T1_SomeGenericClass<Param> {}
@@ -156,23 +133,6 @@ struct T1_ItemInserter: T1_ItemInserterType {
   
   func NF1_insertEntityWithName(_ IP1_name: String) throws -> String {
     return ""
-  }
-}
-
-// nested funcs stuff
-
-class T1_NestedFuncs {
-  
-  fileprivate func NF1_broken() -> [Int] {
-    
-    func NF1_makeInt(EP1_withIdentifier IP1_identifier: String, SP1_model: Int) -> Int {
-      return 42
-    }
-    
-    var ints = [Int]()
-    ints.append(NF1_makeInt(EP1_withIdentifier: "", SP1_model: 42))
-    ints.append(NF1_makeInt(EP1_withIdentifier: "", SP1_model: 42))
-    return ints
   }
 }
 
