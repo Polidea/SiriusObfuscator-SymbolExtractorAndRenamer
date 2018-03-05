@@ -42,6 +42,14 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
         return FunctionDeclaration;
       }
     }
+  } else if (auto *Expression = dyn_cast<Expr>(CallFn)) {
+    // This branch is executed for example when
+    // a function is being called inside set {} block
+    auto *Decl = Expression->getReferencedDecl().getDecl();
+    
+    if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+      return FunctionDeclaration;
+    }
   }
   return stringError("Cannot found supported Call Expression subtree pattern");
 }
