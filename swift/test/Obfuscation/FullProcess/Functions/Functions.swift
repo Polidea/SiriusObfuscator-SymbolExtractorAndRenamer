@@ -172,3 +172,19 @@ p2.foo(a: Test())
 
 let c2 = Child2()
 c2.foo(a: Test())
+
+// parameter names when calling nested functions
+class NestedFuncs {
+  
+  fileprivate func broken() -> [Int] {
+    
+    func makeInt(withIdentifier identifier: String, model: Int) -> Int {
+      return 42
+    }
+    
+    var ints = [Int]()
+    ints.append(makeInt(withIdentifier: "", model: 42))
+    ints.append(makeInt(withIdentifier: "", model: 42))
+    return ints
+  }
+}
