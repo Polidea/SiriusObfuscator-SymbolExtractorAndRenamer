@@ -171,3 +171,19 @@ V1_p2.NF1_foo(EP1_a: T1_Test())
 
 let V1_c2 = T1_Child2()
 V1_c2.NF1_foo(EP1_a: T1_Test())
+
+// parameter names when calling nested functions
+class T1_NestedFuncs {
+  
+  fileprivate func NF1_broken() -> [Int] {
+    
+    func NF1_makeInt(EP1_withIdentifier IP1_identifier: String, SP1_model: Int) -> Int {
+      return 42
+    }
+    
+    var ints = [Int]()
+    ints.append(NF1_makeInt(EP1_withIdentifier: "", SP1_model: 42))
+    ints.append(NF1_makeInt(EP1_withIdentifier: "", SP1_model: 42))
+    return ints
+  }
+}

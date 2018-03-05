@@ -10,17 +10,18 @@ namespace swift {
 namespace obfuscation {
 
 llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
-  if (Declaration->isGetterOrSetter()) {
-    return stringError("don't support getters and setters right now, since "
+  if (Declaration->isGetter()) {
+    return stringError("don't support getters since "
                        "it's the computed property name that should be "
                        "obfuscated");
   }
-  if (Declaration->isAccessor() || Declaration->isObservingAccessor()) {
+  if (!Declaration->isSetter()
+        && (Declaration->isAccessor() || Declaration->isObservingAccessor())) {
     return stringError("don't support property accessors right now");
   }
   return llvm::Error::success();
 }
-
+  
 std::string functionSignature(const AbstractFunctionDecl *Declaration) {
   // The signature is available via different getters depending on whether
   // it is a method or a free function
@@ -249,47 +250,51 @@ SymbolsOrError parse(const ConstructorDecl* Declaration,
 SymbolsOrError parse(GlobalCollectedSymbols &CollectedSymbols,
                      const FuncDecl* Declaration,
                      CharSourceRange Range) {
-  
-  if (auto Error = isDeclarationSupported(Declaration)) {
-    return std::move(Error);
-  }
 
   std::vector<SymbolWithRange> Symbols;
 
-  // Create the symbol for function
-  if (Declaration->getOverriddenDecl() != nullptr) {
-    // Overriden declaration must be treated separately because
-    // we mustn't rename function that overrides function from different module
-    auto SymbolOrError =
-      parseOverridenDeclaration(CollectedSymbols,
-                                Declaration,
-                                moduleName(Declaration),
-                                Range);
-    if (auto Error = SymbolOrError.takeError()) {
-      return std::move(Error);
-    }
+  // function name should be renamed only if it's not a setter
+  if(!Declaration->isSetter()) {
     
-    auto FunctionNameSymbol = SymbolOrError.get();
-    
-    // If overridden method also satisfies protocol requirements
-    // we must update symbol identifier for protocol's method to be the same
-    // as symbol identifier of the overridden function. Otherwise function
-    // inside protocol would be renamed differently and our class
-    // will no longer conform to that protocol.
-    auto HandledOrError = handleSatisfiedProtocolRequirements(
+    // Create the symbol for function
+    if (Declaration->getOverriddenDecl() != nullptr) {
+      // Overriden declaration must be treated separately because we mustn't
+      // rename function that overrides function from different module
+      auto SymbolOrError =
+        parseOverridenDeclaration(CollectedSymbols,
+                                  Declaration,
+                                  moduleName(Declaration),
+                                  Range);
+      if (auto Error = SymbolOrError.takeError()) {
+        return std::move(Error);
+      }
+      
+      auto FunctionNameSymbol = SymbolOrError.get();
+      
+      // If overridden method also satisfies protocol requirements
+      // we must update symbol identifier for protocol's method to be the same
+      // as symbol identifier of the overridden function. Otherwise function
+      // inside protocol would be renamed differently and our class
+      // will no longer conform to that protocol.
+      auto HandledOrError = handleSatisfiedProtocolRequirements(
                                                             CollectedSymbols,
                                                             FunctionNameSymbol,
                                                             Declaration);
-    
-    if (auto Error = HandledOrError.takeError()) {
-      return std::move(Error);
+      
+      if (auto Error = HandledOrError.takeError()) {
+        return std::move(Error);
+      }
+      
+      Symbols.push_back(FunctionNameSymbol);
+    } else {
+      Symbols.push_back(getFunctionSymbol(CollectedSymbols,
+                                          Declaration,
+                                          Range));
     }
-    
-    Symbols.push_back(FunctionNameSymbol);
-  } else {
-    Symbols.push_back(getFunctionSymbol(CollectedSymbols,
-                                        Declaration,
-                                        Range));
+  }
+  
+  if (auto Error = isDeclarationSupported(Declaration)) {
+    return std::move(Error);
   }
 
   // Create the symbols for function parameters

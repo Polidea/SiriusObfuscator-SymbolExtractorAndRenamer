@@ -65,29 +65,6 @@ final class TestController: NSViewController {
   }
 }
 
-// protocol vars in extensions
-
-class TestWithBool {
-  var isFoo = false
-}
-
-func foo(boolParam: Bool) {}
-
-protocol Activable {
-  var active: Bool { get set }
-}
-
-extension Activable where Self: TestWithBool {
-  var active: Bool {
-    get {
-      return isFoo
-    }
-    set(activeValue) {
-      foo(activeValue)
-    }
-  }
-}
-
 // non working if case cast
 
 class SomeGenericClass<Param> {}
@@ -157,23 +134,6 @@ struct ItemInserter: ItemInserterType {
   
   func insertEntityWithName(_ name: String) throws -> String {
     return ""
-  }
-}
-
-// nested funcs stuff
-
-class NestedFuncs {
-  
-  fileprivate func broken() -> [Int] {
-    
-    func makeInt(withIdentifier identifier: String, model: Int) -> Int {
-      return 42
-    }
-    
-    var ints = [Int]()
-    ints.append(makeInt(withIdentifier: "", model: 42))
-    ints.append(makeInt(withIdentifier: "", model: 42))
-    return ints
   }
 }
 
