@@ -345,26 +345,29 @@ SymbolsOrError parse(GlobalCollectedSymbols &CollectedSymbols,
                                   moduleName(Declaration),
                                   Range);
       if (auto Error = SymbolOrError.takeError()) {
-        return std::move(Error);
+
+        llvm::consumeError(std::move(Error));
+
+      } else {
+      
+        auto FunctionNameSymbol = SymbolOrError.get();
+
+        // If overridden method also satisfies protocol requirements
+        // we must update symbol identifier for protocol's method to be the same
+        // as symbol identifier of the overridden function. Otherwise function
+        // inside protocol would be renamed differently and our class
+        // will no longer conform to that protocol.
+        auto HandledOrError = handleSatisfiedProtocolRequirements(
+                                                              CollectedSymbols,
+                                                              FunctionNameSymbol,
+                                                              Declaration);
+
+        if (auto Error = HandledOrError.takeError()) {
+          return std::move(Error);
+        }
+
+        Symbols.push_back(FunctionNameSymbol);
       }
-      
-      auto FunctionNameSymbol = SymbolOrError.get();
-      
-      // If overridden method also satisfies protocol requirements
-      // we must update symbol identifier for protocol's method to be the same
-      // as symbol identifier of the overridden function. Otherwise function
-      // inside protocol would be renamed differently and our class
-      // will no longer conform to that protocol.
-      auto HandledOrError = handleSatisfiedProtocolRequirements(
-                                                            CollectedSymbols,
-                                                            FunctionNameSymbol,
-                                                            Declaration);
-      
-      if (auto Error = HandledOrError.takeError()) {
-        return std::move(Error);
-      }
-      
-      Symbols.push_back(FunctionNameSymbol);
     } else {
       Symbols.push_back(getFunctionSymbol(CollectedSymbols,
                                           Declaration,

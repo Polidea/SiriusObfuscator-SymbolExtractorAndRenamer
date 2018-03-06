@@ -1,5 +1,8 @@
+import AppKit
 
 class T1_SampleClass {}
+
+protocol T1_OtherSampleClass {}
 
 func NF1_noParams() {}
 
@@ -25,9 +28,9 @@ func NF1_intExtParams(EP1_foo IP1_foo:Int, EP2_foo IP1_bar: T1_SampleClass) -> A
 
 func NF1_genericFun<T, R>(_ IP1_a: inout T, _ IP1_b: inout R) {}
 
-func NF1_genericFunc2<T: String & T1_SampleClass>(EP1_e IP1_i: T) {}
+func NF1_genericFunc2<T: T1_OtherSampleClass & T1_SampleClass>(EP1_e IP1_i: T) {}
 
-func NF1_someFunc3<T>(SP1_arg: T) where T:T1_SampleClass, T:Int {}
+func NF1_someFunc3<T>(SP1_arg: T) where T: T1_SampleClass, T: T1_OtherSampleClass {}
 
 // overriding functions
 class T1_Base {
@@ -115,8 +118,20 @@ class T1_SuperTest {
 
 let V1_conv = T1_SuperTest(SP2_convP1:1, SP1_convP2:"asd")
 
-// default values
 
+// overridden method parameters
+final class T1_TestController: NSViewController {
+  
+  override func viewDidLoad() {
+    super.viewDidLoad()
+  }
+  
+  override func prepare(for IP1_segue: NSStoryboardSegue, sender: Any?) {
+    super.prepare(for: IP1_segue, sender: sender)
+  }
+}
+
+// default values
 let V1_defaultValue = 42.0
 
 func NF1_withDefaultValues(SP1_int: Int = 42, EP1_string IP1_string: String = "42", _ IP1_float: Double = V1_defaultValue) {}
