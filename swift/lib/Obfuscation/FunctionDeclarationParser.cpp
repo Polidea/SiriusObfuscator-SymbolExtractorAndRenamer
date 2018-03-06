@@ -4,6 +4,7 @@
 #include "swift/Obfuscation/DeclarationParsingUtils.h"
 
 #include <string>
+#include <sstream>
 #include <vector>
 
 namespace swift {
@@ -21,16 +22,87 @@ llvm::Error isDeclarationSupported(const FuncDecl* Declaration) {
   }
   return llvm::Error::success();
 }
-  
+
+void extractSignaturePart(const Type &Result,
+                          llvm::raw_string_ostream &StringStream,
+                          std::string Fallback) {
+
+  if (auto *ResultTuple = Result->getAs<TupleType>()) {
+    auto Results = ResultTuple->getElements();
+    if (Results.empty()) {
+      StringStream << Fallback;
+    } else {
+      StringStream << "(";
+      for (auto Argument = Results.begin();
+           Argument != Results.end();
+           ++Argument) {
+        auto Name = Argument->getName().str();
+        if (!Name.empty()) {
+          StringStream << Name << ": ";
+        }
+        if (Argument->getType()->getAs<DependentMemberType>() != nullptr) {
+          // It the signature uses the associated type, we're dropping
+          // the information about it. We don't use it's name nor information
+          // where it comes from. We do it to handle the edga case of
+          // single implementation method fulfilling two functions
+          // with associated types from two different protocols.
+          StringStream << "AssociatedType";
+        } else {
+          StringStream << Argument->getType().getString();
+        }
+        if (Argument != Results.drop_back().end()) {
+          StringStream << ", ";
+        }
+      }
+      StringStream << ")";
+    }
+  } else {
+    StringStream << Result.getString();
+  }
+}
+
+std::string extractSignature(const AbstractFunctionDecl *Declaration,
+                             std::string Fallback) {
+  if (!Declaration->hasInterfaceType()) { return Fallback; }
+
+  if (auto *InstanceFunction =
+        Declaration->getInterfaceType()->getAs<AnyFunctionType>()) {
+
+    AnyFunctionType *FunctionToParse = InstanceFunction;
+
+    if (auto *Function =
+          InstanceFunction->getResult()->getAs<AnyFunctionType>()) {
+      FunctionToParse = Function;
+    }
+
+    std::string Signature;
+    llvm::raw_string_ostream StringStream(Signature);
+    extractSignaturePart(FunctionToParse->getInput(), StringStream, "()");
+    StringStream << " -> ";
+    extractSignaturePart(FunctionToParse->getResult(), StringStream, "Void");
+    return StringStream.str();
+
+  } else {
+
+    return Fallback;
+
+  }
+}
+
 std::string functionSignature(const AbstractFunctionDecl *Declaration) {
   // The signature is available via different getters depending on whether
   // it is a method or a free function
-  std::string Interface;
+  std::string Fallback;
+
+  if (!Declaration->hasInterfaceType()) { return "no_signature"; }
+
   if (Declaration->getDeclContext()->isTypeContext()) {
-    Interface = Declaration->getMethodInterfaceType().getString();
+    Fallback = Declaration->getMethodInterfaceType().getString();
   } else {
-    Interface = Declaration->getInterfaceType().getString();
+    Fallback = Declaration->getInterfaceType().getString();
   }
+
+  auto Interface = extractSignature(Declaration, Fallback);
   return "signature." + Interface;
 }
 
@@ -72,6 +144,8 @@ functionIdentifierParts(const AbstractFunctionDecl *Declaration) {
       }
       Parts.push_back("method." + SymbolName);
     }
+
+    Parts.push_back(functionSignature(Declaration));
     
   } else {
     // This logic applies to function that
@@ -86,16 +160,16 @@ functionIdentifierParts(const AbstractFunctionDecl *Declaration) {
     //       there is no override relationship between the A.a() and B.a() in
     //       protocols. it's just a name that's the same.
     //       this simplified handling should be improved in the future.
-    ModuleNameAndParts ModuleNameAndParts;
+    ValueDecl *BaseDeclaration;
     if (SatisfiesProtocol) {
       // TODO: If the function satisfies multiple protocols, we're using
       // the module name from the first of the protocols. This may lead
       // to errors and should be changed in the future.
-      ModuleNameAndParts =
-        moduleNameAndIdentifierParts(ProtocolRequirements.front());
+      BaseDeclaration = ProtocolRequirements.front();
     } else {
-      ModuleNameAndParts = moduleNameAndIdentifierParts(ProtocolDeclaration);
+      BaseDeclaration = ProtocolDeclaration;
     }
+    auto ModuleNameAndParts = moduleNameAndIdentifierParts(BaseDeclaration);
     ModuleName = ModuleNameAndParts.first;
     Parts = ModuleNameAndParts.second;
     
@@ -104,9 +178,14 @@ functionIdentifierParts(const AbstractFunctionDecl *Declaration) {
       Parts.push_back("static");
     }
     Parts.push_back("method." + SymbolName);
+
+    if (auto *ProtocolFunctionDeclaration =
+        dyn_cast<AbstractFunctionDecl>(BaseDeclaration)) {
+      Parts.push_back(functionSignature(ProtocolFunctionDeclaration));
+    } else {
+      Parts.push_back(functionSignature(Declaration));
+    }
   }
-  
-  Parts.push_back(functionSignature(Declaration));
   
   return std::make_pair(ModuleName, Parts);
 }

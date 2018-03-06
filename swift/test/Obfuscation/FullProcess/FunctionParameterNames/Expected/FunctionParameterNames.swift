@@ -83,7 +83,7 @@ class T1_Parent{
   init(SP1_p1: String, SP1_p2: Int) {}
   init(EP3_foo IP2_foo:Int, EP4_foo IP2_bar: T1_SampleClass) { }
   init(EP1_extp1 IP1_p1: String, EP1_extp2 IP1_p2: Int) {}
-  init(_ IP1_p1: String, EP1_extp IP1_p2: Int) {}
+  init(_ IP2_p1: String, EP1_extp IP2_p2: Int) {}
 }
 class T1_Child: T1_Parent {
   override init(SP1_p1: String, SP1_p2: Int) {
@@ -92,11 +92,11 @@ class T1_Child: T1_Parent {
   override init(EP3_foo IP3_foo:Int, EP4_foo IP3_bar: T1_SampleClass) {
     super.init(EP3_foo: IP3_foo, EP4_foo: IP3_bar)
   }
-  override init(EP1_extp1 IP2_p1: String, EP1_extp2 IP2_p2: Int) {
-    super.init(EP1_extp1: IP2_p1, EP1_extp2: IP2_p2)
+  override init(EP1_extp1 IP3_p1: String, EP1_extp2 IP3_p2: Int) {
+    super.init(EP1_extp1: IP3_p1, EP1_extp2: IP3_p2)
   }
-  override init(_ IP2_p1: String, EP1_extp IP2_p2: Int) {
-    super.init(IP2_p1, EP1_extp: IP2_p2)
+  override init(_ IP4_p1: String, EP1_extp IP4_p2: Int) {
+    super.init(IP4_p1, EP1_extp: IP4_p2)
   }
 }
 let V1_c = T1_Child(SP1_p1: "p1", SP1_p2:42)
