@@ -1,6 +1,10 @@
 //RUN: %target-prepare-obfuscation-for-file "FunctionParameterNames" %target-run-full-obfuscation
 
+import AppKit
+
 class SampleClass {}
+
+protocol OtherSampleClass {}
 
 func noParams() {}
 
@@ -26,9 +30,9 @@ func intExtParams(foo foo:Int, foo bar: SampleClass) -> Any? {
 
 func genericFun<T, R>(_ a: inout T, _ b: inout R) {}
 
-func genericFunc2<T: String & SampleClass>(e i: T) {}
+func genericFunc2<T: OtherSampleClass & SampleClass>(e i: T) {}
 
-func someFunc3<T>(arg: T) where T:SampleClass, T:Int {}
+func someFunc3<T>(arg: T) where T: SampleClass, T: OtherSampleClass {}
 
 // overriding functions
 class Base {
@@ -115,6 +119,18 @@ class SuperTest {
 }
 
 let conv = SuperTest(convP1:1, convP2:"asd")
+
+// overridden method parameters
+final class TestController: NSViewController {
+  
+  override func viewDidLoad() {
+    super.viewDidLoad()
+  }
+  
+  override func prepare(for segue: NSStoryboardSegue, sender: Any?) {
+    super.prepare(for: segue, sender: sender)
+  }
+}
 
 // default values
 let defaultValue = 42.0
