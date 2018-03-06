@@ -16,19 +16,6 @@ final class T1_DebugBlock {
   }
 }
 
-// overridden method parameters
-
-final class T1_TestController: NSViewController {
-  
-  override func viewDidLoad() {
-    super.viewDidLoad()
-  }
-  
-  override func prepare(for segue: NSStoryboardSegue, sender: Any?) {
-    super.prepare(for: segue, sender)
-  }
-}
-
 // non working if case cast
 
 class T1_SomeGenericClass<Param> {}
