@@ -16,41 +16,6 @@ final class T1_DebugBlock {
   }
 }
 
-// fun with protocols and extensions
-struct T1_TestStruct {}
-
-protocol T1_ParentProtocol {
-  associatedtype Fuzz
-  associatedtype Bazz
-  associatedtype Gazz
-  
-  func NF1_foo(_ IP1_indexPath: Int) -> String
-  func NF1_bar(_ IP1_fuzz: Fuzz, EP1_extBazz IP1_bazz: Bazz, EP1_extGazz IP1_gazz: Gazz, EP1_atIndexPath IP2_indexPath: Int)
-}
-
-protocol T1_ChildProtocol: T1_ParentProtocol {
-  var V1_items: [[Gazz]] { get }
-}
-
-
-protocol T1_ChildProtocol2: T1_ChildProtocol { }
-
-
-final class T1_TestClass {
-  
-  var V1_items: [[Gazz]] = [[
-    
-    ]]
-}
-
-
-extension T1_TestClass: T1_ChildProtocol2 {
-  
-  func NF1_foo(_ IP1_indexPath: Int) -> String { return "" }
-  
-  func NF1_bar(_ IP1_fuzz: String, EP1_extBazz IP1_bazz: T1_TestStruct, EP1_extGazz IP1_gazz: T1_Test, EP1_atIndexPath IP2_indexPath: Int) {}
-}
-
 // overridden method parameters
 
 final class T1_TestController: NSViewController {
@@ -101,38 +66,6 @@ final class T1_ForEachController: NSViewController {
       }.forEach(V1_unitsSegmentedControl.setLabel(_:forSegment:))
     
     V1_unitsSegmentedControl.accessibilityHint = ""
-  }
-}
-
-// protocol functions strikes back
-
-class T1_NotWorkingParent {
-  func NF1_addSearchItem() {
-  }
-}
-
-final class T1_NextNotWorking: T1_NotWorkingParent {
-  
-  override func NF1_addSearchItem() {
-    let inserter = T1_ItemInserter()
-    do {
-      let coffee = try inserter.NF1_insertEntityWithName("")
-      
-    } catch {
-      
-    }
-  }
-}
-
-protocol T1_ItemInserterType {
-  associatedtype Entity
-  func NF1_insertEntityWithName(_ IP1_name: String) throws -> Entity
-}
-
-struct T1_ItemInserter: T1_ItemInserterType {
-  
-  func NF1_insertEntityWithName(_ IP1_name: String) throws -> String {
-    return ""
   }
 }
 
