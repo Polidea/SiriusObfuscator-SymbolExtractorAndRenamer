@@ -18,7 +18,8 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
       // It's a super call like super.init()
       auto *Decl = OtherConstructor->getDecl();
 
-      if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+      if (auto *FunctionDeclaration =
+            dyn_cast_or_null<AbstractFunctionDecl>(Decl)) {
         return FunctionDeclaration;
       }
     } else {
@@ -26,7 +27,8 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
       if (auto *DeclRefExpression = dyn_cast<DeclRefExpr>(DotFn)) {
         auto *Decl = DeclRefExpression->getDecl();
 
-        if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+        if (auto *FunctionDeclaration =
+              dyn_cast_or_null<AbstractFunctionDecl>(Decl)) {
           return FunctionDeclaration;
         }
       }
@@ -38,7 +40,8 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
     if (auto *DeclarationRefExpression = dyn_cast<DeclRefExpr>(ConstructorFn)) {
       auto* Decl = DeclarationRefExpression->getDecl();
 
-      if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+      if (auto *FunctionDeclaration =
+            dyn_cast_or_null<AbstractFunctionDecl>(Decl)) {
         return FunctionDeclaration;
       }
     }
@@ -47,7 +50,8 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
     // a function is being called inside set {} block
     auto *Decl = Expression->getReferencedDecl().getDecl();
     
-    if (auto *FunctionDeclaration = dyn_cast<AbstractFunctionDecl>(Decl)) {
+    if (auto *FunctionDeclaration =
+          dyn_cast_or_null<AbstractFunctionDecl>(Decl)) {
       return FunctionDeclaration;
     }
   }
