@@ -17,41 +17,6 @@ final class DebugBlock {
   }
 }
 
-// fun with protocols and extensions
-struct TestStruct {}
-
-protocol ParentProtocol {
-  associatedtype Fuzz
-  associatedtype Bazz
-  associatedtype Gazz
-  
-  func foo(_ indexPath: Int) -> String
-  func bar(_ fuzz: Fuzz, extBazz bazz: Bazz, extGazz gazz: Gazz, atIndexPath indexPath: Int)
-}
-
-protocol ChildProtocol: ParentProtocol {
-  var items: [[Gazz]] { get }
-}
-
-
-protocol ChildProtocol2: ChildProtocol { }
-
-
-final class TestClass {
-  
-  var items: [[Gazz]] = [[
-    
-    ]]
-}
-
-
-extension TestClass: ChildProtocol2 {
-  
-  func foo(_ indexPath: Int) -> String { return "" }
-  
-  func bar(_ fuzz: String, extBazz bazz: TestStruct, extGazz gazz: Test, atIndexPath indexPath: Int) {}
-}
-
 // overridden method parameters
 
 final class TestController: NSViewController {
@@ -102,38 +67,6 @@ final class ForEachController: NSViewController {
       }.forEach(unitsSegmentedControl.setLabel(_:forSegment:))
     
     unitsSegmentedControl.accessibilityHint = ""
-  }
-}
-
-// protocol functions strikes back
-
-class NotWorkingParent {
-  func addSearchItem() {
-  }
-}
-
-final class NextNotWorking: NotWorkingParent {
-  
-  override func addSearchItem() {
-    let inserter = ItemInserter()
-    do {
-      let coffee = try inserter.insertEntityWithName("")
-      
-    } catch {
-      
-    }
-  }
-}
-
-protocol ItemInserterType {
-  associatedtype Entity
-  func insertEntityWithName(_ name: String) throws -> Entity
-}
-
-struct ItemInserter: ItemInserterType {
-  
-  func insertEntityWithName(_ name: String) throws -> String {
-    return ""
   }
 }
 
