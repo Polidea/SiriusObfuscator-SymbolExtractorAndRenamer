@@ -17,64 +17,6 @@ final class DebugBlock {
   }
 }
 
-// fun with protocols and extensions
-struct TestStruct {}
-
-protocol ParentProtocol {
-  associatedtype Fuzz
-  associatedtype Bazz
-  associatedtype Gazz
-  
-  func foo(_ indexPath: Int) -> String
-  func bar(_ fuzz: Fuzz, extBazz bazz: Bazz, extGazz gazz: Gazz, atIndexPath indexPath: Int)
-}
-
-protocol ChildProtocol: ParentProtocol {
-  var items: [[Gazz]] { get }
-}
-
-
-protocol ChildProtocol2: ChildProtocol { }
-
-
-final class TestClass {
-  
-  var items: [[Gazz]] = [[
-    
-    ]]
-}
-
-
-extension TestClass: ChildProtocol2 {
-  
-  func foo(_ indexPath: Int) -> String { return "" }
-  
-  func bar(_ fuzz: String, extBazz bazz: TestStruct, extGazz gazz: Test, atIndexPath indexPath: Int) {}
-}
-
-// non working if case cast
-
-class SomeGenericClass<Param> {}
-
-enum RandomEnum {
-  case Foo
-}
-
-func someRandomFunc() -> RandomEnum { return RandomEnum.Foo }
-
-final class TestController2: NSViewController {
-  
-  override func viewDidLoad() {
-    super.viewDidLoad()
-  }
-  
-  override func prepare(for segue: NSStoryboardSegue, sender: Any?) {
-    if case .Foo = someRandomFunc() , sender is SomeGenericClass<String> {
-      let casted = sender as! SomeGenericClass<String>
-    }
-  }
-}
-
 // for each stuff
 
 final class ForEachController: NSViewController {
