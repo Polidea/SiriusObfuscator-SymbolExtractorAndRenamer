@@ -16,29 +16,6 @@ final class T1_DebugBlock {
   }
 }
 
-// non working if case cast
-
-class T1_SomeGenericClass<Param> {}
-
-enum T1_RandomEnum {
-  case Foo
-}
-
-func NF1_someRandomFunc() -> T1_RandomEnum { return T1_RandomEnum.Foo }
-
-final class T1_TestController2: NSViewController {
-  
-  override func viewDidLoad() {
-    super.viewDidLoad()
-  }
-  
-  override func prepare(for segue: NSStoryboardSegue, sender: Any?) {
-    if case .Foo = NF1_someRandomFunc() , sender is T1_SomeGenericClass<String> {
-      let V1_casted = sender as! T1_SomeGenericClass<String>
-    }
-  }
-}
-
 // for each stuff
 
 final class T1_ForEachController: NSViewController {
