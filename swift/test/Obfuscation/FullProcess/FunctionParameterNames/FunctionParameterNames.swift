@@ -120,6 +120,17 @@ class SuperTest {
 
 let conv = SuperTest(convP1:1, convP2:"asd")
 
+//protocol constructor
+protocol ProtoInit {
+  init(protoInitParamA: String, protoInitParamB: Int)
+}
+
+class ProtoInitClass: ProtoInit {
+  required init(protoInitParamA: String, protoInitParamB: Int) {
+  }
+}
+let pic = ProtoInitClass(protoInitParamA: "", protoInitParamB: 42)
+
 // overridden method parameters
 final class TestController: NSViewController {
   
@@ -159,3 +170,11 @@ class Foo {
 
 let FooObj1 = Foo(FieldA: "test")
 let FooObj2 = Foo(FieldA: "test", FieldB: nil)
+
+//setter parameter
+class ClassWithSetter {
+  var testVar: String {
+    get { return "" }
+    set(newTestVar) {}
+  }
+}

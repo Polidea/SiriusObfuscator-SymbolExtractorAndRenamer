@@ -118,6 +118,16 @@ class T1_SuperTest {
 
 let V1_conv = T1_SuperTest(SP2_convP1:1, SP1_convP2:"asd")
 
+//protocol constructor
+protocol T1_ProtoInit {
+  init(SP1_protoInitParamA: String, SP1_protoInitParamB: Int)
+}
+
+class T1_ProtoInitClass: T1_ProtoInit {
+  required init(SP1_protoInitParamA: String, SP1_protoInitParamB: Int) {
+  }
+}
+let V1_pic = T1_ProtoInitClass(SP1_protoInitParamA: "", SP1_protoInitParamB: 42)
 
 // overridden method parameters
 final class T1_TestController: NSViewController {
@@ -159,3 +169,10 @@ class T1_Foo {
 let V1_FooObj1 = T1_Foo(SP1_FieldA: "test")
 let V1_FooObj2 = T1_Foo(SP1_FieldA: "test", SP1_FieldB: nil)
 
+//setter parameter
+class T1_ClassWithSetter {
+  var V1_testVar: String {
+    get { return "" }
+    set(SP1_newTestVar) {}
+  }
+}
