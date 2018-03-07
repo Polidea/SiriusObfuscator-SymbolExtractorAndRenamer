@@ -16,23 +16,6 @@ final class T1_DebugBlock {
   }
 }
 
-// for each stuff
-
-final class T1_ForEachController: NSViewController {
-  
-  var V1_unitsSegmentedControl: NSSegmentedControl!
-  
-  var V1_titles: [String] = []
-  
-  fileprivate func NF1_buggyFunc() {
-    V1_titles.enumerated().map {
-      index, title in (title, index)
-      }.forEach(V1_unitsSegmentedControl.setLabel(_:forSegment:))
-    
-    V1_unitsSegmentedControl.accessibilityHint = ""
-  }
-}
-
 // mocking trick
 
 protocol KeyValueStoreType {
