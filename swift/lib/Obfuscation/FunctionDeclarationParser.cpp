@@ -275,7 +275,7 @@ handleSatisfiedProtocolRequirements(GlobalCollectedSymbols &CollectedSymbols,
         
         // find protocol function identifier in a set of all collected symbols
         // and replace it with function identifier of overridden symbol
-        for(auto CollectedSymbol: CollectedSymbols) {
+        for (auto CollectedSymbol: CollectedSymbols) {
           if(CollectedSymbol.SymbolWithRange.Symbol.Identifier
                                                           == ProtocolFunId) {
             

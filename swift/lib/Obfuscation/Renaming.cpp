@@ -3,6 +3,7 @@
 #include "swift/Obfuscation/SourceFileWalker.h"
 #include "swift/Obfuscation/Utils.h"
 #include "swift/Obfuscation/LayoutRenamer.h"
+#include "swift/Obfuscation/ExtensionExcluder.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/FileSystem.h"
@@ -123,9 +124,11 @@ llvm::Expected<bool> performActualRenaming(SourceFile &Current,
                                            SourceManager &SourceManager,
                                            unsigned int BufferId,
                                            StringRef Path,
-                                           std::unordered_map<std::string, SymbolRenaming> &RenamedSymbols) {
+                                           std::unordered_map<std::string,
+                                           SymbolRenaming> &RenamedSymbols,
+                                           ExtensionExcluder &Excluder) {
   bool performedRenaming = false;
-  auto IndexedSymbolsWithRanges = walkAndCollectSymbols(Current);
+  auto IndexedSymbolsWithRanges = walkAndCollectSymbols(Current, Excluder);
   
   using EditConsumer = swift::ide::SourceEditOutputConsumer;
   
@@ -186,6 +189,8 @@ performRenaming(std::string MainExecutablePath,
   
   FilesList Files;
   std::unordered_map<std::string, SymbolRenaming> RenamedSymbols;
+
+  ExtensionExcluder Excluder;
   
   for (auto* Unit : CI.getMainModule()->getFiles()) {
     if (auto* Current = dyn_cast<SourceFile>(Unit)) {
@@ -207,7 +212,8 @@ performRenaming(std::string MainExecutablePath,
                                 SourceManager,
                                 BufferId,
                                 Path,
-                                RenamedSymbols)) {
+                                RenamedSymbols,
+                                Excluder)) {
         auto Filename = llvm::sys::path::filename(Path).str();
         Files.push_back(std::pair<std::string, std::string>(Filename, Path));
       }
