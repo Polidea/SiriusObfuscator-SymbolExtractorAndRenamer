@@ -1,6 +1,7 @@
 //RUN: %target-prepare-obfuscation-for-file "Types" %target-run-full-obfuscation
 
 import Foundation
+import AppKit
 
 class SampleClass {}
 
@@ -89,4 +90,17 @@ switch test {
   case .case1(let bound1, let bound2):
     print(bound1)
     print(bound2)
+}
+
+// mocking trick
+
+protocol KeyValueStoreType {
+  func object(forKey defaultName: String) -> Any?
+  func set(_ value: Any?, forKey defaultName: String)
+  func removeObject(forKey defaultName: String)
+  func synchronize() -> Bool
+}
+
+extension UserDefaults: KeyValueStoreType {
+  
 }
