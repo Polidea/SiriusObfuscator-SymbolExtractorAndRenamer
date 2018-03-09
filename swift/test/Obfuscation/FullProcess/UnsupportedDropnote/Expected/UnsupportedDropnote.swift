@@ -15,18 +15,3 @@ final class T1_DebugBlock {
     #endif
   }
 }
-
-// mocking trick
-
-protocol KeyValueStoreType {
-  func object(forKey defaultName: String) -> Any?
-  func set(_ value: Any?, forKey defaultName: String)
-  func removeObject(forKey defaultName: String)
-  func synchronize() -> Bool
-}
-
-extension UserDefaults: KeyValueStoreType {
-  
-}
-
-

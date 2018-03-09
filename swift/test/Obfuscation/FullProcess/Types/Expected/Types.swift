@@ -1,5 +1,6 @@
 
 import Foundation
+import AppKit
 
 class T1_SampleClass {}
 
@@ -88,4 +89,17 @@ switch V1_test {
   case .case1(let bound1, let bound2):
     print(bound1)
     print(bound2)
+}
+
+// mocking trick
+
+protocol T1_KeyValueStoreType {
+  func object(forKey defaultName: String) -> Any?
+  func set(_ value: Any?, forKey defaultName: String)
+  func removeObject(forKey defaultName: String)
+  func synchronize() -> Bool
+}
+
+extension UserDefaults: T1_KeyValueStoreType {
+  
 }
