@@ -57,7 +57,7 @@ declarationOfFunctionCalledInExpression(CallExpr *CallExpression) {
   }
   return stringError("Cannot found supported Call Expression subtree pattern");
 }
-  
+
 std::vector<std::pair<Identifier, SourceLoc>>
 validArguments(CallExpr *CallExpression) {
 
