@@ -126,9 +126,9 @@ llvm::Expected<bool> performActualRenaming(SourceFile &Current,
                                            StringRef Path,
                                            std::vector<SymbolRenaming>
                                                           &RenamedSymbols,
-                                           ExtensionExcluder &Excluder) {
+                                           std::set<Excluder*> &Excluders) {
   bool performedRenaming = false;
-  auto IndexedSymbolsWithRanges = walkAndCollectSymbols(Current, Excluder);
+  auto IndexedSymbolsWithRanges = walkAndCollectSymbols(Current, Excluders);
   
   using EditConsumer = swift::ide::SourceEditOutputConsumer;
   
@@ -190,7 +190,10 @@ performRenaming(std::string MainExecutablePath,
   FilesList Files;
   std::vector<SymbolRenaming> RenamedSymbols;
 
-  ExtensionExcluder Excluder;
+  ExtensionExcluder ExtensionExcluder;
+  NSManagedExcluder NSManagedExcluder;
+  
+  std::set<Excluder*> Excluders = { &ExtensionExcluder, &NSManagedExcluder };
   
   for (auto* Unit : CI.getMainModule()->getFiles()) {
     if (auto* Current = dyn_cast<SourceFile>(Unit)) {
@@ -213,7 +216,7 @@ performRenaming(std::string MainExecutablePath,
                                 BufferId,
                                 Path,
                                 RenamedSymbols,
-                                Excluder)) {
+                                Excluders)) {
         auto Filename = llvm::sys::path::filename(Path).str();
         Files.push_back(std::pair<std::string, std::string>(Filename, Path));
       }
