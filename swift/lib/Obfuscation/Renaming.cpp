@@ -174,6 +174,7 @@ performRenaming(std::string MainExecutablePath,
                 ObfuscationConfiguration &&ObfuscationConfiguration,
                 const RenamesJson &RenamesJson,
                 std::string ObfuscatedProjectPath,
+                bool ObfuscateInPlace,
                 llvm::raw_ostream &DiagnosticStream) {
   
   CompilerInstance CI;
@@ -184,9 +185,11 @@ performRenaming(std::string MainExecutablePath,
     return std::move(Error);
   }
   
-  if (auto Error = copyProject(FilesJson.Project.RootPath,
-                               ObfuscatedProjectPath)) {
-    return std::move(Error);
+  if(!ObfuscateInPlace) {
+    if (auto Error = copyProject(FilesJson.Project.RootPath,
+                                 ObfuscatedProjectPath)) {
+      return std::move(Error);
+    }
   }
   
   FilesList Files;
