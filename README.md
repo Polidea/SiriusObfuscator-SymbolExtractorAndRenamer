@@ -1,6 +1,6 @@
 # Symbol Extractor, Name Mapper and Renamer
 
-Repository contains the Swift compiler fork with three additional tools and one additional library added. 
+Repository contains the Swift compiler fork with three additional tools and one additional library added.
 
 The tools are:
 
@@ -28,7 +28,7 @@ It performs the analysis of Swift source code files and identifies the symbols t
 $ obfuscator-symbol-extractor -filesjson <path-to-input-files-json> -symbolsjson <path-to-output-symbols-json>
 ```
 
-where 
+where
 
 `<path-to-input-files-json>` is a path to `Files.json` that contains the data required for performing the analysis of Swift source code. This parameter is required.
 
@@ -53,9 +53,9 @@ The output data format is called `Symbols.json` and presented below:
 }
 ```
 
-`symbols` is a list of objects that contains symbol identifier and name. 
+`symbols` is a list of objects that contains symbol identifier and name.
 
-`name` is directly corresponding to the actual string defined in the Swift source code. This string will be replaced by the `Renamer`. 
+`name` is directly corresponding to the actual string defined in the Swift source code. This string will be replaced by the `Renamer`.
 
 `identifier` contains all the information required to uniquely identify the given symbol in the source code. It will be used by `Renamer` to decide whether the symbol it comes across should be renamed or not.
 
@@ -139,6 +139,9 @@ where
 
 `<path-to-directory-for-obfuscated-project>` is the path to the directory that the newly generated obfuscated Swift source code files will be written to, as well as the new project.
 
+In case when project should be obfuscated in place (without making a copy), `-inplace` argument can be used instead of `-obfuscatedproject`.
+
+
 ## Data formats
 
 The input data formats are `Files.json` and `Renames.json` and are described in the [SymbolExtractor data formats section](#data-formats) and [NameMapper data formats section](#data-formats-1).
@@ -201,4 +204,3 @@ In the alphabetical order:
 * [Krzysztof Siejkowski](krzysztof.siejkowski@polidea.com)
 * [Jakub Sowa](jakub.sowa@polidea.com)
 * [Michał Zieliński](michal.zielinski@polidea.com)
-
