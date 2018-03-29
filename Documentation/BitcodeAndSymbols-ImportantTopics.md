@@ -15,11 +15,18 @@ TODO
 
 # <a name="jailbreak"></a> Disassembling an app
 
-TODO
+This section describes the example process of dissasembling an iOS app that is available in App Store. The process might require different software for each step, depending on tools availability for specific iOS version and device.
+
+Caution: the process involve jailbreaking the device which is strongly advised against.
+
+1. Download the app from the App Store.
+2. Jailbreak the device. For iOS versions 11.0-11.1.2 this can be done using [Electra](https://coolstar.org/electra/).
+3. The app bundle stored on the device is protected by [DRM system](https://en.wikipedia.org/wiki/Digital_rights_management) - the app's symbols that could be retrieved from app's binary are encrypted. The binary is decrypted upon running the app, when it's loaded to RAM. Retrieving the decrypted .ipa from the device can be done using [frida-ios-dump](https://github.com/AloneMonkey/frida-ios-dump).
+4. Dissasembling the app's mach-o executable can be done using [Hopper](https://www.hopperapp.com).
 
 # <a name="strip"></a> Stripping Swift symbols
 
-TODO
+Stripping Swift symbols from the mach-o executable can be achieved by turning on the `Strip Swift Symbols` flag (it is enabled by deefault). The flag can be found in Xcode build settings (Build Settings > Deployment > Strip Swift Symbols) and in archive process settings before sending the app to App Store review. With this flag only the swift symbols that are not accesible from ObjectiveC runtime are stripped from the binary.
 
 # <a name="dsym"></a> dSYM files
 
