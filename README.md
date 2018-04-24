@@ -1,5 +1,7 @@
 # Symbol Extractor, Name Mapper and Renamer
 
+This repository is part of [Sirius - Swift Obfuscator](https://gitlab2.polidea.com/SwiftObfuscator/ObfuscatorTool) project.
+
 Repository contains the Swift compiler fork with three additional tools and one additional library added.
 
 The tools are:
@@ -220,11 +222,9 @@ The input data formats are `files.json` and `Renames.json` and are described in 
 
 Please consult the [Documentation](Documentation/) folder for the further explanations.
 
-## Licence
+## Contributing
 
-TBA
-
-## Contributors
+### Contributors
 
 In the alphabetical order:
 
@@ -232,3 +232,26 @@ In the alphabetical order:
 * [Krzysztof Siejkowski](krzysztof.siejkowski@polidea.com)
 * [Jakub Sowa](jakub.sowa@polidea.com)
 * [Michał Zieliński](michal.zielinski@polidea.com)
+
+### CLA
+
+We require contributors to have signed [Contributor Licence Agreement](https://en.wikipedia.org/wiki/Contributor_License_Agreement).
+
+## Licence
+
+```
+Copyright 2018 Polidea Sp. z o.o
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+```
+
