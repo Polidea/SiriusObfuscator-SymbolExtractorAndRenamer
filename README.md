@@ -184,6 +184,8 @@ The input data formats are `files.json` and `Renames.json` and are described in 
 
 ## Build notes for developers
 
+0. Ensure you have the **Xcode 9.2** installed and available under **/Applications/Xcode.app**. The version and path are important as the Xcode project for the compiler that is generated during build has the path baked in.  
+
 1. Clone the source code  
    `git clone git@github.com:PolideaPlayground/SiriusObfuscator-SymbolExtractorAndRenamer.git`
 
@@ -206,6 +208,8 @@ The input data formats are `files.json` and `Renames.json` and are described in 
 
 8. Remove the ninja build as it's no longer needed (unless you plan to use it)
    `rm -r -f build/Ninja-RelWithDebInfoAssert+swift-DebugAssert`
+
+9. Open `build/Xcode-RelWithDebInfoAssert+swift-DebugAssert/swift-macosx-x86_64/Swift.xcodeproj` and create the schemes for the tools that you're interested in (autocreating schemes is not recommended, as there's a lot of them).
   
 
 ### Build documentation (optional)
