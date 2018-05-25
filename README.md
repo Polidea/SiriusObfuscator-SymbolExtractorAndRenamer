@@ -204,6 +204,10 @@ The input data formats are `files.json` and `Renames.json` and are described in 
    `rm -r -f build/Xcode-RelWithDebInfoAssert+swift-DebugAssert/swift-macosx-x86_64/Debug/lib/swift`
    `cp -r build/Ninja-RelWithDebInfoAssert+swift-DebugAssert/swift-macosx-x86_64/lib/swift build/Xcode-RelWithDebInfoAssert+swift-DebugAssert/swift-macosx-x86_64/Debug/lib/swift`
 
+8. Remove the ninja build as it's no longer needed (unless you plan to use it)
+   `rm -r -f build/Ninja-RelWithDebInfoAssert+swift-DebugAssert`
+  
+
 ### Build documentation (optional)
 
 1. Install doxygen
