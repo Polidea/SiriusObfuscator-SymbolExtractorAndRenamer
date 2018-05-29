@@ -43,7 +43,7 @@ where
 
 ## <a name="symbol-extractor-data-formats"></a> Data Formats
 
-The input data format is called `files.json`. It's defined and explained in the [FilesExtractor project documentation](https://github.com/PolideaPlayground/SiriusObfuscator-FileExtractor#data-formats).
+The input data format is called `files.json`. It's defined and explained in the [FilesExtractor project documentation](https://github.com/Polidea/SiriusObfuscator-FileExtractor#data-formats).
 
 The output data format is called `symbols.json` and it is presented below:
 
