@@ -109,6 +109,7 @@ class TypeMatcher {
     TRIVIAL_CASE(BuiltinUnknownObjectType)
     TRIVIAL_CASE(BuiltinUnsafeValueBufferType)
     TRIVIAL_CASE(BuiltinVectorType)
+    TRIVIAL_CASE(SILTokenType)
 
     bool visitTupleType(CanTupleType firstTuple, Type secondType,
                         Type sugaredFirstType) {
@@ -256,6 +257,28 @@ class TypeMatcher {
           return mismatch(firstFunc.getPointer(), secondFunc, sugaredFirstType);
 
         auto sugaredFirstFunc = sugaredFirstType->castTo<AnyFunctionType>();
+        if (firstFunc->getParams().size() != secondFunc->getParams().size())
+          return mismatch(firstFunc.getInput().getPointer(), secondFunc->getInput(),
+                          sugaredFirstFunc->getInput());
+
+        for (unsigned i = 0, n = firstFunc->getParams().size(); i != n; ++i) {
+          const auto &firstElt = firstFunc->getParams()[i];
+          const auto &secondElt = secondFunc->getParams()[i];
+
+          if (firstElt.getLabel() != secondElt.getLabel() ||
+              firstElt.isVariadic() != secondElt.isVariadic() ||
+              firstElt.isInOut() != secondElt.isInOut())
+            return mismatch(firstFunc.getInput().getPointer(),
+                            secondFunc->getInput(),
+                            sugaredFirstFunc->getInput());
+
+          // Recurse on parameter components.
+          if (!this->visit(firstElt.getType()->getCanonicalType(),
+                           secondElt.getType(),
+                           sugaredFirstFunc->getParams()[i].getType()))
+            return false;
+        }
+
         return this->visit(firstFunc.getInput(), secondFunc->getInput(),
                            sugaredFirstFunc->getInput()) &&
                this->visit(firstFunc.getResult(), secondFunc->getResult(),

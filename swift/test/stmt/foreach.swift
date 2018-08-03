@@ -178,3 +178,42 @@ func testExistentialSequence(s: Sequence) { // expected-error {{protocol 'Sequen
     _ = x
   }
 }
+
+// Conditional conformance to Sequence and IteratorProtocol.
+protocol P { }
+
+struct RepeatedSequence<T> {
+  var value: T
+  var count: Int
+}
+
+struct RepeatedIterator<T> {
+  var value: T
+  var count: Int
+}
+
+extension RepeatedIterator: IteratorProtocol where T: P {
+  typealias Element = T
+
+  mutating func next() -> T? {
+    if count == 0 { return nil }
+    count = count - 1
+    return value
+  }
+}
+
+extension RepeatedSequence: Sequence where T: P {
+  typealias Element = T
+  typealias Iterator = RepeatedIterator<T>
+  typealias SubSequence = AnySequence<T>
+
+  func makeIterator() -> RepeatedIterator<T> {
+    return Iterator(value: value, count: count)
+  }
+}
+
+extension Int : P { }
+
+func testRepeated(ri: RepeatedSequence<Int>) {
+  for x in ri { _ = x }
+}

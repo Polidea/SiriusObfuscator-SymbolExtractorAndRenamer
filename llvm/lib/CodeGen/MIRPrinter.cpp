@@ -12,35 +12,71 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "MIRPrinter.h"
-#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/None.h"
 #include "llvm/ADT/SmallBitVector.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
-#include "llvm/CodeGen/MIRYamlMapping.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineMemOperand.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/MIRPrinter.h"
+#include "llvm/CodeGen/MIRYamlMapping.h"
+#include "llvm/CodeGen/PseudoSourceValue.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/IR/DebugLoc.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/ModuleSlotTracker.h"
+#include "llvm/IR/Value.h"
+#include "llvm/MC/LaneBitmask.h"
+#include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCSymbol.h"
+#include "llvm/Support/AtomicOrdering.h"
+#include "llvm/Support/BranchProbability.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/YAMLTraits.h"
+#include "llvm/Support/LowLevelTypeImpl.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/YAMLTraits.h"
 #include "llvm/Target/TargetInstrInfo.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
+#include "llvm/Target/TargetMachine.h"
+#include "llvm/Target/TargetRegisterInfo.h"
 #include "llvm/Target/TargetSubtargetInfo.h"
+#include <algorithm>
+#include <cassert>
+#include <cinttypes>
+#include <cstdint>
+#include <iterator>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace llvm;
+
+static cl::opt<bool> SimplifyMIR("simplify-mir",
+    cl::desc("Leave out unnecessary information when printing MIR"));
 
 namespace {
 
@@ -104,6 +140,11 @@ class MIPrinter {
   ModuleSlotTracker &MST;
   const DenseMap<const uint32_t *, unsigned> &RegisterMaskIds;
   const DenseMap<int, FrameIndexOperand> &StackObjectOperandMapping;
+  /// Synchronization scope names registered with LLVMContext.
+  SmallVector<StringRef, 8> SSNs;
+
+  bool canPredictBranchProbabilities(const MachineBasicBlock &MBB) const;
+  bool canPredictSuccessors(const MachineBasicBlock &MBB) const;
 
 public:
   MIPrinter(raw_ostream &OS, ModuleSlotTracker &MST,
@@ -121,10 +162,12 @@ public:
   void printStackObjectReference(int FrameIndex);
   void printOffset(int64_t Offset);
   void printTargetFlags(const MachineOperand &Op);
-  void print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
-             unsigned I, bool ShouldPrintRegisterTies,
+  void print(const MachineInstr &MI, unsigned OpIdx,
+             const TargetRegisterInfo *TRI, bool ShouldPrintRegisterTies,
              LLT TypeToPrint, bool IsDef = false);
-  void print(const MachineMemOperand &Op);
+  void print(const LLVMContext &Context, const TargetInstrInfo &TII,
+             const MachineMemOperand &Op);
+  void printSyncScope(const LLVMContext &Context, SyncScope::ID SSID);
 
   void print(const MCCFIInstruction &CFI, const TargetRegisterInfo *TRI);
 };
@@ -139,6 +182,7 @@ template <> struct BlockScalarTraits<Module> {
   static void output(const Module &Mod, void *Ctxt, raw_ostream &OS) {
     Mod.print(OS, nullptr);
   }
+
   static StringRef input(StringRef Str, void *Ctxt, Module &Mod) {
     llvm_unreachable("LLVM Module is supposed to be parsed separately");
     return "";
@@ -175,8 +219,6 @@ void MIRPrinter::print(const MachineFunction &MF) {
   YamlMF.Alignment = MF.getAlignment();
   YamlMF.ExposesReturnsTwice = MF.exposesReturnsTwice();
 
-  YamlMF.NoVRegs = MF.getProperties().hasProperty(
-      MachineFunctionProperties::Property::NoVRegs);
   YamlMF.Legalized = MF.getProperties().hasProperty(
       MachineFunctionProperties::Property::Legalized);
   YamlMF.RegBankSelected = MF.getProperties().hasProperty(
@@ -204,8 +246,51 @@ void MIRPrinter::print(const MachineFunction &MF) {
   }
   StrOS.flush();
   yaml::Output Out(OS);
+  if (!SimplifyMIR)
+      Out.setWriteDefaultValues(true);
   Out << YamlMF;
 }
+
+static void printCustomRegMask(const uint32_t *RegMask, raw_ostream &OS,
+                               const TargetRegisterInfo *TRI) {
+  assert(RegMask && "Can't print an empty register mask");
+  OS << StringRef("CustomRegMask(");
+
+  bool IsRegInRegMaskFound = false;
+  for (int I = 0, E = TRI->getNumRegs(); I < E; I++) {
+    // Check whether the register is asserted in regmask.
+    if (RegMask[I / 32] & (1u << (I % 32))) {
+      if (IsRegInRegMaskFound)
+        OS << ',';
+      printReg(I, OS, TRI);
+      IsRegInRegMaskFound = true;
+    }
+  }
+
+  OS << ')';
+}
+
+static void printRegClassOrBank(unsigned Reg, raw_ostream &OS,
+                                const MachineRegisterInfo &RegInfo,
+                                const TargetRegisterInfo *TRI) {
+  if (RegInfo.getRegClassOrNull(Reg))
+    OS << StringRef(TRI->getRegClassName(RegInfo.getRegClass(Reg))).lower();
+  else if (RegInfo.getRegBankOrNull(Reg))
+    OS << StringRef(RegInfo.getRegBankOrNull(Reg)->getName()).lower();
+  else {
+    OS << "_";
+    assert((RegInfo.def_empty(Reg) || RegInfo.getType(Reg).isValid()) &&
+           "Generic registers must have a valid type");
+  }
+}
+
+static void printRegClassOrBank(unsigned Reg, yaml::StringValue &Dest,
+                                const MachineRegisterInfo &RegInfo,
+                                const TargetRegisterInfo *TRI) {
+  raw_string_ostream OS(Dest.Value);
+  printRegClassOrBank(Reg, OS, RegInfo, TRI);
+}
+
 
 void MIRPrinter::convert(yaml::MachineFunction &MF,
                          const MachineRegisterInfo &RegInfo,
@@ -217,16 +302,7 @@ void MIRPrinter::convert(yaml::MachineFunction &MF,
     unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
     yaml::VirtualRegisterDefinition VReg;
     VReg.ID = I;
-    if (RegInfo.getRegClassOrNull(Reg))
-      VReg.Class =
-          StringRef(TRI->getRegClassName(RegInfo.getRegClass(Reg))).lower();
-    else if (RegInfo.getRegBankOrNull(Reg))
-      VReg.Class = StringRef(RegInfo.getRegBankOrNull(Reg)->getName()).lower();
-    else {
-      VReg.Class = std::string("_");
-      assert((RegInfo.def_empty(Reg) || RegInfo.getType(Reg).isValid()) &&
-             "Generic registers must have a valid type");
-    }
+    printRegClassOrBank(Reg, VReg.Class, RegInfo, TRI);
     unsigned PreferredReg = RegInfo.getSimpleHint(Reg);
     if (PreferredReg)
       printReg(PreferredReg, VReg.PreferredRegister, TRI);
@@ -241,20 +317,18 @@ void MIRPrinter::convert(yaml::MachineFunction &MF,
       printReg(I->second, LiveIn.VirtualRegister, TRI);
     MF.LiveIns.push_back(LiveIn);
   }
-  // The used physical register mask is printed as an inverted callee saved
-  // register mask.
-  const BitVector &UsedPhysRegMask = RegInfo.getUsedPhysRegsMask();
-  if (UsedPhysRegMask.none())
-    return;
-  std::vector<yaml::FlowStringValue> CalleeSavedRegisters;
-  for (unsigned I = 0, E = UsedPhysRegMask.size(); I != E; ++I) {
-    if (!UsedPhysRegMask[I]) {
+
+  // Prints the callee saved registers.
+  if (RegInfo.isUpdatedCSRsInitialized()) {
+    const MCPhysReg *CalleeSavedRegs = RegInfo.getCalleeSavedRegs();
+    std::vector<yaml::FlowStringValue> CalleeSavedRegisters;
+    for (const MCPhysReg *I = CalleeSavedRegs; *I; ++I) {
       yaml::FlowStringValue Reg;
-      printReg(I, Reg, TRI);
+      printReg(*I, Reg, TRI);
       CalleeSavedRegisters.push_back(Reg);
     }
+    MF.CalleeSavedRegisters = CalleeSavedRegisters;
   }
-  MF.CalleeSavedRegisters = CalleeSavedRegisters;
 }
 
 void MIRPrinter::convert(ModuleSlotTracker &MST,
@@ -274,6 +348,7 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
   YamlMFI.HasOpaqueSPAdjustment = MFI.hasOpaqueSPAdjustment();
   YamlMFI.HasVAStart = MFI.hasVAStart();
   YamlMFI.HasMustTailInVarArgFunc = MFI.hasMustTailInVarArgFunc();
+  YamlMFI.LocalFrameSize = MFI.getLocalFrameSize();
   if (MFI.getSavePoint()) {
     raw_string_ostream StrOS(YamlMFI.SavePoint.Value);
     MIPrinter(StrOS, MST, RegisterMaskIds, StackObjectOperandMapping)
@@ -395,17 +470,20 @@ void MIRPrinter::convert(yaml::MachineFunction &MF,
                          const MachineConstantPool &ConstantPool) {
   unsigned ID = 0;
   for (const MachineConstantPoolEntry &Constant : ConstantPool.getConstants()) {
-    // TODO: Serialize target specific constant pool entries.
-    if (Constant.isMachineConstantPoolEntry())
-      llvm_unreachable("Can't print target specific constant pool entries yet");
-
-    yaml::MachineConstantPoolValue YamlConstant;
     std::string Str;
     raw_string_ostream StrOS(Str);
-    Constant.Val.ConstVal->printAsOperand(StrOS);
+    if (Constant.isMachineConstantPoolEntry()) {
+      Constant.Val.MachineCPVal->print(StrOS);
+    } else {
+      Constant.Val.ConstVal->printAsOperand(StrOS);
+    }
+
+    yaml::MachineConstantPoolValue YamlConstant;
     YamlConstant.ID = ID++;
     YamlConstant.Value = StrOS.str();
     YamlConstant.Alignment = Constant.getAlignment();
+    YamlConstant.IsTargetSpecific = Constant.isMachineConstantPoolEntry();
+
     MF.Constants.push_back(YamlConstant);
   }
 }
@@ -435,6 +513,62 @@ void MIRPrinter::initRegisterMaskIds(const MachineFunction &MF) {
   unsigned I = 0;
   for (const uint32_t *Mask : TRI->getRegMasks())
     RegisterMaskIds.insert(std::make_pair(Mask, I++));
+}
+
+void llvm::guessSuccessors(const MachineBasicBlock &MBB,
+                           SmallVectorImpl<MachineBasicBlock*> &Result,
+                           bool &IsFallthrough) {
+  SmallPtrSet<MachineBasicBlock*,8> Seen;
+
+  for (const MachineInstr &MI : MBB) {
+    if (MI.isPHI())
+      continue;
+    for (const MachineOperand &MO : MI.operands()) {
+      if (!MO.isMBB())
+        continue;
+      MachineBasicBlock *Succ = MO.getMBB();
+      auto RP = Seen.insert(Succ);
+      if (RP.second)
+        Result.push_back(Succ);
+    }
+  }
+  MachineBasicBlock::const_iterator I = MBB.getLastNonDebugInstr();
+  IsFallthrough = I == MBB.end() || !I->isBarrier();
+}
+
+bool
+MIPrinter::canPredictBranchProbabilities(const MachineBasicBlock &MBB) const {
+  if (MBB.succ_size() <= 1)
+    return true;
+  if (!MBB.hasSuccessorProbabilities())
+    return true;
+
+  SmallVector<BranchProbability,8> Normalized(MBB.Probs.begin(),
+                                              MBB.Probs.end());
+  BranchProbability::normalizeProbabilities(Normalized.begin(),
+                                            Normalized.end());
+  SmallVector<BranchProbability,8> Equal(Normalized.size());
+  BranchProbability::normalizeProbabilities(Equal.begin(), Equal.end());
+
+  return std::equal(Normalized.begin(), Normalized.end(), Equal.begin());
+}
+
+bool MIPrinter::canPredictSuccessors(const MachineBasicBlock &MBB) const {
+  SmallVector<MachineBasicBlock*,8> GuessedSuccs;
+  bool GuessedFallthrough;
+  guessSuccessors(MBB, GuessedSuccs, GuessedFallthrough);
+  if (GuessedFallthrough) {
+    const MachineFunction &MF = *MBB.getParent();
+    MachineFunction::const_iterator NextI = std::next(MBB.getIterator());
+    if (NextI != MF.end()) {
+      MachineBasicBlock *Next = const_cast<MachineBasicBlock*>(&*NextI);
+      if (!is_contained(GuessedSuccs, Next))
+        GuessedSuccs.push_back(Next);
+    }
+  }
+  if (GuessedSuccs.size() != MBB.succ_size())
+    return false;
+  return std::equal(MBB.succ_begin(), MBB.succ_end(), GuessedSuccs.begin());
 }
 
 void MIPrinter::print(const MachineBasicBlock &MBB) {
@@ -475,13 +609,21 @@ void MIPrinter::print(const MachineBasicBlock &MBB) {
 
   bool HasLineAttributes = false;
   // Print the successors
-  if (!MBB.succ_empty()) {
+  bool canPredictProbs = canPredictBranchProbabilities(MBB);
+  // Even if the list of successors is empty, if we cannot guess it,
+  // we need to print it to tell the parser that the list is empty.
+  // This is needed, because MI model unreachable as empty blocks
+  // with an empty successor list. If the parser would see that
+  // without the successor list, it would guess the code would
+  // fallthrough.
+  if ((!MBB.succ_empty() && !SimplifyMIR) || !canPredictProbs ||
+      !canPredictSuccessors(MBB)) {
     OS.indent(2) << "successors: ";
     for (auto I = MBB.succ_begin(), E = MBB.succ_end(); I != E; ++I) {
       if (I != MBB.succ_begin())
         OS << ", ";
       printMBBReference(**I);
-      if (MBB.hasSuccessorProbabilities())
+      if (!SimplifyMIR || !canPredictProbs)
         OS << '('
            << format("0x%08" PRIx32, MBB.getSuccProbability(I).getNumerator())
            << ')';
@@ -586,7 +728,7 @@ void MIPrinter::print(const MachineInstr &MI) {
        ++I) {
     if (I)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+    print(MI, I, TRI, ShouldPrintRegisterTies,
           getTypeToPrint(MI, I, PrintedTypes, MRI),
           /*IsDef=*/true);
   }
@@ -603,7 +745,7 @@ void MIPrinter::print(const MachineInstr &MI) {
   for (; I < E; ++I) {
     if (NeedComma)
       OS << ", ";
-    print(MI.getOperand(I), TRI, I, ShouldPrintRegisterTies,
+    print(MI, I, TRI, ShouldPrintRegisterTies,
           getTypeToPrint(MI, I, PrintedTypes, MRI));
     NeedComma = true;
   }
@@ -617,11 +759,12 @@ void MIPrinter::print(const MachineInstr &MI) {
 
   if (!MI.memoperands_empty()) {
     OS << " :: ";
+    const LLVMContext &Context = MF->getFunction()->getContext();
     bool NeedComma = false;
     for (const auto *Op : MI.memoperands()) {
       if (NeedComma)
         OS << ", ";
-      print(*Op);
+      print(Context, *TII, *Op);
       NeedComma = true;
     }
   }
@@ -775,12 +918,15 @@ static const char *getTargetIndexName(const MachineFunction &MF, int Index) {
   return nullptr;
 }
 
-void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
-                      unsigned I, bool ShouldPrintRegisterTies, LLT TypeToPrint,
+void MIPrinter::print(const MachineInstr &MI, unsigned OpIdx,
+                      const TargetRegisterInfo *TRI,
+                      bool ShouldPrintRegisterTies, LLT TypeToPrint,
                       bool IsDef) {
+  const MachineOperand &Op = MI.getOperand(OpIdx);
   printTargetFlags(Op);
   switch (Op.getType()) {
-  case MachineOperand::MO_Register:
+  case MachineOperand::MO_Register: {
+    unsigned Reg = Op.getReg();
     if (Op.isImplicit())
       OS << (Op.isDef() ? "implicit-def " : "implicit ");
     else if (!IsDef && Op.isDef())
@@ -798,17 +944,28 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
       OS << "early-clobber ";
     if (Op.isDebug())
       OS << "debug-use ";
-    printReg(Op.getReg(), OS, TRI);
+    printReg(Reg, OS, TRI);
     // Print the sub register.
     if (Op.getSubReg() != 0)
       OS << '.' << TRI->getSubRegIndexName(Op.getSubReg());
+    if (TargetRegisterInfo::isVirtualRegister(Reg)) {
+      const MachineRegisterInfo &MRI = Op.getParent()->getMF()->getRegInfo();
+      if (IsDef || MRI.def_empty(Reg)) {
+        OS << ':';
+        printRegClassOrBank(Reg, OS, MRI, TRI);
+      }
+    }
     if (ShouldPrintRegisterTies && Op.isTied() && !Op.isDef())
-      OS << "(tied-def " << Op.getParent()->findTiedOperandIdx(I) << ")";
+      OS << "(tied-def " << Op.getParent()->findTiedOperandIdx(OpIdx) << ")";
     if (TypeToPrint.isValid())
       OS << '(' << TypeToPrint << ')';
     break;
+  }
   case MachineOperand::MO_Immediate:
-    OS << Op.getImm();
+    if (MI.isOperandSubregIdx(OpIdx))
+      OS << "%subreg." << TRI->getSubRegIndexName(Op.getImm());
+    else
+      OS << Op.getImm();
     break;
   case MachineOperand::MO_CImmediate:
     Op.getCImm()->printAsOperand(OS, /*PrintType=*/true, MST);
@@ -826,7 +983,7 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
     OS << "%const." << Op.getIndex();
     printOffset(Op.getOffset());
     break;
-  case MachineOperand::MO_TargetIndex: {
+  case MachineOperand::MO_TargetIndex:
     OS << "target-index(";
     if (const auto *Name = getTargetIndexName(
             *Op.getParent()->getParent()->getParent(), Op.getIndex()))
@@ -836,15 +993,20 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
     OS << ')';
     printOffset(Op.getOffset());
     break;
-  }
   case MachineOperand::MO_JumpTableIndex:
     OS << "%jump-table." << Op.getIndex();
     break;
-  case MachineOperand::MO_ExternalSymbol:
+  case MachineOperand::MO_ExternalSymbol: {
+    StringRef Name = Op.getSymbolName();
     OS << '$';
-    printLLVMNameWithoutPrefix(OS, Op.getSymbolName());
+    if (Name.empty()) {
+      OS << "\"\"";
+    } else {
+      printLLVMNameWithoutPrefix(OS, Name);
+    }
     printOffset(Op.getOffset());
     break;
+  }
   case MachineOperand::MO_GlobalAddress:
     Op.getGlobal()->printAsOperand(OS, /*PrintType=*/false, MST);
     printOffset(Op.getOffset());
@@ -863,7 +1025,7 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
     if (RegMaskInfo != RegisterMaskIds.end())
       OS << StringRef(TRI->getRegMaskNames()[RegMaskInfo->second]).lower();
     else
-      llvm_unreachable("Can't print this machine register mask yet.");
+      printCustomRegMask(Op.getRegMask(), OS, TRI);
     break;
   }
   case MachineOperand::MO_RegisterLiveOut: {
@@ -909,15 +1071,23 @@ void MIPrinter::print(const MachineOperand &Op, const TargetRegisterInfo *TRI,
        << CmpInst::getPredicateName(Pred) << ')';
     break;
   }
-  case MachineOperand::MO_Placeholder:
-    OS << "<placeholder>";
-    break;
   }
 }
 
-void MIPrinter::print(const MachineMemOperand &Op) {
+static const char *getTargetMMOFlagName(const TargetInstrInfo &TII,
+                                        unsigned TMMOFlag) {
+  auto Flags = TII.getSerializableMachineMemOperandTargetFlags();
+  for (const auto &I : Flags) {
+    if (I.first == TMMOFlag) {
+      return I.second;
+    }
+  }
+  return nullptr;
+}
+
+void MIPrinter::print(const LLVMContext &Context, const TargetInstrInfo &TII,
+                      const MachineMemOperand &Op) {
   OS << '(';
-  // TODO: Print operand's target specific flags.
   if (Op.isVolatile())
     OS << "volatile ";
   if (Op.isNonTemporal())
@@ -926,15 +1096,23 @@ void MIPrinter::print(const MachineMemOperand &Op) {
     OS << "dereferenceable ";
   if (Op.isInvariant())
     OS << "invariant ";
+  if (Op.getFlags() & MachineMemOperand::MOTargetFlag1)
+    OS << '"' << getTargetMMOFlagName(TII, MachineMemOperand::MOTargetFlag1)
+       << "\" ";
+  if (Op.getFlags() & MachineMemOperand::MOTargetFlag2)
+    OS << '"' << getTargetMMOFlagName(TII, MachineMemOperand::MOTargetFlag2)
+       << "\" ";
+  if (Op.getFlags() & MachineMemOperand::MOTargetFlag3)
+    OS << '"' << getTargetMMOFlagName(TII, MachineMemOperand::MOTargetFlag3)
+       << "\" ";
+
+  assert((Op.isLoad() || Op.isStore()) && "machine memory operand must be a load or store (or both)");
   if (Op.isLoad())
     OS << "load ";
-  else {
-    assert(Op.isStore() && "Non load machine operand must be a store");
+  if (Op.isStore())
     OS << "store ";
-  }
 
-  if (Op.getSynchScope() == SynchronizationScope::SingleThread)
-    OS << "singlethread ";
+  printSyncScope(Context, Op.getSyncScopeID());
 
   if (Op.getOrdering() != AtomicOrdering::NotAtomic)
     OS << toIRString(Op.getOrdering()) << ' ';
@@ -943,10 +1121,12 @@ void MIPrinter::print(const MachineMemOperand &Op) {
 
   OS << Op.getSize();
   if (const Value *Val = Op.getValue()) {
-    OS << (Op.isLoad() ? " from " : " into ");
+    OS << ((Op.isLoad() && Op.isStore()) ? " on "
+                                         : Op.isLoad() ? " from " : " into ");
     printIRValueReference(*Val);
   } else if (const PseudoSourceValue *PVal = Op.getPseudoValue()) {
-    OS << (Op.isLoad() ? " from " : " into ");
+    OS << ((Op.isLoad() && Op.isStore()) ? " on "
+                                         : Op.isLoad() ? " from " : " into ");
     assert(PVal && "Expected a pseudo source value");
     switch (PVal->kind()) {
     case PseudoSourceValue::Stack:
@@ -1003,6 +1183,23 @@ void MIPrinter::print(const MachineMemOperand &Op) {
   OS << ')';
 }
 
+void MIPrinter::printSyncScope(const LLVMContext &Context, SyncScope::ID SSID) {
+  switch (SSID) {
+  case SyncScope::System: {
+    break;
+  }
+  default: {
+    if (SSNs.empty())
+      Context.getSyncScopeNames(SSNs);
+
+    OS << "syncscope(\"";
+    PrintEscapedString(SSNs[SSID], OS);
+    OS << "\") ";
+    break;
+  }
+  }
+}
+
 static void printCFIRegister(unsigned DwarfReg, raw_ostream &OS,
                              const TargetRegisterInfo *TRI) {
   int Reg = TRI->getLLVMRegNum(DwarfReg, true);
@@ -1018,35 +1215,95 @@ void MIPrinter::print(const MCCFIInstruction &CFI,
   switch (CFI.getOperation()) {
   case MCCFIInstruction::OpSameValue:
     OS << "same_value ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpRememberState:
+    OS << "remember_state ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    break;
+  case MCCFIInstruction::OpRestoreState:
+    OS << "restore_state ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     break;
   case MCCFIInstruction::OpOffset:
     OS << "offset ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     OS << ", " << CFI.getOffset();
     break;
   case MCCFIInstruction::OpDefCfaRegister:
     OS << "def_cfa_register ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     break;
   case MCCFIInstruction::OpDefCfaOffset:
     OS << "def_cfa_offset ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     OS << CFI.getOffset();
     break;
   case MCCFIInstruction::OpDefCfa:
     OS << "def_cfa ";
-    if (CFI.getLabel())
-      OS << "<mcsymbol> ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     printCFIRegister(CFI.getRegister(), OS, TRI);
     OS << ", " << CFI.getOffset();
+    break;
+  case MCCFIInstruction::OpRelOffset:
+    OS << "rel_offset ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    OS << ", " << CFI.getOffset();
+    break;
+  case MCCFIInstruction::OpAdjustCfaOffset:
+    OS << "adjust_cfa_offset ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    OS << CFI.getOffset();
+    break;
+  case MCCFIInstruction::OpRestore:
+    OS << "restore ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpEscape: {
+    OS << "escape ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    if (!CFI.getValues().empty()) {
+      size_t e = CFI.getValues().size() - 1;
+      for (size_t i = 0; i < e; ++i)
+        OS << format("0x%02x", uint8_t(CFI.getValues()[i])) << ", ";
+      OS << format("0x%02x", uint8_t(CFI.getValues()[e])) << ", ";
+    }
+    break;
+  }
+  case MCCFIInstruction::OpUndefined:
+    OS << "undefined ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpRegister:
+    OS << "register ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
+    printCFIRegister(CFI.getRegister(), OS, TRI);
+    OS << ", ";
+    printCFIRegister(CFI.getRegister2(), OS, TRI);
+    break;
+  case MCCFIInstruction::OpWindowSave:
+    OS << "window_save ";
+    if (MCSymbol *Label = CFI.getLabel())
+      MachineOperand::printSymbol(OS, *Label);
     break;
   default:
     // TODO: Print the other CFI Operations.

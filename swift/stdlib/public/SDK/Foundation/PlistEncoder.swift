@@ -47,7 +47,7 @@ open class PropertyListEncoder {
     ///
     /// - parameter value: The value to encode.
     /// - returns: A new `Data` value containing the encoded property list data.
-    /// - throws: `EncodingError.invalidValue` if a non-comforming floating-point value is encountered during encoding, and the encoding strategy is `.throw`.
+    /// - throws: `EncodingError.invalidValue` if a non-conforming floating-point value is encountered during encoding, and the encoding strategy is `.throw`.
     /// - throws: An error if any value throws an error during encoding.
     open func encode<Value : Encodable>(_ value: Value) throws -> Data {
       let topLevel = try encodeToTopLevelContainer(value)
@@ -80,15 +80,12 @@ open class PropertyListEncoder {
     /// - throws: An error if any value throws an error during encoding.
     internal func encodeToTopLevelContainer<Value : Encodable>(_ value: Value) throws -> Any {
         let encoder = _PlistEncoder(options: self.options)
-        try value.encode(to: encoder)
-
-        guard encoder.storage.count > 0 else {
+        guard let topLevel = try encoder.box_(value) else {
             throw EncodingError.invalidValue(value,
                                              EncodingError.Context(codingPath: [],
                                                                    debugDescription: "Top-level \(Value.self) did not encode any values."))
         }
 
-        let topLevel = encoder.storage.popContainer()
         return topLevel
     }
 }
@@ -384,77 +381,77 @@ extension _PlistEncoder : SingleValueEncodingContainer {
 
     public func encode(_ value: Bool) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Int) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Int8) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Int16) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Int32) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Int64) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: UInt) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: UInt8) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: UInt16) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: UInt32) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: UInt64) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: String) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Float) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode(_ value: Double) throws {
         assertCanEncodeNewValue()
-        self.storage.push(container: box(value))
+        self.storage.push(container: self.box(value))
     }
 
     public func encode<T : Encodable>(_ value: T) throws {
         assertCanEncodeNewValue()
-        try self.storage.push(container: box(value))
+        try self.storage.push(container: self.box(value))
     }
 }
 
@@ -477,25 +474,36 @@ extension _PlistEncoder {
     fileprivate func box(_ value: Float)  -> NSObject { return NSNumber(value: value) }
     fileprivate func box(_ value: Double) -> NSObject { return NSNumber(value: value) }
     fileprivate func box(_ value: String) -> NSObject { return NSString(string: value) }
-    fileprivate func box(_ value: Data)   -> NSObject { return NSData(data: value) }
 
     fileprivate func box<T : Encodable>(_ value: T) throws -> NSObject {
-        if T.self == Date.self {
-            // PropertyListSerialization handles Date directly.
-            return NSDate(timeIntervalSinceReferenceDate: (value as! Date).timeIntervalSinceReferenceDate)
-        } else if T.self == Data.self {
-            // PropertyListSerialization handles Data directly.
-            return NSData(data: (value as! Data))
+        return try self.box_(value) ?? NSDictionary()
+    }
+
+    fileprivate func box_<T : Encodable>(_ value: T) throws -> NSObject? {
+        if T.self == Date.self || T.self == NSDate.self {
+            // PropertyListSerialization handles NSDate directly.
+            return (value as! NSDate)
+        } else if T.self == Data.self || T.self == NSData.self {
+            // PropertyListSerialization handles NSData directly.
+            return (value as! NSData)
         }
 
         // The value should request a container from the _PlistEncoder.
-        let currentTopContainer = self.storage.containers.last
-        try value.encode(to: self)
+        let depth = self.storage.count
+        do {
+            try value.encode(to: self)
+        } catch let error {
+            // If the value pushed a container before throwing, pop it back off to restore state.
+            if self.storage.count > depth {
+                let _ = self.storage.popContainer()
+            }
+
+            throw error
+        }
 
         // The top container should be a new container.
-        guard self.storage.containers.last! !== currentTopContainer else {
-            // If the value didn't request a container at all, encode the default container instead.
-            return NSDictionary()
+        guard self.storage.count > depth else {
+            return nil
         }
 
         return self.storage.popContainer()
@@ -613,7 +621,7 @@ open class PropertyListDecoder {
     /// - throws: An error if any value throws an error during decoding.
     open func decode<T : Decodable>(_ type: T.Type, from data: Data) throws -> T {
         var format: PropertyListSerialization.PropertyListFormat = .binary
-        return try decode(T.self, from: data, format: &format)
+        return try decode(type, from: data, format: &format)
     }
 
     /// Decodes a top-level value of the given type from the given property list representation.
@@ -632,7 +640,7 @@ open class PropertyListDecoder {
             throw DecodingError.dataCorrupted(DecodingError.Context(codingPath: [], debugDescription: "The given data was not a valid property list.", underlyingError: error))
         }
 
-        return try decode(T.self, fromTopLevel: topLevel)
+        return try decode(type, fromTopLevel: topLevel)
     }
 
     /// Decodes a top-level value of the given type from the given property list container (top-level array or dictionary).
@@ -644,7 +652,11 @@ open class PropertyListDecoder {
     /// - throws: An error if any value throws an error during decoding.
     internal func decode<T : Decodable>(_ type: T.Type, fromTopLevel container: Any) throws -> T {
         let decoder = _PlistDecoder(referencing: container, options: self.options)
-        return try T(from: decoder)
+        guard let value = try decoder.unbox(container, as: type) else {
+            throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: [], debugDescription: "The given data did not contain a top-level value."))
+        }
+
+        return value
     }
 }
 
@@ -776,7 +788,7 @@ fileprivate struct _PlistKeyedDecodingContainer<K : CodingKey> : KeyedDecodingCo
     // MARK: - KeyedDecodingContainerProtocol Methods
 
     public var allKeys: [Key] {
-        return self.container.keys.flatMap { Key(stringValue: $0) }
+        return self.container.keys.compactMap { Key(stringValue: $0) }
     }
 
     public func contains(_ key: Key) -> Bool {
@@ -1012,7 +1024,7 @@ fileprivate struct _PlistKeyedDecodingContainer<K : CodingKey> : KeyedDecodingCo
         self.decoder.codingPath.append(key)
         defer { self.decoder.codingPath.removeLast() }
 
-        guard let value = try self.decoder.unbox(entry, as: T.self) else {
+        guard let value = try self.decoder.unbox(entry, as: type) else {
             throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.decoder.codingPath, debugDescription: "Expected \(type) value but found null instead."))
         }
 
@@ -1351,7 +1363,7 @@ fileprivate struct _PlistUnkeyedDecodingContainer : UnkeyedDecodingContainer {
         self.decoder.codingPath.append(_PlistKey(index: self.currentIndex))
         defer { self.decoder.codingPath.removeLast() }
 
-        guard let decoded = try self.decoder.unbox(self.container[self.currentIndex], as: T.self) else {
+        guard let decoded = try self.decoder.unbox(self.container[self.currentIndex], as: type) else {
             throw DecodingError.valueNotFound(type, DecodingError.Context(codingPath: self.decoder.codingPath + [_PlistKey(index: self.currentIndex)], debugDescription: "Expected \(type) but found null instead."))
         }
 
@@ -1513,8 +1525,8 @@ extension _PlistDecoder : SingleValueDecodingContainer {
     }
 
     public func decode<T : Decodable>(_ type: T.Type) throws -> T {
-        try expectNonNull(T.self)
-        return try self.unbox(self.storage.topContainer, as: T.self)!
+        try expectNonNull(type)
+        return try self.unbox(self.storage.topContainer, as: type)!
     }
 }
 
@@ -1546,7 +1558,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Int.Type) throws -> Int? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1561,7 +1573,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Int8.Type) throws -> Int8? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1576,7 +1588,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Int16.Type) throws -> Int16? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1591,7 +1603,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Int32.Type) throws -> Int32? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1606,7 +1618,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Int64.Type) throws -> Int64? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1621,7 +1633,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: UInt.Type) throws -> UInt? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1636,7 +1648,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: UInt8.Type) throws -> UInt8? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1651,7 +1663,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: UInt16.Type) throws -> UInt16? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1666,7 +1678,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: UInt32.Type) throws -> UInt32? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1681,7 +1693,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: UInt64.Type) throws -> UInt64? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1696,7 +1708,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Float.Type) throws -> Float? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1711,7 +1723,7 @@ extension _PlistDecoder {
     fileprivate func unbox(_ value: Any, as type: Double.Type) throws -> Double? {
         if let string = value as? String, string == _plistNull { return nil }
 
-        guard let number = value as? NSNumber else {
+        guard let number = value as? NSNumber, number !== kCFBooleanTrue, number !== kCFBooleanFalse else {
             throw DecodingError._typeMismatch(at: self.codingPath, expectation: type, reality: value)
         }
 
@@ -1752,20 +1764,15 @@ extension _PlistDecoder {
     }
 
     fileprivate func unbox<T : Decodable>(_ value: Any, as type: T.Type) throws -> T? {
-        let decoded: T
-        if T.self == Date.self {
-            guard let date = try self.unbox(value, as: Date.self) else { return nil }
-            decoded = date as! T
-        } else if T.self == Data.self {
-            guard let data = try self.unbox(value, as: Data.self) else { return nil }
-            decoded = data as! T
+        if type == Date.self || type == NSDate.self {
+            return try self.unbox(value, as: Date.self) as? T
+        } else if type == Data.self || type == NSData.self {
+            return try self.unbox(value, as: Data.self) as? T
         } else {
             self.storage.push(container: value)
-            decoded = try T(from: self)
-            self.storage.popContainer()
+            defer { self.storage.popContainer() }
+            return try type.init(from: self)
         }
-
-        return decoded
     }
 }
 

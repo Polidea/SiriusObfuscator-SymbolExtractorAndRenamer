@@ -18,7 +18,7 @@
 // They are reference-counted and strictly immutable, so can be shared freely
 // among Syntax nodes and have no specific identity. They could even in theory
 // be shared for expressions like 1 + 1 + 1 + 1 - you don't need 7 syntax nodes
-// to expressSwiftTypeConverter that at this layer.
+// to express that at this layer.
 //
 // These are internal implementation ONLY - do not expose anything involving
 // RawSyntax publicly. Clients of lib/Syntax should not be aware that they
@@ -30,6 +30,7 @@
 #define SWIFT_SYNTAX_RAWSYNTAX_H
 
 #include "swift/Syntax/References.h"
+#include "swift/Syntax/SyntaxKind.h"
 #include "swift/Syntax/Trivia.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -45,33 +46,58 @@ using llvm::StringRef;
 #define syntax_assert_child_kind(Raw, Cursor, ExpectedKind)                    \
   (assert(Raw->getChild(Cursor)->Kind == ExpectedKind));
 #else
-#define syntax_assert_child_kind(Raw, Cursor, Kind) ((void)0);
+#define syntax_assert_child_kind(Raw, Cursor, ExpectedKind) ({});
 #endif
 
 #ifndef NDEBUG
-#define syntax_assert_child_token(Raw, Cursor, TokenKind)                      \
-  (assert(cast<TokenSyntax>(Raw->getChild(Cursor))->getTokenKind() == TokenKind));
+#define syntax_assert_child_token(Raw, CursorName, ...)                        \
+  ({                                                                           \
+    bool __Found = false;                                                      \
+    auto __Token = cast<RawTokenSyntax>(Raw->getChild(Cursor::CursorName));    \
+    if (__Token->isPresent()) {                                                \
+      for (auto Token : {__VA_ARGS__}) {                                       \
+        if (__Token->getTokenKind() == Token) {                                \
+          __Found = true;                                                      \
+          break;                                                               \
+        }                                                                      \
+      }                                                                        \
+      assert(__Found && "invalid token supplied for "                          \
+             #CursorName ", expected one of {" #__VA_ARGS__ "}");              \
+    }                                                                          \
+  })
 #else
-#define syntax_assert_child_token(Raw, Cursor, TokenKind) ((void)0);
+#define syntax_assert_child_token(Raw, CursorName, ...) ({});
 #endif
 
 #ifndef NDEBUG
-#define syntax_assert_child_token_text(Raw, Cursor, TokenKind, Text)           \
-  (assert(cast<TokenSyntax>(Raw->getChild(Cursor))->getTokenKind() ==          \
-          TokenKind));                                                         \
-  (assert(cast<TokenSyntax>(Raw->getChild(Cursor))->getText() == Text));
+#define syntax_assert_child_token_text(Raw, CursorName, TokenKind, ...)        \
+  ({                                                                           \
+    bool __Found = false;                                                    \
+    auto __Child = cast<RawTokenSyntax>(Raw->getChild(Cursor::CursorName));  \
+    if (__Child->isPresent()) {                                              \
+      assert(__Child->getTokenKind() == TokenKind);                            \
+      for (auto __Text : {__VA_ARGS__}) {                                      \
+        if (__Child->getText() == __Text) {                                    \
+          __Found = true;                                                      \
+          break;                                                               \
+        }                                                                      \
+      }                                                                        \
+      assert(__Found && "invalid text supplied for "                           \
+             #CursorName ", expected one of {" #__VA_ARGS__ "}");              \
+    }                                                                          \
+  })
 #else
-#define syntax_assert_child_token_text(Raw, Cursor, TokenKind, Text) ((void)0);
+#define syntax_assert_child_token_text(Raw, CursorName, TokenKind, ...) ({});
 #endif
 
 #ifndef NDEBUG
 #define syntax_assert_token_is(Tok, Kind, Text)                                \
-  {                                                                            \
-    assert(Tok->getTokenKind() == Kind);                                       \
-    assert(Tok->getText() == Text);                                            \
-  }
+  ({                                                                           \
+    assert(Tok.getTokenKind() == Kind);                                        \
+    assert(Tok.getText() == Text);                                             \
+  })
 #else
-#define syntax_assert_token_is(Tok, Kind, Text) ((void)0);
+#define syntax_assert_token_is(Tok, Kind, Text) ({});
 #endif
 
 namespace swift {
@@ -147,15 +173,6 @@ public:
   void dump(llvm::raw_ostream &OS = llvm::errs()) const;
 };
 
-enum class SyntaxKind {
-  Token,
-#define SYNTAX(Id, Parent) Id,
-#define SYNTAX_COLLECTION(Id, Element) Id,
-#define MISSING_SYNTAX(Id, Parent) Id,
-#define SYNTAX_RANGE(Id, First, Last) First_##Id = First, Last_##Id = Last,
-#include "swift/Syntax/SyntaxKinds.def"
-};
-
 /// An indicator of whether a Syntax node was found or written in the source.
 ///
 /// This is not an 'implicit' bit.
@@ -165,6 +182,13 @@ enum class SourcePresence {
 
   /// The syntax was expected or optional, but not found in the source.
   Missing,
+};
+
+/// The print option to specify when printing a raw syntax node.
+struct SyntaxPrintOptions {
+  bool Visual = false;
+  bool PrintSyntaxKind = false;
+  bool PrintTrivialNodeKind = false;
 };
 
 /// RawSyntax - the strictly immutable, shared backing nodes for all syntax.
@@ -189,6 +213,8 @@ struct RawSyntax : public llvm::ThreadSafeRefCountedBase<RawSyntax> {
             const SourcePresence Presence)
       : Kind(Kind), Layout(Layout), Presence(Presence) {}
 
+  virtual ~RawSyntax() = default;
+
   /// Returns a raw syntax node of the given Kind, specified Layout,
   /// and source presence.
   static RC<RawSyntax> make(const SyntaxKind Kind, const LayoutList Layout,
@@ -198,7 +224,7 @@ struct RawSyntax : public llvm::ThreadSafeRefCountedBase<RawSyntax> {
 
   /// Returns a raw syntax node of the given Kind, marked as missing.
   static RC<RawSyntax> missing(const SyntaxKind Kind) {
-    return RC<RawSyntax>{new RawSyntax{Kind, {}, SourcePresence::Missing}};
+    return make(Kind, {}, SourcePresence::Missing);
   }
 
   /// Get a child based on a particular node's "Cursor", indicating
@@ -217,36 +243,24 @@ struct RawSyntax : public llvm::ThreadSafeRefCountedBase<RawSyntax> {
   }
 
   /// Returns true if this raw syntax node is some kind of declaration.
-  bool isDecl() const {
-    return Kind >= SyntaxKind::First_Decl && Kind <= SyntaxKind::Last_Decl;
-  }
+  bool isDecl() const { return isDeclKind(Kind); }
 
   /// Returns true if this raw syntax node is some kind of type syntax.
-  bool isType() const {
-    return Kind >= SyntaxKind::First_Type && Kind <= SyntaxKind::Last_Type;
-  }
+  bool isType() const { return isTypeKind(Kind); }
 
   /// Returns true if this raw syntax node is some kind of statement.
-  bool isStmt() const {
-    return Kind >= SyntaxKind::First_Stmt && Kind <= SyntaxKind::Last_Stmt;
-  }
+  bool isStmt() const { return isStmtKind(Kind); }
 
   /// Returns true if this raw syntax node is some kind of expression.
-  bool isExpr() const {
-    return Kind >= SyntaxKind::First_Expr && Kind <= SyntaxKind::Last_Expr;
-  }
+  bool isExpr() const { return isExprKind(Kind); }
+
+  /// Returns true if this raw syntax node is some kind of pattern.
+  bool isPattern() const { return isPatternKind(Kind); }
 
   /// Return true if this raw syntax node is a token.
-  bool isToken() const {
-    return Kind == SyntaxKind::Token;
-  }
+  bool isToken() const { return isTokenKind(Kind); }
 
-  bool isUnknown() const {
-    return Kind == SyntaxKind::Unknown ||
-           Kind == SyntaxKind::UnknownDecl ||
-           Kind == SyntaxKind::UnknownExpr ||
-           Kind == SyntaxKind::UnknownStmt;
-  }
+  bool isUnknown() const { return isUnknownKind(Kind); }
 
   /// Get the absolute position of this raw syntax: its offset, line,
   /// and column.
@@ -275,7 +289,7 @@ struct RawSyntax : public llvm::ThreadSafeRefCountedBase<RawSyntax> {
   }
 
   /// Print this piece of syntax recursively.
-  void print(llvm::raw_ostream &OS) const;
+  void print(llvm::raw_ostream &OS, SyntaxPrintOptions Opts) const;
 
   /// Dump this piece of syntax recursively for debugging or testing.
   void dump() const;

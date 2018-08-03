@@ -2,8 +2,7 @@
 
 // REQUIRES: objc_interop
 
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -174,6 +173,15 @@ class DiscardableResult : NSObject {
   }
 
   @objc init(evenMoreFun: ()) { super.init() }
+}
+
+// CHECK-LABEL: @interface InheritedInitializersRequired
+// CHECK-NEXT: - (nonnull instancetype)initWithEvenMoreFun OBJC_DESIGNATED_INITIALIZER;
+// CHECK-NEXT: - (nonnull instancetype)init SWIFT_UNAVAILABLE;
+// CHECK-NEXT: + (nonnull instancetype)new SWIFT_DEPRECATED_MSG("-init is unavailable");
+// CHECK-NEXT: @end
+@objc class InheritedInitializersRequired : InheritedInitializers {
+  @objc required init(evenMoreFun: ()) { super.init() }
 }
 
 // NEGATIVE-NOT: NotObjC
@@ -423,6 +431,41 @@ class MyObject : NSObject {}
   // CHECK-NEXT: init
   // CHECK-NEXT: @end
   @objc class Subclass : NestedSuperclass {}
+}
+
+// CHECK-LABEL: @interface NewBanned
+// CHECK-NEXT: - (nonnull instancetype)initWithArbitraryArgument:(NSInteger)arbitraryArgument OBJC_DESIGNATED_INITIALIZER;
+// CHECK-NEXT: - (nonnull instancetype)init SWIFT_UNAVAILABLE;
+// CHECK-NEXT: + (nonnull instancetype)new SWIFT_DEPRECATED_MSG("-init is unavailable");
+// CHECK-NEXT: @end
+@objc class NewBanned : NSObject {
+  init(arbitraryArgument: Int) { super.init() }
+}
+
+// CHECK-LABEL: @interface NewBanned
+// CHECK-NEXT: - (nonnull instancetype)initWithDifferentArbitraryArgument:(NSInteger)differentArbitraryArgument OBJC_DESIGNATED_INITIALIZER;
+// CHECK-NEXT: - (nonnull instancetype)initWithArbitraryArgument:(NSInteger)arbitraryArgument SWIFT_UNAVAILABLE;
+// CHECK-NEXT: @end
+@objc class NewBannedStill : NewBanned {
+  init(differentArbitraryArgument: Int) { super.init(arbitraryArgument: 0) }
+}
+
+// CHECK-LABEL: @interface NewUnbanned
+// CHECK-NEXT: - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+// CHECK-NEXT: + (nonnull instancetype)new;
+// CHECK-NEXT: - (nonnull instancetype)initWithArbitraryArgument:(NSInteger)arbitraryArgument SWIFT_UNAVAILABLE;
+// CHECK-NEXT: @end
+@objc class NewUnbanned : NewBanned {
+  init() { super.init(arbitraryArgument: 0) }
+}
+
+// CHECK-LABEL: @interface NewUnbannedDouble
+// CHECK-NEXT: - (nonnull instancetype)init OBJC_DESIGNATED_INITIALIZER;
+// CHECK-NEXT: + (nonnull instancetype)new;
+// CHECK-NEXT: - (nonnull instancetype)initWithDifferentArbitraryArgument:(NSInteger)differentArbitraryArgument SWIFT_UNAVAILABLE;
+// CHECK-NEXT: @end
+@objc class NewUnbannedDouble : NewBannedStill {
+  init() { super.init(differentArbitraryArgument: 0) }
 }
 
 // NEGATIVE-NOT: @interface Private :

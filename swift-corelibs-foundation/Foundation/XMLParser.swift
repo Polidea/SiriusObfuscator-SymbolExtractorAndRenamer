@@ -282,7 +282,7 @@ internal func _NSXMLParserStartElementNs(_ ctx: _CFXMLInterface, localname: Unsa
         let attrLocalName = attributes[idx]!
         let attrLocalNameString = UTF8STRING(attrLocalName)!
         let attrPrefix = attributes[idx + 1]
-        if let attrPrefixString = UTF8STRING(attrPrefix), attrPrefixString.count != 0 {
+        if let attrPrefixString = UTF8STRING(attrPrefix), !attrPrefixString.isEmpty {
             attributeQName = attrPrefixString + ":" + attrLocalNameString
         } else {
             attributeQName = attrLocalNameString
@@ -291,10 +291,10 @@ internal func _NSXMLParserStartElementNs(_ ctx: _CFXMLInterface, localname: Unsa
         // idx+3 = value, i+4 = endvalue
         // By using XML_PARSE_NOENT the attribute value string will already have entities resolved
         var attributeValue = ""
-        if attributes[idx + 3] != nil && attributes[idx + 4] != nil {
-            let numBytesWithoutTerminator = attributes[idx + 4]! - attributes[idx + 3]!
+        if let value = attributes[idx + 3], let endvalue = attributes[idx + 4] {
+            let numBytesWithoutTerminator = endvalue - value
             if numBytesWithoutTerminator > 0 {
-                let buffer = UnsafeBufferPointer(start: attributes[idx + 3]!,
+                let buffer = UnsafeBufferPointer(start: value,
                                                  count: numBytesWithoutTerminator)
                 attributeValue = String._fromCodeUnitSequence(UTF8.self,
                                                               input: buffer)!
@@ -563,7 +563,7 @@ open class XMLParser : NSObject {
         } else if let data = _data {
             let buffer = malloc(_chunkSize)!.bindMemory(to: UInt8.self, capacity: _chunkSize)
             defer { free(buffer) }
-            var range = NSMakeRange(0, min(_chunkSize, data.count))
+            var range = NSRange(location: 0, length: min(_chunkSize, data.count))
             while result {
                 let chunk = data.withUnsafeBytes { (buffer: UnsafePointer<UInt8>) -> Data in
                     let ptr = buffer.advanced(by: range.location)
@@ -573,7 +573,7 @@ open class XMLParser : NSObject {
                 if range.location + range.length >= data.count {
                     break
                 }
-                range = NSMakeRange(range.location + range.length, min(_chunkSize, data.count - (range.location + range.length)))
+                range = NSRange(location: range.location + range.length, length: min(_chunkSize, data.count - (range.location + range.length)))
             }
         } else {
             result = false

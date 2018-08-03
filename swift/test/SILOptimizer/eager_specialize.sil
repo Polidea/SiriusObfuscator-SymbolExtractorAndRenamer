@@ -1,6 +1,7 @@
 // RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -eager-specializer  %s | %FileCheck %s
 // RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -eager-specializer -sil-deadfuncelim  %s | %FileCheck --check-prefix=CHECK-DEADFUNCELIM %s
 // RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -eager-specializer  %s -o %t.sil && %target-swift-frontend -assume-parsing-unqualified-ownership-sil -module-name=eager_specialize -emit-ir %t.sil | %FileCheck --check-prefix=CHECK-IRGEN %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -eager-specializer -sil-inline-generics=true -inline %s | %FileCheck --check-prefix=CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE %s
 
 sil_stage canonical
 
@@ -48,7 +49,7 @@ enum ArithmeticError : Error {
 @_specialize(where T == Int)
 public func divideNum<T : SignedInteger & _ExpressibleByBuiltinIntegerLiteral>(num: T, den: T) throws -> T
 
-@inline(never) @_semantics("optimize.sil.never") func foo<T>(t: T) -> Int64
+@inline(never) @_optimize(none) func foo<T>(t: T) -> Int64
 
 // CHECK: @_specialize(exported: false, kind: full, where T == Int64)
 // CHECK: @_specialize(exported: false, kind: full, where T == Float)
@@ -73,9 +74,9 @@ public func nonvoidReturn<T>(t: T) -> Int64
 // G.getContainer(A.Elt) -> A
 sil @_T016eager_specialize1GV12getContainerx3EltQzF : $@convention(method) <Container where Container : HasElt> (@in Container.Elt, G<Container>) -> @out Container {
 bb0(%0 : $*Container, %1 : $*Container.Elt, %2 : $G<Container>):
-  %4 = witness_method $Container, #HasElt.init!allocator.1 : $@convention(witness_method) <τ_0_0 where τ_0_0 : HasElt> (@in τ_0_0.Elt, @thick τ_0_0.Type) -> @out τ_0_0
+  %4 = witness_method $Container, #HasElt.init!allocator.1 : $@convention(witness_method: HasElt) <τ_0_0 where τ_0_0 : HasElt> (@in τ_0_0.Elt, @thick τ_0_0.Type) -> @out τ_0_0
   %5 = metatype $@thick Container.Type
-  %6 = apply %4<Container>(%0, %1, %5) : $@convention(witness_method) <τ_0_0 where τ_0_0 : HasElt> (@in τ_0_0.Elt, @thick τ_0_0.Type) -> @out τ_0_0
+  %6 = apply %4<Container>(%0, %1, %5) : $@convention(witness_method: HasElt) <τ_0_0 where τ_0_0 : HasElt> (@in τ_0_0.Elt, @thick τ_0_0.Type) -> @out τ_0_0
   %7 = tuple ()
   return %7 : $()
 }
@@ -136,9 +137,9 @@ bb0(%0 : $*T, %1 : $G<T>, %2 : $*T.Elt):
 // static != infix<A where ...> (A, A) -> Bool
 sil public_external [serialized] @_T0s2neoiSbx_xts9EquatableRzlFZ : $@convention(thin) <T where T : Equatable> (@in T, @in T) -> Bool {
 bb0(%0 : $*T, %1 : $*T):
-  %4 = witness_method $T, #Equatable."=="!1 : $@convention(witness_method) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> Bool
+  %4 = witness_method $T, #Equatable."=="!1 : $@convention(witness_method: Equatable) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> Bool
   %5 = metatype $@thick T.Type
-  %6 = apply %4<T>(%0, %1, %5) : $@convention(witness_method) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> Bool
+  %6 = apply %4<T>(%0, %1, %5) : $@convention(witness_method: Equatable) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> Bool
   %7 = struct_extract %6 : $Bool, #Bool._value
   %8 = integer_literal $Builtin.Int1, -1
   %9 = builtin "xor_Int1"(%7 : $Builtin.Int1, %8 : $Builtin.Int1) : $Builtin.Int1
@@ -153,11 +154,11 @@ bb0(%0 : $*T, %1 : $*T, %2 : $*T):
   %5 = function_ref @_T0s2neoiSbx_xts9EquatableRzlFZ : $@convention(thin) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0) -> Bool
   %6 = alloc_stack $T
   copy_addr %2 to [initialization] %6 : $*T
-  %8 = witness_method $T, #_ExpressibleByBuiltinIntegerLiteral.init!allocator.1 : $@convention(witness_method) <τ_0_0 where τ_0_0 : _ExpressibleByBuiltinIntegerLiteral> (Builtin.Int2048, @thick τ_0_0.Type) -> @out τ_0_0
+  %8 = witness_method $T, #_ExpressibleByBuiltinIntegerLiteral.init!allocator.1 : $@convention(witness_method: _ExpressibleByBuiltinIntegerLiteral) <τ_0_0 where τ_0_0 : _ExpressibleByBuiltinIntegerLiteral> (Builtin.Int2048, @thick τ_0_0.Type) -> @out τ_0_0
   %9 = metatype $@thick T.Type
   %10 = integer_literal $Builtin.Int2048, 0
   %11 = alloc_stack $T
-  %12 = apply %8<T>(%11, %10, %9) : $@convention(witness_method) <τ_0_0 where τ_0_0 : _ExpressibleByBuiltinIntegerLiteral> (Builtin.Int2048, @thick τ_0_0.Type) -> @out τ_0_0
+  %12 = apply %8<T>(%11, %10, %9) : $@convention(witness_method: _ExpressibleByBuiltinIntegerLiteral) <τ_0_0 where τ_0_0 : _ExpressibleByBuiltinIntegerLiteral> (Builtin.Int2048, @thick τ_0_0.Type) -> @out τ_0_0
   %13 = apply %5<T>(%6, %11) : $@convention(thin) <τ_0_0 where τ_0_0 : Equatable> (@in τ_0_0, @in τ_0_0) -> Bool
   %14 = struct_extract %13 : $Bool, #Bool._value
   dealloc_stack %11 : $*T
@@ -174,8 +175,8 @@ bb1:
   throw %24 : $Error
 
 bb2:
-  %18 = witness_method $T, #BinaryInteger."/"!1 : $@convention(witness_method) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
-  %19 = apply %18<T>(%0, %1, %2, %9) : $@convention(witness_method) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
+  %18 = witness_method $T, #BinaryInteger."/"!1 : $@convention(witness_method: BinaryInteger) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
+  %19 = apply %18<T>(%0, %1, %2, %9) : $@convention(witness_method: BinaryInteger) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
   %20 = tuple ()
   return %20 : $()
 }
@@ -208,8 +209,8 @@ bb2:
 // CHECK:   throw %{{.*}} : $Error
 
 // CHECK: bb4:
-// CHECK:   %{{.*}} = witness_method $T, #BinaryInteger."/"!1 : {{.*}} : $@convention(witness_method) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
-// CHECK:   apply %{{.*}}<T>({{.*}}) : $@convention(witness_method) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
+// CHECK:   %{{.*}} = witness_method $T, #BinaryInteger."/"!1 : {{.*}} : $@convention(witness_method: BinaryInteger) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
+// CHECK:   apply %{{.*}}<T>({{.*}}) : $@convention(witness_method: BinaryInteger) <τ_0_0 where τ_0_0 : BinaryInteger> (@in τ_0_0, @in τ_0_0, @thick τ_0_0.Type) -> @out τ_0_0
 // CHECK:   br bb5
 
 // CHECK: bb5:
@@ -239,7 +240,7 @@ bb2:
 // --- test: multiple void and non-void return values
 
 // foo<A> (A) -> Int64
-sil hidden [noinline] [_semantics "optimize.sil.never"] @_T016eager_specialize3foos5Int64VxlF : $@convention(thin) <T> (@in T) -> Int64 {
+sil hidden [noinline] [Onone] @_T016eager_specialize3foos5Int64VxlF : $@convention(thin) <T> (@in T) -> Int64 {
 // %0                                             // users: %1, %4
 bb0(%0 : $*T):
   %2 = integer_literal $Builtin.Int64, 3
@@ -358,23 +359,23 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 
 // Check specialized for 32 bits
 // specialized copyValueAndReturn<A>(A, s : inout A) -> A
-// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(32)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(32)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK: bb0(%0 : $*τ_0_0, %1 : $*τ_0_0, %2 : $*τ_0_0):
 // CHECK:  copy_addr %2 to [initialization] %0 : $*τ_0_0
 // CHECK:  destroy_addr %1 : $*τ_0_0
 // CHECK:  %5 = tuple ()
 // CHECK:  return %5 : $()
-// CHECK: } // end sil function '_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lItilr_Tp5'
+// CHECK: } // end sil function '_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lIetilr_Tp5'
 
 // Check specialized for 64 bits
 // specialized copyValueAndReturn<A>(A, s : inout A) -> A
-// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(64)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(64)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK: bb0(%0 : $*τ_0_0, %1 : $*τ_0_0, %2 : $*τ_0_0):
 // CHECK:  copy_addr %2 to [initialization] %0 : $*τ_0_0
 // CHECK:  destroy_addr %1 : $*τ_0_0
 // CHECK:  %5 = tuple ()
 // CHECK:  return %5 : $()
-// CHECK: } // end sil function '_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lItilr_Tp5'
+// CHECK: } // end sil function '_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lIetilr_Tp5'
 
 // Generic with specialized dispatch. No more [specialize] attribute.
 //
@@ -394,7 +395,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:  %11 = builtin "cmp_eq_Word"(%9 : $Builtin.Word, %10 : $Builtin.Word) : $Builtin.Int1
 // CHECK:  cond_br %11, bb4, bb2
 
-// None of the constraint checks was successfull, perform a generic copy.
+// None of the constraint checks was successful, perform a generic copy.
 // CHECK: bb2:
 // CHECK:  copy_addr %2 to [initialization] %0 : $*S
 // CHECK:  destroy_addr %1 : $*S
@@ -415,7 +416,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:  %21 = unchecked_addr_cast %1 : $*S to $*S
 // CHECK:  %22 = unchecked_addr_cast %2 : $*S to $*S
 // function_ref specialized copyValueAndReturn<A> (A, s : inout A) -> A
-// CHECK:  %23 = function_ref @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(32)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK:  %23 = function_ref @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(32)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:  %24 = apply %23<S>(%20, %21, %22) : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(32)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:  %25 = tuple ()
 // CHECK:  %26 = unchecked_trivial_bit_cast %25 : $() to $()
@@ -432,7 +433,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:  %31 = unchecked_addr_cast %1 : $*S to $*S
 // CHECK:  %32 = unchecked_addr_cast %2 : $*S to $*S
 // function_ref specialized copyValueAndReturn<A> (A, s : inout A) -> A
-// CHECK:  %33 = function_ref @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(64)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK:  %33 = function_ref @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(64)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:  %34 = apply %33<S>(%30, %31, %32) : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial(64)> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:  %35 = tuple ()
 // CHECK:  %36 = unchecked_trivial_bit_cast %35 : $() to $()
@@ -454,13 +455,13 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 
 // Check the specialization for _Trivial
 // specialized copyValueAndReturn2<A> (A, s : inout A) -> A
-// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK: bb0(%0 : $*τ_0_0, %1 : $*τ_0_0, %2 : $*τ_0_0):
 // CHECK:  copy_addr %2 to [initialization] %0 : $*τ_0_0
 // CHECK:  destroy_addr %1 : $*τ_0_0
 // CHECK:  %5 = tuple ()
 // CHECK:  return %5 : $()
-// CHECK: } // end sil function '_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlItilr_Tp5'
+// CHECK: } // end sil function '_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlIetilr_Tp5'
 
 // Generic with specialized dispatch. No more [specialize] attribute.
 // copyValueAndReturn2<A> (A, s : inout A) -> A
@@ -470,7 +471,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:  %4 = builtin "ispod"<S>(%3 : $@thick S.Type) : $Builtin.Int1
 // CHECK:  cond_br %4, bb3, bb1
 
-// None of the constraint checks was successfull, perform a generic copy.
+// None of the constraint checks was successful, perform a generic copy.
 // CHECK: bb1:
 // CHECK:  copy_addr %2 to [initialization] %0 : $*S
 // CHECK:  destroy_addr %1 : $*S
@@ -486,7 +487,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:   %12 = unchecked_addr_cast %1 : $*S to $*S
 // CHECK:   %13 = unchecked_addr_cast %2 : $*S to $*S
   // function_ref specialized copyValueAndReturn2<A> (A, s : inout A) -> A
-// CHECK:   %14 = function_ref @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK:   %14 = function_ref @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:   %15 = apply %14<S>(%11, %12, %13) : $@convention(thin) <τ_0_0 where τ_0_0 : _Trivial> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:   %16 = tuple ()
 // CHECK:   %17 = unchecked_trivial_bit_cast %16 : $() to $()
@@ -509,13 +510,13 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 
 // Check for specialized function for _RefCountedObject
 // specialized copyValueAndReturn3<A> (A, s : inout A) -> A
-// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _RefCountedObject> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK-LABEL: sil shared [noinline] @_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _RefCountedObject> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK: bb0(%0 : $*τ_0_0, %1 : $*τ_0_0, %2 : $*τ_0_0):
 // CHECK:   copy_addr %2 to [initialization] %0 : $*τ_0_0
 // CHECK:   destroy_addr %1 : $*τ_0_0
 // CHECK:   %5 = tuple ()
 // CHECK:   return %5 : $()
-// CHECK: } // end sil function '_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlItilr_Tp5'
+// CHECK: } // end sil function '_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlIetilr_Tp5'
 
 
 // Generic with specialized dispatch. No more [specialize] attribute.
@@ -545,7 +546,7 @@ bb0(%0 : $*S, %1 : $*S, %2 : $*S):
 // CHECK:   %14 = unchecked_addr_cast %1 : $*S to $*S
 // CHECK:   %15 = unchecked_addr_cast %2 : $*S to $*S
   // function_ref specialized copyValueAndReturn3<A> (A, s : inout A) -> A
-// CHECK:   %16 = function_ref @_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlItilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _RefCountedObject> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
+// CHECK:   %16 = function_ref @_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlIetilr_Tp5 : $@convention(thin) <τ_0_0 where τ_0_0 : _RefCountedObject> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:   %17 = apply %16<S>(%13, %14, %15) : $@convention(thin) <τ_0_0 where τ_0_0 : _RefCountedObject> (@in τ_0_0, @inout τ_0_0) -> @out τ_0_0
 // CHECK:   %18 = tuple ()
 // CHECK:   %19 = unchecked_trivial_bit_cast %18 : $() to $()
@@ -598,7 +599,7 @@ bb0(%0 : $*T, %1 : $*S):
 
 // Check for specialized function for τ_0_0 == Int64
 // specialized checkExplicitPartialSpecialization<A, B> (A, B) -> ()
-// CHECK-LABEL: sil shared @_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lItyi_Tp5 : $@convention(thin) <τ_0_0, τ_0_1 where τ_0_0 == Int64> (Int64, @in τ_0_1) -> ()
+// CHECK-LABEL: sil shared @_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lIetyi_Tp5 : $@convention(thin) <τ_0_0, τ_0_1 where τ_0_0 == Int64> (Int64, @in τ_0_1) -> ()
 // CHECK: bb0(%0 : $Int64, %1 : $*τ_0_1):
 // CHECK:   %2 = alloc_stack $Int64
 // CHECK:   store %0 to %2 : $*Int64
@@ -607,7 +608,7 @@ bb0(%0 : $*T, %1 : $*S):
 // CHECK:   %6 = tuple ()
 // CHECK:   dealloc_stack %2 : $*Int64
 // CHECK:   return %6 : $()
-// CHECK: } // end sil function '_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lItyi_Tp5'
+// CHECK: } // end sil function '_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lIetyi_Tp5'
 
 // Generic with specialized dispatch. No more [specialize] attribute.
 // checkExplicitPartialSpecialization<A, B> (A, B) -> ()
@@ -620,7 +621,7 @@ bb0(%0 : $*T, %1 : $*S):
 // CHECK:   %6 = builtin "cmp_eq_Word"(%4 : $Builtin.Word, %5 : $Builtin.Word) : $Builtin.Int1
 // CHECK:   cond_br %6, bb3, bb1
 
-// Type dispatch was not successfull.
+// Type dispatch was not successful.
 // CHECK: bb1:
 // CHECK:   destroy_addr %1 : $*S
 // CHECK:   destroy_addr %0 : $*T
@@ -636,7 +637,7 @@ bb0(%0 : $*T, %1 : $*S):
 // CHECK:   %14 = load %13 : $*Int64
 // CHECK:   %15 = unchecked_addr_cast %1 : $*S to $*S
 // function_ref specialized checkExplicitPartialSpecialization<A, B> (A, B) -> ()
-// CHECK:   %16 = function_ref @_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lItyi_Tp5 : $@convention(thin) <τ_0_0, τ_0_1 where τ_0_0 == Int64> (Int64, @in τ_0_1) -> ()
+// CHECK:   %16 = function_ref @_T016eager_specialize34checkExplicitPartialSpecializationyx_q_tr0_lFs5Int64Vq_ADRszr0_lIetyi_Tp5 : $@convention(thin) <τ_0_0, τ_0_1 where τ_0_0 == Int64> (Int64, @in τ_0_1) -> ()
 // CHECK:   %17 = apply %16<S>(%14, %15) : $@convention(thin) <τ_0_0, τ_0_1 where τ_0_0 == Int64> (Int64, @in τ_0_1) -> ()
 // CHECK:   %18 = tuple ()
 // CHECK:   %19 = unchecked_trivial_bit_cast %18 : $() to $()
@@ -701,7 +702,7 @@ bb0(%0 : $*Self, %1 : $*Self, %2 : $@thick Self.Type):
 
 // Check that a specialization for _Trivial(32) uses direct loads and stores
 // instead of value witness functions to load and store the value of a generic type.
-// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lItilr_Tp5(i32* noalias nocapture sret, i32* noalias nocapture dereferenceable(4), i32* nocapture dereferenceable(4), %swift.type* %"\CF\84_0_0")
+// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze31_lIetilr_Tp5(i32* noalias nocapture sret, i32* noalias nocapture dereferenceable(4), i32* nocapture dereferenceable(4), %swift.type* %"\CF\84_0_0")
 // CHECK-IRGEN: entry:
 // CHECK-IRGEN-NEXT:  %3 = load i32, i32* %2
 // CHECK-IRGEN-NEXT:  store i32 %3, i32* %0
@@ -710,7 +711,7 @@ bb0(%0 : $*Self, %1 : $*Self, %2 : $@thick Self.Type):
 
 // Check that a specialization for _Trivial(64) uses direct loads and stores
 // instead of value witness functions to load and store the value of a generic type.
-// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lItilr_Tp5(i64* noalias nocapture sret, i64* noalias nocapture dereferenceable(8), i64* nocapture dereferenceable(8), %swift.type* %"\CF\84_0_0")
+// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize18copyValueAndReturnxx_xz1stlFxxxRlze63_lIetilr_Tp5(i64* noalias nocapture sret, i64* noalias nocapture dereferenceable(8), i64* nocapture dereferenceable(8), %swift.type* %"\CF\84_0_0")
 // CHECK-IRGEN: entry:
 // CHECK-IRGEN-NEXT:   %3 = load i64, i64* %2
 // CHECK-IRGEN-NEXT:   store i64 %3, i64* %0
@@ -719,7 +720,7 @@ bb0(%0 : $*Self, %1 : $*Self, %2 : $@thick Self.Type):
 
 // Check that a specialization for _Trivial does not call the 'destroy' value witness,
 // because it is known that the object is Trivial, i.e. contains no references.
-// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlItilr_Tp5(%swift.opaque* noalias nocapture sret, %swift.opaque* noalias nocapture, %swift.opaque* nocapture, %swift.type* %"\CF\84_0_0")
+// CHECK-IRGEN-LABEL: define linkonce_odr hidden swiftcc void @_T016eager_specialize19copyValueAndReturn2xx_xz1stlFxxxRlzTlIetilr_Tp5(%swift.opaque* noalias nocapture sret, %swift.opaque* noalias nocapture, %swift.opaque* nocapture, %swift.type* %"\CF\84_0_0")
 // CHECK-IRGEN-NEXT: entry:
 // CHECK-IRGEN-NEXT:   %3 = bitcast %swift.type* %"\CF\84_0_0" to i8***
 // CHECK-IRGEN-NEXT:   %4 = getelementptr inbounds i8**, i8*** %3, i{{.*}} -1
@@ -734,7 +735,7 @@ bb0(%0 : $*Self, %1 : $*Self, %2 : $@thick Self.Type):
 // Check that a specialization for _RefCountedObject just copies the fixed-size reference,
 // and call retain/release directly, instead of calling the value witness functions.
 // The matching patterns in this test are rather non-precise to cover both objc and non-objc platforms.
-// CHECK-IRGEN-LABEL: define{{.*}}@_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlItilr_Tp5
+// CHECK-IRGEN-LABEL: define{{.*}}@_T016eager_specialize19copyValueAndReturn3xx_xz1stlFxxxRlzRlIetilr_Tp5
 // CHECK-IRGEN: entry:
 // CHECK-IRGEN-NOT: ret void
 // CHECK-IRGEN:   call {{.*}}etain
@@ -768,7 +769,7 @@ class ClassUsingThrowingP {
 sil @_T0s5Int64V34eager_specialize_throwing_functionE6actionAByKF : $@convention(method) (Int64) -> (Int64, @error Error)
 
 // protocol witness for ThrowingP.action() in conformance Int64
-sil @_T0s5Int64V34eager_specialize_throwing_function9ThrowingPA2cDP6actionAByKFTW : $@convention(witness_method) (@in_guaranteed Int64) -> (Int64, @error Error)
+sil @_T0s5Int64V34eager_specialize_throwing_function9ThrowingPA2cDP6actionAByKFTW : $@convention(witness_method: ThrowingP) (@in_guaranteed Int64) -> (Int64, @error Error)
 
 sil @_T034eager_specialize_throwing_function19ClassUsingThrowingPCACycfc : $@convention(method) (@owned ClassUsingThrowingP) -> @owned ClassUsingThrowingP
 
@@ -816,8 +817,8 @@ bb0(%0 : $*T, %1 : $@thick ClassUsingThrowingP.Type):
 // static ClassUsingThrowingP.g<A>(_:)
 sil [_specialize exported: false, kind: full, where T == Int64] @_T034eager_specialize_throwing_function19ClassUsingThrowingPC1gs5Int64VxKAA0G1PRzlFZ : $@convention(method) <T where T : ThrowingP> (@in T, @thick ClassUsingThrowingP.Type) -> (Int64, @error Error) {
 bb0(%0 : $*T, %1 : $@thick ClassUsingThrowingP.Type):
-  %5 = witness_method $T, #ThrowingP.action!1 : <Self where Self : ThrowingP> (Self) -> () throws -> Int64 : $@convention(witness_method) <τ_0_0 where τ_0_0 : ThrowingP> (@in_guaranteed τ_0_0) -> (Int64, @error Error)
-  try_apply %5<T>(%0) : $@convention(witness_method) <τ_0_0 where τ_0_0 : ThrowingP> (@in_guaranteed τ_0_0) -> (Int64, @error Error), normal bb1, error bb2
+  %5 = witness_method $T, #ThrowingP.action!1 : <Self where Self : ThrowingP> (Self) -> () throws -> Int64 : $@convention(witness_method: ThrowingP) <τ_0_0 where τ_0_0 : ThrowingP> (@in_guaranteed τ_0_0) -> (Int64, @error Error)
+  try_apply %5<T>(%0) : $@convention(witness_method: ThrowingP) <τ_0_0 where τ_0_0 : ThrowingP> (@in_guaranteed τ_0_0) -> (Int64, @error Error), normal bb1, error bb2
 
 bb1(%7 : $Int64):                                 // Preds: bb0
   destroy_addr %0 : $*T
@@ -827,6 +828,27 @@ bb2(%10 : $Error):                                // Preds: bb0
   destroy_addr %0 : $*T
   throw %10 : $Error
 } // end sil function '_T034eager_specialize_throwing_function19ClassUsingThrowingPC1gs5Int64VxKAA0G1PRzlFZ'
+
+// Check that a specialization was produced and it is not inlined.
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE-LABEL: sil{{.*}}@{{.*}}testSimpleGeneric{{.*}}where τ_0_0 : _Trivial(64, 64)
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE-LABEL: sil{{.*}}@testSimpleGeneric :
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: [[METATYPE:%.*]] = metatype $@thick T.Type
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: [[SIZEOF:%.*]] = builtin "sizeof"<T>([[METATYPE]] : $@thick T.Type)
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: [[SIZE:%.*]] = integer_literal $Builtin.Word, 8
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: builtin "cmp_eq_Word"([[SIZEOF]] : $Builtin.Word, [[SIZE]] : $Builtin.Word)
+// Invoke the specialization, but do not inline it!
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: function_ref @{{.*}}testSimpleGeneric{{.*}}
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: apply
+// CHECK-EAGER-SPECIALIZE-AND-GENERICS-INLINE: // end sil function 'testSimpleGeneric'
+
+sil [_specialize exported: false, kind: full, where T: _Trivial(64, 64)] @testSimpleGeneric : $@convention(thin) <T>(@in T) -> Builtin.Int64 {
+bb0(%0 : $*T):
+  %1 = metatype $@thick T.Type
+  %2 = builtin "sizeof"<T>(%1 : $@thick T.Type) : $Builtin.Word 
+  %8 = builtin "zextOrBitCast_Word_Int64"(%2 : $Builtin.Word) : $Builtin.Int64
+  destroy_addr %0 : $*T
+  return %8 : $Builtin.Int64
+}
 
 sil_vtable ClassUsingThrowingP {
   #ClassUsingThrowingP.init!allocator.1: (ClassUsingThrowingP.Type) -> () -> ClassUsingThrowingP : _T034eager_specialize_throwing_function19ClassUsingThrowingPCACycfC	// ClassUsingThrowingP.__allocating_init()

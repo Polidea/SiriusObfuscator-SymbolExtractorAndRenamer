@@ -276,8 +276,8 @@ static bool isDeclADefinition(const Decl *D, const DeclContext *ContainerDC, AST
 
 /// Whether the given NamedDecl should be skipped because it has no name.
 static bool shouldSkipNamelessDecl(const NamedDecl *ND) {
-  return ND->getDeclName().isEmpty() && !isa<TagDecl>(ND) &&
-         !isa<ObjCCategoryDecl>(ND);
+  return (ND->getDeclName().isEmpty() && !isa<TagDecl>(ND) &&
+          !isa<ObjCCategoryDecl>(ND)) || isa<CXXDeductionGuideDecl>(ND);
 }
 
 static const Decl *adjustParent(const Decl *Parent) {
@@ -305,8 +305,10 @@ static const Decl *adjustParent(const Decl *Parent) {
 static const Decl *getCanonicalDecl(const Decl *D) {
   D = D->getCanonicalDecl();
   if (auto TD = dyn_cast<TemplateDecl>(D)) {
-    D = TD->getTemplatedDecl();
-    assert(D->isCanonicalDecl());
+    if (auto TTD = TD->getTemplatedDecl()) {
+      D = TTD;
+      assert(D->isCanonicalDecl());
+    }
   }
 
   return D;
@@ -344,6 +346,7 @@ static bool shouldReportOccurrenceForSystemDeclOnlyMode(
       case SymbolRole::RelationSpecializationOf:
         return true;
       }
+      llvm_unreachable("Unsupported SymbolRole value!");
     });
     return accept;
   };

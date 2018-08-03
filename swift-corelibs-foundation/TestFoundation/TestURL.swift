@@ -65,6 +65,7 @@ class TestURL : XCTestCase {
             ("test_copy", test_copy),
             ("test_itemNSCoding", test_itemNSCoding),
             ("test_dataRepresentation", test_dataRepresentation),
+            ("test_description", test_description),
         ]
     }
     
@@ -78,6 +79,9 @@ class TestURL : XCTestCase {
         #if os(OSX)
         let baseURL = URL(fileURLWithPath: homeDirectory, isDirectory: true)
         let relativePath = "Documents"
+        #elseif os(Android)
+        let baseURL = URL(fileURLWithPath: "/data", isDirectory: true)
+        let relativePath = "local"
         #elseif os(Linux)
         let baseURL = URL(fileURLWithPath: "/usr", isDirectory: true)
         let relativePath = "include"
@@ -260,6 +264,10 @@ class TestURL : XCTestCase {
             return false
         }
         
+        #if os(Android)
+        chdir("/data/local/tmp")
+        #endif
+
         let cwd = FileManager.default.currentDirectoryPath
         let cwdURL = URL(fileURLWithPath: cwd, isDirectory: true)
         // 1 for path separator
@@ -309,7 +317,7 @@ class TestURL : XCTestCase {
         let actualLength = strlen(fileSystemRep)
         // 1 for path separator
         let expectedLength = UInt(strlen(TestURL.gFileDoesNotExistName)) + TestURL.gRelativeOffsetFromBaseCurrentWorkingDirectory
-        XCTAssertTrue(UInt(actualLength) == expectedLength, "fileSystemRepresentation was too short")
+        XCTAssertEqual(UInt(actualLength), expectedLength, "fileSystemRepresentation was too short")
         XCTAssertTrue(strncmp(TestURL.gBaseCurrentWorkingDirectoryPath, fileSystemRep, Int(strlen(TestURL.gBaseCurrentWorkingDirectoryPath))) == 0, "fileSystemRepresentation of base path is wrong")
         let lengthOfRelativePath = Int(strlen(TestURL.gFileDoesNotExistName))
         let relativePath = fileSystemRep.advanced(by: Int(TestURL.gRelativeOffsetFromBaseCurrentWorkingDirectory))
@@ -364,7 +372,7 @@ class TestURL : XCTestCase {
         let actualLength = UInt(strlen(fileSystemRep))
         // 1 for path separator
         let expectedLength = UInt(strlen(TestURL.gFileDoesNotExistName)) + TestURL.gRelativeOffsetFromBaseCurrentWorkingDirectory
-        XCTAssertTrue(actualLength == expectedLength, "fileSystemRepresentation was too short")
+        XCTAssertEqual(actualLength, expectedLength, "fileSystemRepresentation was too short")
         XCTAssertTrue(strncmp(TestURL.gBaseCurrentWorkingDirectoryPath, fileSystemRep, Int(strlen(TestURL.gBaseCurrentWorkingDirectoryPath))) == 0, "fileSystemRepresentation of base path is wrong")
         let lengthOfRelativePath = Int(strlen(TestURL.gFileDoesNotExistName))
         let relativePath = fileSystemRep.advanced(by: Int(TestURL.gRelativeOffsetFromBaseCurrentWorkingDirectory))
@@ -426,7 +434,11 @@ class TestURL : XCTestCase {
     }
     
     func test_reachable() {
+        #if os(Android)
+        var url = URL(fileURLWithPath: "/data")
+        #else
         var url = URL(fileURLWithPath: "/usr")
+        #endif
         XCTAssertEqual(true, try? url.checkResourceIsReachable())
         
         url = URL(string: "https://www.swift.org")!
@@ -451,7 +463,11 @@ class TestURL : XCTestCase {
             XCTFail()
         }
         
+        #if os(Android)
+        var nsURL = NSURL(fileURLWithPath: "/data")
+        #else
         var nsURL = NSURL(fileURLWithPath: "/usr")
+        #endif
         XCTAssertEqual(true, try? nsURL.checkResourceIsReachable())
         
         nsURL = NSURL(string: "https://www.swift.org")!
@@ -499,19 +515,40 @@ class TestURL : XCTestCase {
             relativeTo: nil)
         XCTAssertEqual(url, url2)
     }
+
+   func test_description() {
+        let url = URL(string: "http://amazon.in")!
+        XCTAssertEqual(url.description, "http://amazon.in")
+    }
 }
     
 class TestURLComponents : XCTestCase {
     static var allTests: [(String, (TestURLComponents) -> () throws -> Void)] {
         return [
+            ("test_queryItems", test_queryItems),
             ("test_string", test_string),
             ("test_port", test_portSetter),
             ("test_url", test_url),
             ("test_copy", test_copy),
-            ("test_createURLWithComponents", test_createURLWithComponents)
+            ("test_createURLWithComponents", test_createURLWithComponents),
+            ("test_path", test_path),
+            ("test_percentEncodedPath", test_percentEncodedPath),
         ]
     }
     
+    func test_queryItems() {
+        let urlString = "http://localhost:8080/foo?bar=&bar=baz"
+        let url = URL(string: urlString)!
+
+        let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+
+        var query = [String: String]()
+        components?.queryItems?.forEach {
+            query[$0.name] = $0.value ?? ""
+        }
+        XCTAssertEqual(["bar": "baz"], query)
+    }
+
     func test_string() {
         for obj in getTestData()! {
             let testDict = obj as! [String: Any]
@@ -602,4 +639,43 @@ class TestURLComponents : XCTestCase {
         XCTAssertEqual(urlComponents.queryItems?.count, 4)
     }
 
+    func test_path() {
+        let c1 = URLComponents()
+        XCTAssertEqual(c1.path, "")
+
+        let c2 = URLComponents(string: "http://swift.org")
+        XCTAssertEqual(c2?.path, "")
+
+        let c3 = URLComponents(string: "http://swift.org/")
+        XCTAssertEqual(c3?.path, "/")
+
+        let c4 = URLComponents(string: "http://swift.org/foo/bar")
+        XCTAssertEqual(c4?.path, "/foo/bar")
+
+        let c5 = URLComponents(string: "http://swift.org:80/foo/bar")
+        XCTAssertEqual(c5?.path, "/foo/bar")
+
+        let c6 = URLComponents(string: "http://swift.org:80/foo/b%20r")
+        XCTAssertEqual(c6?.path, "/foo/b r")
+    }
+
+    func test_percentEncodedPath() {
+        let c1 = URLComponents()
+        XCTAssertEqual(c1.percentEncodedPath, "")
+
+        let c2 = URLComponents(string: "http://swift.org")
+        XCTAssertEqual(c2?.percentEncodedPath, "")
+
+        let c3 = URLComponents(string: "http://swift.org/")
+        XCTAssertEqual(c3?.percentEncodedPath, "/")
+
+        let c4 = URLComponents(string: "http://swift.org/foo/bar")
+        XCTAssertEqual(c4?.percentEncodedPath, "/foo/bar")
+
+        let c5 = URLComponents(string: "http://swift.org:80/foo/bar")
+        XCTAssertEqual(c5?.percentEncodedPath, "/foo/bar")
+
+        let c6 = URLComponents(string: "http://swift.org:80/foo/b%20r")
+        XCTAssertEqual(c6?.percentEncodedPath, "/foo/b%20r")
+    }
 }

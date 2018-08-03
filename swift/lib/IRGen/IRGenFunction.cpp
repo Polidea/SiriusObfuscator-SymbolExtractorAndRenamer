@@ -32,11 +32,12 @@ using namespace swift;
 using namespace irgen;
 
 IRGenFunction::IRGenFunction(IRGenModule &IGM, llvm::Function *Fn,
+                             OptimizationMode OptMode,
                              const SILDebugScope *DbgScope,
                              Optional<SILLocation> DbgLoc)
     : IGM(IGM), Builder(IGM.getLLVMContext(),
                         IGM.DebugInfo && !IGM.Context.LangOpts.DebuggerSupport),
-      CurFn(Fn), DbgScope(DbgScope) {
+      OptMode(OptMode), CurFn(Fn), DbgScope(DbgScope) {
 
   // Make sure the instructions in this function are attached its debug scope.
   if (IGM.DebugInfo) {
@@ -60,6 +61,13 @@ IRGenFunction::~IRGenFunction() {
   if (LocalTypeData) destroyLocalTypeData();
 }
 
+OptimizationMode IRGenFunction::getEffectiveOptimizationMode() const {
+  if (OptMode != OptimizationMode::NotSet)
+    return OptMode;
+
+  return IGM.getOptions().OptMode;
+}
+
 ModuleDecl *IRGenFunction::getSwiftModule() const {
   return IGM.getSwiftModule();
 }
@@ -70,6 +78,10 @@ SILModule &IRGenFunction::getSILModule() const {
 
 Lowering::TypeConverter &IRGenFunction::getSILTypes() const {
   return IGM.getSILTypes();
+}
+
+const IRGenOptions &IRGenFunction::getOptions() const {
+  return IGM.getOptions();
 }
 
 // Returns the default atomicity of the module.
@@ -100,8 +112,8 @@ void IRGenFunction::emitMemCpy(Address dest, Address src, llvm::Value *size) {
 }
 
 static llvm::Value *emitAllocatingCall(IRGenFunction &IGF,
-                                       llvm::Value *fn,
-                                       std::initializer_list<llvm::Value*> args,
+                                       llvm::Constant *fn,
+                                       ArrayRef<llvm::Value*> args,
                                        const llvm::Twine &name) {
   auto allocAttrs = IGF.IGM.getAllocAttrs();
   llvm::CallInst *call =
@@ -140,6 +152,15 @@ llvm::Value *IRGenFunction::emitInitStackObjectCall(llvm::Value *metadata,
   return call;
 }
 
+llvm::Value *IRGenFunction::emitInitStaticObjectCall(llvm::Value *metadata,
+                                                     llvm::Value *object,
+                                                     const llvm::Twine &name) {
+  llvm::CallInst *call =
+    Builder.CreateCall(IGM.getInitStaticObjectFn(), { metadata, object }, name);
+  call->setDoesNotThrow();
+  return call;
+}
+
 llvm::Value *IRGenFunction::emitVerifyEndOfLifetimeCall(llvm::Value *object,
                                                       const llvm::Twine &name) {
   llvm::CallInst *call =
@@ -151,10 +172,10 @@ llvm::Value *IRGenFunction::emitVerifyEndOfLifetimeCall(llvm::Value *object,
 void IRGenFunction::emitAllocBoxCall(llvm::Value *typeMetadata,
                                       llvm::Value *&box,
                                       llvm::Value *&valueAddress) {
-  auto attrs = llvm::AttributeSet::get(IGM.LLVMContext,
-                                       llvm::AttributeSet::FunctionIndex,
-                                       llvm::Attribute::NoUnwind);
-  
+  auto attrs = llvm::AttributeList::get(IGM.LLVMContext,
+                                        llvm::AttributeList::FunctionIndex,
+                                        llvm::Attribute::NoUnwind);
+
   llvm::CallInst *call =
     Builder.CreateCall(IGM.getAllocBoxFn(), typeMetadata);
   call->setAttributes(attrs);
@@ -168,9 +189,9 @@ void IRGenFunction::emitMakeBoxUniqueCall(llvm::Value *box,
                                           llvm::Value *alignMask,
                                           llvm::Value *&outBox,
                                           llvm::Value *&outValueAddress) {
-  auto attrs = llvm::AttributeSet::get(IGM.LLVMContext,
-                                       llvm::AttributeSet::FunctionIndex,
-                                       llvm::Attribute::NoUnwind);
+  auto attrs = llvm::AttributeList::get(IGM.LLVMContext,
+                                        llvm::AttributeList::FunctionIndex,
+                                        llvm::Attribute::NoUnwind);
 
   llvm::CallInst *call = Builder.CreateCall(IGM.getMakeBoxUniqueFn(),
                                             {box, typeMetadata, alignMask});
@@ -183,9 +204,9 @@ void IRGenFunction::emitMakeBoxUniqueCall(llvm::Value *box,
 
 void IRGenFunction::emitDeallocBoxCall(llvm::Value *box,
                                         llvm::Value *typeMetadata) {
-  auto attrs = llvm::AttributeSet::get(IGM.LLVMContext,
-                                       llvm::AttributeSet::FunctionIndex,
-                                       llvm::Attribute::NoUnwind);
+  auto attrs = llvm::AttributeList::get(IGM.LLVMContext,
+                                        llvm::AttributeList::FunctionIndex,
+                                        llvm::Attribute::NoUnwind);
 
   llvm::CallInst *call =
     Builder.CreateCall(IGM.getDeallocBoxFn(), box);
@@ -199,9 +220,8 @@ llvm::Value *IRGenFunction::emitProjectBoxCall(llvm::Value *box,
     llvm::Attribute::NoUnwind,
     llvm::Attribute::ReadNone,
   };
-  auto attrs = llvm::AttributeSet::get(IGM.LLVMContext,
-                                       llvm::AttributeSet::FunctionIndex,
-                                       attrKinds);
+  auto attrs = llvm::AttributeList::get(
+      IGM.LLVMContext, llvm::AttributeList::FunctionIndex, attrKinds);
   llvm::CallInst *call =
     Builder.CreateCall(IGM.getProjectBoxFn(), box);
   call->setCallingConv(IGM.DefaultCC);
@@ -210,12 +230,9 @@ llvm::Value *IRGenFunction::emitProjectBoxCall(llvm::Value *box,
 }
 
 llvm::Value *IRGenFunction::emitAllocEmptyBoxCall() {
-  llvm::Attribute::AttrKind attrKinds[] = {
-    llvm::Attribute::NoUnwind,
-  };
-  auto attrs = llvm::AttributeSet::get(IGM.LLVMContext,
-                                       llvm::AttributeSet::FunctionIndex,
-                                       attrKinds);
+  auto attrs = llvm::AttributeList::get(IGM.LLVMContext,
+                                        llvm::AttributeList::FunctionIndex,
+                                        llvm::Attribute::NoUnwind);
   llvm::CallInst *call =
     Builder.CreateCall(IGM.getAllocEmptyBoxFn(), {});
   call->setCallingConv(IGM.DefaultCC);
@@ -367,4 +384,49 @@ void Explosion::print(llvm::raw_ostream &OS) {
 
 void Explosion::dump() {
   print(llvm::errs());
+}
+
+llvm::Value *Offset::getAsValue(IRGenFunction &IGF) const {
+  if (isStatic()) {
+    return IGF.IGM.getSize(getStatic());
+  } else {
+    return getDynamic();
+  }
+}
+
+Offset Offset::offsetBy(IRGenFunction &IGF, Offset other) const {
+  if (isStatic() && other.isStatic()) {
+    return Offset(getStatic() + other.getStatic());
+  }
+  return Offset(IGF.Builder.CreateAdd(getDynamic(), other.getDynamic()));
+}
+
+Address IRGenFunction::emitAddressAtOffset(llvm::Value *base, Offset offset,
+                                           llvm::Type *objectTy,
+                                           Alignment objectAlignment,
+                                           const llvm::Twine &name) {
+  // Use a slightly more obvious IR pattern if it's a multiple of the type
+  // size.  I'll confess that this is partly just to avoid updating tests.
+  if (offset.isStatic()) {
+    auto byteOffset = offset.getStatic();
+    Size objectSize(IGM.DataLayout.getTypeAllocSize(objectTy));
+    if (byteOffset.isMultipleOf(objectSize)) {
+      // Cast to T*.
+      auto objectPtrTy = objectTy->getPointerTo();
+      base = Builder.CreateBitCast(base, objectPtrTy);
+
+      // GEP to the slot, computing the index as a signed number.
+      auto scaledIndex =
+        int64_t(byteOffset.getValue()) / int64_t(objectSize.getValue());
+      auto indexValue = IGM.getSize(Size(scaledIndex));
+      auto slotPtr = Builder.CreateInBoundsGEP(base, indexValue);
+
+      return Address(slotPtr, objectAlignment);
+    }
+  }
+
+  // GEP to the slot.
+  auto offsetValue = offset.getAsValue(*this);
+  auto slotPtr = emitByteOffsetGEP(base, offsetValue, objectTy);
+  return Address(slotPtr, objectAlignment);
 }

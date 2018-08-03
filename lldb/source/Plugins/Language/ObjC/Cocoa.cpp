@@ -13,22 +13,25 @@
 // Project includes
 #include "Cocoa.h"
 
-#include "lldb/Core/DataBufferHeap.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/Mangled.h"
-#include "lldb/Core/Stream.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/DataFormatters/TypeSummary.h"
-#include "lldb/Host/Endian.h"
+#include "lldb/Host/Time.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Target/ProcessStructReader.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/ProcessStructReader.h"
+#include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/Endian.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/Stream.h"
+
+#include "llvm/ADT/APInt.h"
 
 #include "llvm/ADT/APInt.h"
 
@@ -228,7 +231,7 @@ bool lldb_private::formatters::NSMachPortSummaryProvider(
 
   if (!strcmp(class_name, "NSMachPort")) {
     uint64_t offset = (ptr_size == 4 ? 12 : 20);
-    Error error;
+    Status error;
     port_number = process_sp->ReadUnsignedIntegerFromMemory(
         offset + valobj_addr, 4, 0, error);
     if (error.Success()) {
@@ -277,7 +280,7 @@ bool lldb_private::formatters::NSIndexSetSummaryProvider(
   do {
     if (!strcmp(class_name, "NSIndexSet") ||
         !strcmp(class_name, "NSMutableIndexSet")) {
-      Error error;
+      Status error;
       uint32_t mode = process_sp->ReadUnsignedIntegerFromMemory(
           valobj_addr + ptr_size, 4, 0, error);
       if (error.Fail())
@@ -493,7 +496,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
       }
       return true;
     } else {
-      Error error;
+      Status error;
       
       AppleObjCRuntime *runtime =
       llvm::dyn_cast_or_null<AppleObjCRuntime>(
@@ -525,11 +528,11 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
 
         bool is_preserved_number = cfinfoa & 0x8;
         if (is_preserved_number) {
-          lldbassert(!"We should handle preserved numbers!");
+          lldbassert(!static_cast<bool>("We should handle preserved numbers!"));
           return false;
         }
 
-        type_code = (TypeCodes)(cfinfoa & 0x7);
+        type_code = static_cast<TypeCodes>(cfinfoa & 0x7);
       } else {
         uint8_t data_type =
         process_sp->ReadUnsignedIntegerFromMemory(valobj_addr + ptr_size, 1,
@@ -551,6 +554,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
       }
       
       uint64_t value = 0;
+      bool success = false;
       switch (type_code) {
         case TypeCodes::sint8:
         value = process_sp->ReadUnsignedIntegerFromMemory(data_location, 1, 0,
@@ -558,6 +562,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
         if (error.Fail())
           return false;
         NSNumber_FormatChar(valobj, stream, (char)value, options.GetLanguage());
+        success = true;
         break;
         case TypeCodes::sint16:
         value = process_sp->ReadUnsignedIntegerFromMemory(data_location, 2, 0,
@@ -566,6 +571,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
           return false;
         NSNumber_FormatShort(valobj, stream, (short)value,
                              options.GetLanguage());
+        success = true;
         break;
       case TypeCodes::sint32:
         value = process_sp->ReadUnsignedIntegerFromMemory(data_location, 4, 0,
@@ -573,6 +579,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
         if (error.Fail())
           return false;
         NSNumber_FormatInt(valobj, stream, (int)value, options.GetLanguage());
+        success = true;
         break;
       case TypeCodes::sint64:
         value = process_sp->ReadUnsignedIntegerFromMemory(data_location, 8, 0,
@@ -580,6 +587,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
         if (error.Fail())
           return false;
         NSNumber_FormatLong(valobj, stream, value, options.GetLanguage());
+        success = true;
         break;
       case TypeCodes::f32:
       {
@@ -590,6 +598,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
         float flt_value = 0.0f;
         memcpy(&flt_value, &flt_as_int, sizeof(flt_as_int));
         NSNumber_FormatFloat(valobj, stream, flt_value, options.GetLanguage());
+        success = true;
         break;
       }
       case TypeCodes::f64:
@@ -601,6 +610,7 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
         double dbl_value = 0.0;
         memcpy(&dbl_value, &dbl_as_lng, sizeof(dbl_as_lng));
         NSNumber_FormatDouble(valobj, stream, dbl_value, options.GetLanguage());
+        success = true;
         break;
       }
       case TypeCodes::sint128: // internally, this is the same
@@ -616,12 +626,11 @@ bool lldb_private::formatters::NSNumberSummaryProvider(
           return false;
         llvm::APInt i128_value(128, words);
         NSNumber_FormatInt128(valobj, stream, i128_value, options.GetLanguage());
+        success = true;
         break;
       }
-      default:
-        return false;
       }
-      return true;
+      return success;
     }
   }
 
@@ -747,7 +756,7 @@ bool lldb_private::formatters::NSDateSummaryProvider(
           process_sp->GetTarget().GetArchitecture().GetTriple());
       uint32_t delta =
           (triple.isWatchOS() && triple.isWatchABI()) ? 8 : ptr_size;
-      Error error;
+      Status error;
       date_value_bits = process_sp->ReadUnsignedIntegerFromMemory(
           valobj_addr + delta, 8, 0, error);
       memcpy(&date_value, &date_value_bits, sizeof(date_value_bits));
@@ -755,7 +764,7 @@ bool lldb_private::formatters::NSDateSummaryProvider(
         return false;
     }
   } else if (class_name == g_NSCalendarDate) {
-    Error error;
+    Status error;
     date_value_bits = process_sp->ReadUnsignedIntegerFromMemory(
         valobj_addr + 2 * ptr_size, 8, 0, error);
     memcpy(&date_value, &date_value_bits, sizeof(date_value_bits));
@@ -882,14 +891,14 @@ bool lldb_private::formatters::NSDataSummaryProvider(
       !strcmp(class_name, "NSConcreteMutableData") ||
       !strcmp(class_name, "__NSCFData")) {
     uint32_t offset = (is_64bit ? 16 : 8);
-    Error error;
+    Status error;
     value = process_sp->ReadUnsignedIntegerFromMemory(
         valobj_addr + offset, is_64bit ? 8 : 4, 0, error);
     if (error.Fail())
       return false;
   } else if (!strcmp(class_name, "_NSInlineData")) {
     uint32_t offset = (is_64bit ? 8 : 4);
-    Error error;
+    Status error;
     value = process_sp->ReadUnsignedIntegerFromMemory(valobj_addr + offset, 2,
                                                       0, error);
     if (error.Fail())
@@ -912,7 +921,7 @@ bool lldb_private::formatters::ObjCBOOLSummaryProvider(
   ValueObjectSP real_guy_sp = valobj.GetSP();
 
   if (type_info & eTypeIsPointer) {
-    Error err;
+    Status err;
     real_guy_sp = valobj.Dereference(err);
     if (err.Fail() || !real_guy_sp)
       return false;
@@ -987,7 +996,7 @@ bool lldb_private::formatters::ObjCSELSummaryProvider(
                                                           exe_ctx, charstar);
   } else {
     DataExtractor data;
-    Error error;
+    Status error;
     valobj.GetData(data, error);
     if (error.Fail())
       return false;

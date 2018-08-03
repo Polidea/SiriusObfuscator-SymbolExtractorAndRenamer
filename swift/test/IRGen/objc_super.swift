@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %build-irgen-test-overlays
 // RUN: %target-swift-frontend(mock-sdk: -sdk %S/Inputs -I %t) %s -emit-ir | %FileCheck %s
 
@@ -74,7 +74,7 @@ func acceptFn(_ fn: () -> Void) { }
 class PartialApply : Gizmo {
   // CHECK: define hidden swiftcc void @_T010objc_super12PartialApplyC4frobyyF([[PARTIAL_APPLY_CLASS]]* swiftself) {{.*}} {
   override func frob() {
-    // CHECK: call swiftcc void @_T010objc_super8acceptFnyyycF(i8* bitcast (void (%swift.refcounted*)* [[PARTIAL_FORWARDING_THUNK:@[A-Za-z0-9_]+]] to i8*), %swift.refcounted* %3)
+    // CHECK: call swiftcc void @_T010objc_super8acceptFnyyycF(i8* bitcast (void (%swift.refcounted*)* [[PARTIAL_FORWARDING_THUNK:@[A-Za-z0-9_]+]] to i8*), %swift.refcounted* %4)
     acceptFn(super.frob)
   }
   // CHECK: }
@@ -87,7 +87,7 @@ class GenericRuncer<T> : Gizmo {
 // Use a constant indirect field access instead of a non-constant direct
 // access because the layout dependents on the alignment of y.
 
-// CHECK: define hidden swiftcc i64 @_T010objc_super13GenericRuncerC1xSo5GizmoCSgfg(%T10objc_super13GenericRuncerC* swiftself)
+// CHECK: define hidden swiftcc i64 @_T010objc_super13GenericRuncerC1xSo5GizmoCSgvg(%T10objc_super13GenericRuncerC* swiftself)
 // CHECK:    inttoptr
 // CHECK:   [[CAST:%.*]] = bitcast %T10objc_super13GenericRuncerC* %0 to i64*
 // CHECK:   [[ISA:%.*]] = load i64, i64* [[CAST]]
@@ -116,7 +116,7 @@ class GenericRuncer<T> : Gizmo {
     // CHECK-NEXT: [[ISA_MASKED:%.*]] = and i64 [[ISA]], [[ISA_MASK]]
     // CHECK-NEXT: [[ISA_PTR:%.*]] = inttoptr i64 [[ISA_MASKED]] to %swift.type*
     // CHECK-NEXT: [[METACLASS:%.*]] = bitcast %swift.type* [[ISA_PTR]] to %objc_class*
-    // CHECK:      [[METACLASS_ADDR:%.*]] = getelementptr %objc_super, %objc_super* %objc_super, i32 0, i32 1
+    // CHECK:      [[METACLASS_ADDR:%.*]] = getelementptr inbounds %objc_super, %objc_super* %objc_super, i32 0, i32 1
     // CHECK-NEXT: store %objc_class* [[METACLASS]], %objc_class** [[METACLASS_ADDR]], align 8
     // CHECK-NEXT: [[SELECTOR:%.*]] = load i8*, i8** @"\01L_selector(runce)", align 8
     // CHECK-NEXT: call void bitcast (void ()* @objc_msgSendSuper2 to void (%objc_super*, i8*)*)(%objc_super* %objc_super, i8* [[SELECTOR]])

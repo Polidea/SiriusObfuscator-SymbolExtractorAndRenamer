@@ -29,6 +29,44 @@
 namespace swift {
 namespace remote {
 
+template <typename BuiltType> class FunctionParam {
+  StringRef Label;
+  BuiltType Type;
+  ParameterFlags Flags;
+
+  FunctionParam(StringRef label, BuiltType type, ParameterFlags flags)
+      : Label(label), Type(type), Flags(flags) {}
+
+public:
+  explicit FunctionParam() {}
+
+  FunctionParam(BuiltType type) : Type(type) {}
+
+  StringRef getLabel() const { return Label; }
+  BuiltType getType() const { return Type; }
+  ParameterFlags getFlags() const { return Flags; }
+
+  void setLabel(StringRef label) { Label = label; }
+  void setType(BuiltType type) { Type = type; }
+
+  void setVariadic() { Flags = Flags.withVariadic(true); }
+  void setShared() { Flags = Flags.withShared(true); }
+  void setInOut() { Flags = Flags.withInOut(true); }
+  void setFlags(ParameterFlags flags) { Flags = flags; };
+
+  FunctionParam withLabel(StringRef label) const {
+    return FunctionParam(label, Type, Flags);
+  }
+
+  FunctionParam withType(BuiltType type) const {
+    return FunctionParam(Label, type, Flags);
+  }
+
+  FunctionParam withFlags(ParameterFlags flags) const {
+    return FunctionParam(Label, Type, flags);
+  }
+};
+
 /// A utility class for constructing abstract types from
 /// a textual mangling.
 template <typename BuilderType>
@@ -219,21 +257,21 @@ class TypeDecoder {
         Node->getChild(0)->getKind() == NodeKind::ThrowsAnnotation;
       flags = flags.withThrows(true);
 
-      std::vector<BuiltType> arguments;
-      std::vector<bool> argsAreInOut;
+      std::vector<FunctionParam<BuiltType>> parameters;
       if (!decodeMangledFunctionInputType(Node->getChild(isThrow ? 1 : 0),
-                                          arguments, argsAreInOut, flags))
+                                          parameters))
         return BuiltType();
 
       auto result = decodeMangledType(Node->getChild(isThrow ? 2 : 1));
       if (!result) return BuiltType();
-      return Builder.createFunctionType(arguments, argsAreInOut,
-                                        result, flags);
+      return Builder.createFunctionType(parameters, result, flags);
     }
     case NodeKind::ImplFunctionType: {
       // Minimal support for lowered function types. These come up in
       // reflection as capture types. For the reflection library's
       // purposes, the only part that matters is the convention.
+      //
+      // TODO: Do we want to reflect @escaping?
       FunctionTypeFlags flags;
 
       for (unsigned i = 0; i < Node->getNumChildren(); i++) {
@@ -263,15 +301,13 @@ class TypeDecoder {
       }
 
       // Completely punt on argument types and results.
-      std::vector<BuiltType> arguments;
-      std::vector<bool> argsAreInOut;
+      std::vector<FunctionParam<BuiltType>> parameters;
 
       std::vector<BuiltType> elements;
       std::string labels;
       auto result = Builder.createTupleType(elements, std::move(labels), false);
 
-      return Builder.createFunctionType(arguments, argsAreInOut,
-                                        result, flags);
+      return Builder.createFunctionType(parameters, result, flags);
     }
     case NodeKind::ArgumentTuple:
       return decodeMangledType(Node->getChild(0));
@@ -397,55 +433,92 @@ private:
     return true;
   }
 
-  bool decodeMangledFunctionInputType(const Demangle::NodePointer &node,
-                                      std::vector<BuiltType> &args,
-                                      std::vector<bool> &argsAreInOut,
-                                      FunctionTypeFlags &flags) {
+  bool decodeMangledFunctionInputType(
+      const Demangle::NodePointer &node,
+      std::vector<FunctionParam<BuiltType>> &params) {
     // Look through a couple of sugar nodes.
     if (node->getKind() == NodeKind::Type ||
         node->getKind() == NodeKind::ArgumentTuple) {
-      return decodeMangledFunctionInputType(node->getFirstChild(),
-                                            args, argsAreInOut, flags);
+      return decodeMangledFunctionInputType(node->getFirstChild(), params);
     }
 
-    auto decodeSingleHelper =
-    [&](const Demangle::NodePointer &typeNode, bool argIsInOut) -> bool {
-      BuiltType argType = decodeMangledType(typeNode);
-      if (!argType) return false;
+    auto decodeParamTypeAndFlags =
+        [&](const Demangle::NodePointer &typeNode,
+            FunctionParam<BuiltType> &param) -> bool {
+      Demangle::NodePointer node = typeNode;
+      switch (node->getKind()) {
+      case NodeKind::InOut:
+        param.setInOut();
+        node = node->getFirstChild();
+        break;
 
-      args.push_back(argType);
-      argsAreInOut.push_back(argIsInOut);
+      case NodeKind::Shared:
+        param.setShared();
+        node = node->getFirstChild();
+        break;
+
+      default:
+        break;
+      }
+
+      auto paramType = decodeMangledType(node);
+      if (!paramType)
+        return false;
+
+      param.setType(paramType);
       return true;
     };
-    auto decodeSingle =
-    [&](const Demangle::NodePointer &typeNode) -> bool {
-      if (typeNode->getKind() == NodeKind::InOut) {
-        return decodeSingleHelper(typeNode->getFirstChild(), true);
-      } else {
-        return decodeSingleHelper(typeNode, false);
+
+    auto decodeParam = [&](const Demangle::NodePointer &paramNode)
+        -> Optional<FunctionParam<BuiltType>> {
+      if (paramNode->getKind() != NodeKind::TupleElement)
+        return None;
+
+      FunctionParam<BuiltType> param;
+      for (const auto &child : *paramNode) {
+        switch (child->getKind()) {
+        case NodeKind::TupleElementName:
+          param.setLabel(child->getText());
+          break;
+
+        case NodeKind::VariadicMarker:
+          param.setVariadic();
+          break;
+
+        case NodeKind::Type:
+          if (!decodeParamTypeAndFlags(child->getFirstChild(), param))
+            return None;
+          break;
+
+        default:
+          return None;
+        }
       }
+
+      return param;
     };
 
     // Expand a single level of tuple.
     if (node->getKind() == NodeKind::Tuple) {
-      // TODO: preserve variadic somewhere?
-
       // Decode all the elements as separate arguments.
       for (const auto &elt : *node) {
-        if (elt->getKind() != NodeKind::TupleElement)
+        auto param = decodeParam(elt);
+        if (!param)
           return false;
-        auto typeNode = elt->getChild(elt->getNumChildren() - 1);
-        if (typeNode->getKind() != NodeKind::Type)
-          return false;
-        if (!decodeSingle(typeNode->getFirstChild()))
-          return false;
+
+        params.push_back(std::move(*param));
       }
 
       return true;
     }
 
     // Otherwise, handle the type as a single argument.
-    return decodeSingle(node);
+    FunctionParam<BuiltType> param;
+    if (!decodeParamTypeAndFlags(node, param))
+      return false;
+
+    params.push_back(std::move(param));
+    return true;
   }
 };
 
@@ -690,6 +763,8 @@ public:
 
     switch (Meta->getKind()) {
     case MetadataKind::Class:
+      if (!cast<TargetClassMetadata<Runtime>>(Meta)->isTypeMetadata())
+        return BuiltType();
       return readNominalTypeFromMetadata(Meta, skipArtificialSubclasses);
     case MetadataKind::Struct:
       return readNominalTypeFromMetadata(Meta);
@@ -702,16 +777,8 @@ public:
       std::vector<BuiltType> elementTypes;
       elementTypes.reserve(tupleMeta->NumElements);
 
-      StoredPointer elementAddress = MetadataAddress +
-        sizeof(TargetTupleTypeMetadata<Runtime>);
-      using Element = typename TargetTupleTypeMetadata<Runtime>::Element;
-      for (StoredPointer i = 0; i < tupleMeta->NumElements; ++i,
-           elementAddress += sizeof(Element)) {
-        Element element;
-        if (!Reader->readBytes(RemoteAddress(elementAddress),
-                               (uint8_t*)&element, sizeof(Element)))
-          return BuiltType();
-
+      for (unsigned i = 0, n = tupleMeta->NumElements; i != n; ++i) {
+        auto &element = tupleMeta->getElement(i);
         if (auto elementType = readTypeFromMetadata(element.Type))
           elementTypes.push_back(elementType);
         else
@@ -732,37 +799,28 @@ public:
     case MetadataKind::Function: {
       auto Function = cast<TargetFunctionTypeMetadata<Runtime>>(Meta);
 
-      std::vector<BuiltType> Arguments;
-      std::vector<bool> ArgumentIsInOut;
-      StoredPointer ArgumentAddress = MetadataAddress +
-        sizeof(TargetFunctionTypeMetadata<Runtime>);
-      for (StoredPointer i = 0; i < Function->getNumArguments(); ++i,
-           ArgumentAddress += sizeof(StoredPointer)) {
-        StoredPointer FlaggedArgumentAddress;
-        if (!Reader->readInteger(RemoteAddress(ArgumentAddress),
-                                 &FlaggedArgumentAddress))
+      std::vector<FunctionParam<BuiltType>> Parameters;
+      for (unsigned i = 0, n = Function->getNumParameters(); i != n; ++i) {
+        auto ParamTypeRef = readTypeFromMetadata(Function->getParameter(i));
+        if (!ParamTypeRef)
           return BuiltType();
 
-        // TODO: Use target-agnostic FlaggedPointer to mask this!
-        const auto InOutMask = (StoredPointer) 1;
-        ArgumentIsInOut.push_back((FlaggedArgumentAddress & InOutMask) != 0);
-        FlaggedArgumentAddress &= ~InOutMask;
-
-        if (auto ArgumentTypeRef = readTypeFromMetadata(FlaggedArgumentAddress))
-          Arguments.push_back(ArgumentTypeRef);
-        else
-          return BuiltType();
+        FunctionParam<BuiltType> Param;
+        Param.setType(ParamTypeRef);
+        Param.setFlags(Function->getParameterFlags(i));
+        Parameters.push_back(std::move(Param));
       }
 
       auto Result = readTypeFromMetadata(Function->ResultType);
       if (!Result)
         return BuiltType();
 
-      auto flags = FunctionTypeFlags().withConvention(Function->getConvention())
-                                      .withThrows(Function->throws());
-      auto BuiltFunction = Builder.createFunctionType(Arguments,
-                                                      ArgumentIsInOut,
-                                                      Result, flags);
+      auto flags = FunctionTypeFlags()
+                       .withConvention(Function->getConvention())
+                       .withThrows(Function->throws())
+                       .withParameterFlags(Function->hasParameterFlags());
+      auto BuiltFunction =
+          Builder.createFunctionType(Parameters, Result, flags);
       TypeCache[MetadataAddress] = BuiltFunction;
       return BuiltFunction;
     }
@@ -932,33 +990,6 @@ public:
     }
 
     swift_runtime_unreachable("Unhandled IsaEncodingKind in switch.");
-  }
-
-  /// Read the parent type metadata from a nested nominal type metadata.
-  std::pair<bool, StoredPointer>
-  readParentFromMetadata(StoredPointer metadata) {
-    auto Meta = readMetadata(metadata);
-    if (!Meta)
-      return std::make_pair(false, 0);
-
-    auto descriptorAddress = readAddressOfNominalTypeDescriptor(Meta);
-    if (!descriptorAddress)
-      return std::make_pair(false, 0);
-
-    // Read the nominal type descriptor.
-    auto descriptor = readNominalTypeDescriptor(descriptorAddress);
-    if (!descriptor)
-      return std::make_pair(false, 0);
-
-    // Read the parent type if the type has one.
-    if (descriptor->GenericParams.Flags.hasParent()) {
-      StoredPointer parentAddress = getNominalParent(Meta, descriptor);
-      if (!parentAddress)
-        return std::make_pair(false, 0);
-      return std::make_pair(true, parentAddress);
-    }
-
-    return std::make_pair(false, 0);
   }
 
   /// Read a single generic type argument from a bound generic type
@@ -1151,8 +1182,26 @@ protected:
         return _readMetadata<TargetExistentialMetatypeMetadata>(address);
       case MetadataKind::ForeignClass:
         return _readMetadata<TargetForeignClassMetadata>(address);
-      case MetadataKind::Function:
-        return _readMetadata<TargetFunctionTypeMetadata>(address);
+      case MetadataKind::Function: {
+        StoredSize flagsValue;
+        auto flagsAddr =
+            address + TargetFunctionTypeMetadata<Runtime>::OffsetToFlags;
+        if (!Reader->readInteger(RemoteAddress(flagsAddr), &flagsValue))
+          return nullptr;
+
+        auto flags =
+            TargetFunctionTypeFlags<StoredSize>::fromIntValue(flagsValue);
+
+        using Parameter =
+            ConstTargetMetadataPointer<Runtime, swift::TargetMetadata>;
+        auto totalSize = sizeof(TargetFunctionTypeMetadata<Runtime>) +
+                         flags.getNumParameters() * sizeof(Parameter);
+
+        if (flags.hasParameterFlags())
+          totalSize += flags.getNumParameters() * sizeof(uint32_t);
+
+        return _readMetadata(address, totalSize);
+      }
       case MetadataKind::HeapGenericLocalVariable:
         return _readMetadata<TargetGenericBoxHeapMetadata>(address);
       case MetadataKind::HeapLocalVariable:
@@ -1174,8 +1223,8 @@ protected:
         if (!Reader->readInteger(RemoteAddress(numElementsAddress),
                                  &numElements))
           return nullptr;
-        auto totalSize = sizeof(TargetTupleTypeMetadata<Runtime>)
-          + numElements * sizeof(StoredPointer);
+        auto totalSize = sizeof(TargetTupleTypeMetadata<Runtime>) +
+                         numElements * sizeof(TupleTypeMetadata::Element);
 
         // Make sure the number of elements is reasonable
         if (numElements >= 256)
@@ -1209,23 +1258,19 @@ private:
     return MetadataRef(address, metadata);
   }
 
-  StoredPointer readAddressOfNominalTypeDescriptor(MetadataRef &metadata,
-                                        bool skipArtificialSubclasses = false) {
+  StoredPointer
+  readAddressOfNominalTypeDescriptor(MetadataRef &metadata,
+                                     bool skipArtificialSubclasses = false) {
     switch (metadata->getKind()) {
     case MetadataKind::Class: {
       auto classMeta = cast<TargetClassMetadata<Runtime>>(metadata);
       while (true) {
-        auto descriptorAddress =
-          resolveNullableRelativeOffset<StoredPointer>(metadata.getAddress() +
-                                         classMeta->offsetToDescriptorOffset());
-
-        // Propagate errors reading the offset.
-        if (!descriptorAddress) return 0;
+        auto descriptorAddress = classMeta->getDescription();
 
         // If this class has a null descriptor, it's artificial,
         // and we need to skip it upon request.  Otherwise, we're done.
-        if (*descriptorAddress || !skipArtificialSubclasses)
-          return *descriptorAddress;
+        if (descriptorAddress || !skipArtificialSubclasses)
+          return static_cast<uintptr_t>(descriptorAddress);
 
         auto superclassMetadataAddress = classMeta->SuperClass;
         if (!superclassMetadataAddress)
@@ -1234,8 +1279,8 @@ private:
         auto superMeta = readMetadata(superclassMetadataAddress);
         if (!superMeta)
           return 0;
-        auto superclassMeta =
-          dyn_cast<TargetClassMetadata<Runtime>>(superMeta);
+
+        auto superclassMeta = dyn_cast<TargetClassMetadata<Runtime>>(superMeta);
         if (!superclassMeta)
           return 0;
 
@@ -1248,8 +1293,7 @@ private:
     case MetadataKind::Optional:
     case MetadataKind::Enum: {
       auto valueMeta = cast<TargetValueMetadata<Runtime>>(metadata);
-      return resolveRelativeOffset<StoredPointer>(metadata.getAddress() +
-                                       valueMeta->offsetToDescriptorOffset());
+      return reinterpret_cast<uintptr_t>(valueMeta->getDescription());
     }
 
     default:
@@ -1308,32 +1352,6 @@ private:
     return OwnedProtocolDescriptorRef(Casted);
   }
 
-  StoredPointer getNominalParent(MetadataRef metadata,
-                                 NominalTypeDescriptorRef descriptor) {
-    // If this is metadata for some sort of value type, the parent type
-    // is at a fixed offset.
-    if (auto valueMetadata = dyn_cast<TargetValueMetadata<Runtime>>(metadata)) {
-      return valueMetadata->Parent;
-    }
-
-    // If this is metadata for a class type, the parent type for the
-    // most-derived class is at an offset stored in the most-derived
-    // nominal type descriptor.
-    if (auto classMetadata = dyn_cast<TargetClassMetadata<Runtime>>(metadata)) {
-      // If it does, it's immediately before the generic parameters.
-      auto offsetToParent
-        = sizeof(StoredPointer) * (descriptor->GenericParams.Offset - 1);
-      RemoteAddress addressOfParent(metadata.getAddress() + offsetToParent);
-      StoredPointer parentAddress;
-      if (!Reader->readInteger(addressOfParent, &parentAddress))
-        return StoredPointer();
-      return parentAddress;
-    }
-
-    // Otherwise, we don't know how to access its parent.  This is a failure.
-    return StoredPointer();
-  }
-
   std::vector<BuiltType>
   getGenericSubst(MetadataRef metadata, NominalTypeDescriptorRef descriptor) {
     std::vector<BuiltType> substitutions;
@@ -1387,23 +1405,13 @@ private:
     if (!typeDecl)
       return BuiltType();
 
-    // Read the parent type if the type has one.
-    BuiltType parent = BuiltType();
-    if (descriptor->GenericParams.Flags.hasParent()) {
-      StoredPointer parentAddress = getNominalParent(metadata, descriptor);
-      if (!parentAddress)
-        return BuiltType();
-      parent = readTypeFromMetadata(parentAddress);
-      if (!parent) return BuiltType();
-    }
-
     BuiltType nominal;
     if (descriptor->GenericParams.NumPrimaryParams) {
       auto args = getGenericSubst(metadata, descriptor);
       if (args.empty()) return BuiltType();
-      nominal = Builder.createBoundGenericType(typeDecl, args, parent);
+      nominal = Builder.createBoundGenericType(typeDecl, args);
     } else {
-      nominal = Builder.createNominalType(typeDecl, parent);
+      nominal = Builder.createNominalType(typeDecl);
     }
     if (!nominal) return BuiltType();
 

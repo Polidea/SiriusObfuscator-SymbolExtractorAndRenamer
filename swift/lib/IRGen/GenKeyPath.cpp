@@ -15,6 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "Callee.h"
 #include "ConstantBuilder.h"
 #include "Explosion.h"
 #include "GenClass.h"
@@ -26,6 +27,7 @@
 #include "IRGenDebugInfo.h"
 #include "IRGenFunction.h"
 #include "IRGenModule.h"
+#include "MetadataLayout.h"
 #include "ProtocolInfo.h"
 #include "StructLayout.h"
 #include "TypeInfo.h"
@@ -76,8 +78,6 @@ bindPolymorphicArgumentsFromComponentIndices(IRGenFunction &IGF,
   bindFromGenericRequirementsBuffer(IGF, requirements,
     Address(args, IGF.IGM.getPointerAlignment()),
     [&](CanType t) {
-      if (!genericEnv)
-        return t;
       return genericEnv->mapTypeIntoContext(t)->getCanonicalType();
     });
 }
@@ -112,7 +112,7 @@ getAccessorForComputedComponent(IRGenModule &IGM,
   }
 
   auto accessorFnTy = cast<llvm::FunctionType>(
-    accessorFn->getType()->getPointerElementType());
+    accessorFn->getType()->getPointerElementType());;
   
   // Otherwise, we need a thunk to unmarshal the generic environment from the
   // argument area. It'd be nice to have a good way to represent this
@@ -228,10 +228,10 @@ getAccessorForComputedComponent(IRGenModule &IGM,
                              forwardingSubs,
                              &ignoreWitnessMetadata,
                              forwardedArgs);
-    auto call = IGF.Builder.CreateCall(accessorFn, forwardedArgs.claimAll());
-    if (whichAccessor == Getter)
-      call->addAttribute(1, llvm::Attribute::StructRet);
-
+    auto fnPtr = FunctionPointer::forDirect(IGM, accessorFn,
+                                          accessor->getLoweredFunctionType());
+    auto call = IGF.Builder.CreateCall(fnPtr, forwardedArgs.claimAll());
+    
     if (call->getType()->isVoidTy())
       IGF.Builder.CreateRetVoid();
     else
@@ -258,6 +258,8 @@ getLayoutFunctionForComputedComponent(IRGenModule &IGM,
     
   {
     IRGenFunction IGF(IGM, layoutFn);
+    if (IGM.DebugInfo)
+      IGM.DebugInfo->emitArtificialFunction(IGF, layoutFn);
     // Unmarshal the generic environment from the argument buffer.
     auto parameters = IGF.collectParameters();
     auto args = parameters.claimNext();
@@ -266,8 +268,6 @@ getLayoutFunctionForComputedComponent(IRGenModule &IGM,
       bindFromGenericRequirementsBuffer(IGF, requirements,
         Address(args, IGF.IGM.getPointerAlignment()),
         [&](CanType t) {
-          if (!genericEnv)
-            return t;
           return genericEnv->mapTypeIntoContext(t)->getCanonicalType();
         });
     }
@@ -332,8 +332,6 @@ getWitnessTableForComputedComponent(IRGenModule &IGM,
     
     auto linkInfo = LinkInfo::get(IGM, "swift_keyPathGenericWitnessTable",
                                   SILLinkage::PublicExternal,
-                                  /*fragile*/ false,
-                                  /*sil only*/ false,
                                   NotForDefinition,
                                   /*weak imported*/ false);
     
@@ -398,7 +396,8 @@ getWitnessTableForComputedComponent(IRGenModule &IGM,
         auto elt = IGF.Builder.CreateInBoundsGEP(componentArgsBuf, offset);
         auto eltAddr = ti.getAddressForPointer(
           IGF.Builder.CreateBitCast(elt, ti.getStorageType()->getPointerTo()));
-        ti.destroy(IGF, eltAddr, ty);
+        ti.destroy(IGF, eltAddr, ty,
+                   true /*witness table: need it to be fast*/);
         auto size = ti.getSize(IGF, ty);
         offset = IGF.Builder.CreateAdd(offset, size);
       }
@@ -451,8 +450,8 @@ getWitnessTableForComputedComponent(IRGenModule &IGM,
         auto destEltAddr = ti.getAddressForPointer(
           IGF.Builder.CreateBitCast(destElt,
                                     ti.getStorageType()->getPointerTo()));
-        
-        ti.initializeWithCopy(IGF, destEltAddr, sourceEltAddr, ty);
+
+        ti.initializeWithCopy(IGF, destEltAddr, sourceEltAddr, ty, false);
         auto size = ti.getSize(IGF, ty);
         offset = IGF.Builder.CreateAdd(offset, size);
       }
@@ -512,6 +511,9 @@ getInitializerForComputedComponent(IRGenModule &IGM,
     
   {
     IRGenFunction IGF(IGM, initFn);
+    if (IGM.DebugInfo)
+      IGM.DebugInfo->emitArtificialFunction(IGF, initFn);
+
     auto params = IGF.collectParameters();
     // Pointer to the argument packet passed into swift_getKeyPath
     auto src = params.claimNext();
@@ -535,8 +537,6 @@ getInitializerForComputedComponent(IRGenModule &IGM,
       bindFromGenericRequirementsBuffer(IGF, requirements,
         Address(src, IGF.IGM.getPointerAlignment()),
         [&](CanType t) {
-          if (!genericEnv)
-            return t;
           return genericEnv->mapTypeIntoContext(t)->getCanonicalType();
         });
 
@@ -596,9 +596,11 @@ getInitializerForComputedComponent(IRGenModule &IGM,
       // The last component using an operand can move the value out of the
       // buffer.
       if (&component == operands[index.Operand].LastUser) {
-        ti.initializeWithTake(IGF, destAddr, srcAddresses[index.Operand], ty);
+        ti.initializeWithTake(IGF, destAddr, srcAddresses[index.Operand], ty,
+                              false);
       } else {
-        ti.initializeWithCopy(IGF, destAddr, srcAddresses[index.Operand], ty);
+        ti.initializeWithCopy(IGF, destAddr, srcAddresses[index.Operand], ty,
+                              false);
       }
       auto size = ti.getSize(IGF, ty);
       offset = IGF.Builder.CreateAdd(offset, size);
@@ -647,7 +649,7 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
   
   GenericEnvironment *genericEnv = nullptr;
   if (auto sig = pattern->getGenericSignature()) {
-    genericEnv = sig->createGenericEnvironment(*getSwiftModule());
+    genericEnv = sig->createGenericEnvironment();
     enumerateGenericSignatureRequirements(pattern->getGenericSignature(),
       [&](GenericRequirement reqt) { requirements.push_back(reqt); });
   }
@@ -677,8 +679,6 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
         bindFromGenericRequirementsBuffer(IGF, requirements,
           Address(bindingsBufPtr, getPointerAlignment()),
           [&](CanType t) {
-            if (!genericEnv)
-              return t;
             return genericEnv->mapTypeIntoContext(t)->getCanonicalType();
           });
       
@@ -706,11 +706,6 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
   // the final object.
   fields.add(emitMetadataGenerator(rootTy));
   fields.add(emitMetadataGenerator(valueTy));
-  
-  // TODO: 32-bit heap object header still has an extra word
-  if (SizeTy == Int32Ty) {
-    fields.addInt32(0);
-  }
   
 #ifndef NDEBUG
   auto endOfObjectHeader = fields.getNextOffsetFromGlobal();
@@ -779,7 +774,7 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
     Lowering::GenericContextScope scope(getSILTypes(),
                                         pattern->getGenericSignature());
     loweredBaseTy = getLoweredType(AbstractionPattern::getOpaque(),
-                                   baseTy->getLValueOrInOutObjectType());
+                                   baseTy->getWithoutSpecifierType());
     auto &component = pattern->getComponents()[i];
     switch (auto kind = component.getKind()) {
     case KeyPathPatternComponent::Kind::StoredProperty: {
@@ -806,7 +801,7 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
       // For a struct stored property, we may know the fixed offset of the field,
       // or we may need to fetch it out of the type's metadata at instantiation
       // time.
-      if (loweredBaseTy.getStructOrBoundGenericStruct()) {
+      if (auto theStruct = loweredBaseTy.getStructOrBoundGenericStruct()) {
         if (auto offset = emitPhysicalStructMemberFixedOffset(*this,
                                                               loweredBaseTy,
                                                               property)) {
@@ -814,15 +809,15 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
           addFixedOffset(/*struct*/ true, offset);
           break;
         }
-        
+
         // If the offset isn't fixed, try instead to get the field offset out
         // of the type metadata at instantiation time.
-        auto fieldOffset = emitPhysicalStructMemberOffsetOfFieldOffset(
-                                                *this, loweredBaseTy, property);
+        auto &metadataLayout = getMetadataLayout(theStruct);
+        auto fieldOffset = metadataLayout.getStaticFieldOffset(property);
+
         auto header = KeyPathComponentHeader::forStructComponentWithUnresolvedFieldOffset();
         fields.addInt32(header.getData());
-        fields.add(llvm::ConstantExpr::getTruncOrBitCast(fieldOffset,
-                                                         Int32Ty));
+        fields.addInt32(fieldOffset.getValue());
         break;
       }
       
@@ -860,8 +855,8 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
             KeyPathComponentHeader::forClassComponentWithUnresolvedFieldOffset();
           fields.addInt32(header.getData());
           auto fieldOffset =
-            getClassFieldOffset(*this, loweredBaseTy.getClassOrBoundGenericClass(),
-                                property);
+            getClassFieldOffsetOffset(*this, loweredBaseTy.getClassOrBoundGenericClass(),
+                                      property);
           fields.addInt32(fieldOffset.getValue());
           break;
         }
@@ -914,8 +909,12 @@ IRGenModule::getAddrOfKeyPathPattern(KeyPathPattern *pattern,
           idKind = KeyPathComponentHeader::VTableOffset;
           auto dc = declRef.getDecl()->getDeclContext();
           if (isa<ClassDecl>(dc)) {
-            auto index = getVirtualMethodIndex(*this, declRef);
-            idValue = llvm::ConstantInt::get(SizeTy, index);
+            auto overridden = getSILTypes().getOverriddenVTableEntry(declRef);
+            auto declaringClass =
+              cast<ClassDecl>(overridden.getDecl()->getDeclContext());
+            auto &metadataLayout = getMetadataLayout(declaringClass);
+            auto offset = metadataLayout.getStaticMethodOffset(overridden);
+            idValue = llvm::ConstantInt::get(SizeTy, offset.getValue());
             idResolved = true;
           } else if (auto methodProto = dyn_cast<ProtocolDecl>(dc)) {
             auto &protoInfo = getProtocolInfo(methodProto);

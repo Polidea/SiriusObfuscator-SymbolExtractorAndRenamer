@@ -134,9 +134,38 @@ void CalleeCache::computeWitnessMethodCalleesForWitnessTable(
 
     TheCallees.getPointer()->push_back(WitnessFn);
 
-    // FIXME: For now, conservatively assume that unknown functions
-    //        can be called from any witness_method call site.
-    TheCallees.setInt(true);
+    // If we can't resolve the witness, conservatively assume it can call
+    // anything.
+    if (!Requirement.getDecl()->isProtocolRequirement() ||
+        !WT.getConformance()->hasWitness(Requirement.getDecl())) {
+      TheCallees.setInt(true);
+      continue;
+    }
+
+    bool canCallUnknown = false;
+
+    auto Conf = WT.getConformance();
+    switch (Conf->getProtocol()->getEffectiveAccess()) {
+      case AccessLevel::Open:
+        llvm_unreachable("protocols cannot have open access level");
+      case AccessLevel::Public:
+        canCallUnknown = true;
+        break;
+      case AccessLevel::Internal:
+        if (!M.isWholeModule()) {
+          canCallUnknown = true;
+          break;
+        }
+        LLVM_FALLTHROUGH;
+      case AccessLevel::FilePrivate:
+      case AccessLevel::Private: {
+        auto Witness = Conf->getWitness(Requirement.getDecl(), nullptr);
+        auto DeclRef = SILDeclRef(Witness.getDecl());
+        canCallUnknown = !calleesAreStaticallyKnowable(M, DeclRef);
+      }
+    }
+    if (canCallUnknown)
+      TheCallees.setInt(true);
   }
 }
 
@@ -218,7 +247,8 @@ CalleeList CalleeCache::getCalleeListForCalleeKind(SILValue Callee) const {
     return getCalleeList(cast<ClassMethodInst>(Callee));
 
   case ValueKind::SuperMethodInst:
-  case ValueKind::DynamicMethodInst:
+  case ValueKind::ObjCMethodInst:
+  case ValueKind::ObjCSuperMethodInst:
     return CalleeList();
   }
 }

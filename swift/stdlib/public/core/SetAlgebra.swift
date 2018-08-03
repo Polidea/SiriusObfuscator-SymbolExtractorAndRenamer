@@ -46,13 +46,13 @@
 /// - `x.union(y).contains(e)` implies `x.contains(e) || y.contains(e)`
 /// - `x.contains(e) && y.contains(e)` if and only if
 ///   `x.intersection(y).contains(e)`
+/// - `x.isSubset(of: y)` implies `x.union(y) == y`
+/// - `x.isSuperset(of: y)` implies `x.union(y) == x`
 /// - `x.isSubset(of: y)` if and only if `y.isSuperset(of: x)`
 /// - `x.isStrictSuperset(of: y)` if and only if
 ///   `x.isSuperset(of: y) && x != y`
 /// - `x.isStrictSubset(of: y)` if and only if `x.isSubset(of: y) && x != y`
-public protocol SetAlgebra : Equatable, ExpressibleByArrayLiteral {
-  // FIXME: write tests for SetAlgebra
-  
+public protocol SetAlgebra : Equatable, ExpressibleByArrayLiteral {  
   /// A type for which the conforming type provides a containment test.
   associatedtype Element
   
@@ -239,7 +239,7 @@ public protocol SetAlgebra : Equatable, ExpressibleByArrayLiteral {
   /// the `attendees` set:
   ///
   ///     var attendees: Set = ["Alicia", "Bethany", "Diana"]
-  ///     let visitors: Set = ["Marcia", "Nathaniel"]
+  ///     let visitors: Set = ["Diana", "Marcia", "Nathaniel"]
   ///     attendees.formUnion(visitors)
   ///     print(attendees)
   ///     // Prints "["Diana", "Nathaniel", "Bethany", "Alicia", "Marcia"]"
@@ -400,6 +400,7 @@ extension SetAlgebra {
   ///     // Prints "[6, 0, 1, 3]"
   ///
   /// - Parameter sequence: The elements to use as members of the new set.
+  @_inlineable // FIXME(sil-serialize-all)
   public init<S : Sequence>(_ sequence: S)
     where S.Element == Element {
     self.init()
@@ -419,6 +420,7 @@ extension SetAlgebra {
   ///     // Prints "["Diana", "Chris", "Alicia"]"
   ///
   /// - Parameter other: A set of the same type as the current set.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func subtract(_ other: Self) {
     self.formIntersection(self.symmetricDifference(other))
   }
@@ -436,6 +438,7 @@ extension SetAlgebra {
   ///
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: `true` if the set is a subset of `other`; otherwise, `false`.
+  @_inlineable // FIXME(sil-serialize-all)
   public func isSubset(of other: Self) -> Bool {
     return self.intersection(other) == self
   }
@@ -454,6 +457,7 @@ extension SetAlgebra {
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: `true` if the set is a superset of `other`; otherwise,
   ///   `false`.
+  @_inlineable // FIXME(sil-serialize-all)
   public func isSuperset(of other: Self) -> Bool {
     return other.isSubset(of: self)
   }
@@ -472,6 +476,7 @@ extension SetAlgebra {
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: `true` if the set has no elements in common with `other`;
   ///   otherwise, `false`.
+  @_inlineable // FIXME(sil-serialize-all)
   public func isDisjoint(with other: Self) -> Bool {
     return self.intersection(other).isEmpty
   }
@@ -490,11 +495,13 @@ extension SetAlgebra {
   ///
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: A new set.
+  @_inlineable // FIXME(sil-serialize-all)
   public func subtracting(_ other: Self) -> Self {
     return self.intersection(self.symmetricDifference(other))
   }
 
   /// A Boolean value that indicates whether the set has no elements.
+  @_inlineable // FIXME(sil-serialize-all)
   public var isEmpty: Bool {
     return self == Self()
   }
@@ -518,6 +525,7 @@ extension SetAlgebra {
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: `true` if the set is a strict superset of `other`; otherwise,
   ///   `false`.
+  @_inlineable // FIXME(sil-serialize-all)
   public func isStrictSuperset(of other: Self) -> Bool {
     return self.isSuperset(of: other) && self != other
   }
@@ -541,6 +549,7 @@ extension SetAlgebra {
   /// - Parameter other: A set of the same type as the current set.
   /// - Returns: `true` if the set is a strict subset of `other`; otherwise,
   ///   `false`.
+  @_inlineable // FIXME(sil-serialize-all)
   public func isStrictSubset(of other: Self) -> Bool {
     return other.isStrictSuperset(of: self)
   }
@@ -565,68 +574,8 @@ extension SetAlgebra where Element == ArrayLiteralElement {
   ///     // Prints "Whatever it is, it's bound to be delicious!"
   ///
   /// - Parameter arrayLiteral: A list of elements of the new set.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(arrayLiteral: Element...) {
     self.init(arrayLiteral)
   }  
 }
-
-@available(*, unavailable, renamed: "SetAlgebra")
-public typealias SetAlgebraType = SetAlgebra
-
-extension SetAlgebra {
-  @available(*, unavailable, renamed: "intersection(_:)")
-  public func intersect(_ other: Self) -> Self {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "symmetricDifference(_:)")
-  public func exclusiveOr(_ other: Self) -> Self {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "formUnion(_:)")
-  public mutating func unionInPlace(_ other: Self) {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "formIntersection(_:)")
-  public mutating func intersectInPlace(_ other: Self) {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "formSymmetricDifference(_:)")
-  public mutating func exclusiveOrInPlace(_ other: Self) {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "isSubset(of:)")
-  public func isSubsetOf(_ other: Self) -> Bool {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "isDisjoint(with:)")
-  public func isDisjointWith(_ other: Self) -> Bool {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "isSuperset(of:)")
-  public func isSupersetOf(_ other: Self) -> Bool {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "subtract(_:)")
-  public mutating func subtractInPlace(_ other: Self) {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "isStrictSuperset(of:)")
-  public func isStrictSupersetOf(_ other: Self) -> Bool {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, renamed: "isStrictSubset(of:)")
-  public func isStrictSubsetOf(_ other: Self) -> Bool {
-    Builtin.unreachable()
-  }
-}
-

@@ -1181,7 +1181,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
 #if defined(__linux__)
       sigset_t mostSignals;
       sigemptyset(&mostSignals);
-      for (int i = 1; i < SIGUNUSED; ++i) {
+      for (int i = 1; i < SIGSYS; ++i) {
         if (i == SIGKILL || i == SIGSTOP) continue;
         sigaddset(&mostSignals, i);
       }
@@ -1257,10 +1257,11 @@ buildCommand(BuildContext& context, ninja::Command* command) {
         // we don't create a process in between when we are cancelled.
         std::lock_guard<std::mutex> guard(context.spawnedProcessesMutex);
 
-        if (posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
-                        /*attrp=*/&attributes, const_cast<char**>(args),
-                        environ) != 0) {
-          context.emitError("unable to spawn process (%s)", strerror(errno));
+        int result = posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
+                                 /*attrp=*/&attributes, const_cast<char**>(args),
+                                 environ);
+        if (result != 0) {
+          context.emitError("unable to spawn process (%s)", strerror(result));
           return false;
         }
 

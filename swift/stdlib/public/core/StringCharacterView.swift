@@ -15,24 +15,32 @@
 //
 //===----------------------------------------------------------------------===//
 
-// FIXME(ABI)#70 : The character string view should have a custom iterator type to
-// allow performance optimizations of linear traversals.
+// FIXME(ABI)#70 : The character string view should have a custom iterator type
+// to allow performance optimizations of linear traversals.
 
 /// CR and LF are common special cases in grapheme breaking logic
-@_versioned internal var _CR: UInt8 { return 0x0d }
-@_versioned internal var _LF: UInt8 { return 0x0a }
+@_inlineable // FIXME(sil-serialize-all)
+@_versioned
+internal var _CR: UInt8 { return 0x0d }
+@_inlineable // FIXME(sil-serialize-all)
+@_versioned
+internal var _LF: UInt8 { return 0x0a }
 
 import SwiftShims
 
 extension String {
+  @available(swift, deprecated: 3.2, message:
+    "Please use String or Substring directly")
+  public typealias CharacterView = _CharacterView
+  
   /// A view of a string's contents as a collection of characters.
   ///
   /// In Swift, every string provides a view of its contents as characters. In
   /// this view, many individual characters---for example, "é", "김", and
-  /// "🇮🇳"---can be made up of multiple Unicode code points. These code points
-  /// are combined by Unicode's boundary algorithms into *extended grapheme
-  /// clusters*, represented by the `Character` type. Each element of a
-  /// `CharacterView` collection is a `Character` instance.
+  /// "🇮🇳"---can be made up of multiple Unicode scalar values. These scalar
+  /// values are combined by Unicode's boundary algorithms into *extended
+  /// grapheme clusters*, represented by the `Character` type. Each element of
+  /// a `CharacterView` collection is a `Character` instance.
   ///
   ///     let flowers = "Flowers 💐"
   ///     for c in flowers.characters {
@@ -57,9 +65,8 @@ extension String {
   ///         print(firstName)
   ///     }
   ///     // Prints "Marie"
-  @available(swift, deprecated: 3.2, message:
-    "Please use String or Substring directly")
-  public struct CharacterView {
+  @_fixed_layout // FIXME(sil-serialize-all)
+  public struct _CharacterView {
     @_versioned
     internal var _core: _StringCore
 
@@ -71,27 +78,41 @@ extension String {
     internal var _coreOffset: Int
 
     /// Creates a view of the given string.
+    @_inlineable // FIXME(sil-serialize-all)
     public init(_ text: String) {
       self._core = text._core
       self._coreOffset = 0
     }
     
+    @_inlineable // FIXME(sil-serialize-all)
     public // @testable
     init(_ _core: _StringCore, coreOffset: Int = 0) {
       self._core = _core
       self._coreOffset = coreOffset
     }
   }
-
+  
   /// A view of the string's contents as a collection of characters.
-  @available(swift, deprecated: 3.2, message:
-    "Please use String or Substring directly")
-  public var characters: CharacterView {
+  @_transparent // FIXME(sil-serialize-all)
+  public var _characters: _CharacterView {
     get {
       return CharacterView(self)
     }
     set {
       self = String(newValue)
+    }
+  }
+
+  /// A view of the string's contents as a collection of characters.
+  @_inlineable // FIXME(sil-serialize-all)
+  @available(swift, deprecated: 3.2, message:
+    "Please use String or Substring directly")
+  public var characters: CharacterView {
+    get {
+      return _characters
+    }
+    set {
+      _characters = newValue
     }
   }
 
@@ -106,7 +127,8 @@ extension String {
   /// of the string.
   ///
   ///     var str = "All this happened, more or less."
-  ///     let afterSpace = str.withMutableCharacters { chars -> String.CharacterView in
+  ///     let afterSpace = str.withMutableCharacters {
+  ///         chars -> String.CharacterView in
   ///         if let i = chars.index(of: " ") {
   ///             let result = chars[chars.index(after: i)...]
   ///             chars.removeSubrange(i...)
@@ -125,13 +147,14 @@ extension String {
   ///   value for the `withMutableCharacters(_:)` method. The `CharacterView`
   ///   argument is valid only for the duration of the closure's execution.
   /// - Returns: The return value, if any, of the `body` closure parameter.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func withMutableCharacters<R>(
     _ body: (inout CharacterView) -> R
   ) -> R {
     // Naively mutating self.characters forces multiple references to
     // exist at the point of mutation. Instead, temporarily move the
     // core of this string into a CharacterView.
-    var tmp = CharacterView("")
+    var tmp = _CharacterView("")
     (_core, tmp._core) = (tmp._core, _core)
     let r = body(&tmp)
     (_core, tmp._core) = (tmp._core, _core)
@@ -154,13 +177,18 @@ extension String {
   ///     // Prints "'Twas brillig, and the..."
   ///
   /// - Parameter characters: A character view to convert to a string.
+  @_inlineable // FIXME(sil-serialize-all)
+  @available(swift, deprecated: 3.2, message:
+    "Please use String or Substring directly")
   public init(_ characters: CharacterView) {
     self.init(characters._core)
   }
 }
 
-extension String.CharacterView : _SwiftStringView {
-  var _persistentContent : String {
+extension String._CharacterView : _SwiftStringView {
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
+  internal var _persistentContent : String {
     // FIXME: we might want to make sure our _StringCore isn't somehow a slice
     // of some larger storage before blindly wrapping/returning it as
     // persistent.  That said, if current benchmarks are measuring these cases,
@@ -174,19 +202,20 @@ extension String.CharacterView : _SwiftStringView {
 
 
 /// `String.CharacterView` is a collection of `Character`.
-extension String.CharacterView : BidirectionalCollection {
+extension String._CharacterView : BidirectionalCollection {
   internal typealias UnicodeScalarView = String.UnicodeScalarView
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var unicodeScalars: UnicodeScalarView {
     return UnicodeScalarView(_core, coreOffset: _coreOffset)
   }
   
   public typealias Index = String.Index
-  public typealias IndexDistance = Int
 
   /// The position of the first character in a nonempty character view.
   /// 
   /// In an empty character view, `startIndex` is equal to `endIndex`.
+  @_inlineable // FIXME(sil-serialize-all)
   public var startIndex: Index {
     return unicodeScalars.startIndex
   }
@@ -195,10 +224,13 @@ extension String.CharacterView : BidirectionalCollection {
   /// greater than the last valid subscript argument.
   ///
   /// In an empty character view, `endIndex` is equal to `startIndex`.
+  @_inlineable // FIXME(sil-serialize-all)
   public var endIndex: Index {
     return unicodeScalars.endIndex
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
   internal func _index(atEncodedOffset n: Int) -> Index {
     let stride = _measureExtendedGraphemeClusterForward(
       from: Index(encodedOffset: n))
@@ -208,6 +240,7 @@ extension String.CharacterView : BidirectionalCollection {
   /// Returns the next consecutive position after `i`.
   ///
   /// - Precondition: The next position is valid.
+  @_inlineable // FIXME(sil-serialize-all)
   public func index(after i: Index) -> Index {
     _precondition(
       i < unicodeScalars.endIndex,
@@ -229,6 +262,7 @@ extension String.CharacterView : BidirectionalCollection {
   /// Returns the previous consecutive position before `i`.
   ///
   /// - Precondition: The previous position is valid.
+  @_inlineable // FIXME(sil-serialize-all)
   public func index(before i: Index) -> Index {
     _precondition(i > unicodeScalars.startIndex,
       "cannot decrement before startIndex")
@@ -266,6 +300,7 @@ extension String.CharacterView : BidirectionalCollection {
   // TODO: this is actually fine to inline into non-inlinable code
   //
   @inline(never) // @inline(resilient_only)
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal static func _internalExtraCheckGraphemeBreakBetween(
     _ lhs: UInt16, _ rhs: UInt16
@@ -288,7 +323,6 @@ extension String.CharacterView : BidirectionalCollection {
       // others:
       //   0x3400-0xA4CF
       case 0x3400...0xa4cf: return true
-      // TODO: CJK punctuation
 
       // Repeat sub-300 check, this is beneficial for common cases of Latin
       // characters embedded within non-Latin script (e.g. newlines, spaces,
@@ -296,8 +330,6 @@ extension String.CharacterView : BidirectionalCollection {
       //
       // NOTE: CR-LF special case has already been checked.
       case 0x0000...0x02ff: return true
-
-      // TODO: general punctuation
 
       // Non-combining kana:
       //   0x3041-0x3096
@@ -317,6 +349,14 @@ extension String.CharacterView : BidirectionalCollection {
       //   0xAC00–0xD7AF
       case 0xac00...0xd7af: return true
 
+      // Common general use punctuation, excluding extenders:
+      //   0x2010-0x2029
+      case 0x2010...0x2029: return true
+
+      // CJK punctuation characters, excluding extenders:
+      //   0x3000-0x3029
+      case 0x3000...0x3029: return true
+
       default: return false
       }
     }
@@ -332,128 +372,131 @@ extension String.CharacterView : BidirectionalCollection {
   internal func _measureExtendedGraphemeClusterForward(
     from start: UnicodeScalarView.Index
   ) -> Int {
-    let end = unicodeScalars.endIndex
-    if start == end {
+    let startPosition = start.encodedOffset
+    let endPosition = unicodeScalars.endIndex.encodedOffset
+
+    // No more graphemes
+    if startPosition == endPosition {
       return 0
     }
 
-    // Our relative position (offset). If our _core is not a substring, this is
-    // the same as start.encodedOffset.
-    let relativeOffset = start.encodedOffset - _coreOffset
+    // Last code unit means final grapheme length of 1
+    if startPosition == endPosition - 1 {
+      return 1
+    }
+
+    // Our relative offset from the _StringCore's baseAddress pointer. If our
+    // _core is not a substring, this is the same as start.encodedOffset. Otherwise,
+    // it is the code unit relative offset into the substring and not the
+    // absolute offset into the outer string.
+    let startOffset = startPosition - _coreOffset
 
     // Grapheme breaking is much simpler if known ASCII
     if _core.isASCII {
       _onFastPath() // Please aggressively inline
       let asciiBuffer = _core.asciiBuffer._unsafelyUnwrappedUnchecked
+      _sanityCheck(startOffset+1 < asciiBuffer.endIndex, 
+        "Already checked for last code unit")
 
       // With the exception of CR-LF, ASCII graphemes are single-scalar. Check
       // for that one exception.
       if _slowPath(
-        asciiBuffer[relativeOffset] == _CR &&
-        relativeOffset+1 < asciiBuffer.endIndex &&
-        asciiBuffer[relativeOffset+1] == _LF
+        asciiBuffer[startOffset] == _CR &&
+        asciiBuffer[startOffset+1] == _LF
       ) {
         return 2
       }
 
       return 1
-    } else {
-      // TODO: Check for (potentially non-contiguous) ASCII NSStrings,
-      // especially small tagged pointers.
     }
     
-    let startIndexUTF16 = start.encodedOffset
-
-    // Last scalar is its own grapheme
-    if (startIndexUTF16+1 == end.encodedOffset) {
+    // Perform a quick single-code-unit grapheme check.
+    if _fastPath(String._CharacterView._quickCheckGraphemeBreakBetween(
+        _core[startOffset],
+        _core[startOffset+1])
+    ) {
       return 1
     }
 
-    // Perform a quick single-code-unit grapheme check
-    if _core._baseAddress != nil {
-      if String.CharacterView._quickCheckGraphemeBreakBetween(
-        _core._nthContiguous(relativeOffset),
-        _core._nthContiguous(relativeOffset+1)
-      ) {
-        return 1
-      }
-    } else {
-      // TODO: Check for (potentially non-contiguous) UTF16 NSStrings,
-      // especially small tagged pointers
-    }
-    return _measureExtendedGraphemeClusterForwardSlow(
-      relativeOffset: relativeOffset,
-      start: start,
-      end: end,
-      startIndexUTF16: startIndexUTF16
-    )
+    return _measureExtendedGraphemeClusterForwardSlow(startOffset: startOffset)
   }
   
   @inline(never)
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  func _measureExtendedGraphemeClusterForwardSlow(
-    relativeOffset: Int,
-    start: String.UnicodeScalarView.Index,
-    end: String.UnicodeScalarView.Index,
-    startIndexUTF16: Int
+  internal func _measureExtendedGraphemeClusterForwardSlow(
+    startOffset: Int
   ) -> Int {
-    if _core._baseAddress != nil {
+    let endOffset = unicodeScalars.endIndex.encodedOffset - _coreOffset
+    let numCodeUnits = endOffset - startOffset
+    _sanityCheck(numCodeUnits >= 2, "should have at least two code units")
+
+    // The vast majority of time, we can get a pointer and a length directly
+    if _fastPath(_core._baseAddress != nil) {
       _onFastPath() // Please aggressively inline
       let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: _core)
-      let ubrkFollowing = __swift_stdlib_ubrk_following(
-        breakIterator, Int32(relativeOffset)
+      let ubrkFollowingOffset = __swift_stdlib_ubrk_following(
+        breakIterator, Int32(startOffset)
       )
       // ubrk_following may return UBRK_DONE (-1). Treat that as the rest of the
       // string.
-      let nextPosition =
-        ubrkFollowing == -1 ? end.encodedOffset : Int(ubrkFollowing)
-      return nextPosition - relativeOffset
-    } else {
-      // TODO: See if we can get fast character contents.
+      if _slowPath(ubrkFollowingOffset == -1) {
+        return numCodeUnits
+      }
+      _sanityCheck(startOffset != Int(ubrkFollowingOffset), 
+        "zero-sized grapheme?")
+      return Int(ubrkFollowingOffset) - startOffset
     }
 
-    // FIXME: Need to handle the general case correctly with Unicode 9+
-    // semantics, as opposed to this legacy Unicode 8 path. This gets hit for
-    // e.g. non-contiguous NSStrings. In such cases, there may be an alternative
-    // CFString API available, or worst case we can map over it via UTextFuncs.
-
-    return legacyGraphemeForward(
-      start: start, end: end, startIndexUTF16: startIndexUTF16
-    )
-  }
-
-  @inline(never)
-  func legacyGraphemeForward(
-    start: UnicodeScalarView.Index,
-    end: UnicodeScalarView.Index,
-    startIndexUTF16: Int
-  ) -> Int {
-    var start = start
-    let graphemeClusterBreakProperty =
-      _UnicodeGraphemeClusterBreakPropertyTrie()
-    let segmenter = _UnicodeExtendedGraphemeClusterSegmenter()
-    
-    var gcb0 = graphemeClusterBreakProperty.getPropertyRawValue(
-      unicodeScalars[start].value)
-    unicodeScalars.formIndex(after: &start)
-    
-    while start != end {
-      // FIXME(performance): consider removing this "fast path".  A branch
-      // that is hard to predict could be worse for performance than a few
-      // loads from cache to fetch the property 'gcb1'.
-      if segmenter.isBoundaryAfter(gcb0) {
-        break
-      }
-      let gcb1 = graphemeClusterBreakProperty.getPropertyRawValue(
-        unicodeScalars[start].value)
-      if segmenter.isBoundary(gcb0, gcb1) {
-        break
-      }
-      gcb0 = gcb1
-      unicodeScalars.formIndex(after: &start)
+    // We have a non-contiguous string. Pull out some code units into a fixed
+    // array and try to perform grapheme breaking on that. If even that's not
+    // sufficient (i.e. very pathological) then copy into an Array.
+    var codeUnitBuffer = _FixedArray16<UInt16>(allZeros:())
+    let maxBufferCount = codeUnitBuffer.count
+    let bufferCount = Swift.min(maxBufferCount, numCodeUnits)
+    for i in 0..<bufferCount {
+      codeUnitBuffer[i] = _core[startOffset+i]
     }
-    
-    return start.encodedOffset - startIndexUTF16
+
+    return withUnsafeBytes(of: &codeUnitBuffer.storage) {
+      (rawPtr : UnsafeRawBufferPointer) -> Int in
+      let bufPtr = UnsafeBufferPointer(
+        start: rawPtr.baseAddress!.assumingMemoryBound(to: UInt16.self),
+        count: bufferCount)
+
+      let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: bufPtr)
+      let ubrkFollowingOffset = __swift_stdlib_ubrk_following(
+        breakIterator, Int32(0))
+
+      if _fastPath(
+        bufferCount < maxBufferCount ||
+        (ubrkFollowingOffset != -1 && ubrkFollowingOffset != maxBufferCount)
+      ) {
+        // The offset into our buffer *is* the distance.
+        _sanityCheck(ubrkFollowingOffset != 0, "zero-sized grapheme?")
+        return Int(ubrkFollowingOffset)
+      }
+
+      // Nuclear option: copy out the rest of the string into an array
+      var codeUnits = Array<UInt16>()
+      codeUnits.reserveCapacity(numCodeUnits)
+      for i in startOffset..<endOffset {
+        codeUnits.append(_core[i])
+      }
+      return codeUnits.withUnsafeBufferPointer { bufPtr -> Int in
+        let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: bufPtr)
+        let ubrkFollowingOffset = __swift_stdlib_ubrk_following(
+          breakIterator, Int32(0)
+        )
+        // ubrk_following may return UBRK_DONE (-1). Treat that as the rest of
+        // the string.
+        if _slowPath(ubrkFollowingOffset == -1) {
+          return numCodeUnits
+        }
+        _sanityCheck(ubrkFollowingOffset != 0, "zero-sized grapheme?")
+        return Int(ubrkFollowingOffset)
+      }
+    }
   }
 
   // NOTE: Because this function is inlineable, it should contain only the fast
@@ -466,14 +509,25 @@ extension String.CharacterView : BidirectionalCollection {
   internal func _measureExtendedGraphemeClusterBackward(
     from end: UnicodeScalarView.Index
   ) -> Int {
-    let start = unicodeScalars.startIndex
-    if start == end {
+    let startPosition = unicodeScalars.startIndex.encodedOffset
+    let endPosition = end.encodedOffset
+
+    // No more graphemes
+    if startPosition == endPosition {
       return 0
     }
 
-    // The relative position (offset) to the last code unit.
-    let lastOffset = end.encodedOffset - _coreOffset - 1
-    // The relative position (offset) that is one-past-the-last
+    // Last code unit means final grapheme length of 1
+    if startPosition == endPosition - 1 {
+      return 1
+    }
+
+    // The relative offset from the _StringCore's baseAddress pointer for the
+    // one-past-the-end and the last code unit under consideration.  If our
+    // _core is not a substring, these are the same as positions. Otherwise,
+    // these are code unit relative offsets into the substring and not the
+    // absolute positions into the outer string.
+    let lastOffset = endPosition - _coreOffset - 1
     let endOffset = lastOffset + 1
 
     // Grapheme breaking is much simpler if known ASCII
@@ -481,15 +535,14 @@ extension String.CharacterView : BidirectionalCollection {
       _onFastPath() // Please aggressively inline
       let asciiBuffer = _core.asciiBuffer._unsafelyUnwrappedUnchecked
       _sanityCheck(
-        lastOffset >= asciiBuffer.startIndex,
-        "should of been caught in earlier start-of-scalars check")
+        lastOffset-1 >= asciiBuffer.startIndex,
+        "should of been caught in earlier trivially-sized checks")
 
       // With the exception of CR-LF, ASCII graphemes are single-scalar. Check
       // for that one exception.
       if _slowPath(
-        asciiBuffer[lastOffset] == _LF &&
-        lastOffset-1 >= asciiBuffer.startIndex &&
-        asciiBuffer[lastOffset-1] == _CR
+        asciiBuffer[lastOffset-1] == _CR &&
+        asciiBuffer[lastOffset] == _LF
       ) {
         return 2
       }
@@ -497,92 +550,95 @@ extension String.CharacterView : BidirectionalCollection {
       return 1
     }
     
-    let endIndexUTF16 = end.encodedOffset
-
-    // First scalar is its own grapheme
-    if (endIndexUTF16-1 == start.encodedOffset) {
+    // Perform a quick single-code-unit grapheme check
+    if _fastPath(String._CharacterView._quickCheckGraphemeBreakBetween(
+      _core[lastOffset-1], _core[lastOffset])
+    ) {
       return 1
     }
 
-    // Perform a quick single-code-unit grapheme check
-    if _core._baseAddress != nil {
-      if String.CharacterView._quickCheckGraphemeBreakBetween(
-        _core._nthContiguous(lastOffset-1),
-        _core._nthContiguous(lastOffset)
-      ) {
-        return 1
-      }
-    }
-    return _measureExtendedGraphemeClusterBackwardSlow(
-      endOffset: endOffset, start: start, end: end, endIndexUTF16: endIndexUTF16
-    )
+    return _measureExtendedGraphemeClusterBackwardSlow(endOffset: endOffset)
   }
   
   @inline(never)
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
-  func _measureExtendedGraphemeClusterBackwardSlow(
-    endOffset: Int,
-    start: String.UnicodeScalarView.Index,
-    end: String.UnicodeScalarView.Index,
-    endIndexUTF16: Int
+  internal func _measureExtendedGraphemeClusterBackwardSlow(
+    endOffset: Int
   ) -> Int {
-    if _core._baseAddress != nil {
-      _onFastPath() // Please aggressively inline
-      let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: _core)
-      let ubrkPreceding = __swift_stdlib_ubrk_preceding(
-        breakIterator, Int32(endOffset)
-      )
+    let startOffset = 0
+    let numCodeUnits = endOffset - startOffset
+    _sanityCheck(unicodeScalars.startIndex.encodedOffset - _coreOffset == 0,
+      "position/offset mismatch in _StringCore as a substring")
+    _sanityCheck(numCodeUnits >= 2,
+      "should have at least two code units")
+
+    func measureFromUBreakOffset(_ ubrkOffset: Int32) -> Int {
       // ubrk_following may return UBRK_DONE (-1). Treat that as the rest of the
       // string.
-      let priorPosition =
-        ubrkPreceding == -1 ? start.encodedOffset : Int(ubrkPreceding)
-      return endOffset - priorPosition
-    } else {
-      // TODO: See if we can get fast character contents.
-    }
-
-    // FIXME: Need to handle the general case correctly with Unicode 9+
-    // semantics, as opposed to this legacy Unicode 8 path. This gets hit for
-    // e.g. non-contiguous NSStrings. In such cases, there may be an alternative
-    // CFString API available, or worst case we can map over it via UTextFuncs.
-
-    return legacyGraphemeBackward(
-      start: start, end: end, endIndexUTF16: endIndexUTF16
-    )
-  }
-
-  @inline(never)
-  func legacyGraphemeBackward(
-    start: UnicodeScalarView.Index,
-    end: UnicodeScalarView.Index,
-    endIndexUTF16: Int
-  ) -> Int {
-    let graphemeClusterBreakProperty =
-      _UnicodeGraphemeClusterBreakPropertyTrie()
-    let segmenter = _UnicodeExtendedGraphemeClusterSegmenter()
-    
-    var graphemeClusterStart = end
-    
-    unicodeScalars.formIndex(before: &graphemeClusterStart)
-    var gcb0 = graphemeClusterBreakProperty.getPropertyRawValue(
-      unicodeScalars[graphemeClusterStart].value)
-    
-    var graphemeClusterStartUTF16 = graphemeClusterStart.encodedOffset
-    
-    while graphemeClusterStart != start {
-      unicodeScalars.formIndex(before: &graphemeClusterStart)
-      let gcb1 = graphemeClusterBreakProperty.getPropertyRawValue(
-        unicodeScalars[graphemeClusterStart].value)
-      if segmenter.isBoundary(gcb1, gcb0) {
-        break
+      if _slowPath(ubrkOffset == -1) {
+        return numCodeUnits
       }
-      gcb0 = gcb1
-      graphemeClusterStartUTF16 = graphemeClusterStart.encodedOffset
+      _sanityCheck(endOffset > Int(ubrkOffset), "zero-sized grapheme?")
+      return endOffset - Int(ubrkOffset)
     }
-    
-    return endIndexUTF16 - graphemeClusterStartUTF16
+
+    // The vast majority of time, we can get a pointer and a length directly
+    if _fastPath(_core._baseAddress != nil) {
+      _onFastPath() // Please aggressively inline
+      let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: _core)
+      let ubrkPrecedingOffset = __swift_stdlib_ubrk_preceding(
+        breakIterator, Int32(endOffset)
+      )
+      return measureFromUBreakOffset(ubrkPrecedingOffset)
+    }
+
+    // We have a non-contiguous string. Pull out some code units into a fixed
+    // array and try to perform grapheme breaking on that. If even that's not
+    // sufficient (i.e. very pathological) then copy into an Array.
+    var codeUnitBuffer = _FixedArray16<UInt16>(allZeros:())
+    let maxBufferCount = codeUnitBuffer.count
+    let coreStartIdx = Swift.max(startOffset, endOffset - maxBufferCount)
+    let bufferCount = Swift.min(maxBufferCount, numCodeUnits)
+    for i in 0..<bufferCount {
+      codeUnitBuffer[i] = _core[coreStartIdx+i]
+    }
+
+    return withUnsafeBytes(of: &codeUnitBuffer.storage) {
+      (rawPtr : UnsafeRawBufferPointer) -> Int in
+      let bufPtr = UnsafeBufferPointer(
+        start: rawPtr.baseAddress!.assumingMemoryBound(to: UInt16.self),
+        count: bufferCount)
+
+      let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: bufPtr)
+      let ubrkPrecedingOffset = __swift_stdlib_ubrk_preceding(
+        breakIterator, Int32(bufferCount)
+      )
+
+      if _fastPath(numCodeUnits < maxBufferCount || ubrkPrecedingOffset > 1) {
+        // There was a grapheme break within our buffer.
+        _sanityCheck(ubrkPrecedingOffset < bufferCount, "offset mismatch")
+        return bufferCount - Int(ubrkPrecedingOffset)
+      }
+
+      // Nuclear option: copy out the prefix of the string into an array
+      var codeUnits = Array<UInt16>()
+      codeUnits.reserveCapacity(numCodeUnits)
+      for i in startOffset..<endOffset {
+        codeUnits.append(_core[i])
+      }
+      return codeUnits.withUnsafeBufferPointer { bufPtr -> Int in
+        let breakIterator = _ThreadLocalStorage.getUBreakIterator(for: bufPtr)
+        let ubrkPrecedingOffset = __swift_stdlib_ubrk_preceding(
+          breakIterator, Int32(endOffset)
+        )
+        // No need to adjust ubrkPrecedingOffset as we copied the prefix: it is
+        // the position in the original string
+        return measureFromUBreakOffset(ubrkPrecedingOffset)
+      }
+    }    
   }
-  
+
   /// Accesses the character at the given position.
   ///
   /// The following example searches a string's character view for a capital
@@ -596,6 +652,7 @@ extension String.CharacterView : BidirectionalCollection {
   ///
   /// - Parameter position: A valid index of the character view. `position`
   ///   must be less than the view's end index.
+  @_inlineable // FIXME(sil-serialize-all)
   public subscript(i_: Index) -> Character {
     var i = i_
     while true {
@@ -631,8 +688,9 @@ extension String.CharacterView : BidirectionalCollection {
   }
 }
 
-extension String.CharacterView : RangeReplaceableCollection {
+extension String._CharacterView : RangeReplaceableCollection {
   /// Creates an empty character view.
+  @_inlineable // FIXME(sil-serialize-all)
   public init() {
     self.init("")
   }
@@ -651,6 +709,7 @@ extension String.CharacterView : RangeReplaceableCollection {
   ///   view and `newElements`. If the call to `replaceSubrange(_:with:)`
   ///   simply removes characters at the end of the view, the complexity is
   ///   O(*n*), where *n* is equal to `bounds.count`.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func replaceSubrange<C>(
     _ bounds: Range<Index>,
     with newElements: C
@@ -674,6 +733,7 @@ extension String.CharacterView : RangeReplaceableCollection {
   ///   to allocate.
   ///
   /// - Complexity: O(*n*), where *n* is the capacity being reserved.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func reserveCapacity(_ n: Int) {
     _core.reserveCapacity(n)
   }
@@ -681,6 +741,7 @@ extension String.CharacterView : RangeReplaceableCollection {
   /// Appends the given character to the character view.
   ///
   /// - Parameter c: The character to append to the character view.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func append(_ c: Character) {
     if let c0 = c._smallUTF16 {
       _core.append(contentsOf: c0)
@@ -692,6 +753,7 @@ extension String.CharacterView : RangeReplaceableCollection {
   /// Appends the characters in the given sequence to the character view.
   /// 
   /// - Parameter newElements: A sequence of characters.
+  @_inlineable // FIXME(sil-serialize-all)
   public mutating func append<S : Sequence>(contentsOf newElements: S)
   where S.Element == Character {
     if _fastPath(newElements is _SwiftStringView) {
@@ -709,7 +771,7 @@ extension String.CharacterView : RangeReplaceableCollection {
 }
 
 // Algorithms
-extension String.CharacterView {
+extension String._CharacterView {
   /// Accesses the characters in the given range.
   ///
   /// The example below uses this subscript to access the characters up to, but
@@ -723,25 +785,10 @@ extension String.CharacterView {
   ///
   /// - Complexity: O(*n*) if the underlying string is bridged from
   ///   Objective-C, where *n* is the length of the string; otherwise, O(1).
-  public subscript(bounds: Range<Index>) -> String.CharacterView {
-    return String.CharacterView(
+  @_inlineable // FIXME(sil-serialize-all)
+  public subscript(bounds: Range<Index>) -> String._CharacterView {
+    return String._CharacterView(
       unicodeScalars[bounds]._core,
       coreOffset: bounds.lowerBound.encodedOffset)
-  }
-}
-
-extension String.CharacterView {
-  @available(*, unavailable, renamed: "replaceSubrange")
-  public mutating func replaceRange<C>(
-    _ subRange: Range<Index>,
-    with newElements: C
-  ) where C : Collection, C.Element == Character {
-    Builtin.unreachable()
-  }
-    
-  @available(*, unavailable, renamed: "append(contentsOf:)")
-  public mutating func appendContentsOf<S : Sequence>(_ newElements: S)
-    where S.Element == Character {
-    Builtin.unreachable()
   }
 }

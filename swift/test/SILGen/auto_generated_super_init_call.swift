@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -Xllvm -sil-print-debuginfo -emit-silgen %s | %FileCheck %s
+// RUN: %target-swift-frontend -Xllvm -sil-print-debuginfo -emit-silgen -enable-sil-ownership %s | %FileCheck %s
 
 // Test that we emit a call to super.init at the end of the initializer, when none has been previously added.
 
@@ -131,4 +131,30 @@ class ChildOfParentWithNoDefaultInit : ParentWithNoDefaultInit {
 // CHECK-NOT: apply
 // CHECK: return
   }
+}
+
+// <https://bugs.swift.org/browse/SR-5974> - auto-generated super.init()
+// delegation to a throwing or failing initializer
+class FailingParent {
+  init?() {}
+}
+
+class ThrowingParent {
+  init() throws {}
+}
+
+class FailingThrowingParent {
+  init?() throws {}
+}
+
+class FailingChild : FailingParent {
+  override init?() {}
+}
+
+class ThrowingChild : ThrowingParent {
+  override init() throws {}
+}
+
+class FailingThrowingChild : FailingThrowingParent {
+  override init?() throws {}
 }

@@ -551,8 +551,6 @@ namespace {
 
   enum PreambleDirectiveKind {
     PDK_Skipped,
-    PDK_StartIf,
-    PDK_EndIf,
     PDK_Unknown
   };
 
@@ -575,8 +573,6 @@ std::pair<unsigned, bool> Lexer::ComputePreamble(StringRef Buffer,
 
   bool InPreprocessorDirective = false;
   Token TheTok;
-  Token IfStartTok;
-  unsigned IfCount = 0;
   SourceLocation ActiveCommentLoc;
 
   unsigned MaxLineOffset = 0;
@@ -659,33 +655,18 @@ std::pair<unsigned, bool> Lexer::ComputePreamble(StringRef Buffer,
               .Case("sccs", PDK_Skipped)
               .Case("assert", PDK_Skipped)
               .Case("unassert", PDK_Skipped)
-              .Case("if", PDK_StartIf)
-              .Case("ifdef", PDK_StartIf)
-              .Case("ifndef", PDK_StartIf)
+              .Case("if", PDK_Skipped)
+              .Case("ifdef", PDK_Skipped)
+              .Case("ifndef", PDK_Skipped)
               .Case("elif", PDK_Skipped)
               .Case("else", PDK_Skipped)
-              .Case("endif", PDK_EndIf)
+              .Case("endif", PDK_Skipped)
               .Default(PDK_Unknown);
 
         switch (PDK) {
         case PDK_Skipped:
           continue;
 
-        case PDK_StartIf:
-          if (IfCount == 0)
-            IfStartTok = HashTok;
-            
-          ++IfCount;
-          continue;
-            
-        case PDK_EndIf:
-          // Mismatched #endif. The preamble ends here.
-          if (IfCount == 0)
-            break;
-
-          --IfCount;
-          continue;
-            
         case PDK_Unknown:
           // We don't know what this directive is; stop at the '#'.
           break;
@@ -706,16 +687,13 @@ std::pair<unsigned, bool> Lexer::ComputePreamble(StringRef Buffer,
   } while (true);
   
   SourceLocation End;
-  if (IfCount)
-    End = IfStartTok.getLocation();
-  else if (ActiveCommentLoc.isValid())
+  if (ActiveCommentLoc.isValid())
     End = ActiveCommentLoc; // don't truncate a decl comment.
   else
     End = TheTok.getLocation();
 
   return std::make_pair(End.getRawEncoding() - StartLoc.getRawEncoding(),
-                        IfCount? IfStartTok.isAtStartOfLine()
-                               : TheTok.isAtStartOfLine());
+                        TheTok.isAtStartOfLine());
 }
 
 /// AdvanceToTokenCharacter - Given a location that specifies the start of a
@@ -1208,6 +1186,8 @@ const char *Lexer::SkipEscapedNewLines(const char *P) {
       // If not a trigraph for escape, bail out.
       if (P[1] != '?' || P[2] != '/')
         return P;
+      // FIXME: Take LangOpts into account; the language might not
+      // support trigraphs.
       AfterEscape = P+3;
     } else {
       return P;
@@ -1279,6 +1259,35 @@ SourceLocation Lexer::findLocationAfterToken(SourceLocation Loc,
   return TokenLoc.getLocWithOffset(Tok.getLength() + NumWhitespaceChars);
 }
 
+SourceLocation Lexer::findNextTokenLocationAfterTokenAt(
+    SourceLocation Loc, const SourceManager &SM, const LangOptions &LangOpts) {
+  // TODO: Share the code with the function above when upstreaming.
+  if (Loc.isMacroID()) {
+    if (!Lexer::isAtEndOfMacroExpansion(Loc, SM, LangOpts, &Loc))
+      return SourceLocation();
+  }
+  Loc = Lexer::getLocForEndOfToken(Loc, 0, SM, LangOpts);
+
+  // Break down the source location.
+  std::pair<FileID, unsigned> LocInfo = SM.getDecomposedLoc(Loc);
+
+  // Try to load the file buffer.
+  bool InvalidTemp = false;
+  StringRef File = SM.getBufferData(LocInfo.first, &InvalidTemp);
+  if (InvalidTemp)
+    return SourceLocation();
+
+  const char *TokenBegin = File.data() + LocInfo.second;
+
+  // Lex from the start of the given location.
+  Lexer lexer(SM.getLocForStartOfFile(LocInfo.first), LangOpts, File.begin(),
+              TokenBegin, File.end());
+  // Find the token.
+  Token Tok;
+  lexer.LexFromRawLexer(Tok);
+  return Tok.getLocation();
+}
+
 /// getCharAndSizeSlow - Peek a single 'character' from the specified buffer,
 /// get its size, and return it.  This is tricky in several cases:
 ///   1. If currently at the start of a trigraph, we warn about the trigraph,
@@ -1318,12 +1327,6 @@ Slash:
       // Found backslash<whitespace><newline>.  Parse the char after it.
       Size += EscapedNewLineSize;
       Ptr  += EscapedNewLineSize;
-
-      // If the char that we finally got was a \n, then we must have had
-      // something like \<newline><newline>.  We don't want to consume the
-      // second newline.
-      if (*Ptr == '\n' || *Ptr == '\r' || *Ptr == '\0')
-        return ' ';
 
       // Use slow version to accumulate a correct size field.
       return getCharAndSizeSlow(Ptr, Size, Tok);
@@ -1374,12 +1377,6 @@ Slash:
       // Found backslash<whitespace><newline>.  Parse the char after it.
       Size += EscapedNewLineSize;
       Ptr  += EscapedNewLineSize;
-
-      // If the char that we finally got was a \n, then we must have had
-      // something like \<newline><newline>.  We don't want to consume the
-      // second newline.
-      if (*Ptr == '\n' || *Ptr == '\r' || *Ptr == '\0')
-        return ' ';
 
       // Use slow version to accumulate a correct size field.
       return getCharAndSizeSlowNoWarn(Ptr, Size, LangOpts);
@@ -1935,18 +1932,21 @@ bool Lexer::LexAngledStringLiteral(Token &Result, const char *CurPtr) {
   const char *AfterLessPos = CurPtr;
   char C = getAndAdvanceChar(CurPtr, Result);
   while (C != '>') {
-    // Skip escaped characters.
-    if (C == '\\' && CurPtr < BufferEnd) {
-      // Skip the escaped character.
-      getAndAdvanceChar(CurPtr, Result);
-    } else if (C == '\n' || C == '\r' ||             // Newline.
-               (C == 0 && (CurPtr-1 == BufferEnd ||  // End of file.
-                           isCodeCompletionPoint(CurPtr-1)))) {
+    // Skip escaped characters.  Escaped newlines will already be processed by
+    // getAndAdvanceChar.
+    if (C == '\\')
+      C = getAndAdvanceChar(CurPtr, Result);
+
+    if (C == '\n' || C == '\r' ||             // Newline.
+        (C == 0 && (CurPtr-1 == BufferEnd ||  // End of file.
+                    isCodeCompletionPoint(CurPtr-1)))) {
       // If the filename is unterminated, then it must just be a lone <
       // character.  Return this as such.
       FormTokenWithChars(Result, AfterLessPos, tok::less);
       return true;
-    } else if (C == 0) {
+    }
+
+    if (C == 0) {
       NulCharacter = CurPtr-1;
     }
     C = getAndAdvanceChar(CurPtr, Result);
@@ -2107,8 +2107,11 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
   // Scan over the body of the comment.  The common case, when scanning, is that
   // the comment contains normal ascii characters with nothing interesting in
   // them.  As such, optimize for this case with the inner loop.
+  //
+  // This loop terminates with CurPtr pointing at the newline (or end of buffer)
+  // character that ends the line comment.
   char C;
-  do {
+  while (true) {
     C = *CurPtr;
     // Skip over characters in the fast loop.
     while (C != 0 &&                // Potentially EOF.
@@ -2125,10 +2128,12 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
         HasSpace = true;
       }
 
-      if (*EscapePtr == '\\') // Escaped newline.
+      if (*EscapePtr == '\\')
+        // Escaped newline.
         CurPtr = EscapePtr;
       else if (EscapePtr[0] == '/' && EscapePtr[-1] == '?' &&
-               EscapePtr[-2] == '?') // Trigraph-escaped newline.
+               EscapePtr[-2] == '?' && LangOpts.Trigraphs)
+        // Trigraph-escaped newline.
         CurPtr = EscapePtr-2;
       else
         break; // This is a newline, we're done.
@@ -2158,7 +2163,8 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
     // If we read multiple characters, and one of those characters was a \r or
     // \n, then we had an escaped newline within the comment.  Emit diagnostic
     // unless the next line is also a // comment.
-    if (CurPtr != OldPtr+1 && C != '/' && CurPtr[0] != '/') {
+    if (CurPtr != OldPtr + 1 && C != '/' &&
+        (CurPtr == BufferEnd + 1 || CurPtr[0] != '/')) {
       for (; OldPtr != CurPtr; ++OldPtr)
         if (OldPtr[0] == '\n' || OldPtr[0] == '\r') {
           // Okay, we found a // comment that ends in a newline, if the next
@@ -2177,9 +2183,9 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
         }
     }
 
-    if (CurPtr == BufferEnd+1) { 
-      --CurPtr; 
-      break; 
+    if (C == '\r' || C == '\n' || CurPtr == BufferEnd + 1) {
+      --CurPtr;
+      break;
     }
 
     if (C == '\0' && isCodeCompletionPoint(CurPtr-1)) {
@@ -2187,8 +2193,7 @@ bool Lexer::SkipLineComment(Token &Result, const char *CurPtr,
       cutOffLexing();
       return false;
     }
-
-  } while (C != '\n' && C != '\r');
+  }
 
   // Found but did not consume the newline.  Notify comment handlers about the
   // comment unless we're in a #if 0 block.
@@ -2527,6 +2532,7 @@ void Lexer::ReadToEndOfLine(SmallVectorImpl<char> *Result) {
         break;
       }
       // FALL THROUGH.
+      LLVM_FALLTHROUGH;
     case '\r':
     case '\n':
       // Okay, we found the end of the line. First, back up past the \0, \r, \n.
@@ -2577,6 +2583,11 @@ bool Lexer::LexEndOfFile(Token &Result, const char *CurPtr) {
     return true;
   }
   
+  if (PP->isRecordingPreamble() && PP->isInPrimaryFile()) {
+    PP->setRecordedPreambleConditionalStack(ConditionalStack);
+    ConditionalStack.clear();
+  }
+
   // Issue diagnostics for unterminated #if and missing newline.
 
   // If we are in a #if directive, emit an error.
@@ -3271,6 +3282,7 @@ LexNextToken:
       return LexCharConstant(Result, ConsumeChar(CurPtr, SizeTmp, Result),
                              tok::wide_char_constant);
     // FALL THROUGH, treating L like the start of an identifier.
+    LLVM_FALLTHROUGH;
 
   // C99 6.4.2: Identifiers.
   case 'A': case 'B': case 'C': case 'D': case 'E': case 'F': case 'G':
@@ -3547,7 +3559,8 @@ LexNextToken:
     } else if (LangOpts.Digraphs && Char == '%') {     // '<%' -> '{'
       CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
       Kind = tok::l_brace;
-    } else if (Char == '#' && lexEditorPlaceholder(Result, CurPtr)) {
+    } else if (Char == '#' && /*Not a trigraph*/ SizeTmp == 1 &&
+               lexEditorPlaceholder(Result, CurPtr)) {
       return true;
     } else {
       Kind = tok::less;
@@ -3673,17 +3686,19 @@ LexNextToken:
 
   // UCNs (C99 6.4.3, C++11 [lex.charset]p2)
   case '\\':
-    if (uint32_t CodePoint = tryReadUCN(CurPtr, BufferPtr, &Result)) {
-      if (CheckUnicodeWhitespace(Result, CodePoint, CurPtr)) {
-        if (SkipWhitespace(Result, CurPtr, TokAtPhysicalStartOfLine))
-          return true; // KeepWhitespaceMode
+    if (!LangOpts.AsmPreprocessor) {
+      if (uint32_t CodePoint = tryReadUCN(CurPtr, BufferPtr, &Result)) {
+        if (CheckUnicodeWhitespace(Result, CodePoint, CurPtr)) {
+          if (SkipWhitespace(Result, CurPtr, TokAtPhysicalStartOfLine))
+            return true; // KeepWhitespaceMode
 
-        // We only saw whitespace, so just try again with this lexer.
-        // (We manually eliminate the tail call to avoid recursion.)
-        goto LexNextToken;
+          // We only saw whitespace, so just try again with this lexer.
+          // (We manually eliminate the tail call to avoid recursion.)
+          goto LexNextToken;
+        }
+
+        return LexUnicode(Result, CodePoint, CurPtr);
       }
-
-      return LexUnicode(Result, CodePoint, CurPtr);
     }
 
     Kind = tok::unknown;

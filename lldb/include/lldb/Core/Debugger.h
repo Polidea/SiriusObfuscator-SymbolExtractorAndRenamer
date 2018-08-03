@@ -14,9 +14,7 @@
 #include <stdint.h>
 
 // C++ Includes
-#include <map>
 #include <memory>
-#include <mutex>
 #include <vector>
 
 // Other libraries and framework includes
@@ -24,21 +22,55 @@
 #include "lldb/Core/Broadcaster.h"
 #include "lldb/Core/FormatEntity.h"
 #include "lldb/Core/IOHandler.h"
-#include "lldb/Core/Listener.h"
 #include "lldb/Core/SourceManager.h"
-#include "lldb/Core/UserID.h"
 #include "lldb/Core/UserSettingsController.h"
 #include "lldb/Host/HostThread.h"
 #include "lldb/Host/Terminal.h"
+#include "lldb/Target/ExecutionContext.h" // for ExecutionContext
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/TargetList.h"
-#include "lldb/lldb-public.h"
+#include "lldb/Utility/ConstString.h" // for ConstString
+#include "lldb/Utility/FileSpec.h"    // for FileSpec
+#include "lldb/Utility/Status.h"      // for Status
+#include "lldb/Utility/UserID.h"
+#include "lldb/lldb-defines.h"              // for DISALLOW_COPY_AND_ASSIGN
+#include "lldb/lldb-enumerations.h"         // for ScriptLanguage, Langua...
+#include "lldb/lldb-forward.h"              // for StreamFileSP, DebuggerSP
+#include "lldb/lldb-private-enumerations.h" // for VarSetOperationType
+#include "lldb/lldb-private-types.h"        // for LoadPluginCallbackType
+#include "lldb/lldb-types.h"                // for LogOutputCallback, thr...
 
+#include "llvm/ADT/ArrayRef.h"           // for ArrayRef
+#include "llvm/ADT/StringMap.h"          // for StringMap
+#include "llvm/ADT/StringRef.h"          // for StringRef
+#include "llvm/Support/DynamicLibrary.h" // for DynamicLibrary
+#include "llvm/Support/Threading.h"
+
+#include <assert.h> // for assert
+#include <stddef.h> // for size_t
+#include <stdio.h>
+
+namespace lldb_private {
+class Address;
+}
+namespace lldb_private {
+class CommandInterpreter;
+}
+namespace lldb_private {
+class Process;
+}
+namespace lldb_private {
+class Stream;
+}
+namespace lldb_private {
+class SymbolContext;
+}
+namespace lldb_private {
+class Target;
+}
 namespace llvm {
-namespace sys {
-class DynamicLibrary;
-} // namespace sys
-} // namespace llvm
+class raw_ostream;
+}
 
 namespace lldb_private {
 
@@ -193,9 +225,10 @@ public:
 
   void SetCloseInputOnEOF(bool b);
 
-  bool EnableLog(const char *channel, const char **categories,
-                 const char *log_file, uint32_t log_options,
-                 Stream &error_stream);
+  bool EnableLog(llvm::StringRef channel,
+                 llvm::ArrayRef<const char *> categories,
+                 llvm::StringRef log_file, uint32_t log_options,
+                 llvm::raw_ostream &error_stream);
 
   void SetLoggingCallback(lldb::LogOutputCallback log_callback, void *baton);
 
@@ -209,15 +242,17 @@ public:
     eStopDisassemblyTypeAlways
   };
 
-  Error SetPropertyValue(const ExecutionContext *exe_ctx,
-                         VarSetOperationType op, llvm::StringRef property_path,
-    llvm::StringRef value) override;
+  Status SetPropertyValue(const ExecutionContext *exe_ctx,
+                          VarSetOperationType op, llvm::StringRef property_path,
+                          llvm::StringRef value) override;
 
   bool GetAutoConfirm() const;
 
   const FormatEntity::Entry *GetDisassemblyFormat() const;
 
   const FormatEntity::Entry *GetFrameFormat() const;
+
+  const FormatEntity::Entry *GetFrameFormatUnique() const;
 
   const FormatEntity::Entry *GetThreadFormat() const;
 
@@ -276,7 +311,7 @@ public:
 
   const ConstString &GetInstanceName() { return m_instance_name; }
 
-  bool LoadPlugin(const FileSpec &spec, Error &error);
+  bool LoadPlugin(const FileSpec &spec, Status &error);
 
   void ExecuteIOHandlers();
 
@@ -288,7 +323,7 @@ public:
 
   bool IsHandlingEvents() const { return m_event_handler_thread.IsJoinable(); }
 
-  Error RunREPL(lldb::LanguageType language, const char *repl_options);
+  Status RunREPL(lldb::LanguageType language, const char *repl_options);
 
   bool REPLIsActive() { return m_input_reader_stack.REPLIsActive(); }
 
@@ -371,9 +406,8 @@ protected:
   std::unique_ptr<CommandInterpreter> m_command_interpreter_ap;
 
   IOHandlerStack m_input_reader_stack;
-  typedef std::map<std::string, lldb::StreamWP> LogStreamMap;
-  LogStreamMap m_log_streams;
-  lldb::StreamSP m_log_callback_stream_sp;
+  llvm::StringMap<std::weak_ptr<llvm::raw_ostream>> m_log_streams;
+  std::shared_ptr<llvm::raw_ostream> m_log_callback_stream_sp;
   ConstString m_instance_name;
   static LoadPluginCallbackType g_load_plugin_callback;
   typedef std::vector<llvm::sys::DynamicLibrary> LoadedPluginsList;

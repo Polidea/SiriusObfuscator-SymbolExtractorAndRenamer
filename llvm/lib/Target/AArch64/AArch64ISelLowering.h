@@ -250,8 +250,9 @@ public:
 
   /// Determine which of the bits specified in Mask are known to be either zero
   /// or one and return them in the KnownZero/KnownOne bitsets.
-  void computeKnownBitsForTargetNode(const SDValue Op, APInt &KnownZero,
-                                     APInt &KnownOne, const SelectionDAG &DAG,
+  void computeKnownBitsForTargetNode(const SDValue Op, KnownBits &Known,
+                                     const APInt &DemandedElts,
+                                     const SelectionDAG &DAG,
                                      unsigned Depth = 0) const override;
 
   bool targetShrinkDemandedConstant(SDValue Op, const APInt &Demanded,
@@ -405,7 +406,20 @@ public:
     return AArch64::X1;
   }
 
-  bool isIntDivCheap(EVT VT, AttributeSet Attr) const override;
+  bool isIntDivCheap(EVT VT, AttributeList Attr) const override;
+
+  bool canMergeStoresTo(unsigned AddressSpace, EVT MemVT,
+                        const SelectionDAG &DAG) const override {
+    // Do not merge to float value size (128 bytes) if no implicit
+    // float attribute is set.
+
+    bool NoFloat = DAG.getMachineFunction().getFunction()->hasFnAttribute(
+        Attribute::NoImplicitFloat);
+
+    if (NoFloat)
+      return (MemVT.getSizeInBits() <= 64);
+    return true;
+  }
 
   bool isCheapToSpeculateCttz() const override {
     return true;
@@ -443,6 +457,22 @@ public:
   /// Returns the size of the platform's va_list object.
   unsigned getVaListSizeInBits(const DataLayout &DL) const override;
 
+  /// Returns true if \p VecTy is a legal interleaved access type. This
+  /// function checks the vector element type and the overall width of the
+  /// vector.
+  bool isLegalInterleavedAccessType(VectorType *VecTy,
+                                    const DataLayout &DL) const;
+
+  /// Returns the number of interleaved accesses that will be generated when
+  /// lowering accesses of the given type.
+  unsigned getNumInterleavedAccesses(VectorType *VecTy,
+                                     const DataLayout &DL) const;
+
+  MachineMemOperand::Flags getMMOFlags(const Instruction &I) const override;
+
+  bool functionArgumentNeedsConsecutiveRegisters(Type *Ty,
+                                                 CallingConv::ID CallConv,
+                                                 bool isVarArg) const override;
 private:
   bool isExtFreeImpl(const Instruction *Ext) const override;
 
@@ -499,6 +529,18 @@ private:
                       const SmallVectorImpl<SDValue> &OutVals, const SDLoc &DL,
                       SelectionDAG &DAG) const override;
 
+  SDValue getTargetNode(GlobalAddressSDNode *N, EVT Ty, SelectionDAG &DAG,
+                        unsigned Flag) const;
+  SDValue getTargetNode(JumpTableSDNode *N, EVT Ty, SelectionDAG &DAG,
+                        unsigned Flag) const;
+  SDValue getTargetNode(ConstantPoolSDNode *N, EVT Ty, SelectionDAG &DAG,
+                        unsigned Flag) const;
+  SDValue getTargetNode(BlockAddressSDNode *N, EVT Ty, SelectionDAG &DAG,
+                        unsigned Flag) const;
+  template <class NodeTy> SDValue getGOT(NodeTy *N, SelectionDAG &DAG) const;
+  template <class NodeTy>
+  SDValue getAddrLarge(NodeTy *N, SelectionDAG &DAG) const;
+  template <class NodeTy> SDValue getAddr(NodeTy *N, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDarwinGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -517,6 +559,7 @@ private:
   SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerAAPCS_VASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerDarwin_VASTART(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerWin64_VASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVASTART(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVACOPY(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
@@ -544,6 +587,7 @@ private:
   SDValue LowerVectorOR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerCONCAT_VECTORS(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFSINCOS(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerVECREDUCE(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
                         std::vector<SDNode *> *Created) const override;
@@ -584,7 +628,7 @@ private:
   }
 
   bool isUsedByReturnOnly(SDNode *N, SDValue &Chain) const override;
-  bool mayBeEmittedAsTailCall(CallInst *CI) const override;
+  bool mayBeEmittedAsTailCall(const CallInst *CI) const override;
   bool getIndexedAddressParts(SDNode *Op, SDValue &Base, SDValue &Offset,
                               ISD::MemIndexedMode &AM, bool &IsInc,
                               SelectionDAG &DAG) const;
@@ -598,11 +642,9 @@ private:
   void ReplaceNodeResults(SDNode *N, SmallVectorImpl<SDValue> &Results,
                           SelectionDAG &DAG) const override;
 
-  bool functionArgumentNeedsConsecutiveRegisters(Type *Ty,
-                                                 CallingConv::ID CallConv,
-                                                 bool isVarArg) const override;
-
   bool shouldNormalizeToSelectSequence(LLVMContext &, EVT) const override;
+
+  void finalizeLowering(MachineFunction &MF) const override;
 };
 
 namespace AArch64 {

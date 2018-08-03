@@ -21,11 +21,13 @@
 #include "swift/Basic/SourceLoc.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Parse/Token.h"
-#include "swift/Syntax/TokenSyntax.h"
+#include "swift/Syntax/References.h"
+#include "swift/Syntax/Trivia.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/SaveAndRestore.h"
 
 namespace swift {
+
   /// Given a pointer to the starting byte of a UTF8 character, validate it and
   /// advance the lexer past it.  This returns the encoded character or ~0U if
   /// the encoding is invalid.
@@ -138,18 +140,12 @@ public:
 
     State advance(unsigned Offset) const {
       assert(isValid());
-      return State(Loc.getAdvancedLoc(Offset), LeadingTrivia, TrailingTrivia);
+      return State(Loc.getAdvancedLoc(Offset));
     }
 
   private:
-    explicit State(SourceLoc Loc,
-                   syntax::TriviaList LeadingTrivia,
-                   syntax::TriviaList TrailingTrivia)
-      : Loc(Loc), LeadingTrivia(LeadingTrivia),
-        TrailingTrivia(TrailingTrivia) {}
+    explicit State(SourceLoc Loc) : Loc(Loc) {}
     SourceLoc Loc;
-    syntax::TriviaList LeadingTrivia;
-    syntax::TriviaList TrailingTrivia;
     friend class Lexer;
   };
 
@@ -208,10 +204,8 @@ public:
     assert(Offset <= EndOffset && "invalid range");
     initSubLexer(
         *this,
-        State(getLocForStartOfBuffer().getAdvancedLoc(Offset),
-              LeadingTrivia, TrailingTrivia),
-        State(getLocForStartOfBuffer().getAdvancedLoc(EndOffset),
-              LeadingTrivia, TrailingTrivia));
+        State(getLocForStartOfBuffer().getAdvancedLoc(Offset)),
+        State(getLocForStartOfBuffer().getAdvancedLoc(EndOffset)));
   }
 
   /// \brief Create a sub-lexer that lexes from the same buffer, but scans
@@ -232,14 +226,24 @@ public:
     return CodeCompletionPtr != nullptr;
   }
 
-  void lex(Token &Result) {
+  /// Lex a token. If \c TriviaRetentionMode is \c WithTrivia, passed pointers
+  /// to trivias are populated.
+  void lex(Token &Result, syntax::Trivia &LeadingTriviaResult,
+           syntax::Trivia &TrailingTriviaResult) {
     Result = NextToken;
-    if (Result.isNot(tok::eof))
+    LeadingTriviaResult = {LeadingTrivia};
+    TrailingTriviaResult = {TrailingTrivia};
+    if (Result.isNot(tok::eof)) {
+      LeadingTrivia.clear();
+      TrailingTrivia.clear();
       lexImpl();
+    }
   }
 
-  /// Lex a full token including leading and trailing trivia.
-  RC<syntax::TokenSyntax> fullLex();
+  void lex(Token &Result) {
+    syntax::Trivia LeadingTrivia, TrailingTrivia;
+    lex(Result, LeadingTrivia, TrailingTrivia);
+  }
 
   bool isKeepingComments() const {
     return RetainComments == CommentRetentionMode::ReturnAsTokens;
@@ -259,7 +263,13 @@ public:
   /// \brief Returns the lexer state for the beginning of the given token.
   /// After restoring the state, lexer will return this token and continue from
   /// there.
-  State getStateForBeginningOfToken(const Token &Tok) const {
+  State getStateForBeginningOfToken(const Token &Tok,
+                                    const syntax::Trivia &LeadingTrivia = {}) const {
+    // If trivia parsing mode, start position of trivia is the position we want
+    // to restore.
+    if (TriviaRetention == TriviaRetentionMode::WithTrivia)
+      return State(Tok.getLoc().getAdvancedLoc(-LeadingTrivia.getTextLength()));
+
     // If the token has a comment attached to it, rewind to before the comment,
     // not just the start of the token.  This ensures that we will re-lex and
     // reattach the comment to the token if rewound to this state.
@@ -270,8 +280,7 @@ public:
   }
 
   State getStateForEndOfTokenLoc(SourceLoc Loc) const {
-    return State(getLocForEndOfToken(SourceMgr, Loc), LeadingTrivia,
-                 TrailingTrivia);
+    return State(getLocForEndOfToken(SourceMgr, Loc));
   }
 
   /// \brief Restore the lexer state to a given one, that can be located either
@@ -279,8 +288,8 @@ public:
   void restoreState(State S, bool enableDiagnostics = false) {
     assert(S.isValid());
     CurPtr = getBufferPtrForSourceLoc(S.Loc);
-    LeadingTrivia = S.LeadingTrivia;
-    TrailingTrivia = S.TrailingTrivia;
+    LeadingTrivia.clear();
+    TrailingTrivia.clear();
     // Don't reemit diagnostics while readvancing the lexer.
     llvm::SaveAndRestore<DiagnosticEngine*>
       D(Diags, enableDiagnostics ? Diags : nullptr);
@@ -405,6 +414,10 @@ public:
       Result.IndentToStrip = 0;
       return Result;
     }
+
+    SourceLoc getEndLoc() {
+      return Loc.getAdvancedLoc(Length);
+    }
   };
   
   /// \brief Compute the bytes that the actual string literal should codegen to.
@@ -483,6 +496,7 @@ private:
   }
 
   void formToken(tok Kind, const char *TokStart, bool MultilineString = false);
+  void formEscapedIdentifierToken(const char *TokStart);
 
   /// Advance to the end of the line but leave the current buffer pointer
   /// at that newline character.
@@ -526,6 +540,21 @@ private:
   bool tryLexConflictMarker();
 };
   
+/// Given an ordered token \param Array , get the iterator pointing to the first
+/// token that is not before \param Loc .
+template<typename ArrayTy, typename Iterator = typename ArrayTy::iterator>
+Iterator token_lower_bound(ArrayTy &Array, SourceLoc Loc) {
+  return std::lower_bound(Array.begin(), Array.end(), Loc,
+    [](const Token &T, SourceLoc L) {
+      return T.getLoc().getOpaquePointerValue() < L.getOpaquePointerValue();
+  });
+}
+
+/// Given an ordered token array \param AllTokens , get the slice of the array
+/// where front() locates at \param StartLoc and back() locates at \param EndLoc .
+ArrayRef<Token> slice_token_array(ArrayRef<Token> AllTokens, SourceLoc StartLoc,
+                                  SourceLoc EndLoc);
+
 } // end namespace swift
 
 #endif

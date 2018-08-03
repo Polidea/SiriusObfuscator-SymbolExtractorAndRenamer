@@ -17,14 +17,12 @@
 #include "DWARFDeclContext.h"
 #include "DWARFDefines.h"
 #include "SymbolFileDWARF.h"
+#include "SymbolFileDWARFDwo.h"
 #include "SymbolFileDWARFDebugMap.h"
 #include "UniqueDWARFASTType.h"
 
 #include "Plugins/Language/ObjC/ObjCLanguage.h"
-#include "Plugins/Language/ObjC/ObjCLanguage.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Interpreter/Args.h"
@@ -39,6 +37,8 @@
 #include "lldb/Symbol/TypeMap.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Utility/LLDBAssert.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/StreamString.h"
 
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -124,57 +124,86 @@ ClangASTImporter &DWARFASTParserClang::GetClangASTImporter() {
   return *m_clang_ast_importer_ap;
 }
 
+/// Detect a forward declaration that is nested in a DW_TAG_module.
+static bool isClangModuleFwdDecl(const DWARFDIE &Die) {
+  if (!Die.GetAttributeValueAsUnsigned(DW_AT_declaration, 0))
+    return false;
+  auto Parent = Die.GetParent();
+  while (Parent.IsValid()) {
+    if (Parent.Tag() == DW_TAG_module)
+      return true;
+    Parent = Parent.GetParent();
+  }
+  return false;
+}
+
 TypeSP DWARFASTParserClang::ParseTypeFromDWO(const DWARFDIE &die, Log *log) {
   ModuleSP dwo_module_sp = die.GetContainingDWOModule();
-  if (dwo_module_sp) {
-    // This type comes from an external DWO module
-    std::vector<CompilerContext> dwo_context;
-    die.GetDWOContext(dwo_context);
-    TypeMap dwo_types;
-    if (dwo_module_sp->GetSymbolVendor()->FindTypes(dwo_context, true,
-                                                    dwo_types)) {
-      const size_t num_dwo_types = dwo_types.GetSize();
-      if (num_dwo_types == 1) {
-        // We found a real definition for this type elsewhere
-        // so lets use it and cache the fact that we found
-        // a complete type for this die
-        TypeSP dwo_type_sp = dwo_types.GetTypeAtIndex(0);
-        if (dwo_type_sp) {
-          lldb_private::CompilerType dwo_type =
-              dwo_type_sp->GetForwardCompilerType();
+  if (!dwo_module_sp)
+    return TypeSP();
 
-          lldb_private::CompilerType type =
-              GetClangASTImporter().CopyType(m_ast, dwo_type);
+  // This type comes from an external DWO module.
+  std::vector<CompilerContext> dwo_context;
+  die.GetDWOContext(dwo_context);
+  TypeMap dwo_types;
 
-          // printf ("copied_qual_type: ast = %p, clang_type = %p, name =
-          // '%s'\n", m_ast, copied_qual_type.getAsOpaquePtr(),
-          // external_type->GetName().GetCString());
-          if (type) {
-            SymbolFileDWARF *dwarf = die.GetDWARF();
-            TypeSP type_sp(new Type(die.GetID(), dwarf, dwo_type_sp->GetName(),
-                                    dwo_type_sp->GetByteSize(), NULL,
-                                    LLDB_INVALID_UID, Type::eEncodingInvalid,
-                                    &dwo_type_sp->GetDeclaration(), type,
-                                    Type::eResolveStateForward));
+  if (!dwo_module_sp->GetSymbolVendor()->FindTypes(dwo_context, true,
+                                                   dwo_types)) {
+    if (!isClangModuleFwdDecl(die))
+      return TypeSP();
 
-            dwarf->GetTypeList()->Insert(type_sp);
-            dwarf->GetDIEToType()[die.GetDIE()] = type_sp.get();
-            clang::TagDecl *tag_decl = ClangASTContext::GetAsTagDecl(type);
-            if (tag_decl)
-              LinkDeclContextToDIE(tag_decl, die);
-            else {
-              clang::DeclContext *defn_decl_ctx =
-                  GetCachedClangDeclContextForDIE(die);
-              if (defn_decl_ctx)
-                LinkDeclContextToDIE(defn_decl_ctx, die);
-            }
-            return type_sp;
-          }
-        }
-      }
+    // Since this this type is defined in one of the Clang modules
+    // imported by this symbol file, search all of them.
+    auto *SymFile = die.GetCU()->GetSymbolFileDWARF();
+    for (const auto &NameModule : SymFile->getExternalTypeModules()) {
+      if (!NameModule.second)
+        continue;
+      SymbolVendor *SymVendor = NameModule.second->GetSymbolVendor();
+      if (SymVendor->FindTypes(dwo_context, true, dwo_types))
+        break;
     }
   }
-  return TypeSP();
+
+  const size_t num_dwo_types = dwo_types.GetSize();
+  if (num_dwo_types != 1)
+    return TypeSP();
+
+  // We found a real definition for this type in the Clang module, so
+  // lets use it and cache the fact that we found a complete type for
+  // this die.
+  TypeSP dwo_type_sp = dwo_types.GetTypeAtIndex(0);
+  if (!dwo_type_sp)
+    return TypeSP();
+
+  lldb_private::CompilerType dwo_type = dwo_type_sp->GetForwardCompilerType();
+
+  lldb_private::CompilerType type =
+      GetClangASTImporter().CopyType(m_ast, dwo_type);
+
+  // printf ("copied_qual_type: ast = %p, clang_type = %p, name =
+  // '%s'\n", m_ast, copied_qual_type.getAsOpaquePtr(),
+  // external_type->GetName().GetCString());
+  if (!type)
+    return TypeSP();
+
+  SymbolFileDWARF *dwarf = die.GetDWARF();
+  TypeSP type_sp(new Type(
+      die.GetID(), dwarf, dwo_type_sp->GetName(), dwo_type_sp->GetByteSize(),
+      NULL, LLDB_INVALID_UID, Type::eEncodingInvalid,
+      &dwo_type_sp->GetDeclaration(), type, Type::eResolveStateForward));
+
+  dwarf->GetTypeList()->Insert(type_sp);
+  dwarf->GetDIEToType()[die.GetDIE()] = type_sp.get();
+  clang::TagDecl *tag_decl = ClangASTContext::GetAsTagDecl(type);
+  if (tag_decl)
+    LinkDeclContextToDIE(tag_decl, die);
+  else {
+    clang::DeclContext *defn_decl_ctx = GetCachedClangDeclContextForDIE(die);
+    if (defn_decl_ctx)
+      LinkDeclContextToDIE(defn_decl_ctx, die);
+  }
+
+  return type_sp;
 }
 
 TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
@@ -787,7 +816,17 @@ TypeSP DWARFASTParserClang::ParseTypeFromDWARF(const SymbolContext &sc,
                   m_ast.ParseClassTemplateDecl(decl_ctx, accessibility,
                                                type_name_cstr, tag_decl_kind,
                                                template_param_infos);
-
+              if (!class_template_decl) {
+                if (log) {
+                  dwarf->GetObjectFile()->GetModule()->LogMessage(
+                    log, "SymbolFileDWARF(%p) - 0x%8.8x: %s type \"%s\" "
+                         "clang::ClassTemplateDecl failed to return a decl.",
+                    static_cast<void *>(this), die.GetOffset(),
+                    DW_TAG_value_to_name(tag), type_name_cstr);
+                }
+                return TypeSP();
+              }
+                
               clang::ClassTemplateSpecializationDecl
                   *class_specialization_decl =
                       m_ast.CreateClassTemplateSpecializationDecl(
@@ -3733,8 +3772,8 @@ static DWARFDIE GetContainingFunctionWithAbstractOrigin(const DWARFDIE &die) {
       }
     }
   }
-  assert(!"Shouldn't call GetContainingFunctionWithAbstractOrigin on something "
-          "not in a function");
+  assert(0 && "Shouldn't call GetContainingFunctionWithAbstractOrigin on "
+              "something not in a function");
   return DWARFDIE();
 }
 

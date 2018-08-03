@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-swift-frontend -assume-parsing-unqualified-ownership-sil -import-objc-header %S/Inputs/c_functions.h -primary-file %s -emit-ir | %FileCheck %s
 // RUN: %target-swift-frontend -assume-parsing-unqualified-ownership-sil -import-objc-header %S/Inputs/c_functions.h -primary-file %s -emit-ir |  %FileCheck %s --check-prefix=%target-cpu
 
@@ -27,6 +27,7 @@ func test_indirect_by_val_alignment() {
 
 
 // We only want to test x86_64.
+// aarch64: define hidden swiftcc void  @_T011c_functions30test_indirect_by_val_alignmentyyF()
 // arm64: define hidden swiftcc void  @_T011c_functions30test_indirect_by_val_alignmentyyF()
 // armv7k: define hidden swiftcc void  @_T011c_functions30test_indirect_by_val_alignmentyyF()
 // armv7s: define hidden swiftcc void  @_T011c_functions30test_indirect_by_val_alignmentyyF()

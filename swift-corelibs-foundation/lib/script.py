@@ -142,6 +142,9 @@ TARGET_LDFLAGS       = --target=${TARGET} ${EXTRA_LD_FLAGS} -L${SDKROOT}/lib/swi
         if Configuration.current.bootstrap_directory is not None:
             ld_flags += """ -L${TARGET_BOOTSTRAP_DIR}/usr/lib"""
 
+        if Configuration.current.build_mode == Configuration.Debug:
+            ld_flags += """  -rpath ${SDKROOT}/lib/swift/""" + Configuration.current.target.swift_sdk_name + """ """
+
         if Configuration.current.linker is not None:
             ld_flags += " -fuse-ld=" + Configuration.current.linker
 
@@ -189,7 +192,7 @@ rule CompileSwift
     depfile = $out.d
 
 rule MergeSwiftModule
-    command = mkdir -p `dirname $out`; ${SWIFT} -frontend -emit-module $partials ${TARGET_SWIFTCFLAGS} $flags -module-cache-path ${MODULE_CACHE_PATH} -module-link-name $module_name -o $out
+    command = mkdir -p `dirname $out`; ${SWIFT} -frontend -sil-merge-partial-modules -emit-module $partials ${TARGET_SWIFTCFLAGS} $flags -module-cache-path ${MODULE_CACHE_PATH} -module-link-name $module_name -o $out
     description = Merge $out
 """
 

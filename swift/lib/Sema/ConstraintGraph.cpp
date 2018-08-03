@@ -648,25 +648,6 @@ static bool shouldContractEdge(ConstraintKind kind) {
   }
 }
 
-/// We use this function to determine if a subtype constraint is set
-/// between two (possibly sugared) type variables, one of which is wrapped
-/// in an inout type.
-static bool isStrictInoutSubtypeConstraint(Constraint *constraint) {
-  if (constraint->getKind() != ConstraintKind::Subtype)
-    return false;
-
-  auto t1 = constraint->getFirstType()->getDesugaredType();
-
-  if (auto tt = t1->getAs<TupleType>()) {
-    if (tt->getNumElements() != 1)
-      return false;
-
-    t1 = tt->getElementType(0).getPointer();
-  }
-
-  return t1->is<InOutType>();
-}
-
 bool ConstraintGraph::contractEdges() {
   llvm::SetVector<std::pair<TypeVariableType *,
                             TypeVariableType *>> contractions;
@@ -694,23 +675,37 @@ bool ConstraintGraph::contractEdges() {
 
         auto isParamBindingConstraint = kind == ConstraintKind::BindParam;
 
-        // We need to take special care not to directly contract parameter
-        // binding constraints if there is an inout subtype constraint on the
-        // type variable. The constraint solver depends on multiple constraints
-        // being present in this case, so it can generate the appropriate lvalue
-        // wrapper for the argument type.
-        if (isParamBindingConstraint) {
-          auto node = tyvar1->getImpl().getGraphNode();
-          auto hasDependentConstraint = false;
+        // If the argument is allowed to bind to `inout`, in general,
+        // it's invalid to contract the edge between argument and parameter,
+        // but if we can prove that there are no possible bindings
+        // which result in attempt to bind `inout` type to argument
+        // type variable, we should go ahead and allow (temporary)
+        // contraction, because that greatly helps with performance.
+        // Such action is valid because argument type variable can
+        // only get its bindings from related overload, which gives
+        // us enough information to decided on l-valueness.
+        if (isParamBindingConstraint && tyvar1->getImpl().canBindToInOut()) {
+          bool isNotContractable = true;
+          if (auto bindings = CS.getPotentialBindings(tyvar1)) {
+            for (auto &binding : bindings.Bindings) {
+              auto type = binding.BindingType;
+              isNotContractable = type.findIf([&](Type nestedType) -> bool {
+                if (auto tv = nestedType->getAs<TypeVariableType>()) {
+                  if (!tv->getImpl().mustBeMaterializable())
+                    return true;
+                }
 
-          for (auto t1Constraint : node->getConstraints()) {
-            if (isStrictInoutSubtypeConstraint(t1Constraint)) {
-              hasDependentConstraint = true;
-              break;
+                return nestedType->is<InOutType>();
+              });
+
+              // If there is at least one non-contractable binding, let's
+              // not risk contracting this edge.
+              if (isNotContractable)
+                break;
             }
           }
 
-          if (hasDependentConstraint)
+          if (isNotContractable)
             continue;
         }
 
@@ -745,10 +740,12 @@ bool ConstraintGraph::contractEdges() {
 }
 
 void ConstraintGraph::removeEdge(Constraint *constraint) {
+  bool isExistingConstraint = false;
 
   for (auto &active : CS.ActiveConstraints) {
     if (&active == constraint) {
       CS.ActiveConstraints.erase(constraint);
+      isExistingConstraint = true;
       break;
     }
   }
@@ -756,12 +753,17 @@ void ConstraintGraph::removeEdge(Constraint *constraint) {
   for (auto &inactive : CS.InactiveConstraints) {
     if (&inactive == constraint) {
       CS.InactiveConstraints.erase(constraint);
+      isExistingConstraint = true;
       break;
     }
   }
 
-  if (CS.solverState)
-    CS.solverState->removeGeneratedConstraint(constraint);
+  if (CS.solverState) {
+    if (isExistingConstraint)
+      CS.solverState->retireConstraint(constraint);
+    else
+      CS.solverState->removeGeneratedConstraint(constraint);
+  }
 
   removeConstraint(constraint);
 }

@@ -53,7 +53,6 @@ add_lldb_library(lldbSymbol
     clangBasic
     clangFrontend
     lldbCore
-    lldbDataFormatters
     lldbExpression
     lldbHost
     lldbTarget
@@ -66,6 +65,7 @@ add_lldb_library(lldbSymbol
     lldbPluginObjectContainerBSDArchive
     lldbPluginCPlusPlusLanguage
     lldbPluginObjCLanguage
+    lldbPluginPlatformMacOSX
 
   LINK_COMPONENTS
     Support

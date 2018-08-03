@@ -14,7 +14,6 @@
 
 // REQUIRES: objc_interop
 
-import SwiftExperimental
 import Foundation
 import StdlibUnittest
 
@@ -35,7 +34,6 @@ func checkAssociatedTypes() {
     iteratorType: IndexingIterator<Subject>.self,
     subSequenceType: RandomAccessSlice<Subject>.self,
     indexType: Int.self,
-    indexDistanceType: Int.self,
     indicesType: CountableRange<Int>.self)
 }
 

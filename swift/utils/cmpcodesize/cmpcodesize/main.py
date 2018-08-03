@@ -24,7 +24,7 @@ from cmpcodesize.compare import \
 
 SHORTCUTS = {
     "O": "bin/Benchmark_O",
-    "Ounchecked": "bin/Benchmark_Ounchecked",
+    "Osize": "bin/Benchmark_Osize",
     "Onone": "bin/Benchmark_Onone",
     "dylib": "lib/swift/macosx/x86_64/libswiftCore.dylib",
 }
@@ -53,7 +53,7 @@ How to specify files:
     Compares the files in the new and old build-dirs.
     Aliases:
         O          => bin/Benchmark_O
-        Ounchecked => bin/Benchmark_Ounchecked
+        Osize      => bin/Benchmark_Osize
         Onone      => bin/Benchmark_Onone
         dylib      => lib/swift/macosx/x86_64/libswiftCore.dylib
     Examples:
@@ -183,7 +183,7 @@ How to specify files:
         else:
             compare_function_sizes(old_files, new_files)
     else:
-        print("%-26s%16s  %8s  %8s  %s" %
+        print("%-26s%16s  %14s  %14s  %s" %
               ("", "Section", "Old", "New", "Percent"))
         if parsed_arguments.sum_sizes:
             compare_sizes_of_file(old_files, new_files,

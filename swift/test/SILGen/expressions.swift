@@ -1,7 +1,6 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: echo "public var x = Int()" | %target-swift-frontend -module-name FooBar -emit-module -o %t -
-// RUN: %target-swift-frontend -parse-stdlib -emit-silgen %s -I%t -disable-access-control | %FileCheck %s
+// RUN: %target-swift-frontend -parse-stdlib -emit-silgen -enable-sil-ownership %s -I%t -disable-access-control | %FileCheck %s
 
 import Swift
 import FooBar
@@ -109,9 +108,9 @@ func call_one() {
 }
 
 // CHECK-LABEL: sil hidden @_T011expressions8call_oneyyF
-// CHECK: [[BAR:%[0-9]+]] = function_ref @_T011expressions3bar{{[_0-9a-zA-Z]*}}F : $@convention(thin) (Int) -> ()
 // CHECK: [[FORTYTWO:%[0-9]+]] = integer_literal {{.*}} 42
 // CHECK: [[FORTYTWO_CONVERTED:%[0-9]+]] = apply {{.*}}([[FORTYTWO]], {{.*}})
+// CHECK: [[BAR:%[0-9]+]] = function_ref @_T011expressions3bar{{[_0-9a-zA-Z]*}}F : $@convention(thin) (Int) -> ()
 // CHECK: apply [[BAR]]([[FORTYTWO_CONVERTED]])
 
 func call_two() {
@@ -119,11 +118,11 @@ func call_two() {
 }
 
 // CHECK-LABEL: sil hidden @_T011expressions8call_twoyyF
-// CHECK: [[BAR:%[0-9]+]] = function_ref @_T011expressions3bar{{[_0-9a-zA-Z]*}}F : $@convention(thin) (Int, Int) -> ()
 // CHECK: [[FORTYTWO:%[0-9]+]] = integer_literal {{.*}} 42
 // CHECK: [[FORTYTWO_CONVERTED:%[0-9]+]] = apply {{.*}}([[FORTYTWO]], {{.*}})
 // CHECK: [[TWONINETEEN:%[0-9]+]] = integer_literal {{.*}} 219
 // CHECK: [[TWONINETEEN_CONVERTED:%[0-9]+]] = apply {{.*}}([[TWONINETEEN]], {{.*}})
+// CHECK: [[BAR:%[0-9]+]] = function_ref @_T011expressions3bar{{[_0-9a-zA-Z]*}}F : $@convention(thin) (Int, Int) -> ()
 // CHECK: apply [[BAR]]([[FORTYTWO_CONVERTED]], [[TWONINETEEN_CONVERTED]])
 
 func tuples() {
@@ -198,7 +197,7 @@ func calls() {
 // CHECK-LABEL: sil hidden @_T011expressions11module_path{{[_0-9a-zA-Z]*}}F
 func module_path() -> Int {
   return FooBar.x
-  // CHECK: [[x_GET:%[0-9]+]] = function_ref @_T06FooBar1xSifau
+  // CHECK: [[x_GET:%[0-9]+]] = function_ref @_T06FooBar1xSivau
   // CHECK-NEXT: apply [[x_GET]]()
 }
 
@@ -207,21 +206,21 @@ func default_args(_ x: Int, y: Int = 219, z: Int = 20721) {}
 // CHECK-LABEL: sil hidden @_T011expressions19call_default_args_1{{[_0-9a-zA-Z]*}}F
 func call_default_args_1(_ x: Int) {
   default_args(x)
-  // CHECK: [[FUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}F
   // CHECK: [[YFUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}A0_
   // CHECK: [[Y:%[0-9]+]] = apply [[YFUNC]]()
   // CHECK: [[ZFUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}A1_
   // CHECK: [[Z:%[0-9]+]] = apply [[ZFUNC]]()
+  // CHECK: [[FUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}F
   // CHECK: apply [[FUNC]]({{.*}}, [[Y]], [[Z]])
 }
 
 // CHECK-LABEL: sil hidden @_T011expressions19call_default_args_2{{[_0-9a-zA-Z]*}}F
 func call_default_args_2(_ x: Int, z: Int) {
   default_args(x, z:z)
-  // CHECK: [[FUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}F
   // CHECK: [[DEFFN:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}A0_
   // CHECK-NEXT: [[C219:%[0-9]+]] = apply [[DEFFN]]()
-  // CHECK: apply [[FUNC]]({{.*}}, [[C219]], {{.*}})
+  // CHECK: [[FUNC:%[0-9]+]] = function_ref @_T011expressions12default_args{{[_0-9a-zA-Z]*}}F
+  // CHECK-NEXT: apply [[FUNC]]({{.*}}, [[C219]], {{.*}})
 }
 
 struct Generic<T> {
@@ -248,7 +247,7 @@ struct Generic<T> {
 
 // CHECK-LABEL: sil hidden @_T011expressions18generic_member_ref{{[_0-9a-zA-Z]*}}F
 func generic_member_ref<T>(_ x: Generic<T>) -> Int {
-  // CHECK: bb0([[XADDR:%[0-9]+]] : $*Generic<T>):
+  // CHECK: bb0([[XADDR:%[0-9]+]] : @trivial $*Generic<T>):
   return x.mono_member
   // CHECK: [[MEMBER_ADDR:%[0-9]+]] = struct_element_addr {{.*}}, #Generic.mono_member
   // CHECK: load [trivial] [[MEMBER_ADDR]]
@@ -257,7 +256,7 @@ func generic_member_ref<T>(_ x: Generic<T>) -> Int {
 // CHECK-LABEL: sil hidden @_T011expressions24bound_generic_member_ref{{[_0-9a-zA-Z]*}}F
 func bound_generic_member_ref(_ x: Generic<UnicodeScalar>) -> Int {
   var x = x
-  // CHECK: bb0([[XADDR:%[0-9]+]] : $Generic<Unicode.Scalar>):
+  // CHECK: bb0([[XADDR:%[0-9]+]] : @trivial $Generic<Unicode.Scalar>):
   return x.mono_member
   // CHECK: [[MEMBER_ADDR:%[0-9]+]] = struct_element_addr {{.*}}, #Generic.mono_member
   // CHECK: load [trivial] [[MEMBER_ADDR]]
@@ -337,20 +336,20 @@ protocol Wibbleable { }
 func archetype_member_ref<T : Runcible>(_ x: T) {
   var x = x
   x.free_method()
-  // CHECK: witness_method $T, #Runcible.free_method!1
-  // CHECK-NEXT: [[READ:%.*]] = begin_access [read] [unknown] [[X:%.*]]
+  // CHECK:      [[READ:%.*]] = begin_access [read] [unknown] [[X:%.*]]
   // CHECK-NEXT: [[TEMP:%.*]] = alloc_stack $T
   // CHECK-NEXT: copy_addr [[READ]] to [initialization] [[TEMP]]
   // CHECK-NEXT: end_access [[READ]]
+  // CHECK-NEXT: witness_method $T, #Runcible.free_method!1
   // CHECK-NEXT: apply
   // CHECK-NEXT: destroy_addr [[TEMP]]
   var u = x.associated_method()
-  // CHECK: witness_method $T, #Runcible.associated_method!1
-  // CHECK-NEXT: [[WRITE:%.*]] = begin_access [modify] [unknown]
+  // CHECK:      [[WRITE:%.*]] = begin_access [modify] [unknown]
+  // CHECK-NEXT: witness_method $T, #Runcible.associated_method!1
   // CHECK-NEXT: apply
   T.static_method()
-  // CHECK: witness_method $T, #Runcible.static_method!1
-  // CHECK-NEXT: metatype $@thick T.Type
+  // CHECK:      metatype $@thick T.Type
+  // CHECK-NEXT: witness_method $T, #Runcible.static_method!1
   // CHECK-NEXT: apply
 }
 
@@ -506,9 +505,9 @@ func if_expr(_ a: Bool, b: Bool, x: Int, y: Int, z: Int) -> Int {
   // CHECK:   [[READ:%.*]] = begin_access [read] [unknown] [[PBZ]]
   // CHECK:   [[ZVAL:%[0-9]+]] = load [trivial] [[READ]]
   // CHECK:   br [[CONT_B:bb[0-9]+]]([[ZVAL]] : $Int)
-  // CHECK: [[CONT_B]]([[B_RES:%[0-9]+]] : $Int):
+  // CHECK: [[CONT_B]]([[B_RES:%[0-9]+]] : @trivial $Int):
   // CHECK:   br [[CONT_A:bb[0-9]+]]([[B_RES]] : $Int)
-  // CHECK: [[CONT_A]]([[A_RES:%[0-9]+]] : $Int):
+  // CHECK: [[CONT_A]]([[A_RES:%[0-9]+]] : @trivial $Int):
   // CHECK:   return [[A_RES]]
 }
 
@@ -560,7 +559,7 @@ func dynamicTypePlusZero(_ a : Super1) -> Super1.Type {
   return type(of: a)
 }
 // CHECK-LABEL: dynamicTypePlusZero
-// CHECK: bb0([[ARG:%.*]] : $Super1):
+// CHECK: bb0([[ARG:%.*]] : @owned $Super1):
 // CHECK-NOT: copy_value
 // CHECK: [[BORROWED_ARG:%.*]] = begin_borrow [[ARG]]
 // CHECK-NOT: copy_value
@@ -574,7 +573,7 @@ func dontEmitIgnoredLoadExpr(_ a : NonTrivialStruct) -> NonTrivialStruct.Type {
   return type(of: a)
 }
 // CHECK-LABEL: dontEmitIgnoredLoadExpr
-// CHECK: bb0(%0 : $NonTrivialStruct):
+// CHECK: bb0(%0 : @owned $NonTrivialStruct):
 // CHECK-NEXT: debug_value
 // CHECK-NEXT: begin_borrow
 // CHECK-NEXT: end_borrow
@@ -585,10 +584,10 @@ func dontEmitIgnoredLoadExpr(_ a : NonTrivialStruct) -> NonTrivialStruct.Type {
 
 // <rdar://problem/18851497> Swiftc fails to compile nested destructuring tuple binding
 // CHECK-LABEL: sil hidden @_T011expressions21implodeRecursiveTupleySi_Sit_SitSgF
-// CHECK: bb0(%0 : $Optional<((Int, Int), Int)>):
+// CHECK: bb0(%0 : @trivial $Optional<((Int, Int), Int)>):
 func implodeRecursiveTuple(_ expr: ((Int, Int), Int)?) {
 
-  // CHECK: bb2([[WHOLE:%.*]] : $((Int, Int), Int)):
+  // CHECK: bb2([[WHOLE:%.*]] : @trivial $((Int, Int), Int)):
   // CHECK-NEXT: [[X:%[0-9]+]] = tuple_extract [[WHOLE]] : $((Int, Int), Int), 0
   // CHECK-NEXT: [[X0:%[0-9]+]] = tuple_extract [[X]] : $(Int, Int), 0
   // CHECK-NEXT: [[X1:%[0-9]+]] = tuple_extract [[X]] : $(Int, Int), 1

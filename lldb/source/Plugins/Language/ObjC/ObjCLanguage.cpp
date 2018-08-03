@@ -15,9 +15,7 @@
 // Project includes
 #include "ObjCLanguage.h"
 
-#include "lldb/Core/ConstString.h"
 #include "lldb/Core/PluginManager.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
@@ -25,6 +23,10 @@
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/StreamString.h"
+
+#include "llvm/Support/Threading.h"
 
 #include "CF.h"
 #include "Cocoa.h"
@@ -93,7 +95,7 @@ bool ObjCLanguage::MethodName::SetName(llvm::StringRef name, bool strict) {
   // or '-' can be omitted
   bool valid_prefix = false;
 
-  if (name[0] == '+' || name[0] == '-') {
+  if (name.size() > 1 && (name[0] == '+' || name[0] == '-')) {
     valid_prefix = name[1] == '[';
     if (name[0] == '+')
       m_type = eTypeClassMethod;
@@ -865,7 +867,7 @@ lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
   static std::once_flag g_initialize;
   static TypeCategoryImplSP g_category;
 
-  std::call_once(g_initialize, [this]() -> void {
+  llvm::call_once(g_initialize, [this]() -> void {
     DataVisualization::Categories::GetCategory(GetPluginName(), g_category);
     if (g_category) {
       LoadCoreMediaFormatters(g_category);

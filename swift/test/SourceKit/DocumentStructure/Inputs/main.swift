@@ -99,3 +99,22 @@ class ClassObjcAttr2 : NSObject {
     @objc(Foo)
     func m() {}
 }
+
+protocol FooProtocol {
+    associatedtype Bar
+    associatedtype Baz: Equatable
+}
+
+// SR-5717
+a.b(c: d?.e?.f, h: i)
+
+// SR-6926
+/* 👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦 */
+`init`(x: Int, y: Int) {}
+class C {
+/* 👨‍👩‍👧‍👦👨‍👩‍👧‍👦👨‍👩‍👧‍👦 */
+`init`(x: Int, y: Int) {}
+}
+var // comment
+  `$` = 1
+func /* comment */`foo`(x: Int) {}

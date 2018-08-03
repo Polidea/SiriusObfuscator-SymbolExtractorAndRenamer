@@ -56,11 +56,21 @@ MDNode *MDBuilder::createUnpredictable() {
   return MDNode::get(Context, None);
 }
 
-MDNode *MDBuilder::createFunctionEntryCount(uint64_t Count) {
+MDNode *MDBuilder::createFunctionEntryCount(
+    uint64_t Count, const DenseSet<GlobalValue::GUID> *Imports) {
   Type *Int64Ty = Type::getInt64Ty(Context);
-  return MDNode::get(Context,
-                     {createString("function_entry_count"),
-                      createConstant(ConstantInt::get(Int64Ty, Count))});
+  SmallVector<Metadata *, 8> Ops;
+  Ops.push_back(createString("function_entry_count"));
+  Ops.push_back(createConstant(ConstantInt::get(Int64Ty, Count)));
+  if (Imports) {
+    SmallVector<GlobalValue::GUID, 2> OrderID(Imports->begin(), Imports->end());
+    std::stable_sort(OrderID.begin(), OrderID.end(),
+      [] (GlobalValue::GUID A, GlobalValue::GUID B) {
+        return A < B;});
+    for (auto ID : OrderID)
+      Ops.push_back(createConstant(ConstantInt::get(Int64Ty, ID)));
+  }
+  return MDNode::get(Context, Ops);
 }
 
 MDNode *MDBuilder::createFunctionSectionPrefix(StringRef Prefix) {

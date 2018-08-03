@@ -12,6 +12,7 @@
 
 #include "llbuild/Core/BuildEngine.h"
 
+#include "llbuild/Basic/Tracing.h"
 #include "llbuild/Core/BuildDB.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -195,6 +196,15 @@ class BuildEngineImpl {
       result.builtAt = engine->getCurrentTimestamp();
     }
 
+    void setCancelled() {
+      // If we have to cancel a task, it becomes incomplete. We do not need to
+      // sync this to the database, the database won't see an updated record and
+      // can continue to maintain the previous view of state -- however, we must
+      // mark the internal representation as incomplete because the result is no
+      // longer valid.
+      state = StateKind::Incomplete;
+    }
+    
     RuleScanRecord* getPendingScanRecord() {
       assert(isScanning());
       return inProgressInfo.pendingScanRecord;
@@ -483,7 +493,10 @@ private:
     ruleInfo.result.dependencies.clear();
 
     // Inform the task it should start.
-    task->start(buildEngine);
+    {
+      TracingInterval i(EngineTaskCallbackKind::Start);
+      task->start(buildEngine);
+    }
 
     // Provide the task the prior result, if present.
     //
@@ -492,6 +505,7 @@ private:
     // the clients that want it can ask? It's cheap to provide here, so
     // ultimately this is mostly a matter of cleanliness.
     if (ruleInfo.result.builtAt != 0) {
+      TracingInterval i(EngineTaskCallbackKind::ProvidePriorValue);
       task->providePriorValue(buildEngine, ruleInfo.result.value);
     }
 
@@ -631,6 +645,8 @@ private:
       // FIXME: We don't want to process all of these requests, this amounts to
       // doing all of the dependency scanning up-front.
       while (!ruleInfosToScan.empty()) {
+        TracingInterval i(EngineQueueItemKind::RuleToScan);
+        
         didWork = true;
 
         auto request = ruleInfosToScan.back();
@@ -641,6 +657,8 @@ private:
 
       // Process all of the pending input requests.
       while (!inputRequests.empty()) {
+        TracingInterval i(EngineQueueItemKind::InputRequest);
+        
         didWork = true;
 
         auto request = inputRequests.back();
@@ -695,6 +713,8 @@ private:
 
       // Process all of the finished inputs.
       while (!finishedInputRequests.empty()) {
+        TracingInterval i(EngineQueueItemKind::FinishedInputRequest);
+        
         didWork = true;
 
         auto request = finishedInputRequests.back();
@@ -736,8 +756,11 @@ private:
         // FIXME: Should we provide the input key here? We have it available
         // cheaply.
         assert(request.inputRuleInfo->isComplete(this));
-        request.taskInfo->task->provideValue(
-          buildEngine, request.inputID, request.inputRuleInfo->result.value);
+        {
+          TracingInterval i(EngineTaskCallbackKind::ProvideValue);
+          request.taskInfo->task->provideValue(
+              buildEngine, request.inputID, request.inputRuleInfo->result.value);
+        }
 
         // Decrement the wait count, and move to finish queue if necessary.
         decrementTaskWaitCount(request.taskInfo);
@@ -745,6 +768,8 @@ private:
 
       // Process all of the ready to run tasks.
       while (!readyTaskInfos.empty()) {
+        TracingInterval i(EngineQueueItemKind::ReadyTask);
+        
         didWork = true;
 
         TaskInfo* taskInfo = readyTaskInfos.back();
@@ -764,7 +789,10 @@ private:
         //
         // FIXME: We need to track this state, and generate an error if this
         // task ever requests additional inputs.
-        taskInfo->task->inputsAvailable(buildEngine);
+        {
+          TracingInterval i(EngineTaskCallbackKind::InputsAvailable);
+          taskInfo->task->inputsAvailable(buildEngine);
+        }
 
         // Increment our count of outstanding tasks.
         ++numOutstandingUnfinishedTasks;
@@ -772,6 +800,8 @@ private:
 
       // Process all of the finished tasks.
       while (true) {
+        TracingInterval i(EngineQueueItemKind::FinishedTask);
+        
         // Try to take a task from the finished queue.
         TaskInfo* taskInfo = nullptr;
         {
@@ -835,7 +865,7 @@ private:
               ruleInfo->keyID, ruleInfo->rule, ruleInfo->result, &error);
           if (!result) {
             delegate.error(error);
-            completeRemainingTasks();
+            cancelRemainingTasks();
             return false;
           }
         }
@@ -870,7 +900,13 @@ private:
 
       // If we haven't done any other work at this point but we have pending
       // tasks, we need to wait for a task to complete.
+      //
+      // NOTE: Cancellation also implements this process, if you modify this
+      // code please also validate that \see cancelRemainingTasks() is still
+      // correct.
       if (!didWork && numOutstandingUnfinishedTasks != 0) {
+        TracingInterval i(EngineQueueItemKind::Waiting);
+        
         // Wait for our condition variable.
         std::unique_lock<std::mutex> lock(finishedTaskInfosMutex);
 
@@ -878,7 +914,7 @@ private:
         // of the mutex, if one has been added then we may have already missed
         // the condition notification and cannot safely wait.
         if (finishedTaskInfos.empty()) {
-            finishedTaskInfosCondition.wait(lock);
+          finishedTaskInfosCondition.wait(lock);
         }
 
         didWork = true;
@@ -1031,22 +1067,50 @@ private:
     assert(!cycleList.empty());
 
     delegate.cycleDetected(cycleList);
-    completeRemainingTasks();
+    cancelRemainingTasks();
   }
 
-  // Complete all of the remaining tasks.
-  //
-  // FIXME: Should we have a task abort callback?
-  void completeRemainingTasks() {
+  // Cancel all of the remaining tasks.
+  void cancelRemainingTasks() {
+    // We need to wait for any currently running tasks to be reported as
+    // complete. Not doing this would mean we could get asynchronous calls
+    // attempting to modify the task state concurrently with the cancellation
+    // process, which isn't something we want to need to synchronize on.
+    //
+    // We don't process the requests at all, we simply drain them. In practice,
+    // we expect clients to implement cancellation in conjection with causing
+    // long-running tasks to also cancel and fail, so preserving those results
+    // is not valuable.
+    while (numOutstandingUnfinishedTasks != 0) {
+        std::unique_lock<std::mutex> lock(finishedTaskInfosMutex);
+        if (finishedTaskInfos.empty()) {
+          finishedTaskInfosCondition.wait(lock);
+        } else {
+          assert(finishedTaskInfos.size() <= numOutstandingUnfinishedTasks);
+          numOutstandingUnfinishedTasks -= finishedTaskInfos.size();
+          finishedTaskInfos.clear();
+        }
+    }
+    
     for (auto& it: taskInfos) {
-      // Complete the task, even though it did not update the value.
+      // Cancel the task, marking it incomplete.
       //
-      // FIXME: What should we do here with the value?
+      // This will force it to rerun in a later build, but since it was already
+      // running in this build that was almost certainly going to be
+      // required. Technically, there are rare situations where it wouldn't have
+      // to rerun (e.g., if resultIsValid becomes true after being false in this
+      // run), and if we were willing to restore the tasks state--either by
+      // keeping the old one or by restoring from the database--we could ensure
+      // that doesn't happen.
+      //
+      // NOTE: Actually, we currently don't sync this write to the database, so
+      // in some cases we do actually preserve this information (if the client
+      // ends up cancelling, then reloading froom the database).
       TaskInfo* taskInfo = &it.second;
       RuleInfo* ruleInfo = taskInfo->forRuleInfo;
       assert(taskInfo == ruleInfo->getPendingTaskInfo());
       ruleInfo->setPendingTaskInfo(nullptr);
-      ruleInfo->setComplete(this);
+      ruleInfo->setCancelled();
     }
 
     // Delete all of the tasks.
@@ -1077,7 +1141,13 @@ public:
   KeyID getKeyID(const KeyType& key) {
     // Delegate if we have a database.
     if (db) {
-      return db->getKeyID(key);
+      std::string error;
+      KeyID id = db->getKeyID(key, &error);
+      if (!error.empty()) {
+        delegate.error(error);
+        cancelRemainingTasks();
+      }
+      return id;
     }
 
     // Otherwise use our builtin key table.
@@ -1153,7 +1223,7 @@ public:
       db->lookupRuleResult(ruleInfo.keyID, ruleInfo.rule, &ruleInfo.result, &error);
       if (!error.empty()) {
         delegate.error(error);
-        completeRemainingTasks();
+        cancelRemainingTasks();
       }
     }
 
@@ -1327,7 +1397,7 @@ public:
     // Validate the InputID.
     if (inputID > BuildEngine::kMaximumInputID) {
       delegate.error("error: attempt to use reserved input ID");
-      completeRemainingTasks();
+      cancelRemainingTasks();
       return;
     }
 
@@ -1345,7 +1415,7 @@ public:
 
     if (!taskInfo->forRuleInfo->isInProgressComputing()) {
       delegate.error("error: invalid state for adding discovered dependency");
-      completeRemainingTasks();
+      cancelRemainingTasks();
       return;
     }
 
@@ -1362,7 +1432,7 @@ public:
 
     if (!taskInfo->forRuleInfo->isInProgressComputing()) {
       delegate.error("error: invalid state for marking task complete");
-      completeRemainingTasks();
+      cancelRemainingTasks();
       return;
     }
 

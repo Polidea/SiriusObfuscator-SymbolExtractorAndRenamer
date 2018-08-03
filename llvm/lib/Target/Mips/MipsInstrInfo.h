@@ -135,6 +135,13 @@ public:
   MachineInstrBuilder genInstrWithNewOpc(unsigned NewOpc,
                                          MachineBasicBlock::iterator I) const;
 
+  bool findCommutedOpIndices(MachineInstr &MI, unsigned &SrcOpIdx1,
+                             unsigned &SrcOpIdx2) const override;
+
+  /// Perform target specific instruction verification.
+  bool verifyInstruction(const MachineInstr &MI,
+                         StringRef &ErrInfo) const override;
+
 protected:
   bool isZeroImm(const MachineOperand &op) const;
 

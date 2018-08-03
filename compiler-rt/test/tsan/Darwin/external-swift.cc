@@ -5,14 +5,11 @@
 
 #import "../test.h"
 
-static void *tag = (void *)0x1;
 extern "C" {
-void *__tsan_external_register_tag(const char *object_type);
-void *__tsan_external_assign_tag(void *addr, void *tag);
-void __tsan_external_read(void *addr, void *caller_pc, void *tag);
-void __tsan_external_write(void *addr, void *caller_pc, void *tag);
 void __tsan_write8(void *addr);
 }
+
+static void *tag = (void *)0x1;
 
 __attribute__((no_sanitize("thread")))
 void ExternalWrite(void *addr) {
@@ -40,8 +37,9 @@ int main(int argc, char *argv[]) {
       ExternalWrite(opaque_object);
     });
     // CHECK: WARNING: ThreadSanitizer: Swift access race
-    // CHECK: Modifying access at {{.*}} by thread {{.*}}
-    // CHECK: Previous modifying access at {{.*}} by thread {{.*}}
+    // CHECK: Modifying access of Swift variable at {{.*}} by thread {{.*}}
+    // CHECK: Previous modifying access of Swift variable at {{.*}} by thread {{.*}}
+    // CHECK: SUMMARY: ThreadSanitizer: Swift access race
     t1.join();
     t2.join();
   }
@@ -61,7 +59,8 @@ int main(int argc, char *argv[]) {
     });
     // CHECK: WARNING: ThreadSanitizer: Swift access race
     // CHECK: Write of size 8 at {{.*}} by thread {{.*}}
-    // CHECK: Previous modifying access at {{.*}} by thread {{.*}}
+    // CHECK: Previous modifying access of Swift variable at {{.*}} by thread {{.*}}
+    // CHECK: SUMMARY: ThreadSanitizer: Swift access race
     t1.join();
     t2.join();
   }
@@ -80,8 +79,9 @@ int main(int argc, char *argv[]) {
       ExternalWrite(opaque_object);
     });
     // CHECK: WARNING: ThreadSanitizer: Swift access race
-    // CHECK: Modifying access at {{.*}} by thread {{.*}}
+    // CHECK: Modifying access of Swift variable at {{.*}} by thread {{.*}}
     // CHECK: Previous write of size 8 at {{.*}} by thread {{.*}}
+    // CHECK: SUMMARY: ThreadSanitizer: Swift access race
     t1.join();
     t2.join();
   }

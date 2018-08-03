@@ -29,6 +29,8 @@ add_lldb_library(liblldb SHARED
   SBBlock.cpp
   SBBreakpoint.cpp
   SBBreakpointLocation.cpp
+  SBBreakpointName.cpp
+  SBBreakpointOptionCommon.cpp
   SBBroadcaster.cpp
   SBCommandInterpreter.cpp
   SBCommandReturnObject.cpp
@@ -72,6 +74,8 @@ add_lldb_library(liblldb SHARED
   SBThread.cpp
   SBThreadCollection.cpp
   SBThreadPlan.cpp
+  SBTrace.cpp
+  SBTraceOptions.cpp
   SBType.cpp
   SBTypeCategory.cpp
   SBTypeEnumMember.cpp
@@ -99,6 +103,7 @@ add_lldb_library(liblldb SHARED
     lldbInterpreter
     lldbSymbol
     lldbTarget
+    lldbUtility
     ${LLDB_ALL_PLUGINS}
     ${SWIFT_ALL_LIBS}
   LINK_COMPONENTS
@@ -165,10 +170,11 @@ if(NOT LLDB_BUILT_STANDALONE)
   set(clang_headers_target symlink_clang_headers)
 endif()
 
+# Copy the clang resource directory.
 add_custom_command_target(
     unused_var
-    COMMAND "${CMAKE_COMMAND}" "-E" "copy_directory" "${CLANG_RESOURCE_PATH}" "${lib_dir}/lldb/clang"
-    OUTPUT "${lib_dir}/lldb/clang"
+    COMMAND "${CMAKE_COMMAND}" "-E" "copy_directory" "${CLANG_RESOURCE_PATH}" "${lib_dir}/lldb/clang/${LLVM_PACKAGE_VERSION}"
+    OUTPUT "${lib_dir}/lldb/clang/${LLVM_PACKAGE_VERSION}"
     VERBATIM
     ALL
     DEPENDS ${clang_headers_target})

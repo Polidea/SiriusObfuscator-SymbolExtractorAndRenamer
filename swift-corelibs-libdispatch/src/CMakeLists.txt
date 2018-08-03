@@ -19,6 +19,7 @@ add_library(dispatch
               time.c
               transform.c
               voucher.c
+              shims.c
               protocol.defs
               provider.d
               allocator_internal.h
@@ -46,8 +47,8 @@ add_library(dispatch
               shims/atomic_sfb.h
               shims/getprogname.h
               shims/hw_config.h
-              shims/linux_stubs.c
-              shims/linux_stubs.h
+              shims/generic_unix_stubs.c
+              shims/generic_unix_stubs.h
               shims/lock.c
               shims/lock.h
               shims/perfmon.h
@@ -93,20 +94,23 @@ if(ENABLE_SWIFT)
                       swift/Source.swift
                       swift/Time.swift
                       swift/Wrapper.swift
+                    TARGET
+                      ${CMAKE_C_COMPILER_TARGET}
                     CFLAGS
                       -fblocks
                       -fmodule-map-file=${CMAKE_SOURCE_DIR}/dispatch/module.modulemap
                     SWIFT_FLAGS
                       -I ${CMAKE_SOURCE_DIR}
-                      ${swift_optimization_flags})
-  add_dependencies(swiftDispatch
-                     module-map-symlinks)
+                      -I/usr/include
+                      ${swift_optimization_flags}
+                    DEPENDS
+                      ${CMAKE_SOURCE_DIR}/dispatch/module.modulemap)
   target_sources(dispatch
                  PRIVATE
                    swift/DispatchStubs.cc
                    ${CMAKE_CURRENT_BINARY_DIR}/swiftDispatch.o)
 endif()
-if(dtrace_EXECUTABLE)
+if(ENABLE_DTRACE)
   dtrace_usdt_probe(${CMAKE_CURRENT_SOURCE_DIR}/provider.d
                     OUTPUT_SOURCES
                       dispatch_dtrace_provider_headers)
@@ -140,6 +144,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL Windows)
   target_compile_definitions(dispatch
                              PRIVATE
                                -D_CRT_SECURE_NO_WARNINGS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL Android)
+  target_compile_options(dispatch
+                         PRIVATE
+                           -U_GNU_SOURCE)
 endif()
 if(BSD_OVERLAY_FOUND)
   target_compile_options(dispatch
@@ -202,12 +210,12 @@ add_custom_command(TARGET dispatch POST_BUILD
 install(TARGETS
           dispatch
         DESTINATION
-          "${CMAKE_INSTALL_LIBDIR}")
+          "${INSTALL_TARGET_DIR}")
 if(ENABLE_SWIFT)
   install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/swift/Dispatch.swiftmodule
             ${CMAKE_CURRENT_BINARY_DIR}/swift/Dispatch.swiftdoc
           DESTINATION
-            "${CMAKE_INSTALL_LIBDIR}/swift/${SWIFT_OS}/${CMAKE_SYSTEM_PROCESSOR}")
+            "${INSTALL_TARGET_DIR}/${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 

@@ -22,7 +22,14 @@ struct L {
 }
 
 sil @plus : $@convention(thin) (Int64, Int64) -> Int64
+sil @nativeobject_plus : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+sil @partial_apply_user : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject) -> ()
 sil @fromLiteral : $@convention(thin) (Builtin.Int128, @thin Int64.Type) -> Int64
+sil @use_nativeobject : $@convention(thin) (@guaranteed Builtin.NativeObject) -> ()
+
+//////////////////////////////////////
+// Multiple Inline in a Block Tests //
+//////////////////////////////////////
 
 // CHECK-LABEL: sil [transparent] @test_add : $@convention(thin) (Int64) -> Int64 {
 sil [transparent] @test_add : $@convention(thin) (Int64) -> Int64 {
@@ -166,6 +173,10 @@ bb0(%0 : $Int64):
   return %19 : $Int64
 }
 
+///////////////////////
+// Existential Tests //
+///////////////////////
+
 protocol SomeProtocol {
 }
 
@@ -201,14 +212,12 @@ sil @inline_test_existential_metatype : $@convention(thin) (@in SomeProtocol) ->
 bb0(%0 : $*SomeProtocol):
   %1 = function_ref @test_existential_metatype : $@convention(thin) (@in SomeProtocol) -> @thick SomeProtocol.Type
   %2 = apply %1(%0) : $@convention(thin) (@in SomeProtocol) -> @thick SomeProtocol.Type
-  %3 = return %2 : $@thick SomeProtocol.Type
+  return %2 : $@thick SomeProtocol.Type
 }
 
-sil private @top_level_code : $() -> () {
-bb0:
-  %0 = tuple ()
-  return %0 : $()
-}
+////////////////////////
+// Control Flow Tests //
+////////////////////////
 
 sil @get_logic_value : $@convention(method) (@inout Bool) -> Builtin.Int1
 sil @add_floats : $@convention(thin) (Float32, Float32) -> Float32
@@ -387,6 +396,10 @@ bb0(%0 : $Float):
   return %21 : $Float
 }
 
+///////////////////////////////////////
+// Recursion and Partial Apply Tests //
+///////////////////////////////////////
+
 // CHECK-LABEL: [transparent] @test_recursive_foo : $@convention(thin) (Float) -> Float
 sil [transparent] @test_recursive_foo : $@convention(thin) (Float) -> Float {
   // CHECK-NOT: function_ref
@@ -449,6 +462,109 @@ bb0(%0 : $@callee_owned (Int64) -> Int64, %1 : $Int64):
   return %7 : $Int64
 }
 
+
+// CHECK-LABEL: [transparent] @test_recursive_nativeobject_foo : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+sil [transparent] @test_recursive_nativeobject_foo : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+  // CHECK-NOT: function_ref
+  // CHECK-NOT: apply
+  // CHECK: return
+
+bb0(%0 : $Builtin.NativeObject):
+  %3 = function_ref @test_recursive_nativeobject_bar : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %5 = apply %3(%0) : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  return %5 : $Builtin.NativeObject
+}
+
+// CHECK-LABEL: sil [transparent] @test_recursive_nativeobject_bar : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+sil [transparent] @test_recursive_nativeobject_bar : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+  // CHECK-NOT: function_ref
+  // CHECK-NOT: apply
+  // CHECK: return
+
+bb0(%0 : $Builtin.NativeObject):
+  %3 = function_ref @test_recursive_nativeobject_baz : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %5 = apply %3(%0) : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  return %5 : $Builtin.NativeObject
+}
+
+// CHECK-LABEL: sil [transparent] @test_recursive_nativeobject_baz : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+// CHECK: bb0
+// CHECK-NEXT: return
+// CHECK: } // end sil function 'test_recursive_nativeobject_baz'
+sil [transparent] @test_recursive_nativeobject_baz : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+bb0(%0 : $Builtin.NativeObject):
+  return %0 : $Builtin.NativeObject
+}
+
+sil [transparent] @test_partial_nativeobject_baz : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+bb0(%0 : $Builtin.NativeObject, %1 : $Builtin.NativeObject):
+  %6 = function_ref @nativeobject_plus : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %7 = apply %6(%0, %1) : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  return %7 : $Builtin.NativeObject
+}
+
+sil [transparent] @test_partial_nativeobject_bar : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+bb0(%0 : $@callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject, %1 : $Builtin.NativeObject):
+  %7 = apply %0(%1) : $@callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  return %7 : $Builtin.NativeObject
+}
+
+// CHECK-LABEL: sil [transparent] @test_partial_nativeobject_foo : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+// CHECK: bb0([[ARG:%.*]] : $Builtin.NativeObject):
+// CHECK:   [[FN:%.*]] = function_ref @test_partial_nativeobject_baz :
+// CHECK:   br bb1
+//
+// CHECK: bb1:
+// CHECK:   strong_retain [[ARG]]
+// CHECK:   [[PAI:%.*]] = partial_apply [[FN]]([[ARG]])
+// CHECK:   br bb2
+//
+// CHECK: bb2:
+// CHECK:   strong_retain [[ARG]]
+// CHECK:   strong_retain [[PAI]]
+// CHECK:   strong_retain [[ARG]]
+// CHECK:   strong_release [[PAI]]
+// CHECK:   [[FN2:%.*]] = function_ref @nativeobject_plus :
+// CHECK:   [[RESULT:%.*]] = apply [[FN2]]([[ARG]], [[ARG]])
+//
+// CHECK: bb3:
+// CHECK:   strong_retain [[PAI]]
+// CHECK:   [[OPAQUE_FN:%.*]] = function_ref @partial_apply_user
+// CHECK:   apply [[OPAQUE_FN]]([[PAI]])
+// CHECK:   strong_release [[PAI]]
+// CHECK:   strong_release [[ARG]]
+// CHECK:   return [[RESULT]]
+// CHECK: } // end sil function 'test_partial_nativeobject_foo'
+sil [transparent] @test_partial_nativeobject_foo : $@convention(thin) (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject {
+bb0(%0 : $Builtin.NativeObject):
+  %2 = function_ref @test_partial_nativeobject_bar : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %3 = function_ref @test_partial_nativeobject_baz : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  br bb1
+
+bb1:
+  strong_retain %0 : $Builtin.NativeObject
+  %5 = partial_apply %3(%0) : $@convention(thin) (@owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  br bb2
+
+bb2:
+  strong_retain %0 : $Builtin.NativeObject
+  strong_retain %5 : $@callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %13 = apply %2(%5, %0) : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject, @owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  br bb3
+
+bb3:
+  strong_retain %5 : $@callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  %15 = function_ref @partial_apply_user : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject) -> ()
+  apply %15(%5) : $@convention(thin) (@owned @callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject) -> ()
+  strong_release %5 : $@callee_owned (@owned Builtin.NativeObject) -> @owned Builtin.NativeObject
+  strong_release %0 : $Builtin.NativeObject
+  return %13 : $Builtin.NativeObject
+}
+
+///////////////////////
+// Autoclosure Tests //
+///////////////////////
+
 sil @true_getter : $@convention(thin) () -> Bool
 
 sil [transparent] @short_circuit_or : $@convention(thin) (Bool, @callee_owned () -> Bool) -> Bool {
@@ -470,8 +586,10 @@ bb1:
   br bb3(%10 : $Bool)
 
 bb2:
+  %m2 = integer_literal $Builtin.Int32, 2 // Marker
   %12 = load %3a : $*@callee_owned () -> Bool
   strong_retain %12 : $@callee_owned () -> Bool
+  %m3 = integer_literal $Builtin.Int32, 3 // Marker
   %14 = apply %12() : $@callee_owned () -> Bool
   br bb3(%14 : $Bool)
 
@@ -500,20 +618,22 @@ sil @test_short_circuit : $@convention(thin) (Bool, Bool) -> Bool {
   // CHECK: br [[BB2:.*]](
 
 // CHECK: [[BB2]](
-  // CHECK: br [[BB5:.*]](
+  // CHECK: br [[BB4:.*]](
 
 // CHECK: bb3:
-  // CHECK: br bb4
-
-// CHECK: [[BB4]]:
+  // CHECK: [[OLD_CALLEE:%.*]] = load {{%[0-9]+}} :
+  // CHECK: strong_retain [[OLD_CALLEE]]
+  // Separation marker
+  // CHECK: integer_literal $Builtin.Int32, 3
   // CHECK: strong_retain [[VAL4:%[0-9]*]]
+  // CHECK: strong_release [[OLD_CALLEE]]
   // CHECK: [[ADDR4:%.*]] = project_box [[VAL4]]
   // CHECK: {{%.*}} = tuple ()
   // CHECK: {{%.*}} = load [[ADDR4]]
   // CHECK: strong_release [[VAL4]]
   // CHECK: br [[BB2]](
 
-// CHECK: [[BB5]](
+// CHECK: [[BB4]](
   // CHECK: strong_release [[VAL4]]
   // CHECK: return {{.*}}
 
@@ -529,6 +649,7 @@ bb0(%0 : $Bool, %1 : $Bool):
   %8 = function_ref @closure0 : $@convention(thin) (@owned { var Bool }) -> Bool
   strong_retain %3 : ${ var Bool }
   %10 = partial_apply %8(%3) : $@convention(thin) (@owned { var Bool }) -> Bool
+  %12 = integer_literal $Builtin.Int32, 1 // Marker
   %11 = apply %6(%7, %10) : $@convention(thin) (Bool, @callee_owned () -> Bool) -> Bool
   strong_release %3 : ${ var Bool }
   strong_release %2 : ${ var Bool }
@@ -547,11 +668,15 @@ sil @test_short_circuit2 : $@convention(thin) (Bool, Bool) -> Bool {
 // CHECK: [[BB2]](
   // CHECK: br [[BB5:.*]](
 
-// CHECK: bb3:
-  // CHECK: br bb4
-
-// CHECK: [[BB4]]:
+// CHECK: [[BB3]]:
+  // Marker -
+  // CHECK: integer_literal $Builtin.Int32, 2
+  // CHECK: [[OLD_CALLEE:%.*]] = load {{%.*}}
+  // CHECK: strong_retain [[OLD_CALLEE]]
+  // Marker -
+  // CHECK: integer_literal $Builtin.Int32, 3
   // CHECK: strong_retain [[VAL4:%[0-9]*]]
+  // CHECK: strong_release [[OLD_CALLEE]]
   // CHECK: [[ADDR4:%.*]] = project_box [[VAL4]]
   // CHECK: {{%.*}} = tuple ()
   // CHECK: {{%.*}} = load [[ADDR4]]
@@ -722,7 +847,7 @@ sil hidden [transparent] @protocolConstrained : $@convention(thin) <T where T : 
 bb0(%0 : $T):
   debug_value %0 : $T
   strong_retain %0 : $T
-  %3 = witness_method [volatile] $T, #Foo.foo!1.foreign : $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
+  %3 = objc_method %0 : $T, #Foo.foo!1.foreign, $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
   %4 = apply %3<T>(%0) : $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
   strong_release %0 : $T
   strong_release %0 : $T
@@ -738,7 +863,7 @@ bb0(%0 : $Foo):
   %2 = function_ref @protocolConstrained : $@convention(thin) <τ_0_0 where τ_0_0 : Foo> (@owned τ_0_0) -> ()
   strong_retain %0 : $Foo
   // CHECK-NOT: apply
-  // CHECK: [[METHOD:%[a-zA-Z0-9]+]] = witness_method [volatile] $Foo, #Foo.foo!1.foreign : {{.*}} : $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
+  // CHECK: [[METHOD:%[a-zA-Z0-9]+]] = objc_method %0 : $Foo, #Foo.foo!1.foreign : {{.*}}, $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
   // CHECK: apply [[METHOD]]<Foo>(%0) : $@convention(objc_method) <τ_0_0 where τ_0_0 : Foo> (τ_0_0) -> ()
   %4 = apply %2<Foo>(%0) : $@convention(thin) <τ_0_0 where τ_0_0 : Foo> (@owned τ_0_0) -> ()
   strong_release %0 : $Foo
@@ -849,8 +974,6 @@ bb0(%0 : $@callee_owned () -> Builtin.Int8):
 // CHECK-LABEL: sil @testouter_transparent
 sil @testouter_transparent : $@convention(thin) (Builtin.Int8) -> Builtin.Int8 {
 // CHECK: bb0
-// CHECK-NEXT: br bb1
-// CHECK: bb1
 // CHECK-NEXT: return
 bb0(%0 : $Builtin.Int8):
   %2 = function_ref @outer_transparent : $@convention(thin) (@owned @callee_owned () -> Builtin.Int8) -> Builtin.Int8
@@ -872,8 +995,8 @@ sil [transparent] @P2_s : $@convention(method) <Self where Self : P2> (@in_guara
 bb0(%0 : $*Self):
   %2 = alloc_stack $Self
   copy_addr %0 to [initialization] %2 : $*Self
-  %4 = witness_method $Self, #P2.c!getter.1 : $@convention(witness_method) <τ_0_0 where τ_0_0 : P2> (@in_guaranteed τ_0_0) -> Int32
-  %5 = apply %4<Self>(%2) : $@convention(witness_method) <τ_0_0 where τ_0_0 : P2> (@in_guaranteed τ_0_0) -> Int32
+  %4 = witness_method $Self, #P2.c!getter.1 : $@convention(witness_method: P2) <τ_0_0 where τ_0_0 : P2> (@in_guaranteed τ_0_0) -> Int32
+  %5 = apply %4<Self>(%2) : $@convention(witness_method: P2) <τ_0_0 where τ_0_0 : P2> (@in_guaranteed τ_0_0) -> Int32
   destroy_addr %2 : $*Self
   %7 = integer_literal $Builtin.Int32, 1
   %8 = struct_extract %5 : $Int32, #Int32._value
@@ -910,3 +1033,154 @@ sil_default_witness_table hidden P2 {
   no_default
 }
 
+// Test function_ref -> convert_function -> apply.
+sil [transparent] @testMandatoryConvertedHelper : $@convention(thin) (C) -> C {
+bb0(%0 : $C):
+  return %0 : $C
+}
+
+sil [transparent] @testMandatoryConvertedHelper2 : $@convention(thin) (Optional<C>) -> C {
+bb0(%0 : $Optional<C>):
+  %o = unchecked_enum_data %0 : $Optional<C>, #Optional.some!enumelt.1
+  return %o : $C
+}
+
+// CHECK-LABEL: sil @testMandatoryConverted : $@convention(thin) (C) -> C {
+// CHECK: bb0(%0 : $C):
+// CHECK:   [[F1:%.*]] = function_ref @testMandatoryConvertedHelper : $@convention(thin) (C) -> C
+// CHECK:   [[CVT1:%.*]] = convert_function [[F1]] : $@convention(thin) (C) -> C to $@convention(thin) (C) -> (C, @error Error)
+// CHECK:   try_apply [[CVT1]](%0) : $@convention(thin) (C) -> (C, @error Error), normal bb1, error bb2
+// CHECK: bb1(%{{.*}} : $C):
+// CHECK:   br bb3(%{{.*}} : $C)
+// CHECK: bb2(%{{.*}} : $Error):
+// CHECK:   [[F2:%.*]] = function_ref @testMandatoryConvertedHelper2 : $@convention(thin) (Optional<C>) -> C
+// CHECK:   [[CVT2:%.*]] = convert_function [[F2]] : $@convention(thin) (Optional<C>) -> C to $@convention(thin) (C) -> C
+// CHECK:   %{{.*}} = apply [[CVT2]](%0) : $@convention(thin) (C) -> C
+// CHECK:   br bb3(%{{.*}} : $C)
+// CHECK: bb3(%{{.*}} : $C):
+// CHECK:   return %{{.*}} : $C
+// CHECK-LABEL: } // end sil function 'testMandatoryConverted'
+sil @testMandatoryConverted : $@convention(thin) (C) -> C {
+bb0(%0 : $C):
+  // Inline this one.
+  %f = function_ref @testMandatoryConvertedHelper : $@convention(thin) (C) -> C
+  %cf1 = convert_function %f : $@convention(thin) (C) -> C to $@convention(thin) @noescape (C) -> C
+  %call1 = apply %cf1(%0) : $@convention(thin) @noescape (C) -> C
+
+  // Don't (currently) inline conversion away from throws.
+  %cf2 = convert_function %f : $@convention(thin) (C) -> C to $@convention(thin) (C) -> (C, @error Error)
+  try_apply %cf2(%0) : $@convention(thin) (C) -> (C, @error Error), normal bb7, error bb11
+
+bb7(%callret : $C):
+  br bb12(%callret : $C)
+
+bb11(%128 : $Error):
+  // Don't (currently) inline conversion away from Optional.
+  %f2 = function_ref @testMandatoryConvertedHelper2 : $@convention(thin) (Optional<C>) -> C
+  %cf3 = convert_function %f2 : $@convention(thin) (Optional<C>) -> C to $@convention(thin) (C) -> C
+  %call3 = apply %cf3(%0) : $@convention(thin) (C) -> C
+  br bb12(%call3 : $C)
+
+bb12(%result : $C):
+  return %result : $C
+}
+
+sil @use_c : $@convention(thin) (@guaranteed C) -> ()
+sil @use_c_unowned : $@convention(thin) (C) -> ()
+
+sil [transparent] @guaranteed_closure_func : $@convention(thin) (@guaranteed C) -> () {
+bb0(%0 : $C):
+  %use = function_ref @use_c : $@convention(thin) (@guaranteed C) -> ()
+  apply %use(%0) : $@convention(thin) (@guaranteed C) -> ()
+  %t = tuple ()
+  return %t : $()
+}
+
+sil [transparent] @unowned_closure_func : $@convention(thin) (C) -> () {
+bb0(%0 : $C):
+  %use = function_ref @use_c_unowned : $@convention(thin) (C) -> ()
+  apply %use(%0) : $@convention(thin) (C) -> ()
+  %t = tuple ()
+  return %t : $()
+}
+
+// CHECK-LABEL: sil @test_guaranteed_closure_capture
+// CHECK: bb0([[ARG:%.*]] : $C):
+// CHECK:   strong_retain [[ARG]] : $C
+// @guaranteed closure captures *don't* release the capture in the closure implementation.
+// CHECK-NOT:   strong_retain [[ARG]] : $C
+// CHECK:   [[F:%.*]] = function_ref @use_c
+// CHECK:   apply [[F]]([[ARG]])
+// CHECK:   strong_release [[ARG]]
+// CHECK:   return
+sil @test_guaranteed_closure_capture : $@convention(thin) (@guaranteed C) -> () {
+bb0(%0: $C):
+  strong_retain %0 : $C
+  %closure_fun = function_ref @guaranteed_closure_func : $@convention(thin) (@guaranteed C) -> ()
+  %closure = partial_apply [callee_guaranteed] %closure_fun(%0) : $@convention(thin) (@guaranteed C) -> ()
+  apply %closure() : $@callee_guaranteed () -> ()
+  strong_release %closure : $@callee_guaranteed () -> ()
+  %t = tuple ()
+  return %t : $()
+}
+
+// CHECK-LABEL: sil @test_guaranteed_closure_capture2
+// CHECK: bb0([[ARG:%.*]] : $C):
+// @guaranteed closure captures *don't* release the capture in the closure implementation.
+// CHECK:   strong_retain [[ARG]] : $C
+// CHECK:   strong_release [[ARG]] : $C
+// CHECK:   [[F:%.*]] = function_ref @use_c
+// CHECK:   apply [[F]]([[ARG]])
+// CHECK-NOT:   strong_release [[ARG]]
+// CHECK:   return
+sil @test_guaranteed_closure_capture2 : $@convention(thin) (@guaranteed C) -> () {
+bb0(%0: $C):
+  strong_retain %0 : $C
+  %closure_fun = function_ref @guaranteed_closure_func : $@convention(thin) (@guaranteed C) -> ()
+  %closure = partial_apply %closure_fun(%0) : $@convention(thin) (@guaranteed C) -> ()
+  apply %closure() : $@callee_owned () -> ()
+  %t = tuple ()
+  return %t : $()
+}
+
+// CHECK-LABEL: sil @test_unowned_closure_capture2
+// CHECK: bb0([[ARG:%.*]] : $C):
+// CHECK:   strong_retain [[ARG]]
+// CHECK:   strong_release [[ARG]]
+// CHECK-NOT: strong_release [[ARG]]
+// CHECK:   [[F:%.*]] = function_ref @use_c_unowned
+// CHECK:   apply [[F]]([[ARG]]) : $@convention(thin) (C) -> ()
+// CHECK-NOT: strong_release [[ARG]]
+// CHECK:   return
+sil @test_unowned_closure_capture2 : $@convention(thin) (@guaranteed C) -> () {
+bb0(%0: $C):
+  strong_retain %0 : $C
+  %closure_fun = function_ref @unowned_closure_func : $@convention(thin) (C) -> ()
+  %closure = partial_apply %closure_fun(%0) : $@convention(thin) (C) -> ()
+  apply %closure() : $@callee_owned () -> ()
+  %t = tuple ()
+  return %t : $()
+}
+// CHECK-LABEL: sil @test_guaranteed_closure
+// CHECK: bb0([[ARG:%.*]] : $C):
+// CHECK:   strong_retain [[ARG]] : $C
+// CHECK:   [[F:%.*]] = function_ref @guaranteed_closure_func
+// CHECK:   [[C:%.*]] = partial_apply [callee_guaranteed] [[F]]([[ARG]])
+// @guaranteed closure captures *don't* release the capture in the closure implementation.
+// CHECK-NOT:   strong_retain [[ARG]] : $C
+// @callee_guaranteed closures *don't* release the context on application.
+// CHECK-NOT:   strong_release [[C]]
+// CHECK:   [[F:%.*]] = function_ref @use_c
+// CHECK:   apply [[F]]([[ARG]])
+// CHECK:   return [[C]]
+
+sil @test_guaranteed_closure : $@convention(thin) (@guaranteed C) -> @owned @callee_guaranteed () -> () {
+bb0(%0: $C):
+  strong_retain %0 : $C
+  %closure_fun = function_ref @guaranteed_closure_func : $@convention(thin) (@guaranteed C) -> ()
+  %closure = partial_apply [callee_guaranteed] %closure_fun(%0) : $@convention(thin) (@guaranteed C) -> ()
+// NOTE: No ``strong_retain %closure`` is needed here because the context is
+// @callee_guaranteed.
+  apply %closure() : $@callee_guaranteed () -> ()
+  return %closure : $@callee_guaranteed () -> ()
+}

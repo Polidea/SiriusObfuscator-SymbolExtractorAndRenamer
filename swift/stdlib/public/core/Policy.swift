@@ -15,8 +15,8 @@
 //===----------------------------------------------------------------------===//
 // Standardized uninhabited type
 //===----------------------------------------------------------------------===//
-/// The return type of functions that do not return normally; a type with no
-/// values.
+/// The return type of functions that do not return normally, that is, a type
+/// with no values.
 ///
 /// Use `Never` as the return type when declaring a closure, function, or
 /// method that unconditionally throws an error, traps, or otherwise does
@@ -31,16 +31,16 @@ public enum Never {}
 //===----------------------------------------------------------------------===//
 // Standardized aliases
 //===----------------------------------------------------------------------===//
-/// The return type of functions that don't explicitly specify a return type;
-/// an empty tuple (i.e., `()`).
+/// The return type of functions that don't explicitly specify a return type,
+/// that is, an empty tuple `()`.
 ///
 /// When declaring a function or method, you don't need to specify a return
 /// type if no value will be returned. However, the type of a function,
 /// method, or closure always includes a return type, which is `Void` if
 /// otherwise unspecified.
 ///
-/// Use `Void` or an empty tuple as the return type when declaring a
-/// closure, function, or method that doesn't return a value.
+/// Use `Void` or an empty tuple as the return type when declaring a closure,
+/// function, or method that doesn't return a value.
 ///
 ///     // No return type declared:
 ///     func logMessage(_ s: String) {
@@ -104,7 +104,7 @@ public typealias StringLiteralType = String
 // IEEE Binary64, and we need 1 bit to represent the sign.  Instead of using
 // 1025, we use the next round number -- 2048.
 public typealias _MaxBuiltinIntegerType = Builtin.Int2048
-#if (!os(Windows) || CYGWIN) && (arch(i386) || arch(x86_64))
+#if !os(Windows) && (arch(i386) || arch(x86_64))
 public typealias _MaxBuiltinFloatType = Builtin.FPIEEE80
 #else
 public typealias _MaxBuiltinFloatType = Builtin.FPIEEE64
@@ -480,6 +480,7 @@ public protocol _BitwiseOperations {
 /// - Parameters:
 ///   - lhs: A value to update with the union of bits set in the two arguments.
 ///   - rhs: Another value.
+@_inlineable // FIXME(sil-serialize-all)
 public func |= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
   lhs = lhs | rhs
 }
@@ -491,6 +492,7 @@ public func |= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
 ///   - lhs: A value to update with the intersections of bits set in the two
 ///     arguments.
 ///   - rhs: Another value.
+@_inlineable // FIXME(sil-serialize-all)
 public func &= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
   lhs = lhs & rhs
 }
@@ -502,6 +504,7 @@ public func &= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
 ///   - lhs: A value to update with the bits that are set in exactly one of the
 ///     two arguments.
 ///   - rhs: Another value.
+@_inlineable // FIXME(sil-serialize-all)
 public func ^= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
   lhs = lhs ^ rhs
 }
@@ -537,6 +540,7 @@ public func ^= <T : _BitwiseOperations>(lhs: inout T, rhs: T) {
 /// - Parameters:
 ///   - lhs: A value to compare.
 ///   - rhs: Another value to compare.
+@_inlineable // FIXME(sil-serialize-all)
 @_transparent
 public func ~= <T : Equatable>(a: T, b: T) -> Bool {
   return a == b
@@ -602,6 +606,7 @@ precedencegroup BitwiseShiftPrecedence {
 // Standard postfix operators.
 postfix operator ++
 postfix operator --
+postfix operator ...
 
 // Optional<T> unwrapping operator is built into the compiler as a part of
 // postfix expression grammar.
@@ -615,13 +620,17 @@ prefix operator !
 prefix operator ~
 prefix operator +
 prefix operator -
+prefix operator ...
+prefix operator ..<
 
 // Standard infix operators.
 
 // "Exponentiative"
 
-infix operator << : BitwiseShiftPrecedence
-infix operator >> : BitwiseShiftPrecedence
+infix operator  << : BitwiseShiftPrecedence
+infix operator &<< : BitwiseShiftPrecedence
+infix operator  >> : BitwiseShiftPrecedence
+infix operator &>> : BitwiseShiftPrecedence
 
 // "Multiplicative"
 
@@ -643,15 +652,13 @@ infix operator   ^ : AdditionPrecedence
 // FIXME: is this the right precedence level for "..." ?
 infix operator  ... : RangeFormationPrecedence
 infix operator  ..< : RangeFormationPrecedence
-postfix operator ...
-prefix operator ...
-prefix operator ..<
 
 // The cast operators 'as' and 'is' are hardcoded as if they had the
 // following attributes:
 // infix operator as : CastingPrecedence
 
 // "Coalescing"
+
 infix operator ?? : NilCoalescingPrecedence
 
 // "Comparative"
@@ -675,7 +682,6 @@ infix operator && : LogicalConjunctionPrecedence
 
 infix operator || : LogicalDisjunctionPrecedence
 
-
 // User-defined ternary operators are not supported. The ? : operator is
 // hardcoded as if it had the following attributes:
 // operator ternary ? : : TernaryPrecedence
@@ -686,16 +692,18 @@ infix operator || : LogicalDisjunctionPrecedence
 
 // Compound
 
-infix operator  *= : AssignmentPrecedence
-infix operator  /= : AssignmentPrecedence
-infix operator  %= : AssignmentPrecedence
-infix operator  += : AssignmentPrecedence
-infix operator  -= : AssignmentPrecedence
-infix operator <<= : AssignmentPrecedence
-infix operator >>= : AssignmentPrecedence
-infix operator  &= : AssignmentPrecedence
-infix operator  ^= : AssignmentPrecedence
-infix operator  |= : AssignmentPrecedence
+infix operator   *= : AssignmentPrecedence
+infix operator   /= : AssignmentPrecedence
+infix operator   %= : AssignmentPrecedence
+infix operator   += : AssignmentPrecedence
+infix operator   -= : AssignmentPrecedence
+infix operator  <<= : AssignmentPrecedence
+infix operator &<<= : AssignmentPrecedence
+infix operator  >>= : AssignmentPrecedence
+infix operator &>>= : AssignmentPrecedence
+infix operator   &= : AssignmentPrecedence
+infix operator   ^= : AssignmentPrecedence
+infix operator   |= : AssignmentPrecedence
 
 // Workaround for <rdar://problem/14011860> SubTLF: Default
 // implementations in protocols.  Library authors should ensure

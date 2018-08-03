@@ -19,11 +19,11 @@
 #include "swift/AST/Expr.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/ParameterList.h"
-#include "swift/AST/SourceEntityWalker.h"
 #include "swift/AST/Types.h"
 #include "swift/AST/USRGeneration.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Basic/StringExtras.h"
+#include "swift/IDE/SourceEntityWalker.h"
 #include "swift/Markup/Markup.h"
 #include "swift/Sema/IDETypeChecking.h"
 #include "llvm/ADT/APInt.h"
@@ -257,7 +257,8 @@ private:
     if (AvailableAttr::isUnavailable(D))
       return false;
     if (auto *FD = dyn_cast<FuncDecl>(D)) {
-      if (FD->isAccessor() && getParentDecl() != FD->getAccessorStorageDecl())
+      auto *Parent = getParentDecl();
+      if (FD->isAccessor() && Parent && Parent != FD->getAccessorStorageDecl())
         return false; // already handled as part of the var decl.
     }
     if (auto *VD = dyn_cast<ValueDecl>(D)) {
@@ -351,9 +352,9 @@ private:
 
     IndexSymbol Info;
     if (CtorTyRef)
-      if (!reportRef(CtorTyRef, Loc, Info))
+      if (!reportRef(CtorTyRef, Loc, Info, Data.AccKind))
         return false;
-    if (!reportRef(D, Loc, Info))
+    if (!reportRef(D, Loc, Info, Data.AccKind))
       return false;
 
     return true;
@@ -396,7 +397,8 @@ private:
 
   bool report(ValueDecl *D);
   bool reportExtension(ExtensionDecl *D);
-  bool reportRef(ValueDecl *D, SourceLoc Loc, IndexSymbol &Info);
+  bool reportRef(ValueDecl *D, SourceLoc Loc, IndexSymbol &Info,
+                 Optional<AccessKind> AccKind);
 
   bool startEntity(Decl *D, IndexSymbol &Info);
   bool startEntityDecl(ValueDecl *D);
@@ -434,7 +436,7 @@ private:
   bool initFuncDeclIndexSymbol(FuncDecl *D, IndexSymbol &Info);
   bool initFuncRefIndexSymbol(ValueDecl *D, SourceLoc Loc, IndexSymbol &Info);
   bool initVarRefIndexSymbols(Expr *CurrentE, ValueDecl *D, SourceLoc Loc,
-                              IndexSymbol &Info);
+                              IndexSymbol &Info, Optional<AccessKind> AccKind);
 
   bool indexComment(const Decl *D);
 
@@ -689,7 +691,7 @@ bool IndexSwiftASTWalker::reportRelatedRef(ValueDecl *D, SourceLoc Loc, bool isI
   // don't report this ref again when visitDeclReference reports it
   repressRefAtLoc(Loc);
 
-  if (!reportRef(D, Loc, Info)) {
+  if (!reportRef(D, Loc, Info, None)) {
     Cancelled = true;
     return false;
   }
@@ -715,7 +717,7 @@ bool IndexSwiftASTWalker::reportRelatedTypeRef(const TypeLoc &Ty, SymbolRoleSet 
     if (auto *VD = Comps.back()->getBoundDecl()) {
       if (auto *TAD = dyn_cast<TypeAliasDecl>(VD)) {
         IndexSymbol Info;
-        if (!reportRef(TAD, IdLoc, Info))
+        if (!reportRef(TAD, IdLoc, Info, None))
           return false;
         if (auto Ty = TAD->getUnderlyingTypeLoc().getType()) {
           NTD = Ty->getAnyNominal();
@@ -933,7 +935,8 @@ static bool hasUsefulRoleInSystemModule(SymbolRoleSet roles) {
 }
 
 bool IndexSwiftASTWalker::reportRef(ValueDecl *D, SourceLoc Loc,
-                                    IndexSymbol &Info) {
+                                    IndexSymbol &Info,
+                                    Optional<AccessKind> AccKind) {
   if (!shouldIndex(D, /*IsRef=*/true))
     return true; // keep walking
 
@@ -941,7 +944,7 @@ bool IndexSwiftASTWalker::reportRef(ValueDecl *D, SourceLoc Loc,
     if (initFuncRefIndexSymbol(D, Loc, Info))
       return true;
   } else if (isa<AbstractStorageDecl>(D)) {
-    if (initVarRefIndexSymbols(getCurrentExpr(), D, Loc, Info))
+    if (initVarRefIndexSymbols(getCurrentExpr(), D, Loc, Info, AccKind))
       return true;
   } else {
     if (initIndexSymbol(D, Loc, /*IsRef=*/true, Info))
@@ -1024,10 +1027,7 @@ bool IndexSwiftASTWalker::initIndexSymbol(ExtensionDecl *ExtD, ValueDecl *Extend
 }
 
 static NominalTypeDecl *getNominalParent(ValueDecl *D) {
-  Type Ty = D->getDeclContext()->getDeclaredTypeOfContext();
-  if (!Ty)
-    return nullptr;
-  return Ty->getAnyNominal();
+  return D->getDeclContext()->getAsNominalTypeOrNominalTypeExtensionContext();
 }
 
 bool IndexSwiftASTWalker::initFuncDeclIndexSymbol(FuncDecl *D,
@@ -1138,7 +1138,6 @@ bool IndexSwiftASTWalker::initFuncRefIndexSymbol(ValueDecl *D, SourceLoc Loc,
       ReceiverTy = MetaT->getInstanceType();
 
     if (auto TyD = ReceiverTy->getAnyNominal()) {
-      StringRef unused;
       if (addRelation(Info, (SymbolRoleSet) SymbolRole::RelationReceivedBy, TyD))
         return true;
       if (isDynamicCall(BaseE, D))
@@ -1149,7 +1148,9 @@ bool IndexSwiftASTWalker::initFuncRefIndexSymbol(ValueDecl *D, SourceLoc Loc,
   return false;
 }
 
-bool IndexSwiftASTWalker::initVarRefIndexSymbols(Expr *CurrentE, ValueDecl *D, SourceLoc Loc, IndexSymbol &Info) {
+bool IndexSwiftASTWalker::initVarRefIndexSymbols(Expr *CurrentE, ValueDecl *D,
+                                                 SourceLoc Loc, IndexSymbol &Info,
+                                                 Optional<AccessKind> AccKind) {
 
   if (initIndexSymbol(D, Loc, /*IsRef=*/true, Info))
     return true;
@@ -1157,7 +1158,7 @@ bool IndexSwiftASTWalker::initVarRefIndexSymbols(Expr *CurrentE, ValueDecl *D, S
   if (!CurrentE)
     return false;
 
-  AccessKind Kind = CurrentE->hasLValueAccessKind() ? CurrentE->getLValueAccessKind() : AccessKind::Read;
+  AccessKind Kind = AccKind.hasValue() ? *AccKind : AccessKind::Read;
   switch (Kind) {
   case swift::AccessKind::Read:
     Info.roles |= (unsigned)SymbolRole::Read;

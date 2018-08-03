@@ -30,6 +30,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   StackMaps SM;
   FaultMaps FM;
   std::unique_ptr<MCCodeEmitter> CodeEmitter;
+  bool NeedsRetpoline = false;
 
   // This utility class tracks the length of a stackmap instruction's 'shadow'.
   // It is used by the X86AsmPrinter to ensure that the stackmap shadow
@@ -81,7 +82,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   void LowerSTACKMAP(const MachineInstr &MI);
   void LowerPATCHPOINT(const MachineInstr &MI, X86MCInstLower &MCIL);
   void LowerSTATEPOINT(const MachineInstr &MI, X86MCInstLower &MCIL);
-  void LowerFAULTING_LOAD_OP(const MachineInstr &MI, X86MCInstLower &MCIL);
+  void LowerFAULTING_OP(const MachineInstr &MI, X86MCInstLower &MCIL);
   void LowerPATCHABLE_OP(const MachineInstr &MI, X86MCInstLower &MCIL);
 
   void LowerTlsAddr(X86MCInstLower &MCInstLowering, const MachineInstr &MI);
@@ -91,6 +92,9 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
                                      X86MCInstLower &MCIL);
   void LowerPATCHABLE_RET(const MachineInstr &MI, X86MCInstLower &MCIL);
   void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI, X86MCInstLower &MCIL);
+  void LowerPATCHABLE_EVENT_CALL(const MachineInstr &MI, X86MCInstLower &MCIL);
+
+  void LowerFENTRY_CALL(const MachineInstr &MI, X86MCInstLower &MCIL);
 
   // Helper function that emits the XRay sleds we've collected for a particular
   // function.

@@ -497,10 +497,6 @@ void SerializedASTFile::collectLinkLibraries(
   if (isSIB()) {
     collectLinkLibrariesFromImports(callback);
   } else {
-    if (File.getAssociatedModule()->getResilienceStrategy()
-        == ResilienceStrategy::Fragile) {
-      collectLinkLibrariesFromImports(callback);
-    }
     File.collectLinkLibraries(callback);
   }
 }
@@ -614,7 +610,7 @@ StringRef SerializedASTFile::getFilename() const {
   return File.getModuleFilename();
 }
 
-const clang::Module *SerializedASTFile::getUnderlyingClangModule() {
+const clang::Module *SerializedASTFile::getUnderlyingClangModule() const {
   if (auto *ShadowedModule = File.getShadowedModule())
     return ShadowedModule->findUnderlyingClangModule();
   return nullptr;

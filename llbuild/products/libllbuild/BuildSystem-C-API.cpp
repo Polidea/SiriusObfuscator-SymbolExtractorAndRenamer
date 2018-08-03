@@ -358,7 +358,13 @@ public:
           break;
         case BuildKey::Kind::DirectoryTreeSignature:
           buildKey.kind = llb_build_key_kind_directory_tree_signature;
-          buildKey.key = strdup(key.getDirectoryTreeSignaturePath().str().c_str());
+          buildKey.key = strdup(
+              key.getDirectoryTreeSignaturePath().str().c_str());
+          break;
+        case BuildKey::Kind::DirectoryTreeStructureSignature:
+          buildKey.kind = llb_build_key_kind_directory_tree_structure_signature;
+          buildKey.key = strdup(
+              key.getDirectoryTreeStructureSignaturePath().str().c_str());
           break;
         case BuildKey::Kind::Node:
           buildKey.kind = llb_build_key_kind_node;
@@ -379,6 +385,19 @@ public:
 
     for (unsigned long i=0;i<rules.size();i++) {
       free((char *)rules[i].key);
+    }
+  }
+
+  virtual void error(StringRef filename, const Token& at, const Twine& message) override {
+    if (cAPIDelegate.handle_diagnostic) {
+      cAPIDelegate.handle_diagnostic(cAPIDelegate.context,
+                                     llb_buildsystem_diagnostic_kind_error,
+                                     filename.str().c_str(),
+                                     -1,
+                                     -1,
+                                     message.str().c_str());
+    } else {
+        BuildSystemFrontendDelegate::error(filename, at, message);
     }
   }
 };
@@ -464,6 +483,11 @@ public:
     // FIXME: We probably should return a context to represent the running
     // build, instead of keeping state (like cancellation) in the delegate.
     return getFrontend().build(key);
+  }
+
+  bool buildNode(const core::KeyType& key) {
+    frontendDelegate->resetForBuild();
+    return getFrontend().buildNode(key);
   }
 
   void cancel() {
@@ -614,6 +638,11 @@ bool llb_buildsystem_initialize(llb_buildsystem_t* system_p) {
 bool llb_buildsystem_build(llb_buildsystem_t* system_p, const llb_data_t* key) {
   CAPIBuildSystem* system = (CAPIBuildSystem*) system_p;
   return system->build(core::KeyType((const char*)key->data, key->length));
+}
+
+bool llb_buildsystem_build_node(llb_buildsystem_t* system_p, const llb_data_t* key) {
+  CAPIBuildSystem* system = (CAPIBuildSystem*) system_p;
+  return system->buildNode(core::KeyType((const char*)key->data, key->length));
 }
 
 void llb_buildsystem_cancel(llb_buildsystem_t* system_p) {

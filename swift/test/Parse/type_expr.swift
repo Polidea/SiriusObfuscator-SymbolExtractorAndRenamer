@@ -22,12 +22,12 @@ protocol Zim {
 
   init()
   // TODO class var prop: Int { get }
-  static func meth() {} // expected-error{{protocol methods may not have bodies}}
-  func instMeth() {} // expected-error{{protocol methods may not have bodies}}
+  static func meth() {} // expected-error{{protocol methods must not have bodies}}
+  func instMeth() {} // expected-error{{protocol methods must not have bodies}}
 }
 
 protocol Bad {
-  init() {} // expected-error{{protocol initializers may not have bodies}}
+  init() {} // expected-error{{protocol initializers must not have bodies}}
 }
 
 struct Gen<T> {
@@ -76,15 +76,17 @@ func qualifiedType() {
                           // expected-error@-1 {{'.dynamicType' is deprecated. Use 'type(of: ...)' instead}} {{7-7=type(of: }} {{14-26=)}}
 }
 
-/* TODO allow '.Type' in expr context
+// We allow '.Type' in expr context
 func metaType() {
-  let ty = Foo.Type.self
-  let metaTy = Foo.Type.self
+  let _ = Foo.Type.self
+  let _ = Foo.Type.self
 
-  let badTy = Foo.Type
-  let badMetaTy = type(of: Foo.Type)
+  let _ = Foo.Type // expected-error{{expected member name or constructor call after type name}}
+  // expected-note@-1 {{use '.self' to reference the type object}}
+
+  let _ = type(of: Foo.Type) // expected-error{{expected member name or constructor call after type name}}
+  // expected-note@-1 {{use '.self' to reference the type object}}
 }
- */
 
 func genType() {
   _ = Gen<Foo>.self
@@ -254,7 +256,7 @@ func testFunctionCollectionTypes() {
   _ = [(Int) throws -> Int]()
   _ = [@convention(swift) (Int) throws -> Int]().count
   _ = [(inout Int) throws -> (inout () -> Void) -> Void]().count
-  _ = [String: (@autoclosure (Int) -> Int32) -> Void]().keys
+  _ = [String: (@autoclosure (Int) -> Int32) -> Void]().keys // expected-error {{argument type of @autoclosure parameter must be '()'}}
   let _ = [(Int) -> throws Int]() // expected-error{{'throws' may only occur before '->'}}
   let _ = [Int throws Int](); // expected-error{{'throws' may only occur before '->'}} expected-error {{consecutive statements on a line must be separated by ';'}}
 }

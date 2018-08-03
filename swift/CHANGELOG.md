@@ -6,6 +6,7 @@ CHANGELOG
 
 | Contents               |
 | :--------------------- |
+| [Swift 4.1](#swift-41) |
 | [Swift 4.0](#swift-40) |
 | [Swift 3.1](#swift-31) |
 | [Swift 3.0](#swift-30) |
@@ -18,8 +19,137 @@ CHANGELOG
 
 </details>
 
+Swift 4.1
+---------
+
+* [SE-0189][]
+
+  If an initializer is declared in a different module from a struct, it must
+  use `self.init(…)` or `self = …` before returning or accessing `self`.
+  Failure to do so will produce a warning in Swift 4 and an error in Swift 5.
+  This is to keep a client app from accidentally depending on a library's
+  implementation details, and matches an existing restriction for classes,
+  where cross-module initializers must be convenience initializers.
+
+  This will most commonly affect code that extends a struct imported from C.
+  However, most imported C structs are given a zeroing no-argument initializer,
+  which can be called as `self.init()` before modifying specific properties.
+
+  Swift library authors who wish to continue allowing initialization on a
+  per-member basis should explicitly declare a public memberwise initializer
+  for clients in other modules to use.
+
+* [SE-0166][] / [SE-0143][]
+
+  The standard library now defines the conformances of `Optional`,
+  `Array`, `Dictionary`, and `Set` to `Encodable` and `Decodable` as
+  conditional conformances, available only when their type parameters
+  conform to `Encodable` or `Decodable`, respectively.
+
+* [SE-0188][] 
+  
+  Index types for most standard library collections now conform to `Hashable`. 
+  These indices can now be used in key-path subscripts and hashed collections:
+  
+  ```swift
+  let s = "Hashable"
+  let p = \String.[s.startIndex]
+  s[keyPath: p] // "H"
+  ```
+
+* [SE-0143][] The standard library types `Optional`, `Array`, and
+	`Dictionary` now conform to the `Equatable` protocol when their element types
+	conform to `Equatable`. This allows the `==` operator to compose (e.g., one
+	can compare two values of type `[Int : [Int?]?]` with `==`), as well as use
+  various algorthims defined for `Equatable` element types, such as
+	`index(of:)`.
+
+* [SE-0157][] is implemented. Associated types can now declare "recursive"
+	constraints, which require that the associated type conform to the enclosing
+	protocol. The standard library protocols have been updated to make use of
+	recursive constraints. For example, the `SubSequence` associated type of
+	`Sequence` follows the enclosing protocol:
+
+        protocol Sequence {
+          associatedtype Element
+          associatedtype SubSequence: Sequence
+            where SubSequence.Element == Element,
+                  SubSequence.SubSequence == SubSequence
+          // ...
+        }
+
+        protocol Collection: Sequence where Self.SubSequence: Collection {
+          // ...
+        }
+
+  As a result, a number of new constraints have been introduced into the
+	standard library protocols:
+
+	* Make the `Indices` associated type have the same traversal requirements as
+	its enclosing protocol, e.g., `Collection.Indices` conforms to
+	`Collection`, `BidirectionalCollection.Indices` conforms to
+	`BidirectionalCollection`, and so on
+	* Make `Numeric.Magnitude` conform to `Numeric`
+	* Use more efficient `SubSequence` types for lazy filter and map
+	* Eliminate the `*Indexable` protocols
+
+
+* [SE-0161][] is fully implemented. KeyPaths now support subscript, optional
+  chaining, and optional force-unwrapping components.
+
+* [SE-0186][]
+
+  It is no longer valid to use the ownership keywords `weak` and `unowned` for property declarations in protocols. These keywords are meaningless and misleading when used in a protocol as they don't have any effect.
+
+  In Swift 3 and 4 mode the following example will produce a warning with a fix-it to remove the keyword. In Swift 5 mode and above an error will be produced.
+
+  ```swift
+  class A {}
+
+  protocol P {
+      weak var weakVar: A? { get set }
+      unowned var unownedVar: A { get set }
+  }
+  ```
+
+* [SE-0185][]
+
+  Structs and enums that declare a conformance to `Equatable`/`Hashable` now get an automatically synthesized implementation of `==`/`hashValue`. For structs, all stored properties must be `Equatable`/`Hashable`. For enums, all enum cases with associated values must be `Equatable`/`Hashable`.
+
+  ```swift
+  public struct Point: Hashable {
+    public let x: Int
+    public let y: Int
+
+    public init(x: Int, y: Int) {
+      self.x = x
+      self.y = y
+    }
+  }
+
+  Point(3, 0) == Point(0, 3)  // false
+  Point(3, 0) == Point(3, 0)  // true
+  Point(3, 0).hashValue       // -2942920663782199421
+
+  public enum Token: Hashable {
+    case comma
+    case identifier(String)
+    case number(Int)
+  }
+
+  Token.identifier("x") == .number(5)        // false
+  Token.identifier("x") == .identifier("x")  // true
+  Token.number(50).hashValue                 // -2002318238093721609
+  ```
+
+  If you wish to provide your own implementation of `==`/`hashValue`, you still can; a custom implementation will replace the one synthesized by the compiler.
+
+  **Add new entries to the top of this file, not here!**
+
 Swift 4.0
 ---------
+
+### 2017-09-19 (Xcode 9.0)
 
 * [SE-0165][] and [SE-0154][]
 
@@ -304,8 +434,6 @@ Swift 4.0
   #define TINY    (BITWIDTH <= 16)
   #define LIMITED (SMALL || TINY)   // now imported as Bool.
   ```
-
-  **Add new entries to the top of this file, not here!**
 
 Swift 3.1
 ---------
@@ -6710,3 +6838,11 @@ Swift 1.0
 [SE-0177]: <https://github.com/apple/swift-evolution/blob/master/proposals/0177-add-clamped-to-method.md>
 [SE-0178]: <https://github.com/apple/swift-evolution/blob/master/proposals/0178-character-unicode-view.md>
 [SE-0179]: <https://github.com/apple/swift-evolution/blob/master/proposals/0179-swift-run-command.md>
+[SE-0180]: <https://github.com/apple/swift-evolution/blob/master/proposals/0180-string-index-overhaul.md>
+[SE-0181]: <https://github.com/apple/swift-evolution/blob/master/proposals/0181-package-manager-cpp-language-version.md>
+[SE-0182]: <https://github.com/apple/swift-evolution/blob/master/proposals/0182-newline-escape-in-strings.md>
+[SE-0183]: <https://github.com/apple/swift-evolution/blob/master/proposals/0183-substring-affordances.md>
+[SE-0184]: <https://github.com/apple/swift-evolution/blob/master/proposals/0184-unsafe-pointers-add-missing.md>
+[SE-0185]: <https://github.com/apple/swift-evolution/blob/master/proposals/0185-synthesize-equatable-hashable.md>
+[SE-0186]: <https://github.com/apple/swift-evolution/blob/master/proposals/0186-remove-ownership-keyword-support-in-protocols.md>
+[SE-0188]: <https://github.com/apple/swift-evolution/blob/master/proposals/0188-stdlib-index-types-hashable.md>

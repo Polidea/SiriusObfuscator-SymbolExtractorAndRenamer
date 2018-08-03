@@ -14,8 +14,9 @@
 #ifndef LLVM_CODEGEN_MACHINEOPERAND_H
 #define LLVM_CODEGEN_MACHINEOPERAND_H
 
-#include "llvm/Support/DataTypes.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/Support/DataTypes.h"
 #include <cassert>
 
 namespace llvm {
@@ -65,7 +66,7 @@ public:
     MO_CFIIndex,          ///< MCCFIInstruction index.
     MO_IntrinsicID,       ///< Intrinsic ID for ISel
     MO_Predicate,         ///< Generic predicate for ISel
-    MO_Placeholder,       ///< Placeholder for GlobalISel ComplexPattern result.
+    MO_Last = MO_Predicate,
   };
 
 private:
@@ -225,6 +226,9 @@ public:
   ///
   void clearParent() { ParentMI = nullptr; }
 
+  /// Print a MCSymbol as an operand.
+  static void printSymbol(raw_ostream &OS, MCSymbol &Sym);
+
   void print(raw_ostream &os, const TargetRegisterInfo *TRI = nullptr,
              const TargetIntrinsicInfo *IntrinsicInfo = nullptr) const;
   void print(raw_ostream &os, ModuleSlotTracker &MST,
@@ -356,7 +360,7 @@ public:
   void setReg(unsigned Reg);
 
   void setSubReg(unsigned subReg) {
-    assert(isReg() && "Wrong MachineOperand accessor");
+    assert(isReg() && "Wrong MachineOperand mutator");
     SubReg_TargetFlags = subReg;
     assert(SubReg_TargetFlags == subReg && "SubReg out of range");
   }
@@ -379,38 +383,38 @@ public:
   void setIsDef(bool Val = true);
 
   void setImplicit(bool Val = true) {
-    assert(isReg() && "Wrong MachineOperand accessor");
+    assert(isReg() && "Wrong MachineOperand mutator");
     IsImp = Val;
   }
 
   void setIsKill(bool Val = true) {
-    assert(isReg() && !IsDef && "Wrong MachineOperand accessor");
+    assert(isReg() && !IsDef && "Wrong MachineOperand mutator");
     assert((!Val || !isDebug()) && "Marking a debug operation as kill");
     IsKill = Val;
   }
 
   void setIsDead(bool Val = true) {
-    assert(isReg() && IsDef && "Wrong MachineOperand accessor");
+    assert(isReg() && IsDef && "Wrong MachineOperand mutator");
     IsDead = Val;
   }
 
   void setIsUndef(bool Val = true) {
-    assert(isReg() && "Wrong MachineOperand accessor");
+    assert(isReg() && "Wrong MachineOperand mutator");
     IsUndef = Val;
   }
 
   void setIsInternalRead(bool Val = true) {
-    assert(isReg() && "Wrong MachineOperand accessor");
+    assert(isReg() && "Wrong MachineOperand mutator");
     IsInternalRead = Val;
   }
 
   void setIsEarlyClobber(bool Val = true) {
-    assert(isReg() && IsDef && "Wrong MachineOperand accessor");
+    assert(isReg() && IsDef && "Wrong MachineOperand mutator");
     IsEarlyClobber = Val;
   }
 
   void setIsDebug(bool Val = true) {
-    assert(isReg() && !IsDef && "Wrong MachineOperand accessor");
+    assert(isReg() && !IsDef && "Wrong MachineOperand mutator");
     IsDebug = Val;
   }
 
@@ -539,19 +543,24 @@ public:
   void setOffset(int64_t Offset) {
     assert((isGlobal() || isSymbol() || isMCSymbol() || isCPI() ||
             isTargetIndex() || isBlockAddress()) &&
-           "Wrong MachineOperand accessor");
+           "Wrong MachineOperand mutator");
     SmallContents.OffsetLo = unsigned(Offset);
     Contents.OffsetedInfo.OffsetHi = int(Offset >> 32);
   }
 
   void setIndex(int Idx) {
     assert((isFI() || isCPI() || isTargetIndex() || isJTI()) &&
-           "Wrong MachineOperand accessor");
+           "Wrong MachineOperand mutator");
     Contents.OffsetedInfo.Val.Index = Idx;
   }
 
+  void setMetadata(const MDNode *MD) {
+    assert(isMetadata() && "Wrong MachineOperand mutator");
+    Contents.MD = MD;
+  }
+
   void setMBB(MachineBasicBlock *MBB) {
-    assert(isMBB() && "Wrong MachineOperand accessor");
+    assert(isMBB() && "Wrong MachineOperand mutator");
     Contents.MBB = MBB;
   }
 
@@ -597,6 +606,10 @@ public:
 
   /// Replace this operand with a frame index.
   void ChangeToFrameIndex(int Idx);
+
+  /// Replace this operand with a target index.
+  void ChangeToTargetIndex(unsigned Idx, int64_t Offset,
+                           unsigned char TargetFlags = 0);
 
   /// ChangeToRegister - Replace this operand with a new register operand of
   /// the specified value.  If an operand is known to be an register already,
@@ -768,15 +781,18 @@ public:
     return Op;
   }
 
-  static MachineOperand CreatePlaceholder() {
-    MachineOperand Op(MachineOperand::MO_Placeholder);
-    return Op;
-  }
-
   friend class MachineInstr;
   friend class MachineRegisterInfo;
 private:
   void removeRegFromUses();
+
+  /// Artificial kinds for DenseMap usage.
+  enum : unsigned char {
+    MO_Empty = MO_Last + 1,
+    MO_Tombstone,
+  };
+
+  friend struct DenseMapInfo<MachineOperand>;
 
   //===--------------------------------------------------------------------===//
   // Methods for handling register use/def lists.
@@ -788,6 +804,26 @@ private:
   bool isOnRegUseList() const {
     assert(isReg() && "Can only add reg operand to use lists");
     return Contents.Reg.Prev != nullptr;
+  }
+};
+
+template <> struct DenseMapInfo<MachineOperand> {
+  static MachineOperand getEmptyKey() {
+    return MachineOperand(static_cast<MachineOperand::MachineOperandType>(
+        MachineOperand::MO_Empty));
+  }
+  static MachineOperand getTombstoneKey() {
+    return MachineOperand(static_cast<MachineOperand::MachineOperandType>(
+        MachineOperand::MO_Tombstone));
+  }
+  static unsigned getHashValue(const MachineOperand &MO) {
+    return hash_value(MO);
+  }
+  static bool isEqual(const MachineOperand &LHS, const MachineOperand &RHS) {
+    if (LHS.getType() == MachineOperand::MO_Empty ||
+        LHS.getType() == MachineOperand::MO_Tombstone)
+      return LHS.getType() == RHS.getType();
+    return LHS.isIdenticalTo(RHS);
   }
 };
 

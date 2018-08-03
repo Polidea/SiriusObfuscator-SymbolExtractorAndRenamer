@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -emit-silgen %s | %FileCheck %s
+// RUN: %target-swift-frontend -enable-sil-ownership -emit-silgen %s | %FileCheck %s
 
 // Test for compilation order independence
 class C : B {
@@ -68,8 +68,9 @@ class B : A {
 
 // CHECK: sil_vtable RequiredInitDerived {
 // CHECK-NEXT: #SimpleInitBase.init!initializer.1: {{.*}} : _T07vtables19RequiredInitDerivedC{{[_0-9a-zA-Z]*}}fc
-// CHECK-NEXT  #RequiredInitDerived.init!allocator.1: {{.*}} : _TFC7vtables19RequiredInitDerivedC
-// CHECK-NEXT}
+// CHECK-NEXT: #RequiredInitDerived.init!allocator.1: {{.*}} : _T07vtables19RequiredInitDerivedC
+// CHECK-NEXT: #RequiredInitDerived.deinit!deallocator: _T07vtables19RequiredInitDerivedCfD
+// CHECK-NEXT: }
 
 class SimpleInitBase { }
 
@@ -106,3 +107,24 @@ class DerivedWithoutDefaults : BaseWithDefaults {
 
 // CHECK-LABEL: sil_vtable DerivedWithoutDefaults {
 // CHECK:         #BaseWithDefaults.a!1: {{.*}} : _T07vtables22DerivedWithoutDefaultsC1a{{[_0-9a-zA-Z]*}}F
+
+
+
+// Escape identifiers that represent special names
+
+class SubscriptAsFunction {
+  func `subscript`() {}
+}
+
+// CHECK-LABEL: sil_vtable SubscriptAsFunction {
+// CHECK-NOT:     #SubscriptAsFunction.subscript
+// CHECK:         #SubscriptAsFunction.`subscript`!1
+
+
+class DeinitAsFunction {
+  func `deinit`() {}
+}
+
+// CHECK-LABEL: sil_vtable DeinitAsFunction {
+// CHECK:         #DeinitAsFunction.`deinit`!1
+// CHECK:         #DeinitAsFunction.deinit!deallocator

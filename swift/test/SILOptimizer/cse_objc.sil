@@ -39,7 +39,7 @@ bb0(%0 : $Bar):
   %1 = alloc_stack $Bar, let, name "sf"              // users: %2, %6, %9, %10
   store %0 to %1 : $*Bar                        // id: %2
   %3 = upcast %0 : $Bar to $NSObject              // user: %7
-  %4 = super_method [volatile] %0 : $Bar, #NSObject.init!initializer.1.foreign : (NSObject.Type) -> () -> NSObject, $@convention(objc_method) (@owned NSObject) -> @owned NSObject // user: %7
+  %4 = objc_super_method %0 : $Bar, #NSObject.init!initializer.1.foreign : (NSObject.Type) -> () -> NSObject, $@convention(objc_method) (@owned NSObject) -> @owned NSObject // user: %7
   %7 = apply %4(%3) : $@convention(objc_method) (@owned NSObject) -> @owned NSObject // user: %8
   %8 = unchecked_ref_cast %7 : $NSObject to $Bar  // users: %9, %11
   store %8 to %1 : $*Bar                        // id: %9
@@ -89,7 +89,7 @@ bb0(%0 : $Bar):
 sil hidden @_TFC4test3BarD : $@convention(method) (@owned Bar) -> () {
 bb0(%0 : $Bar):
   debug_value %0 : $Bar, let, name "self" // id: %1
-  %2 = super_method %0 : $Bar, #NSObject.deinit!deallocator.foreign : (NSObject) -> () -> (), $@convention(objc_method) (NSObject) -> ()  // user: %4
+  %2 = objc_super_method %0 : $Bar, #NSObject.deinit!deallocator.foreign : (NSObject) -> () -> (), $@convention(objc_method) (NSObject) -> ()  // user: %4
   %3 = upcast %0 : $Bar to $NSObject              // user: %4
   %4 = apply %2(%3) : $@convention(objc_method) (NSObject) -> ()
   %5 = tuple ()                                   // user: %6
@@ -98,21 +98,21 @@ bb0(%0 : $Bar):
 
 // CHECK-LABEL: _TF4test9trytowalkFPS_8Walkable_T_
 // CHECK:           bb0(%0 : $Walkable):
-// CHECK-NEXT:      open_existential_ref
-// CHECK-NEXT:      witness_method
-// CHECK-NEXT:      apply
-// CHECK-NEXT:      witness_method
-// CHECK-NEXT:      apply
+// CHECK-NEXT:      {{%.*}} = open_existential_ref
+// CHECK-NEXT:      {{%.*}} = objc_method
+// CHECK-NEXT:      {{%.*}} = apply
+// CHECK-NEXT:      {{%.*}} = objc_method
+// CHECK-NEXT:      {{%.*}} = apply
 // CHECK-NEXT:      strong_release
-// CHECK-NEXT:      tuple
+// CHECK-NEXT:      {{%.*}} = tuple
 // CHECK-NEXT:      return
 // test.trytowalk (test.Walkable) -> ()
 sil hidden @_TF4test9trytowalkFPS_8Walkable_T_ : $@convention(thin) (@owned Walkable) -> () {
 bb0(%0 : $Walkable):
   %2 = open_existential_ref %0 : $Walkable to $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable // users: %3, %4
-  %3 = witness_method [volatile] $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable, #Walkable.walk!1.foreign, %2 : $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable : $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> () // user: %4
+  %3 = objc_method %2 : $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable, #Walkable.walk!1.foreign, $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> () // user: %4
   %4 = apply %3<@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable>(%2) : $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> ()
-  %5 = witness_method [volatile] $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable, #Walkable.walk!1.foreign, %2 : $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable : $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> () // user: %6
+  %5 = objc_method %2 : $@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable, #Walkable.walk!1.foreign, $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> () // user: %6
   %6 = apply %5<@opened("7813D5BE-4C48-11E5-BD72-AC87A3294C0A") Walkable>(%2) : $@convention(objc_method) <τ_0_0 where τ_0_0 : Walkable> (τ_0_0) -> ()
   strong_release %0 : $Walkable                   // id: %8
   %9 = tuple ()                                   // user: %10

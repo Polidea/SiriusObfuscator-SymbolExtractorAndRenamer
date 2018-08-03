@@ -1,6 +1,7 @@
-// RUN: %target-typecheck-verify-swift -swift-version 4
+// RUN: %target-typecheck-verify-swift -swift-version 5
 
-// See test/Compatibility/tuple_arguments.swift for the Swift 3 behavior.
+// See test/Compatibility/tuple_arguments_3.swift for the Swift 3 behavior.
+// See test/Compatibility/tuple_arguments_4.swift for the Swift 4 behavior.
 
 func concrete(_ x: Int) {}
 func concreteLabeled(x: Int) {}
@@ -623,7 +624,7 @@ do {
 }
 
 enum Enum {
-  case two(Int, Int) // expected-note 5 {{'two' declared here}}
+  case two(Int, Int) // expected-note 6 {{'two' declared here}}
   case tuple((Int, Int))
   case labeledTuple(x: (Int, Int))
 }
@@ -631,6 +632,7 @@ enum Enum {
 do {
   _ = Enum.two(3, 4)
   _ = Enum.two((3, 4)) // expected-error {{missing argument for parameter #2 in call}}
+  _ = Enum.two(3 > 4 ? 3 : 4) // expected-error {{missing argument for parameter #2 in call}}
 
   _ = Enum.tuple(3, 4) // expected-error {{enum element 'tuple' expects a single parameter of type '(Int, Int)'}} {{18-18=(}} {{22-22=)}}
   _ = Enum.tuple((3, 4))
@@ -1553,11 +1555,11 @@ extension Sequence where Iterator.Element == (key: String, value: String?) {
 }
 
 func rdar33043106(_ records: [(Int)], _ other: [((Int))]) -> [Int] {
-  let x: [Int] = records.flatMap { _ in
+  let x: [Int] = records.map { _ in
     let i = 1
     return i
   }
-  let y: [Int] = other.flatMap { _ in
+  let y: [Int] = other.map { _ in
     let i = 1
     return i
   }
@@ -1570,9 +1572,13 @@ func itsFalse(_: Int) -> Bool? {
 }
 
 func rdar33159366(s: AnySequence<Int>) {
-  _ = s.flatMap(itsFalse)
+  _ = s.compactMap(itsFalse)
   let a = Array(s)
-  _ = a.flatMap(itsFalse)
+  _ = a.compactMap(itsFalse)
+}
+
+func sr5429<T>(t: T) {
+  _ = AnySequence([t]).first(where: { (t: T) in true })
 }
 
 extension Concrete {
@@ -1615,4 +1621,53 @@ func rdar33239714() {
   Generic<(Int, Int)>().optAliasT { (x, y) in }
   Generic<(Int, Int)>().optAliasF { x, y in }
   Generic<(Int, Int)>().optAliasF { (x, y) in }
+}
+
+// rdar://problem/35198459 - source-compat-suite failure: Moya (toType->hasUnresolvedType() && "Should have handled this above"
+do {
+  func foo(_: (() -> Void)?) {}
+  func bar() -> ((()) -> Void)? { return nil }
+  foo(bar()) // expected-error {{cannot convert value of type '((()) -> Void)?' to expected argument type '(() -> Void)?'}}
+}
+
+// https://bugs.swift.org/browse/SR-6509
+public extension Optional {
+  public func apply<Result>(_ transform: ((Wrapped) -> Result)?) -> Result? {
+    return self.flatMap { value in
+      transform.map { $0(value) }
+    }
+  }
+
+  public func apply<Value, Result>(_ value: Value?) -> Result?
+    where Wrapped == (Value) -> Result {
+    return value.apply(self)
+  }
+}
+
+// https://bugs.swift.org/browse/SR-6837
+do {
+  func takeFn(fn: (_ i: Int, _ j: Int?) -> ()) {}
+  func takePair(_ pair: (Int, Int?)) {}
+  takeFn(fn: takePair) // expected-error {{cannot convert value of type '((Int, Int?)) -> ()' to expected argument type '(Int, Int?) -> ()'}}
+  takeFn(fn: { (pair: (Int, Int?)) in } ) // Disallow for -swift-version 4 and later
+  // expected-error@-1 {{contextual closure type '(Int, Int?) -> ()' expects 2 arguments, but 1 was used in closure body}}
+  takeFn { (pair: (Int, Int?)) in } // Disallow for -swift-version 4 and later
+  // expected-error@-1 {{contextual closure type '(Int, Int?) -> ()' expects 2 arguments, but 1 was used in closure body}}
+}
+
+// https://bugs.swift.org/browse/SR-6796
+do {
+  func f(a: (() -> Void)? = nil) {}
+  func log<T>() -> ((T) -> Void)? { return nil }
+
+  f(a: log() as ((()) -> Void)?) // expected-error {{cannot convert value of type '((()) -> Void)?' to expected argument type '(() -> Void)?'}}
+
+  func logNoOptional<T>() -> (T) -> Void { }
+  f(a: logNoOptional() as ((()) -> Void)) // expected-error {{cannot convert value of type '(()) -> Void' to expected argument type '(() -> Void)?'}}
+
+  func g() {}
+  g(()) // expected-error {{argument passed to call that takes no arguments}}
+
+  func h(_: ()) {} // expected-note {{'h' declared here}}
+  h() // expected-error {{missing argument for parameter #1 in call}}
 }

@@ -47,6 +47,10 @@ public:
   /// header, place it in this directory.
   std::string PrecompiledHeaderOutputDir;
 
+  /// The optimizaton setting.  This doesn't typically matter for
+  /// import, but it can affect Clang's IR generation of static functions.
+  std::string Optimization;
+
   /// Disable validating the persistent PCH.
   bool PCHDisableValidation = false;
 
@@ -92,6 +96,9 @@ public:
 
   /// When set, don't look for or load adapter modules.
   bool DisableAdapterModules = false;
+
+  /// When set, don't enforce warnings with -Werror.
+  bool DebuggerSupport = false;
 
   /// Return a hash code of any components from these options that should
   /// contribute to a Swift Bridging PCH hash.

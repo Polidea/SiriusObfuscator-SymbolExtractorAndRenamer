@@ -12,7 +12,7 @@
 
 #include "SwiftLanguage.h"
 
-#include "lldb/Core/ConstString.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectVariable.h"
@@ -21,6 +21,7 @@
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 
+#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Variable.h"
@@ -1322,14 +1323,14 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
             Target *target = exe_scope->CalculateTarget().get();
             if (target) {
               const bool create_on_demand = false;
-              Error error;
+              Status error;
               SwiftASTContext *ast_ctx(
                   target->GetScratchSwiftASTContext(error, create_on_demand));
               if (ast_ctx) {
                 const bool is_mangled = true;
                 Mangled mangled(ConstString(input), is_mangled);
                 if (mangled.GuessLanguage() == eLanguageTypeSwift) {
-                  Error error;
+                  Status error;
                   auto candidate =
                       ast_ctx->GetTypeFromMangledTypename(input, error);
                   if (candidate.IsValid() && error.Success())
@@ -1381,7 +1382,7 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
           if (exe_scope) {
             Target *target = exe_scope->CalculateTarget().get();
             const bool create_on_demand = false;
-            Error error;
+            Status error;
             SwiftASTContext *ast_ctx(
                 target->GetScratchSwiftASTContext(error, create_on_demand));
             if (ast_ctx) {
@@ -1588,7 +1589,7 @@ SwiftLanguage::GetDeclPrintingHelper() {
   };
 }
 
-LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Error &error) {
+LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
   static ConstString g_SwiftBool("Swift.Bool");
   static ConstString g_value("_value");
 

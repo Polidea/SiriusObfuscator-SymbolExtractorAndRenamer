@@ -65,7 +65,7 @@ extension Version: Hashable {
         result = (result &* mul) ^ UInt64(bitPattern: Int64(patch.hashValue))
         result = prereleaseIdentifiers.reduce(result, { ($0 &* mul) ^ UInt64(bitPattern: Int64($1.hashValue)) })
         result = buildMetadataIdentifiers.reduce(result, { ($0 &* mul) ^ UInt64(bitPattern: Int64($1.hashValue)) })
-        return Int(truncatingBitPattern: result)
+        return Int(truncatingIfNeeded: result)
     }
 }
 
@@ -141,7 +141,7 @@ public extension Version {
         let requiredCharacters = string.prefix(upTo: requiredEndIndex)
         let requiredComponents = requiredCharacters
             .split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            .map(String.init).flatMap({ Int($0) }).filter({ $0 >= 0 })
+            .map(String.init).compactMap({ Int($0) }).filter({ $0 >= 0 })
 
         guard requiredComponents.count == 3 else { return nil }
 

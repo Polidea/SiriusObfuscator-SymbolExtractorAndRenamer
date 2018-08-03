@@ -14,22 +14,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "llvm/Support/MathExtras.h"
-#include "swift/Demangling/Demangler.h"
+#include "swift/Runtime/Metadata.h"
+#include "MetadataCache.h"
 #include "swift/Basic/LLVM.h"
-#include "swift/Basic/Range.h"
 #include "swift/Basic/Lazy.h"
+#include "swift/Basic/Range.h"
+#include "swift/Demangling/Demangler.h"
 #include "swift/Runtime/Casting.h"
 #include "swift/Runtime/HeapObject.h"
-#include "swift/Runtime/Metadata.h"
 #include "swift/Runtime/Mutex.h"
 #include "swift/Strings.h"
-#include "MetadataCache.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/PointerLikeTypeTraits.h"
 #include <algorithm>
-#include <condition_variable>
-#include <new>
 #include <cctype>
+#include <condition_variable>
 #include <iostream>
+#include <new>
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 // Avoid defining macro max(), min() which conflict with std::max(), std::min()
@@ -220,9 +221,8 @@ swift::swift_allocateGenericValueMetadata(GenericMetadata *pattern,
     reinterpret_cast<const char*>(pattern->getMetadataTemplate()) +
     pattern->AddressPoint;
   auto patternMetadata = reinterpret_cast<const ValueMetadata*>(patternBytes);
-  metadata->Description = patternMetadata->Description.get();
-  metadata->Parent = patternMetadata->Parent;
-  
+  metadata->Description = patternMetadata->Description;
+
   return metadata;
 }
 
@@ -282,8 +282,6 @@ namespace {
 /// The uniquing structure for ObjC class-wrapper metadata.
 static SimpleGlobalCache<ObjCClassCacheEntry> ObjCClassWrappers;
 
-#endif
-
 const Metadata *
 swift::swift_getObjCClassMetadata(const ClassMetadata *theClass) {
   // Make calls resilient against receiving a null Objective-C class. This can
@@ -296,13 +294,23 @@ swift::swift_getObjCClassMetadata(const ClassMetadata *theClass) {
     return theClass;
   }
 
-#if SWIFT_OBJC_INTEROP
   return &ObjCClassWrappers.getOrInsert(theClass).first->Data;
-#else
-  fatalError(/* flags = */ 0,
-             "swift_getObjCClassMetadata: no Objective-C interop");
-#endif
 }
+
+const ClassMetadata *
+swift::swift_getObjCClassFromMetadata(const Metadata *theMetadata) {
+  // Unwrap ObjC class wrappers.
+  if (auto wrapper = dyn_cast<ObjCClassWrapperMetadata>(theMetadata)) {
+    return wrapper->Class;
+  }
+
+  // Otherwise, the input should already be a Swift class object.
+  auto theClass = cast<ClassMetadata>(theMetadata);
+  assert(theClass->isTypeMetadata() && !theClass->isArtificialSubclass());
+  return theClass;
+}
+
+#endif
 
 /***************************************************************************/
 /*** Functions *************************************************************/
@@ -315,19 +323,34 @@ public:
   FullMetadata<FunctionTypeMetadata> Data;
 
   struct Key {
-    const void * const *FlagsArgsAndResult;
+    const FunctionTypeFlags Flags;
 
-    FunctionTypeFlags getFlags() const {
-      return FunctionTypeFlags::fromIntValue(size_t(FlagsArgsAndResult[0]));
+    const Metadata *const *Parameters;
+    const uint32_t *ParameterFlags;
+    const Metadata *Result;
+
+    Key(FunctionTypeFlags flags,
+        const Metadata *const *params,
+        const uint32_t *paramFlags,
+        const Metadata *result)
+      : Flags(flags), Parameters(params), ParameterFlags(paramFlags),
+        Result(result) {}
+
+    FunctionTypeFlags getFlags() const { return Flags; }
+    const Metadata *getParameter(unsigned index) const {
+      assert(index < Flags.getNumParameters());
+      return Parameters[index];
+    }
+    const Metadata *getResult() const { return Result; }
+
+    const uint32_t *getParameterFlags() const {
+      return ParameterFlags;
     }
 
-    const Metadata *getResult() const {
-      auto opaqueResult = FlagsArgsAndResult[getFlags().getNumArguments() + 1];
-      return reinterpret_cast<const Metadata *>(opaqueResult);
-    }
-
-    const void * const *getArguments() const {
-      return &FlagsArgsAndResult[1];
+    ::ParameterFlags getParameterFlags(unsigned index) const {
+      assert(index < Flags.getNumParameters());
+      auto flags = Flags.hasParameterFlags() ? ParameterFlags[index] : 0;
+      return ParameterFlags::fromIntValue(flags);
     }
   };
 
@@ -346,23 +369,35 @@ public:
     if (auto result = comparePointers(key.getResult(), Data.ResultType))
       return result;
 
-    for (unsigned i = 0, e = keyFlags.getNumArguments(); i != e; ++i) {
+    for (unsigned i = 0, e = keyFlags.getNumParameters(); i != e; ++i) {
       if (auto result =
-            comparePointers(key.getArguments()[i],
-                            Data.getArguments()[i].getOpaqueValue()))
+              comparePointers(key.getParameter(i), Data.getParameter(i)))
+        return result;
+
+      if (auto result =
+              compareIntegers(key.getParameterFlags(i).getIntValue(),
+                              Data.getParameterFlags(i).getIntValue()))
         return result;
     }
 
     return 0;
   }
-
   static size_t getExtraAllocationSize(Key key) {
-    return key.getFlags().getNumArguments()
-         * sizeof(FunctionTypeMetadata::Argument);
+    return getExtraAllocationSize(key.Flags);
   }
+
   size_t getExtraAllocationSize() const {
-    return Data.Flags.getNumArguments()
-         * sizeof(FunctionTypeMetadata::Argument);
+    return getExtraAllocationSize(Data.Flags);
+  }
+
+  static size_t getExtraAllocationSize(const FunctionTypeFlags flags) {
+    const auto numParams = flags.getNumParameters();
+    auto size = numParams * sizeof(FunctionTypeMetadata::Parameter);
+    if (flags.hasParameterFlags())
+      size += numParams * sizeof(uint32_t);
+
+    const auto alignment = sizeof(void *);
+    return (size + alignment - 1) & ~(alignment - 1);
   }
 };
 
@@ -373,53 +408,101 @@ static SimpleGlobalCache<FunctionCacheEntry> FunctionTypes;
 
 const FunctionTypeMetadata *
 swift::swift_getFunctionTypeMetadata1(FunctionTypeFlags flags,
-                                      const void *arg0,
+                                      const Metadata *arg0,
                                       const Metadata *result) {
-  assert(flags.getNumArguments() == 1
+  assert(flags.getNumParameters() == 1
          && "wrong number of arguments in function metadata flags?!");
-  const void *flagsArgsAndResult[] = {
-    reinterpret_cast<const void*>(flags.getIntValue()),
-    arg0,
-    static_cast<const void *>(result)                      
-  };                                                       
-  return swift_getFunctionTypeMetadata(flagsArgsAndResult);
-}                                                          
-const FunctionTypeMetadata *                               
-swift::swift_getFunctionTypeMetadata2(FunctionTypeFlags flags,
-                                      const void *arg0,
-                                      const void *arg1,
-                                      const Metadata *result) {
-  assert(flags.getNumArguments() == 2
-         && "wrong number of arguments in function metadata flags?!");
-  const void *flagsArgsAndResult[] = {
-    reinterpret_cast<const void*>(flags.getIntValue()),
-    arg0,
-    arg1,                                                  
-    static_cast<const void *>(result)                      
-  };                                                       
-  return swift_getFunctionTypeMetadata(flagsArgsAndResult);
-}                                                          
-const FunctionTypeMetadata *                               
-swift::swift_getFunctionTypeMetadata3(FunctionTypeFlags flags,
-                                      const void *arg0,
-                                      const void *arg1,
-                                      const void *arg2,
-                                      const Metadata *result) {
-  assert(flags.getNumArguments() == 3
-         && "wrong number of arguments in function metadata flags?!");
-  const void *flagsArgsAndResult[] = {
-    reinterpret_cast<const void*>(flags.getIntValue()),
-    arg0,                                                  
-    arg1,                                                  
-    arg2,                                                  
-    static_cast<const void *>(result)                      
-  };                                                       
-  return swift_getFunctionTypeMetadata(flagsArgsAndResult);
+  const Metadata *parameters[] = { arg0 };
+  return swift_getFunctionTypeMetadata(flags, parameters, nullptr, result);
 }
 
 const FunctionTypeMetadata *
-swift::swift_getFunctionTypeMetadata(const void *flagsArgsAndResult[]) {
-  FunctionCacheEntry::Key key = { flagsArgsAndResult };
+swift::swift_getFunctionTypeMetadata1WithFlags(FunctionTypeFlags flags,
+                                               const Metadata *arg0,
+                                               ParameterFlags flags0,
+                                               const Metadata *result) {
+  assert(flags.getNumParameters() == 1
+         && "wrong number of arguments in function metadata flags?!");
+  const Metadata *parameters[] = { arg0 };
+  const uint32_t parameterFlags[] = { flags0.getIntValue() };
+  return swift_getFunctionTypeMetadata(flags,
+                                       parameters,
+                                       parameterFlags,
+                                       result);
+}
+
+const FunctionTypeMetadata *
+swift::swift_getFunctionTypeMetadata2(FunctionTypeFlags flags,
+                                      const Metadata *arg0,
+                                      const Metadata *arg1,
+                                      const Metadata *result) {
+  assert(flags.getNumParameters() == 2
+         && "wrong number of arguments in function metadata flags?!");
+  const Metadata *parameters[] = { arg0, arg1 };
+  return swift_getFunctionTypeMetadata(flags, parameters, nullptr, result);
+}
+
+const FunctionTypeMetadata *
+swift::swift_getFunctionTypeMetadata2WithFlags(FunctionTypeFlags flags,
+                                               const Metadata *arg0,
+                                               ParameterFlags flags0,
+                                               const Metadata *arg1,
+                                               ParameterFlags flags1,
+                                               const Metadata *result) {
+  assert(flags.getNumParameters() == 2
+         && "wrong number of arguments in function metadata flags?!");
+  const Metadata *parameters[] = { arg0, arg1 };
+  const uint32_t parameterFlags[] = {
+    flags0.getIntValue(),
+    flags1.getIntValue()
+  };
+  return swift_getFunctionTypeMetadata(flags,
+                                       parameters,
+                                       parameterFlags,
+                                       result);
+}
+
+const FunctionTypeMetadata *
+swift::swift_getFunctionTypeMetadata3(FunctionTypeFlags flags,
+                                      const Metadata *arg0,
+                                      const Metadata *arg1,
+                                      const Metadata *arg2,
+                                      const Metadata *result) {
+  assert(flags.getNumParameters() == 3
+         && "wrong number of arguments in function metadata flags?!");
+  const Metadata *parameters[] = { arg0, arg1, arg2 };
+  return swift_getFunctionTypeMetadata(flags, parameters, nullptr, result);
+}
+
+const FunctionTypeMetadata *
+swift::swift_getFunctionTypeMetadata3WithFlags(FunctionTypeFlags flags,
+                                               const Metadata *arg0,
+                                               ParameterFlags flags0,
+                                               const Metadata *arg1,
+                                               ParameterFlags flags1,
+                                               const Metadata *arg2,
+                                               ParameterFlags flags2,
+                                               const Metadata *result) {
+  assert(flags.getNumParameters() == 3
+         && "wrong number of arguments in function metadata flags?!");
+  const Metadata *parameters[] = { arg0, arg1, arg2 };
+  const uint32_t parameterFlags[] = {
+    flags0.getIntValue(),
+    flags1.getIntValue(),
+    flags2.getIntValue()
+  };
+  return swift_getFunctionTypeMetadata(flags,
+                                       parameters,
+                                       parameterFlags,
+                                       result);
+}
+
+const FunctionTypeMetadata *
+swift::swift_getFunctionTypeMetadata(FunctionTypeFlags flags,
+                                     const Metadata *const *parameters,
+                                     const uint32_t *parameterFlags,
+                                     const Metadata *result) {
+  FunctionCacheEntry::Key key = { flags, parameters, parameterFlags, result };
   return &FunctionTypes.getOrInsert(key).first->Data;
 }
 
@@ -450,16 +533,16 @@ FunctionCacheEntry::FunctionCacheEntry(Key key) {
     break;
   }
 
-  unsigned numArguments = flags.getNumArguments();
+  unsigned numParameters = flags.getNumParameters();
 
   Data.setKind(MetadataKind::Function);
   Data.Flags = flags;
   Data.ResultType = key.getResult();
 
-  for (size_t i = 0; i < numArguments; ++i) {
-    auto opaqueArg = key.getArguments()[i];
-    auto arg = FunctionTypeMetadata::Argument::getFromOpaqueValue(opaqueArg);
-    Data.getArguments()[i] = arg;
+  for (unsigned i = 0; i < numParameters; ++i) {
+    Data.getParameters()[i] = key.getParameter(i);
+    if (flags.hasParameterFlags())
+      Data.getParameterFlags()[i] = key.getParameterFlags(i).getIntValue();
   }
 }
 
@@ -552,7 +635,6 @@ static OpaqueValue *tuple_projectBuffer(ValueBuffer *buffer,
   if (IsInline)
     return reinterpret_cast<OpaqueValue*>(buffer);
 
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   auto wtable = tuple_getValueWitnesses(metatype);
   unsigned alignMask = wtable->getAlignmentMask();
   // Compute the byte offset of the object in the box.
@@ -560,9 +642,6 @@ static OpaqueValue *tuple_projectBuffer(ValueBuffer *buffer,
   auto *bytePtr =
       reinterpret_cast<char *>(*reinterpret_cast<HeapObject **>(buffer));
   return reinterpret_cast<OpaqueValue *>(bytePtr + byteOffset);
-#else
-  return *reinterpret_cast<OpaqueValue**>(buffer);
-#endif
 }
 
 /// Generic tuple value witness for 'allocateBuffer'
@@ -574,33 +653,9 @@ static OpaqueValue *tuple_allocateBuffer(ValueBuffer *buffer,
 
   if (IsInline)
     return reinterpret_cast<OpaqueValue*>(buffer);
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   BoxPair refAndValueAddr(swift_allocBox(metatype));
   *reinterpret_cast<HeapObject **>(buffer) = refAndValueAddr.first;
   return refAndValueAddr.second;
-#else
-  auto wtable = tuple_getValueWitnesses(metatype);
-  auto value = (OpaqueValue*) swift_slowAlloc(wtable->size,
-                                              wtable->getAlignmentMask());
-
-  *reinterpret_cast<OpaqueValue**>(buffer) = value;
-  return value;
-#endif
-}
-
-/// Generic tuple value witness for 'deallocateBuffer'.
-template <bool IsPOD, bool IsInline>
-static void tuple_deallocateBuffer(ValueBuffer *buffer,
-                                   const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  if (IsInline)
-    return;
-
-  auto wtable = tuple_getValueWitnesses(metatype);
-  auto value = *reinterpret_cast<OpaqueValue**>(buffer);
-  swift_slowDealloc(value, wtable->size, wtable->getAlignmentMask());
 }
 
 /// Generic tuple value witness for 'destroy'.
@@ -620,54 +675,21 @@ static void tuple_destroy(OpaqueValue *tuple, const Metadata *_metadata) {
   }
 }
 
-/// Generic tuple value witness for 'destroyArray'.
-template <bool IsPOD, bool IsInline>
-static void tuple_destroyArray(OpaqueValue *array, size_t n,
-                               const Metadata *_metadata) {
-  auto &metadata = *(const TupleTypeMetadata*) _metadata;
-  assert(IsPOD == tuple_getValueWitnesses(&metadata)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(&metadata)->isValueInline());
-
-  if (IsPOD) return;
-
-  size_t stride = tuple_getValueWitnesses(&metadata)->stride;
-  char *bytes = (char*)array;
-
-  while (n--) {
-    tuple_destroy<IsPOD, IsInline>((OpaqueValue*)bytes, _metadata);
-    bytes += stride;
-  }
-}
-
-/// Generic tuple value witness for 'destroyBuffer'.
-template <bool IsPOD, bool IsInline>
-static void tuple_destroyBuffer(ValueBuffer *buffer, const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  auto tuple = tuple_projectBuffer<IsPOD, IsInline>(buffer, metatype);
-  tuple_destroy<IsPOD, IsInline>(tuple, metatype);
-  tuple_deallocateBuffer<IsPOD, IsInline>(buffer, metatype);
-}
-
 // The operation doesn't have to be initializeWithCopy, but they all
 // have basically the same type.
-typedef value_witness_types::initializeWithCopy *
-  ValueWitnessTable::*forEachOperation;
+typedef value_witness_types::initializeWithCopy forEachOperation;
 
 /// Perform an operation for each field of two tuples.
 static OpaqueValue *tuple_forEachField(OpaqueValue *destTuple,
                                        OpaqueValue *srcTuple,
                                        const Metadata *_metatype,
-                                       forEachOperation member) {
+                                       forEachOperation operation) {
   auto &metatype = *(const TupleTypeMetadata*) _metatype;
   for (size_t i = 0, e = metatype.NumElements; i != e; ++i) {
     auto &eltInfo = metatype.getElement(i);
-    auto eltValueWitnesses = eltInfo.Type->getValueWitnesses();
-
     OpaqueValue *destElt = eltInfo.findIn(destTuple);
     OpaqueValue *srcElt = eltInfo.findIn(srcTuple);
-    (eltValueWitnesses->*member)(destElt, srcElt, eltInfo.Type);
+    operation(destElt, srcElt, eltInfo.Type);
   }
 
   return destTuple;
@@ -681,24 +703,6 @@ static OpaqueValue *tuple_memcpy(OpaqueValue *dest,
   return (OpaqueValue*)
     memcpy(dest, src, metatype->getValueWitnesses()->getSize());
 }
-/// Perform a naive memcpy of n tuples from src into dest.
-static OpaqueValue *tuple_memcpy_array(OpaqueValue *dest,
-                                       OpaqueValue *src,
-                                       size_t n,
-                                       const Metadata *metatype) {
-  assert(metatype->getValueWitnesses()->isPOD());
-  return (OpaqueValue*)
-    memcpy(dest, src, metatype->getValueWitnesses()->stride * n);
-}
-/// Perform a naive memmove of n tuples from src into dest.
-static OpaqueValue *tuple_memmove_array(OpaqueValue *dest,
-                                        OpaqueValue *src,
-                                        size_t n,
-                                        const Metadata *metatype) {
-  assert(metatype->getValueWitnesses()->isPOD());
-  return (OpaqueValue*)
-    memmove(dest, src, metatype->getValueWitnesses()->stride * n);
-}
 
 /// Generic tuple value witness for 'initializeWithCopy'.
 template <bool IsPOD, bool IsInline>
@@ -710,32 +714,9 @@ static OpaqueValue *tuple_initializeWithCopy(OpaqueValue *dest,
 
   if (IsPOD) return tuple_memcpy(dest, src, metatype);
   return tuple_forEachField(dest, src, metatype,
-                            &ValueWitnessTable::initializeWithCopy);
-}
-
-/// Generic tuple value witness for 'initializeArrayWithCopy'.
-template <bool IsPOD, bool IsInline>
-static OpaqueValue *tuple_initializeArrayWithCopy(OpaqueValue *dest,
-                                                  OpaqueValue *src,
-                                                  size_t n,
-                                                  const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  if (IsPOD) return tuple_memcpy_array(dest, src, n, metatype);
-
-  char *destBytes = (char*)dest;
-  char *srcBytes = (char*)src;
-  size_t stride = tuple_getValueWitnesses(metatype)->stride;
-
-  while (n--) {
-    tuple_initializeWithCopy<IsPOD, IsInline>((OpaqueValue*)destBytes,
-                                              (OpaqueValue*)srcBytes,
-                                              metatype);
-    destBytes += stride; srcBytes += stride;
-  }
-
-  return dest;
+      [](OpaqueValue *dest, OpaqueValue *src, const Metadata *eltType) {
+    return eltType->vw_initializeWithCopy(dest, src);
+  });
 }
 
 /// Generic tuple value witness for 'initializeWithTake'.
@@ -748,59 +729,9 @@ static OpaqueValue *tuple_initializeWithTake(OpaqueValue *dest,
 
   if (IsPOD) return tuple_memcpy(dest, src, metatype);
   return tuple_forEachField(dest, src, metatype,
-                            &ValueWitnessTable::initializeWithTake);
-}
-
-/// Generic tuple value witness for 'initializeArrayWithTakeFrontToBack'.
-template <bool IsPOD, bool IsInline>
-static OpaqueValue *tuple_initializeArrayWithTakeFrontToBack(
-                                             OpaqueValue *dest,
-                                             OpaqueValue *src,
-                                             size_t n,
-                                             const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  if (IsPOD) return tuple_memmove_array(dest, src, n, metatype);
-
-  char *destBytes = (char*)dest;
-  char *srcBytes = (char*)src;
-  size_t stride = tuple_getValueWitnesses(metatype)->stride;
-
-  while (n--) {
-    tuple_initializeWithTake<IsPOD, IsInline>((OpaqueValue*)destBytes,
-                                              (OpaqueValue*)srcBytes,
-                                              metatype);
-    destBytes += stride; srcBytes += stride;
-  }
-
-  return dest;
-}
-
-/// Generic tuple value witness for 'initializeArrayWithTakeBackToFront'.
-template <bool IsPOD, bool IsInline>
-static OpaqueValue *tuple_initializeArrayWithTakeBackToFront(
-                                             OpaqueValue *dest,
-                                             OpaqueValue *src,
-                                             size_t n,
-                                             const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  if (IsPOD) return tuple_memmove_array(dest, src, n, metatype);
-
-  size_t stride = tuple_getValueWitnesses(metatype)->stride;
-  char *destBytes = (char*)dest + n * stride;
-  char *srcBytes = (char*)src + n * stride;
-
-  while (n--) {
-    destBytes -= stride; srcBytes -= stride;
-    tuple_initializeWithTake<IsPOD, IsInline>((OpaqueValue*)destBytes,
-                                              (OpaqueValue*)srcBytes,
-                                              metatype);
-  }
-
-  return dest;
+      [](OpaqueValue *dest, OpaqueValue *src, const Metadata *eltType) {
+    return eltType->vw_initializeWithTake(dest, src);
+  });
 }
 
 /// Generic tuple value witness for 'assignWithCopy'.
@@ -813,7 +744,9 @@ static OpaqueValue *tuple_assignWithCopy(OpaqueValue *dest,
 
   if (IsPOD) return tuple_memcpy(dest, src, metatype);
   return tuple_forEachField(dest, src, metatype,
-                            &ValueWitnessTable::assignWithCopy);
+      [](OpaqueValue *dest, OpaqueValue *src, const Metadata *eltType) {
+    return eltType->vw_assignWithCopy(dest, src);
+  });
 }
 
 /// Generic tuple value witness for 'assignWithTake'.
@@ -823,35 +756,9 @@ static OpaqueValue *tuple_assignWithTake(OpaqueValue *dest,
                                          const Metadata *metatype) {
   if (IsPOD) return tuple_memcpy(dest, src, metatype);
   return tuple_forEachField(dest, src, metatype,
-                            &ValueWitnessTable::assignWithTake);
-}
-
-/// Generic tuple value witness for 'initializeBufferWithCopy'.
-template <bool IsPOD, bool IsInline>
-static OpaqueValue *tuple_initializeBufferWithCopy(ValueBuffer *dest,
-                                                   OpaqueValue *src,
-                                                   const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  return tuple_initializeWithCopy<IsPOD, IsInline>(
-                        tuple_allocateBuffer<IsPOD, IsInline>(dest, metatype),
-                        src,
-                        metatype);
-}
-
-/// Generic tuple value witness for 'initializeBufferWithTake'.
-template <bool IsPOD, bool IsInline>
-static OpaqueValue *tuple_initializeBufferWithTake(ValueBuffer *dest,
-                                                   OpaqueValue *src,
-                                                   const Metadata *metatype) {
-  assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
-  assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-
-  return tuple_initializeWithTake<IsPOD, IsInline>(
-                        tuple_allocateBuffer<IsPOD, IsInline>(dest, metatype),
-                        src,
-                        metatype);
+      [](OpaqueValue *dest, OpaqueValue *src, const Metadata *eltType) {
+    return eltType->vw_assignWithTake(dest, src);
+  });
 }
 
 /// Generic tuple value witness for 'initializeBufferWithCopyOfBuffer'.
@@ -861,7 +768,6 @@ static OpaqueValue *tuple_initializeBufferWithCopyOfBuffer(ValueBuffer *dest,
                                                      const Metadata *metatype) {
   assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
   assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   if (IsInline) {
     return tuple_initializeWithCopy<IsPOD, IsInline>(
         tuple_projectBuffer<IsPOD, IsInline>(dest, metatype),
@@ -872,12 +778,6 @@ static OpaqueValue *tuple_initializeBufferWithCopyOfBuffer(ValueBuffer *dest,
   *reinterpret_cast<HeapObject**>(dest) = srcReference;
   swift_retain(srcReference);
   return tuple_projectBuffer<IsPOD, IsInline>(dest, metatype);
-#else
-  return tuple_initializeBufferWithCopy<IsPOD, IsInline>(
-                            dest,
-                            tuple_projectBuffer<IsPOD, IsInline>(src, metatype),
-                            metatype);
-#endif
 }
 
 /// Generic tuple value witness for 'initializeBufferWithTakeOfBuffer'.
@@ -887,7 +787,6 @@ static OpaqueValue *tuple_initializeBufferWithTakeOfBuffer(ValueBuffer *dest,
                                                      const Metadata *metatype) {
   assert(IsPOD == tuple_getValueWitnesses(metatype)->isPOD());
   assert(IsInline == tuple_getValueWitnesses(metatype)->isValueInline());
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   if (IsInline) {
     return tuple_initializeWithTake<IsPOD, IsInline>(
         tuple_projectBuffer<IsPOD, IsInline>(dest, metatype),
@@ -896,17 +795,37 @@ static OpaqueValue *tuple_initializeBufferWithTakeOfBuffer(ValueBuffer *dest,
   auto *srcReference = *reinterpret_cast<HeapObject**>(src);
   *reinterpret_cast<HeapObject**>(dest) = srcReference;
   return tuple_projectBuffer<IsPOD, IsInline>(dest, metatype);
-#else
-  if (IsInline) {
-    return tuple_initializeWithTake<IsPOD, IsInline>(
-                      tuple_projectBuffer<IsPOD, IsInline>(dest, metatype),
-                      tuple_projectBuffer<IsPOD, IsInline>(src, metatype),
-                      metatype);
-  } else {
-    dest->PrivateData[0] = src->PrivateData[0];
-    return (OpaqueValue*) dest->PrivateData[0];
-  }
-#endif
+}
+
+template <bool IsPOD, bool IsInline>
+static int tuple_getEnumTagSinglePayload(const OpaqueValue *enumAddr,
+                                         unsigned numEmptyCases,
+                                         const Metadata *self) {
+  auto *witnesses = self->getValueWitnesses();
+  auto size = witnesses->getSize();
+  auto numExtraInhabitants = witnesses->getNumExtraInhabitants();
+  auto getExtraInhabitantIndex =
+      (static_cast<const ExtraInhabitantsValueWitnessTable *>(witnesses)
+           ->getExtraInhabitantIndex);
+
+  return getEnumTagSinglePayloadImpl(enumAddr, numEmptyCases, self, size,
+                                     numExtraInhabitants,
+                                     getExtraInhabitantIndex);
+}
+
+template <bool IsPOD, bool IsInline>
+static void
+tuple_storeEnumTagSinglePayload(OpaqueValue *enumAddr, int whichCase,
+                                unsigned numEmptyCases, const Metadata *self) {
+  auto *witnesses = self->getValueWitnesses();
+  auto size = witnesses->getSize();
+  auto numExtraInhabitants = witnesses->getNumExtraInhabitants();
+  auto storeExtraInhabitant =
+      (static_cast<const ExtraInhabitantsValueWitnessTable *>(witnesses)
+           ->storeExtraInhabitant);
+
+  storeEnumTagSinglePayloadImpl(enumAddr, whichCase, numEmptyCases, self, size,
+                                numExtraInhabitants, storeExtraInhabitant);
 }
 
 static void tuple_storeExtraInhabitant(OpaqueValue *tuple,
@@ -934,33 +853,37 @@ static int tuple_getExtraInhabitantIndex(const OpaqueValue *tuple,
 
 /// Various standard witness table for tuples.
 static const ValueWitnessTable tuple_witnesses_pod_inline = {
-#define TUPLE_WITNESS(NAME) &tuple_##NAME<true, true>,
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(TUPLE_WITNESS)
-#undef TUPLE_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) &tuple_##LOWER_ID<true, true>,
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
   0,
   ValueWitnessFlags(),
   0
 };
 static const ValueWitnessTable tuple_witnesses_nonpod_inline = {
-#define TUPLE_WITNESS(NAME) &tuple_##NAME<false, true>,
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(TUPLE_WITNESS)
-#undef TUPLE_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) &tuple_##LOWER_ID<false, true>,
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
   0,
   ValueWitnessFlags(),
   0
 };
 static const ValueWitnessTable tuple_witnesses_pod_noninline = {
-#define TUPLE_WITNESS(NAME) &tuple_##NAME<true, false>,
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(TUPLE_WITNESS)
-#undef TUPLE_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) &tuple_##LOWER_ID<true, false>,
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
   0,
   ValueWitnessFlags(),
   0
 };
 static const ValueWitnessTable tuple_witnesses_nonpod_noninline = {
-#define TUPLE_WITNESS(NAME) &tuple_##NAME<false, false>,
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(TUPLE_WITNESS)
-#undef TUPLE_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) &tuple_##LOWER_ID<false, false>,
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
   0,
   ValueWitnessFlags(),
   0
@@ -1061,6 +984,18 @@ TupleCacheEntry::TupleCacheEntry(const Key &key,
   Witnesses.flags = layout.flags;
   Witnesses.stride = layout.stride;
 
+  // We have extra inhabitants if the first element does.
+  // FIXME: generalize this.
+  bool hasExtraInhabitants = false;
+  if (auto firstEltEIVWT = dyn_cast<ExtraInhabitantsValueWitnessTable>(
+                             key.Elements[0]->getValueWitnesses())) {
+    hasExtraInhabitants = true;
+    Witnesses.flags = Witnesses.flags.withExtraInhabitants(true);
+    Witnesses.extraInhabitantFlags = firstEltEIVWT->extraInhabitantFlags;
+    Witnesses.storeExtraInhabitant = tuple_storeExtraInhabitant;
+    Witnesses.getExtraInhabitantIndex = tuple_getExtraInhabitantIndex;
+  }
+
   // Copy the function witnesses in, either from the proposed
   // witnesses or from the standard table.
   if (!proposedWitnesses) {
@@ -1073,13 +1008,13 @@ TupleCacheEntry::TupleCacheEntry(const Key &key,
       // into something better).
     } else if (layout.flags.isInlineStorage()
                && layout.flags.isPOD()) {
-      if (layout.size == 8 && layout.flags.getAlignmentMask() == 7)
+      if (!hasExtraInhabitants && layout.size == 8 && layout.flags.getAlignmentMask() == 7)
         proposedWitnesses = &VALUE_WITNESS_SYM(Bi64_);
-      else if (layout.size == 4 && layout.flags.getAlignmentMask() == 3)
+      else if (!hasExtraInhabitants && layout.size == 4 && layout.flags.getAlignmentMask() == 3)
         proposedWitnesses = &VALUE_WITNESS_SYM(Bi32_);
-      else if (layout.size == 2 && layout.flags.getAlignmentMask() == 1)
+      else if (!hasExtraInhabitants && layout.size == 2 && layout.flags.getAlignmentMask() == 1)
         proposedWitnesses = &VALUE_WITNESS_SYM(Bi16_);
-      else if (layout.size == 1)
+      else if (!hasExtraInhabitants && layout.size == 1)
         proposedWitnesses = &VALUE_WITNESS_SYM(Bi8_);
       else
         proposedWitnesses = &tuple_witnesses_pod_inline;
@@ -1095,20 +1030,11 @@ TupleCacheEntry::TupleCacheEntry(const Key &key,
       proposedWitnesses = &tuple_witnesses_nonpod_noninline;
     }
   }
-#define ASSIGN_TUPLE_WITNESS(NAME) \
-  Witnesses.NAME = proposedWitnesses->NAME;
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(ASSIGN_TUPLE_WITNESS)
-#undef ASSIGN_TUPLE_WITNESS
-
-  // We have extra inhabitants if the first element does.
-  // FIXME: generalize this.
-  if (auto firstEltEIVWT = dyn_cast<ExtraInhabitantsValueWitnessTable>(
-                             key.Elements[0]->getValueWitnesses())) {
-    Witnesses.flags = Witnesses.flags.withExtraInhabitants(true);
-    Witnesses.extraInhabitantFlags = firstEltEIVWT->extraInhabitantFlags;
-    Witnesses.storeExtraInhabitant = tuple_storeExtraInhabitant;
-    Witnesses.getExtraInhabitantIndex = tuple_getExtraInhabitantIndex;
-  }
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+  Witnesses.LOWER_ID = proposedWitnesses->LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
 }
 
 const TupleTypeMetadata *
@@ -1141,7 +1067,7 @@ namespace {
   struct pointer_function_cast_impl;
   
   template<typename OutRet, typename...OutArgs>
-  struct pointer_function_cast_impl<OutRet * (OutArgs *...)> {
+  struct pointer_function_cast_impl<OutRet * (*)(OutArgs *...)> {
     template<typename InRet, typename...InArgs>
     static constexpr auto perform(InRet * (*function)(InArgs *...))
       -> OutRet * (*)(OutArgs *...)
@@ -1153,7 +1079,7 @@ namespace {
   };
 
   template<typename...OutArgs>
-  struct pointer_function_cast_impl<void (OutArgs *...)> {
+  struct pointer_function_cast_impl<void (*)(OutArgs *...)> {
     template<typename...InArgs>
     static constexpr auto perform(void (*function)(InArgs *...))
       -> void (*)(OutArgs *...)
@@ -1170,22 +1096,12 @@ namespace {
 /// In any reasonable calling convention the input and output function types
 /// should be ABI-compatible.
 template<typename Out, typename In>
-static constexpr Out *pointer_function_cast(In *function) {
+static constexpr Out pointer_function_cast(In *function) {
   return pointer_function_cast_impl<Out>::perform(function);
 }
 
-static void pod_indirect_deallocateBuffer(ValueBuffer *buffer,
-                                          const Metadata *self) {
-  auto value = *reinterpret_cast<OpaqueValue**>(buffer);
-  auto wtable = self->getValueWitnesses();
-  swift_slowDealloc(value, wtable->size, wtable->getAlignmentMask());
-}
-#define pod_indirect_destroyBuffer \
-  pointer_function_cast<value_witness_types::destroyBuffer>(pod_indirect_deallocateBuffer)
-
 static OpaqueValue *pod_indirect_initializeBufferWithCopyOfBuffer(
                     ValueBuffer *dest, ValueBuffer *src, const Metadata *self) {
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   auto wtable = self->getValueWitnesses();
   auto *srcReference = *reinterpret_cast<HeapObject**>(src);
   *reinterpret_cast<HeapObject**>(dest) = srcReference;
@@ -1197,20 +1113,10 @@ static OpaqueValue *pod_indirect_initializeBufferWithCopyOfBuffer(
   unsigned byteOffset = (sizeof(HeapObject) + alignMask) & ~alignMask;
   auto *bytePtr = reinterpret_cast<char *>(srcReference);
   return reinterpret_cast<OpaqueValue *>(bytePtr + byteOffset);
-#else
-  auto wtable = self->getValueWitnesses();
-  auto destBuf = (OpaqueValue*)swift_slowAlloc(wtable->size,
-                                               wtable->getAlignmentMask());
-  *reinterpret_cast<OpaqueValue**>(dest) = destBuf;
-  OpaqueValue *srcBuf = *reinterpret_cast<OpaqueValue**>(src);
-  memcpy(destBuf, srcBuf, wtable->size);
-  return destBuf;
-#endif
 }
 
 static OpaqueValue *pod_indirect_initializeBufferWithTakeOfBuffer(
                     ValueBuffer *dest, ValueBuffer *src, const Metadata *self) {
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   auto wtable = self->getValueWitnesses();
   auto *srcReference = *reinterpret_cast<HeapObject**>(src);
   *reinterpret_cast<HeapObject**>(dest) = srcReference;
@@ -1221,33 +1127,6 @@ static OpaqueValue *pod_indirect_initializeBufferWithTakeOfBuffer(
   unsigned byteOffset = (sizeof(HeapObject) + alignMask) & ~alignMask;
   auto *bytePtr = reinterpret_cast<char *>(srcReference);
   return reinterpret_cast<OpaqueValue *>(bytePtr + byteOffset);
-#else
-  memcpy(dest, src, sizeof(ValueBuffer));
-  return *reinterpret_cast<OpaqueValue**>(dest);
-#endif
-}
-
-static OpaqueValue *pod_indirect_projectBuffer(ValueBuffer *buffer,
-                                               const Metadata *self) {
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
-  unsigned alignMask = self->getValueWitnesses()->getAlignmentMask();
-  // Compute the byte offset of the object in the box.
-  unsigned byteOffset = (sizeof(HeapObject) + alignMask) & ~alignMask;
-  auto *bytePtr =
-      reinterpret_cast<char *>(*reinterpret_cast<HeapObject **>(buffer));
-  return reinterpret_cast<OpaqueValue *>(bytePtr + byteOffset);
-#else
-  return *reinterpret_cast<OpaqueValue**>(buffer);
-#endif
-}
-
-static OpaqueValue *pod_indirect_allocateBuffer(ValueBuffer *buffer,
-                                                const Metadata *self) {
-  auto wtable = self->getValueWitnesses();
-  auto destBuf = (OpaqueValue*)swift_slowAlloc(wtable->size,
-                                               wtable->getAlignmentMask());
-  *reinterpret_cast<OpaqueValue**>(buffer) = destBuf;
-  return destBuf;
 }
 
 static void pod_noop(void *object, const Metadata *self) {
@@ -1255,30 +1134,6 @@ static void pod_noop(void *object, const Metadata *self) {
 #define pod_direct_destroy \
   pointer_function_cast<value_witness_types::destroy>(pod_noop)
 #define pod_indirect_destroy pod_direct_destroy
-#define pod_direct_destroyBuffer \
-  pointer_function_cast<value_witness_types::destroyBuffer>(pod_noop)
-#define pod_direct_deallocateBuffer \
-  pointer_function_cast<value_witness_types::deallocateBuffer>(pod_noop)
-
-static void *pod_noop_return(void *object, const Metadata *self) {
-  return object;
-}
-#define pod_direct_projectBuffer \
-  pointer_function_cast<value_witness_types::projectBuffer>(pod_noop_return)
-#define pod_direct_allocateBuffer \
-  pointer_function_cast<value_witness_types::allocateBuffer>(pod_noop_return)
-
-static OpaqueValue *pod_indirect_initializeBufferWithCopy(ValueBuffer *dest,
-                                                          OpaqueValue *src,
-                                                          const Metadata *self){
-  auto wtable = self->getValueWitnesses();
-  auto destBuf = (OpaqueValue*)swift_slowAlloc(wtable->size,
-                                               wtable->getAlignmentMask());
-  *reinterpret_cast<OpaqueValue**>(dest) = destBuf;
-  memcpy(destBuf, src, wtable->size);
-  return destBuf;
-}
-#define pod_indirect_initializeBufferWithTake pod_indirect_initializeBufferWithCopy
 
 static OpaqueValue *pod_direct_initializeWithCopy(OpaqueValue *dest,
                                                   OpaqueValue *src,
@@ -1293,12 +1148,6 @@ static OpaqueValue *pod_direct_initializeWithCopy(OpaqueValue *dest,
 #define pod_direct_initializeBufferWithTakeOfBuffer \
   pointer_function_cast<value_witness_types::initializeBufferWithTakeOfBuffer> \
     (pod_direct_initializeWithCopy)
-#define pod_direct_initializeBufferWithCopy \
-  pointer_function_cast<value_witness_types::initializeBufferWithCopy> \
-    (pod_direct_initializeWithCopy)
-#define pod_direct_initializeBufferWithTake \
-  pointer_function_cast<value_witness_types::initializeBufferWithTake> \
-    (pod_direct_initializeWithCopy)
 #define pod_direct_assignWithCopy pod_direct_initializeWithCopy
 #define pod_indirect_assignWithCopy pod_direct_initializeWithCopy
 #define pod_direct_initializeWithTake pod_direct_initializeWithCopy
@@ -1306,40 +1155,44 @@ static OpaqueValue *pod_direct_initializeWithCopy(OpaqueValue *dest,
 #define pod_direct_assignWithTake pod_direct_initializeWithCopy
 #define pod_indirect_assignWithTake pod_direct_initializeWithCopy
 
-static void pod_direct_destroyArray(OpaqueValue *, size_t, const Metadata *) {
-  // noop
-}
-#define pod_indirect_destroyArray pod_direct_destroyArray
+static int pod_direct_getEnumTagSinglePayload(const OpaqueValue *enumAddr,
+                                              unsigned numEmptyCases,
+                                              const Metadata *self) {
+  auto *witnesses = self->getValueWitnesses();
+  auto size = witnesses->getSize();
+  auto numExtraInhabitants = witnesses->getNumExtraInhabitants();
+  auto getExtraInhabitantIndex =
+      (static_cast<const ExtraInhabitantsValueWitnessTable *>(witnesses)
+           ->getExtraInhabitantIndex);
 
-static OpaqueValue *pod_direct_initializeArrayWithCopy(OpaqueValue *dest,
-                                                       OpaqueValue *src,
-                                                       size_t n,
-                                                       const Metadata *self) {
-  auto totalSize = self->getValueWitnesses()->stride * n;
-  memcpy(dest, src, totalSize);
-  return dest;
+  return getEnumTagSinglePayloadImpl(enumAddr, numEmptyCases, self, size,
+                                     numExtraInhabitants,
+                                     getExtraInhabitantIndex);
 }
-#define pod_indirect_initializeArrayWithCopy pod_direct_initializeArrayWithCopy
 
-static OpaqueValue *pod_direct_initializeArrayWithTakeFrontToBack(
-                                                        OpaqueValue *dest,
-                                                        OpaqueValue *src,
-                                                        size_t n,
-                                                        const Metadata *self) {
-  auto totalSize = self->getValueWitnesses()->stride * n;
-  memmove(dest, src, totalSize);
-  return dest;
+static void pod_direct_storeEnumTagSinglePayload(OpaqueValue *enumAddr,
+                                                 int whichCase,
+                                                 unsigned numEmptyCases,
+                                                 const Metadata *self) {
+  auto *witnesses = self->getValueWitnesses();
+  auto size = witnesses->getSize();
+  auto numExtraInhabitants = witnesses->getNumExtraInhabitants();
+  auto storeExtraInhabitant =
+      (static_cast<const ExtraInhabitantsValueWitnessTable *>(witnesses)
+           ->storeExtraInhabitant);
+
+  storeEnumTagSinglePayloadImpl(enumAddr, whichCase, numEmptyCases, self, size,
+                                numExtraInhabitants, storeExtraInhabitant);
 }
-#define pod_direct_initializeArrayWithTakeBackToFront \
-  pod_direct_initializeArrayWithTakeFrontToBack
-#define pod_indirect_initializeArrayWithTakeFrontToBack \
-  pod_direct_initializeArrayWithTakeFrontToBack
-#define pod_indirect_initializeArrayWithTakeBackToFront \
-  pod_direct_initializeArrayWithTakeFrontToBack
+
+#define pod_indirect_getEnumTagSinglePayload pod_direct_getEnumTagSinglePayload
+#define pod_indirect_storeEnumTagSinglePayload \
+  pod_direct_storeEnumTagSinglePayload
 
 static constexpr uint64_t sizeWithAlignmentMask(uint64_t size,
-                                                uint64_t alignmentMask) {
-  return (size << 16) | alignmentMask;
+                                                uint64_t alignmentMask,
+                                                uint64_t hasExtraInhabitants) {
+  return (hasExtraInhabitants << 48) | (size << 16) | alignmentMask;
 }
 
 void swift::installCommonValueWitnesses(ValueWitnessTable *vwtable) {
@@ -1349,47 +1202,55 @@ void swift::installCommonValueWitnesses(ValueWitnessTable *vwtable) {
     // If the value has a common size and alignment, use specialized value
     // witnesses we already have lying around for the builtin types.
     const ValueWitnessTable *commonVWT;
-    switch (sizeWithAlignmentMask(vwtable->size, vwtable->getAlignmentMask())) {
+    bool hasExtraInhabitants = flags.hasExtraInhabitants();
+    switch (sizeWithAlignmentMask(vwtable->size, vwtable->getAlignmentMask(),
+                                  hasExtraInhabitants)) {
     default:
       // For uncommon layouts, use value witnesses that work with an arbitrary
       // size and alignment.
       if (flags.isInlineStorage()) {
-  #define INSTALL_POD_DIRECT_WITNESS(NAME) vwtable->NAME = pod_direct_##NAME;
-        FOR_ALL_FUNCTION_VALUE_WITNESSES(INSTALL_POD_DIRECT_WITNESS)
-  #undef INSTALL_POD_DIRECT_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+        vwtable->LOWER_ID = pod_direct_##LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
       } else {
-  #define INSTALL_POD_INDIRECT_WITNESS(NAME) vwtable->NAME = pod_indirect_##NAME;
-        FOR_ALL_FUNCTION_VALUE_WITNESSES(INSTALL_POD_INDIRECT_WITNESS)
-  #undef INSTALL_POD_INDIRECT_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+        vwtable->LOWER_ID = pod_indirect_##LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
       }
       return;
       
-    case sizeWithAlignmentMask(1, 0):
+    case sizeWithAlignmentMask(1, 0, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi8_);
       break;
-    case sizeWithAlignmentMask(2, 1):
+    case sizeWithAlignmentMask(2, 1, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi16_);
       break;
-    case sizeWithAlignmentMask(4, 3):
+    case sizeWithAlignmentMask(4, 3, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi32_);
       break;
-    case sizeWithAlignmentMask(8, 7):
+    case sizeWithAlignmentMask(8, 7, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi64_);
       break;
-    case sizeWithAlignmentMask(16, 15):
+    case sizeWithAlignmentMask(16, 15, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi128_);
       break;
-    case sizeWithAlignmentMask(32, 31):
+    case sizeWithAlignmentMask(32, 31, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi256_);
       break;
-    case sizeWithAlignmentMask(64, 63):
+    case sizeWithAlignmentMask(64, 63, 0):
       commonVWT = &VALUE_WITNESS_SYM(Bi512_);
       break;
     }
-    
-  #define INSTALL_POD_COMMON_WITNESS(NAME) vwtable->NAME = commonVWT->NAME;
-    FOR_ALL_FUNCTION_VALUE_WITNESSES(INSTALL_POD_COMMON_WITNESS)
-  #undef INSTALL_POD_COMMON_WITNESS
+
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+    vwtable->LOWER_ID = commonVWT->LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
     
     return;
   }
@@ -1400,18 +1261,10 @@ void swift::installCommonValueWitnesses(ValueWitnessTable *vwtable) {
       vwtable->initializeWithTake = pod_direct_initializeWithTake;
       vwtable->initializeBufferWithTakeOfBuffer
         = pod_direct_initializeBufferWithTakeOfBuffer;
-      vwtable->initializeArrayWithTakeFrontToBack
-        = pod_direct_initializeArrayWithTakeFrontToBack;
-      vwtable->initializeArrayWithTakeBackToFront
-        = pod_direct_initializeArrayWithTakeBackToFront;
     } else {
       vwtable->initializeWithTake = pod_indirect_initializeWithTake;
       vwtable->initializeBufferWithTakeOfBuffer
         = pod_indirect_initializeBufferWithTakeOfBuffer;
-      vwtable->initializeArrayWithTakeFrontToBack
-        = pod_indirect_initializeArrayWithTakeFrontToBack;
-      vwtable->initializeArrayWithTakeBackToFront
-        = pod_indirect_initializeArrayWithTakeBackToFront;
     }
     return;
   }
@@ -1445,9 +1298,6 @@ void swift::swift_initStructMetadata_UniversalStrategy(size_t numFields,
   vwtable->flags = layout.flags;
   vwtable->stride = layout.stride;
   
-  // Substitute in better value witnesses if we have them.
-  installCommonValueWitnesses(vwtable);
-
   // We have extra inhabitants if the first element does.
   // FIXME: generalize this.
   if (fieldTypes[0]->flags.hasExtraInhabitants()) {
@@ -1459,6 +1309,9 @@ void swift::swift_initStructMetadata_UniversalStrategy(size_t numFields,
     assert(xiVWT->storeExtraInhabitant);
     assert(xiVWT->getExtraInhabitantIndex);
   }
+
+  // Substitute in better value witnesses if we have them.
+  installCommonValueWitnesses(vwtable);
 }
 
 /***************************************************************************/
@@ -1493,7 +1346,7 @@ namespace {
     uint32_t Flags;
     uint32_t InstanceStart;
     uint32_t InstanceSize;
-#ifdef __LP64__
+#if __POINTER_WIDTH__ == 64
     uint32_t Reserved;
 #endif
     const uint8_t *IvarLayout;
@@ -1558,15 +1411,15 @@ static ClassMetadata *_swift_initializeSuperclass(ClassMetadata *theClass,
 #endif
 
   const ClassMetadata *theSuperclass = theClass->SuperClass;
-  if (theSuperclass == nullptr)
-    return theClass;
 
   // Relocate the metadata if necessary.
   //
   // For now, we assume that relocation is only required when the parent
   // class has prefix matter we didn't know about.  This isn't consistent
   // with general class resilience, however.
-  if (theSuperclass->isTypeMetadata()) {
+  //
+  // FIXME: This part isn't used right now.
+  if (theSuperclass && theSuperclass->isTypeMetadata()) {
     auto superAP = theSuperclass->getClassAddressPoint();
     auto oldClassAP = theClass->getClassAddressPoint();
     if (superAP > oldClassAP) {
@@ -1597,21 +1450,36 @@ static ClassMetadata *_swift_initializeSuperclass(ClassMetadata *theClass,
     }
   }
 
-  // If any ancestor classes have generic parameters or field offset
-  // vectors, inherit them.
+  // Copy the class's immediate methods from the nominal type descriptor
+  // to the class metadata.
+  {
+    const auto *description = theClass->getDescription();
+    auto &genericParams = description->GenericParams;
+
+    auto *classWords = reinterpret_cast<void **>(theClass);
+
+    if (genericParams.Flags.hasVTable()) {
+      auto *vtable = description->getVTableDescriptor();
+      for (unsigned i = 0, e = vtable->VTableSize; i < e; ++i) {
+        classWords[vtable->VTableOffset + i] = vtable->getMethod(i);
+      }
+    }
+  }
+
+  if (theSuperclass == nullptr)
+    return theClass;
+
+  // If any ancestor classes have generic parameters, field offset vectors
+  // or virtual methods, inherit them.
+  //
+  // Note that the caller is responsible for installing overrides of
+  // superclass methods; here we just copy them verbatim.
   auto ancestor = theSuperclass;
   auto *classWords = reinterpret_cast<uintptr_t *>(theClass);
   auto *superWords = reinterpret_cast<const uintptr_t *>(theSuperclass);
   while (ancestor && ancestor->isTypeMetadata()) {
-    auto &description = ancestor->getDescription();
+    const auto *description = ancestor->getDescription();
     auto &genericParams = description->GenericParams;
-
-    // Copy the parent type.
-    if (genericParams.Flags.hasParent()) {
-      memcpy(classWords + genericParams.Offset - 1,
-             superWords + genericParams.Offset - 1,
-             sizeof(uintptr_t));
-    }
 
     // Copy the generic requirements.
     if (genericParams.hasGenericRequirements()) {
@@ -1619,6 +1487,14 @@ static ClassMetadata *_swift_initializeSuperclass(ClassMetadata *theClass,
       memcpy(classWords + genericParams.Offset,
              superWords + genericParams.Offset,
              numParamWords * sizeof(uintptr_t));
+    }
+
+    // Copy the vtable entries.
+    if (genericParams.Flags.hasVTable()) {
+      auto *vtable = description->getVTableDescriptor();
+      memcpy(classWords + vtable->VTableOffset,
+             superWords + vtable->VTableOffset,
+             vtable->VTableSize * sizeof(uintptr_t));
     }
 
     // Copy the field offsets.
@@ -1637,7 +1513,7 @@ static ClassMetadata *_swift_initializeSuperclass(ClassMetadata *theClass,
   // superclass.
   auto theMetaclass = (ClassMetadata *)object_getClass((id)theClass);
   auto theSuperMetaclass
-    = (const ClassMetadata *)object_getClass((id)theSuperclass);
+    = (const ClassMetadata *)object_getClass(id_const_cast(theSuperclass));
   theMetaclass->SuperClass = theSuperMetaclass;
 #endif
 
@@ -1657,7 +1533,7 @@ static MetadataAllocator &getResilientMetadataAllocator() {
 ClassMetadata *
 swift::swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
                                                  size_t numFields,
-                                           const ClassFieldLayout *fieldLayouts,
+                                           const TypeLayout * const *fieldTypes,
                                                  size_t *fieldOffsets) {
   self = _swift_initializeSuperclass(self, /*copyFieldOffsetVectors=*/true);
 
@@ -1748,11 +1624,6 @@ swift::swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
   // even if Swift doesn't, because of SwiftObject.)
   rodata->InstanceStart = size;
 
-  auto genericPattern = self->getDescription()->getGenericMetadataPattern();
-  auto &allocator =
-    genericPattern ? unsafeGetInitializedCache(genericPattern).getAllocator()
-                   : getResilientMetadataAllocator();
-
   // Always clone the ivar descriptors.
   if (numFields) {
     const ClassIvarList *dependentIvars = rodata->IvarList;
@@ -1761,12 +1632,14 @@ swift::swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
 
     auto ivarListSize = sizeof(ClassIvarList) +
                         numFields * sizeof(ClassIvarEntry);
-    auto ivars = (ClassIvarList*) allocator.Allocate(ivarListSize,
-                                                     alignof(ClassIvarList));
+    auto ivars = (ClassIvarList*) getResilientMetadataAllocator()
+      .Allocate(ivarListSize, alignof(ClassIvarList));
     memcpy(ivars, dependentIvars, ivarListSize);
     rodata->IvarList = ivars;
 
     for (unsigned i = 0; i != numFields; ++i) {
+      auto *eltLayout = fieldTypes[i];
+
       ClassIvarEntry &ivar = ivars->getIvars()[i];
 
       // Remember the global ivar offset if present.
@@ -1780,11 +1653,11 @@ swift::swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
 
       // If the ivar's size doesn't match the field layout we
       // computed, overwrite it and give it better type information.
-      if (ivar.Size != fieldLayouts[i].Size) {
-        ivar.Size = fieldLayouts[i].Size;
+      if (ivar.Size != eltLayout->size) {
+        ivar.Size = eltLayout->size;
         ivar.Type = nullptr;
         ivar.Log2Alignment =
-          getLog2AlignmentFromMask(fieldLayouts[i].AlignMask);
+          getLog2AlignmentFromMask(eltLayout->flags.getAlignmentMask());
       }
     }
   }
@@ -1792,13 +1665,16 @@ swift::swift_initClassMetadata_UniversalStrategy(ClassMetadata *self,
 
   // Okay, now do layout.
   for (unsigned i = 0; i != numFields; ++i) {
+    auto *eltLayout = fieldTypes[i];
+
     // Skip empty fields.
-    if (fieldOffsets[i] == 0 && fieldLayouts[i].Size == 0)
+    if (fieldOffsets[i] == 0 && eltLayout->size == 0)
       continue;
-    auto offset = roundUpToAlignMask(size, fieldLayouts[i].AlignMask);
+    auto offset = roundUpToAlignMask(size,
+                                     eltLayout->flags.getAlignmentMask());
     fieldOffsets[i] = offset;
-    size = offset + fieldLayouts[i].Size;
-    alignMask = std::max(alignMask, fieldLayouts[i].AlignMask);
+    size = offset + eltLayout->size;
+    alignMask = std::max(alignMask, eltLayout->flags.getAlignmentMask());
   }
 
   // Save the final size and alignment into the metadata record.
@@ -1980,12 +1856,13 @@ ExistentialMetatypeValueWitnessTableCacheEntry(unsigned numWitnessTables) {
   using Box = NonFixedExistentialMetatypeBox;
   using Witnesses = NonFixedValueWitnesses<Box, /*known allocated*/ true>;
 
-#define STORE_VAR_EXISTENTIAL_METATYPE_WITNESS(WITNESS) \
-  Data.WITNESS = Witnesses::WITNESS;
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(STORE_VAR_EXISTENTIAL_METATYPE_WITNESS)
-  STORE_VAR_EXISTENTIAL_METATYPE_WITNESS(storeExtraInhabitant)
-  STORE_VAR_EXISTENTIAL_METATYPE_WITNESS(getExtraInhabitantIndex)
-#undef STORE_VAR_EXISTENTIAL_METATYPE_WITNESS
+#define WANT_REQUIRED_VALUE_WITNESSES 1
+#define WANT_EXTRA_INHABITANT_VALUE_WITNESSES 1
+#define WANT_ENUM_VALUE_WITNESSES 0
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+  Data.LOWER_ID = Witnesses::LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
 
   Data.size = Box::Container::getSize(numWitnessTables);
   Data.flags = ValueWitnessFlags()
@@ -2173,10 +2050,11 @@ OpaqueExistentialValueWitnessTableCacheEntry(unsigned numWitnessTables) {
   using Witnesses = NonFixedValueWitnesses<Box, /*known allocated*/ true>;
   static_assert(!Witnesses::hasExtraInhabitants, "no extra inhabitants");
 
-#define STORE_VAR_OPAQUE_EXISTENTIAL_WITNESS(WITNESS) \
-  Data.WITNESS = Witnesses::WITNESS;
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(STORE_VAR_OPAQUE_EXISTENTIAL_WITNESS)
-#undef STORE_VAR_OPAQUE_EXISTENTIAL_WITNESS
+#define WANT_ONLY_REQUIRED_VALUE_WITNESSES
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+  Data.LOWER_ID = Witnesses::LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
 
   Data.size = Box::Container::getSize(numWitnessTables);
   Data.flags = ValueWitnessFlags()
@@ -2229,12 +2107,13 @@ ClassExistentialValueWitnessTableCacheEntry(unsigned numWitnessTables) {
   using Box = NonFixedClassExistentialBox;
   using Witnesses = NonFixedValueWitnesses<Box, /*known allocated*/ true>;
 
-#define STORE_VAR_CLASS_EXISTENTIAL_WITNESS(WITNESS) \
-  Data.WITNESS = Witnesses::WITNESS;
-  FOR_ALL_FUNCTION_VALUE_WITNESSES(STORE_VAR_CLASS_EXISTENTIAL_WITNESS)
-  STORE_VAR_CLASS_EXISTENTIAL_WITNESS(storeExtraInhabitant)
-  STORE_VAR_CLASS_EXISTENTIAL_WITNESS(getExtraInhabitantIndex)
-#undef STORE_VAR_CLASS_EXISTENTIAL_WITNESS
+#define WANT_REQUIRED_VALUE_WITNESSES 1
+#define WANT_EXTRA_INHABITANT_VALUE_WITNESSES 1
+#define WANT_ENUM_VALUE_WITNESSES 0
+#define VALUE_WITNESS(LOWER_ID, UPPER_ID) \
+  Data.LOWER_ID = Witnesses::LOWER_ID;
+#define DATA_VALUE_WITNESS(LOWER_ID, UPPER_ID, TYPE)
+#include "swift/ABI/ValueWitness.def"
 
   Data.size = Box::Container::getSize(numWitnessTables);
   Data.flags = ValueWitnessFlags()
@@ -2310,7 +2189,6 @@ ExistentialTypeMetadata::mayTakeValue(const OpaqueValue *container) const {
     return true;
   // Opaque existential containers uniquely own their contained value.
   case ExistentialTypeRepresentation::Opaque:
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   {
     // We can't take from a shared existential box without checking uniqueness.
     auto *opaque =
@@ -2318,9 +2196,6 @@ ExistentialTypeMetadata::mayTakeValue(const OpaqueValue *container) const {
     auto *vwt = opaque->Type->getValueWitnesses();
     return vwt->isValueInline();
   }
-#else
-    return true;
-#endif
     
   // References to boxed existential containers may be shared.
   case ExistentialTypeRepresentation::Error: {
@@ -2347,7 +2222,6 @@ const {
     break;
   
   case ExistentialTypeRepresentation::Opaque: {
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
     auto *opaque = reinterpret_cast<OpaqueExistentialContainer *>(container);
     auto *vwt = opaque->Type->getValueWitnesses();
     if (!vwt->isValueInline()) {
@@ -2356,12 +2230,6 @@ const {
       swift_deallocObject(*reinterpret_cast<HeapObject **>(&opaque->Buffer),
                           size, alignMask);
     }
-#else
-    // Containing the value may require a side allocation, which we need
-    // to clean up.
-    auto opaque = reinterpret_cast<OpaqueExistentialContainer *>(container);
-    opaque->Type->vw_deallocateBuffer(&opaque->Buffer);
-#endif
     break;
   }
   
@@ -2383,7 +2251,6 @@ ExistentialTypeMetadata::projectValue(const OpaqueValue *container) const {
   case ExistentialTypeRepresentation::Opaque: {
     auto *opaqueContainer =
       reinterpret_cast<const OpaqueExistentialContainer*>(container);
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
     auto *type = opaqueContainer->Type;
     auto *vwt = type->getValueWitnesses();
 
@@ -2396,10 +2263,6 @@ ExistentialTypeMetadata::projectValue(const OpaqueValue *container) const {
     auto *bytePtr = reinterpret_cast<const char *>(
         *reinterpret_cast<HeapObject *const *const>(&opaqueContainer->Buffer));
     return reinterpret_cast<const OpaqueValue *>(bytePtr + byteOffset);
-#else
-    return opaqueContainer->Type->vw_projectBuffer(
-      const_cast<ValueBuffer *>(&opaqueContainer->Buffer));
-#endif
   }
   case ExistentialTypeRepresentation::Error: {
     const SwiftError *errorBox
@@ -2705,14 +2568,6 @@ swift::swift_getForeignTypeMetadata(ForeignTypeMetadata *nonUnique) {
 /*** Other metadata routines ***********************************************/
 /***************************************************************************/
 
-template<> const GenericMetadata *
-Metadata::getGenericPattern() const {
-  auto &ntd = getNominalTypeDescriptor();
-  if (!ntd)
-    return nullptr;
-  return ntd->getGenericMetadataPattern();
-}
-
 template<> const ClassMetadata *
 Metadata::getClassObject() const {
   switch (getKind()) {
@@ -2843,11 +2698,11 @@ using LazyGenericWitnessTableCache = Lazy<GenericWitnessTableCache>;
 static GenericWitnessTableCache &getCache(GenericWitnessTable *gen) {
   // Keep this assert even if you change the representation above.
   static_assert(sizeof(LazyGenericWitnessTableCache) <=
-                sizeof(GenericWitnessTable::PrivateData),
+                sizeof(GenericWitnessTable::PrivateDataType),
                 "metadata cache is larger than the allowed space");
 
   auto lazyCache =
-    reinterpret_cast<LazyGenericWitnessTableCache*>(gen->PrivateData);
+    reinterpret_cast<LazyGenericWitnessTableCache*>(gen->PrivateData.get());
   return lazyCache->get();
 }
 
@@ -2862,10 +2717,8 @@ static GenericWitnessTableCache &getCache(GenericWitnessTable *gen) {
 static bool doesNotRequireInstantiation(GenericWitnessTable *genericTable) {
   if (genericTable->Instantiator.isNull() &&
       genericTable->WitnessTablePrivateSizeInWords == 0 &&
-      (genericTable->Protocol.isNull() ||
-       genericTable->WitnessTableSizeInWords -
-       genericTable->Protocol->MinimumWitnessTableSizeInWords ==
-       genericTable->Protocol->DefaultWitnessTableSizeInWords)) {
+      genericTable->WitnessTableSizeInWords ==
+        genericTable->Protocol->NumRequirements) {
     return true;
   }
 
@@ -2879,56 +2732,53 @@ allocateWitnessTable(GenericWitnessTable *genericTable,
                      MetadataAllocator &allocator,
                      const void *args[],
                      size_t numGenericArgs) {
-
-  // Number of bytes for any private storage used by the conformance itself.
-  size_t privateSize = genericTable->WitnessTablePrivateSizeInWords * sizeof(void *);
-
-  size_t minWitnessTableSize, expectedWitnessTableSize;
-  size_t actualWitnessTableSize = genericTable->WitnessTableSizeInWords * sizeof(void *);
+  // The number of witnesses provided by the table pattern.
+  size_t numPatternWitnesses = genericTable->WitnessTableSizeInWords;
 
   auto protocol = genericTable->Protocol.get();
 
-  if (protocol != nullptr && protocol->Flags.isResilient()) {
-    // The protocol and conforming type are in different resilience domains.
-    // Allocate the witness table with the correct size, and fill in default
-    // requirements at the end as needed.
-    minWitnessTableSize = (protocol->MinimumWitnessTableSizeInWords *
-                           sizeof(void *));
-    expectedWitnessTableSize = ((protocol->MinimumWitnessTableSizeInWords +
-                                 protocol->DefaultWitnessTableSizeInWords) *
-                                sizeof(void *));
-    assert(actualWitnessTableSize >= minWitnessTableSize &&
-           actualWitnessTableSize <= expectedWitnessTableSize);
-  } else {
-    // The protocol and conforming type are in the same resilience domain.
-    // Trust that the witness table template already has the correct size.
-    minWitnessTableSize = expectedWitnessTableSize = actualWitnessTableSize;
-  }
+  // The number of mandatory requirements, i.e. requirements lacking
+  // default implementations.
+  assert(numPatternWitnesses >= protocol->NumMandatoryRequirements);
+
+  // The total number of requirements.
+  size_t numRequirements = protocol->NumRequirements;
+  assert(numPatternWitnesses <= numRequirements);
+
+  // Number of bytes for any private storage used by the conformance itself.
+  size_t privateSize =
+    genericTable->WitnessTablePrivateSizeInWords * sizeof(void *);
+
+  // Number of bytes for the full witness table.
+  size_t expectedWitnessTableSize = numRequirements * sizeof(void *);
 
   // Create a new entry for the cache.
   auto entry = WitnessTableCacheEntry::allocate(
       allocator, args, numGenericArgs,
-      privateSize + expectedWitnessTableSize);
+      (privateSize + expectedWitnessTableSize) * sizeof(void *));
 
   char *fullTable = entry->getData<char>();
 
   // Zero out the private storage area.
-  memset(fullTable, 0, privateSize);
+  memset(fullTable, 0, privateSize * sizeof(void *));
 
   // Advance the address point; the private storage area is accessed via
   // negative offsets.
-  auto *table = entry->get(genericTable);
+  auto table = (void **) entry->get(genericTable);
+  auto pattern = (void * const *) &*genericTable->Pattern;
+  auto requirements = protocol->Requirements.get();
 
   // Fill in the provided part of the requirements from the pattern.
-  memcpy(table, (void * const *) &*genericTable->Pattern,
-         actualWitnessTableSize);
+  for (size_t i = 0, e = numPatternWitnesses; i < e; ++i) {
+    table[i] = pattern[i];
+  }
 
-  // If this is a resilient conformance, copy in the rest.
-  if (protocol != nullptr && protocol->Flags.isResilient()) {
-    memcpy((char *) table + actualWitnessTableSize,
-           (char *) protocol->getDefaultWitnesses() +
-              (actualWitnessTableSize - minWitnessTableSize),
-           expectedWitnessTableSize - actualWitnessTableSize);
+  // Fill in any default requirements.
+  for (size_t i = numPatternWitnesses, e = numRequirements; i < e; ++i) {
+    void *defaultImpl = requirements[i].DefaultImplementation.get();
+    assert(defaultImpl &&
+           "no default implementation for missing requirement");
+    table[i] = defaultImpl;
   }
 
   return entry;
@@ -3027,7 +2877,7 @@ void *MetadataAllocator::Allocate(size_t size, size_t alignment) {
                                               std::memory_order_relaxed)) {
       // If that succeeded, we've successfully allocated.
       __msan_allocated_memory(allocation, size);
-      __asan_poison_memory_region(allocation, size);
+      __asan_unpoison_memory_region(allocation, size);
       return allocation;
     }
 

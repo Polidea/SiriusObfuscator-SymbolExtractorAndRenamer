@@ -27,6 +27,8 @@ class TestURLRequest : XCTestCase {
             ("test_mutableCopy_1", test_mutableCopy_1),
             ("test_mutableCopy_2", test_mutableCopy_2),
             ("test_mutableCopy_3", test_mutableCopy_3),
+            ("test_methodNormalization", test_methodNormalization),
+            ("test_description", test_description),
         ]
     }
     
@@ -193,6 +195,58 @@ class TestURLRequest : XCTestCase {
         XCTAssertEqual(originalRequest.httpMethod, "GET")
         XCTAssertEqual(originalRequest.url, urlA)
         XCTAssertNil(originalRequest.allHTTPHeaderFields)
+    }
+
+    func test_methodNormalization() {
+        let expectedNormalizations = [
+            "GET": "GET",
+            "get": "GET",
+            "gEt": "GET",
+            "HEAD": "HEAD",
+            "hEAD": "HEAD",
+            "head": "HEAD",
+            "HEAd": "HEAD",
+            "POST": "POST",
+            "post": "POST",
+            "pOST": "POST",
+            "POSt": "POST",
+            "PUT": "PUT",
+            "put": "PUT",
+            "PUt": "PUT",
+            "DELETE": "DELETE",
+            "delete": "DELETE",
+            "DeleTE": "DELETE",
+            "dELETe": "DELETE",
+            "CONNECT": "CONNECT",
+            "connect": "CONNECT",
+            "Connect": "CONNECT",
+            "cOnNeCt": "CONNECT",
+            "OPTIONS": "OPTIONS",
+            "options": "options",
+            "TRACE": "TRACE",
+            "trace": "trace",
+            "PATCH": "PATCH",
+            "patch": "patch",
+            "foo": "foo",
+            "BAR": "BAR",
+            ]
+
+        var request = URLRequest(url: url)
+
+        for n in expectedNormalizations {
+            request.httpMethod = n.key
+            XCTAssertEqual(request.httpMethod, n.value)
+        }
+    }
+
+    func test_description() {
+        let url = URL(string: "http://swift.org")!
+
+        var request = URLRequest(url: url)
+        XCTAssertEqual(request.description, "http://swift.org")
+
+        request.url = nil
+        XCTAssertEqual(request.description, "url: nil")
     }
 }
 

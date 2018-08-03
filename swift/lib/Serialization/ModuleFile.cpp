@@ -16,14 +16,16 @@
 #include "swift/Subsystems.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTMangler.h"
+#include "swift/AST/GenericSignature.h"
 #include "swift/AST/ModuleLoader.h"
 #include "swift/AST/NameLookup.h"
+#include "swift/AST/PrettyStackTrace.h"
 #include "swift/AST/USRGeneration.h"
 #include "swift/Basic/Range.h"
 #include "swift/ClangImporter/ClangImporter.h"
+#include "swift/ClangImporter/ClangModule.h"
 #include "swift/Serialization/BCReadingExtras.h"
 #include "swift/Serialization/SerializedModuleLoader.h"
-
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/OnDiskHashTable.h"
@@ -299,19 +301,26 @@ std::string ModuleFile::Dependency::getPrettyPrintedPath() const {
 /// Used to deserialize entries in the on-disk decl hash table.
 class ModuleFile::DeclTableInfo {
 public:
-  using internal_key_type = StringRef;
+  using internal_key_type = std::pair<DeclBaseName::Kind, StringRef>;
   using external_key_type = DeclBaseName;
   using data_type = SmallVector<std::pair<uint8_t, DeclID>, 8>;
   using hash_value_type = uint32_t;
   using offset_type = unsigned;
 
   internal_key_type GetInternalKey(external_key_type ID) {
-    // TODO: Handle special names
-    return ID.getIdentifier().str();
+    if (ID.getKind() == DeclBaseName::Kind::Normal) {
+      return {DeclBaseName::Kind::Normal, ID.getIdentifier().str()};
+    } else {
+      return {ID.getKind(), StringRef()};
+    }
   }
 
   hash_value_type ComputeHash(internal_key_type key) {
-    return llvm::HashString(key);
+    if (key.first == DeclBaseName::Kind::Normal) {
+      return llvm::HashString(key.second);
+    } else {
+      return (hash_value_type)key.first;
+    }
   }
 
   static bool EqualKey(internal_key_type lhs, internal_key_type rhs) {
@@ -325,8 +334,20 @@ public:
   }
 
   static internal_key_type ReadKey(const uint8_t *data, unsigned length) {
-    // TODO: Handle special names
-    return StringRef(reinterpret_cast<const char *>(data), length);
+    uint8_t kind = endian::readNext<uint8_t, little, unaligned>(data);
+    switch (kind) {
+    case static_cast<uint8_t>(DeclNameKind::Normal): {
+      StringRef str(reinterpret_cast<const char *>(data),
+                    length - sizeof(uint8_t));
+      return {DeclBaseName::Kind::Normal, str};
+    }
+    case static_cast<uint8_t>(DeclNameKind::Subscript):
+      return {DeclBaseName::Kind::Subscript, StringRef()};
+    case static_cast<uint8_t>(DeclNameKind::Destructor):
+      return {DeclBaseName::Kind::Destructor, StringRef()};
+    default:
+      llvm_unreachable("Unknown DeclNameKind");
+    }
   }
 
   static data_type ReadData(internal_key_type key, const uint8_t *data,
@@ -485,6 +506,118 @@ public:
   }
 };
 
+// Indexing the members of all Decls (well, NominalTypeDecls anyway) is
+// accomplished by a 2-level hashtable scheme. The outer table here maps from
+// DeclBaseNames to serialization::BitOffsets of sub-tables. The sub-tables --
+// SerializedDeclMembersTables, one table per name -- map from the enclosing
+// (NominalTypeDecl) DeclID to a vector of DeclIDs of members of the nominal
+// with the name. See DeclMembersTableInfo below.
+class ModuleFile::DeclMemberNamesTableInfo {
+public:
+  using internal_key_type = std::pair<DeclBaseName::Kind, StringRef>;
+  using external_key_type = DeclBaseName;
+  using data_type = serialization::BitOffset;
+  using hash_value_type = uint32_t;
+  using offset_type = unsigned;
+
+  internal_key_type GetInternalKey(external_key_type ID) {
+    if (ID.getKind() == DeclBaseName::Kind::Normal) {
+      return {DeclBaseName::Kind::Normal, ID.getIdentifier().str()};
+    } else {
+      return {ID.getKind(), StringRef()};
+    }
+  }
+
+  hash_value_type ComputeHash(internal_key_type key) {
+    if (key.first == DeclBaseName::Kind::Normal) {
+      return llvm::HashString(key.second);
+    } else {
+      return (hash_value_type)key.first;
+    }
+  }
+
+  static bool EqualKey(internal_key_type lhs, internal_key_type rhs) {
+    return lhs == rhs;
+  }
+
+  static std::pair<unsigned, unsigned> ReadKeyDataLength(const uint8_t *&data) {
+    unsigned keyLength = endian::readNext<uint16_t, little, unaligned>(data);
+    return { keyLength, sizeof(uint32_t) };
+  }
+
+  static internal_key_type ReadKey(const uint8_t *data, unsigned length) {
+    uint8_t kind = endian::readNext<uint8_t, little, unaligned>(data);
+    switch (kind) {
+    case static_cast<uint8_t>(DeclNameKind::Normal): {
+      StringRef str(reinterpret_cast<const char *>(data),
+                    length - sizeof(uint8_t));
+      return {DeclBaseName::Kind::Normal, str};
+    }
+    case static_cast<uint8_t>(DeclNameKind::Subscript):
+      return {DeclBaseName::Kind::Subscript, StringRef()};
+    case static_cast<uint8_t>(DeclNameKind::Destructor):
+      return {DeclBaseName::Kind::Destructor, StringRef()};
+    default:
+      llvm_unreachable("Unknown DeclNameKind");
+    }
+  }
+
+  static data_type ReadData(internal_key_type key, const uint8_t *data,
+                            unsigned length) {
+    assert(length == sizeof(uint32_t));
+    return endian::readNext<uint32_t, little, unaligned>(data);
+  }
+};
+
+// Second half of the 2-level member name lookup scheme, see
+// DeclMemberNamesTableInfo above. There is one of these tables for each member
+// DeclBaseName N in the module, and it maps from enclosing DeclIDs (say: each
+// NominalTypeDecl T that has members named N) to the set of N-named members of
+// T. In other words, there are no names in this table: the names are one level
+// up, this table just maps { Owner-DeclID => [Member-DeclID, ...] }.
+class ModuleFile::DeclMembersTableInfo {
+public:
+  using internal_key_type = uint32_t;
+  using external_key_type = DeclID;
+  using data_type = SmallVector<DeclID, 2>;
+  using hash_value_type = uint32_t;
+  using offset_type = unsigned;
+
+  internal_key_type GetInternalKey(external_key_type ID) {
+    return ID;
+  }
+
+  hash_value_type ComputeHash(internal_key_type key) {
+    return llvm::hash_value(key);
+  }
+
+  static bool EqualKey(internal_key_type lhs, internal_key_type rhs) {
+    return lhs == rhs;
+  }
+
+  static std::pair<unsigned, unsigned> ReadKeyDataLength(const uint8_t *&data) {
+    unsigned keyLength = endian::readNext<uint16_t, little, unaligned>(data);
+    unsigned dataLength = endian::readNext<uint16_t, little, unaligned>(data);
+    return { keyLength, dataLength };
+  }
+
+  static internal_key_type ReadKey(const uint8_t *data, unsigned length) {
+    return endian::readNext<uint32_t, little, unaligned>(data);
+  }
+
+  static data_type ReadData(internal_key_type key, const uint8_t *data,
+                            unsigned length) {
+    data_type result;
+    while (length > 0) {
+      DeclID declID = endian::readNext<uint32_t, little, unaligned>(data);
+      result.push_back(declID);
+      length -= sizeof(uint32_t);
+    }
+    return result;
+  }
+};
+
+
 std::unique_ptr<ModuleFile::SerializedDeclTable>
 ModuleFile::readDeclTable(ArrayRef<uint64_t> fields, StringRef blobData) {
   uint32_t tableOffset;
@@ -527,6 +660,31 @@ ModuleFile::readNestedTypeDeclsTable(ArrayRef<uint64_t> fields,
 
   using OwnedTable = std::unique_ptr<SerializedNestedTypeDeclsTable>;
   return OwnedTable(SerializedNestedTypeDeclsTable::Create(base + tableOffset,
+      base + sizeof(uint32_t), base));
+}
+
+std::unique_ptr<ModuleFile::SerializedDeclMemberNamesTable>
+ModuleFile::readDeclMemberNamesTable(ArrayRef<uint64_t> fields,
+                                     StringRef blobData) {
+  uint32_t tableOffset;
+  index_block::DeclMemberNamesLayout::readRecord(fields, tableOffset);
+  auto base = reinterpret_cast<const uint8_t *>(blobData.data());
+
+  using OwnedTable = std::unique_ptr<SerializedDeclMemberNamesTable>;
+  return OwnedTable(SerializedDeclMemberNamesTable::Create(base + tableOffset,
+      base + sizeof(uint32_t), base));
+}
+
+std::unique_ptr<ModuleFile::SerializedDeclMembersTable>
+ModuleFile::readDeclMembersTable(ArrayRef<uint64_t> fields,
+                                     StringRef blobData) {
+  uint32_t tableOffset;
+  decl_member_tables_block::DeclMembersLayout::readRecord(fields,
+                                                          tableOffset);
+  auto base = reinterpret_cast<const uint8_t *>(blobData.data());
+
+  using OwnedTable = std::unique_ptr<SerializedDeclMembersTable>;
+  return OwnedTable(SerializedDeclMembersTable::Create(base + tableOffset,
       base + sizeof(uint32_t), base));
 }
 
@@ -609,7 +767,19 @@ bool ModuleFile::readIndexBlock(llvm::BitstreamCursor &cursor) {
       return false;
 
     case llvm::BitstreamEntry::SubBlock:
-      // Unknown sub-block, which this version of the compiler won't use.
+      if (entry.ID == DECL_MEMBER_TABLES_BLOCK_ID) {
+        DeclMemberTablesCursor = cursor;
+        DeclMemberTablesCursor.EnterSubBlock(DECL_MEMBER_TABLES_BLOCK_ID);
+        llvm::BitstreamEntry subentry;
+        do {
+          // Scan forward, to load the cursor with any abbrevs we'll need while
+          // seeking inside this block later.
+          subentry = DeclMemberTablesCursor.advance(
+            llvm::BitstreamCursor::AF_DontPopBlockAtEnd);
+        } while (!DeclMemberTablesCursor.AtEndOfStream() &&
+                 subentry.Kind != llvm::BitstreamEntry::Record &&
+                 subentry.Kind != llvm::BitstreamEntry::EndBlock);
+      }
       if (cursor.SkipBlock())
         return false;
       break;
@@ -648,8 +818,8 @@ bool ModuleFile::readIndexBlock(llvm::BitstreamCursor &cursor) {
       case index_block::EXTENSIONS:
         ExtensionDecls = readExtensionTable(scratch, blobData);
         break;
-      case index_block::CLASS_MEMBERS:
-        ClassMembersByName = readDeclTable(scratch, blobData);
+      case index_block::CLASS_MEMBERS_FOR_DYNAMIC_LOOKUP:
+        ClassMembersForDynamicLookup = readDeclTable(scratch, blobData);
         break;
       case index_block::OPERATOR_METHODS:
         OperatorMethodDecls = readDeclTable(scratch, blobData);
@@ -667,9 +837,16 @@ bool ModuleFile::readIndexBlock(llvm::BitstreamCursor &cursor) {
       case index_block::NESTED_TYPE_DECLS:
         NestedTypeDecls = readNestedTypeDeclsTable(scratch, blobData);
         break;
+      case index_block::DECL_MEMBER_NAMES:
+        DeclMemberNames = readDeclMemberNamesTable(scratch, blobData);
+        break;
       case index_block::LOCAL_DECL_CONTEXT_OFFSETS:
         assert(blobData.empty());
         LocalDeclContexts.assign(scratch.begin(), scratch.end());
+        break;
+      case index_block::GENERIC_SIGNATURE_OFFSETS:
+        assert(blobData.empty());
+        GenericSignatures.assign(scratch.begin(), scratch.end());
         break;
       case index_block::GENERIC_ENVIRONMENT_OFFSETS:
         assert(blobData.empty());
@@ -1536,24 +1713,47 @@ void ModuleFile::loadExtensions(NominalTypeDecl *nominal) {
   if (iter == ExtensionDecls->end())
     return;
 
-  if (nominal->hasAccessibility() &&
-      nominal->getEffectiveAccess() < Accessibility::Internal) {
+  if (nominal->hasAccess() &&
+      nominal->getEffectiveAccess() < AccessLevel::Internal) {
     if (nominal->getModuleScopeContext() != getFile())
       return;
   }
 
   if (nominal->getParent()->isModuleScopeContext()) {
-    Identifier moduleName = nominal->getParentModule()->getName();
+    auto parentModule = nominal->getParentModule();
+    StringRef moduleName = parentModule->getName().str();
+
+    // If the originating module is a private module whose interface is
+    // re-exported via public module, check the name of the public module.
+    std::string exportedModuleName;
+    if (auto clangModuleUnit =
+            dyn_cast<ClangModuleUnit>(parentModule->getFiles().front())) {
+      exportedModuleName = clangModuleUnit->getExportedModuleName();
+      moduleName = exportedModuleName;
+    }
+
     for (auto item : *iter) {
-      if (item.first == moduleName.str())
-        (void)getDecl(item.second);
+      if (item.first != moduleName)
+        continue;
+      Expected<Decl *> declOrError = getDeclChecked(item.second);
+      if (!declOrError) {
+        if (!getContext().LangOpts.EnableDeserializationRecovery)
+          fatal(declOrError.takeError());
+        llvm::consumeError(declOrError.takeError());
+      }
     }
   } else {
     std::string mangledName =
         Mangle::ASTMangler().mangleNominalType(nominal);
     for (auto item : *iter) {
-      if (item.first == mangledName)
-        (void)getDecl(item.second);
+      if (item.first != mangledName)
+        continue;
+      Expected<Decl *> declOrError = getDeclChecked(item.second);
+      if (!declOrError) {
+        if (!getContext().LangOpts.EnableDeserializationRecovery)
+          fatal(declOrError.takeError());
+        llvm::consumeError(declOrError.takeError());
+      }
     }
   }
 }
@@ -1592,17 +1792,72 @@ void ModuleFile::loadObjCMethods(
   }
 }
 
+Optional<TinyPtrVector<ValueDecl *>>
+ModuleFile::loadNamedMembers(const IterableDeclContext *IDC, DeclBaseName N,
+                             uint64_t contextData) {
+  PrettyStackTraceDecl trace("loading members for", IDC->getDecl());
+
+  assert(IDC->wasDeserialized());
+  assert(DeclMemberNames);
+
+  TinyPtrVector<ValueDecl *> results;
+  auto i = DeclMemberNames->find(N);
+  if (i == DeclMemberNames->end())
+    return results;
+
+  BitOffset subTableOffset = *i;
+  std::unique_ptr<SerializedDeclMembersTable> &subTable =
+    DeclMembersTables[subTableOffset];
+  if (!subTable) {
+    BCOffsetRAII restoreOffset(DeclMemberTablesCursor);
+    DeclMemberTablesCursor.JumpToBit(subTableOffset);
+    auto entry = DeclMemberTablesCursor.advance();
+    if (entry.Kind != llvm::BitstreamEntry::Record) {
+      error();
+      return None;
+    }
+    SmallVector<uint64_t, 64> scratch;
+    StringRef blobData;
+    unsigned kind = DeclMemberTablesCursor.readRecord(entry.ID, scratch,
+                                                      &blobData);
+    assert(kind == decl_member_tables_block::DECL_MEMBERS);
+    (void)kind;
+    subTable = readDeclMembersTable(scratch, blobData);
+  }
+
+  assert(subTable);
+  auto j = subTable->find(IDC->getDeclID());
+  if (j != subTable->end()) {
+    for (DeclID d : *j) {
+      Expected<Decl *> mem = getDeclChecked(d);
+      if (mem) {
+        assert(mem.get() && "unchecked error deserializing named member");
+        if (auto MVD = dyn_cast<ValueDecl>(mem.get())) {
+          results.push_back(MVD);
+        }
+      } else {
+        if (!getContext().LangOpts.EnableDeserializationRecovery)
+          fatal(mem.takeError());
+        // Treat this as a cache-miss to the caller and let them attempt
+        // to refill through the normal loadAllMembers() path.
+        return None;
+      }
+    }
+  }
+  return results;
+}
+
 void ModuleFile::lookupClassMember(ModuleDecl::AccessPathTy accessPath,
                                    DeclName name,
                                    SmallVectorImpl<ValueDecl*> &results) {
   PrettyStackTraceModuleFile stackEntry(*this);
   assert(accessPath.size() <= 1 && "can only refer to top-level decls");
 
-  if (!ClassMembersByName)
+  if (!ClassMembersForDynamicLookup)
     return;
 
-  auto iter = ClassMembersByName->find(name.getBaseName());
-  if (iter == ClassMembersByName->end())
+  auto iter = ClassMembersForDynamicLookup->find(name.getBaseName());
+  if (iter == ClassMembersForDynamicLookup->end())
     return;
 
   if (!accessPath.empty()) {
@@ -1647,11 +1902,11 @@ void ModuleFile::lookupClassMembers(ModuleDecl::AccessPathTy accessPath,
   PrettyStackTraceModuleFile stackEntry(*this);
   assert(accessPath.size() <= 1 && "can only refer to top-level decls");
 
-  if (!ClassMembersByName)
+  if (!ClassMembersForDynamicLookup)
     return;
 
   if (!accessPath.empty()) {
-    for (const auto &list : ClassMembersByName->data()) {
+    for (const auto &list : ClassMembersForDynamicLookup->data()) {
       for (auto item : list) {
         auto vd = cast<ValueDecl>(getDecl(item.second));
         auto dc = vd->getDeclContext();
@@ -1665,7 +1920,7 @@ void ModuleFile::lookupClassMembers(ModuleDecl::AccessPathTy accessPath,
     return;
   }
 
-  for (const auto &list : ClassMembersByName->data()) {
+  for (const auto &list : ClassMembersForDynamicLookup->data()) {
     for (auto item : list)
       consumer.foundDecl(cast<ValueDecl>(getDecl(item.second)),
                          DeclVisibilityKind::DynamicLookup);
@@ -1732,8 +1987,16 @@ void ModuleFile::getTopLevelDecls(SmallVectorImpl<Decl *> &results) {
 
   if (ExtensionDecls) {
     for (auto entry : ExtensionDecls->data()) {
-      for (auto item : entry)
-        results.push_back(getDecl(item.second));
+      for (auto item : entry) {
+        Expected<Decl *> declOrError = getDeclChecked(item.second);
+        if (!declOrError) {
+          if (!getContext().LangOpts.EnableDeserializationRecovery)
+            fatal(declOrError.takeError());
+          llvm::consumeError(declOrError.takeError());
+          continue;
+        }
+        results.push_back(declOrError.get());
+      }
     }
   }
 }
@@ -1910,6 +2173,17 @@ void ModuleFile::verify() const {
 
 bool SerializedASTFile::hasEntryPoint() const {
   return File.Bits.HasEntryPoint;
+}
+
+bool SerializedASTFile::getAllGenericSignatures(
+                       SmallVectorImpl<GenericSignature*> &genericSignatures) {
+  genericSignatures.clear();
+  for (unsigned index : indices(File.GenericSignatures)) {
+    if (auto genericSig = File.getGenericSignature(index + 1))
+      genericSignatures.push_back(genericSig);
+  }
+
+  return true;
 }
 
 ClassDecl *SerializedASTFile::getMainClass() const {

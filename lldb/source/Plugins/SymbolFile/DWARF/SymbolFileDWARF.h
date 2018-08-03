@@ -21,9 +21,10 @@
 
 // Other libraries and framework includes
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/Support/Threading.h"
 
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Flags.h"
+#include "lldb/Utility/Flags.h"
+
 #include "lldb/Core/RangeMap.h"
 #include "lldb/Core/UniqueCStringMap.h"
 #include "lldb/Core/dwarf.h"
@@ -31,6 +32,7 @@
 #include "lldb/Symbol/DebugMacros.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/SymbolFile.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
 
 // Project includes
@@ -234,6 +236,8 @@ public:
   void GetLoadedModules(lldb::LanguageType language,
                         lldb_private::FileSpecList &modules) override;
 
+  void PreloadSymbols() override;
+
   //------------------------------------------------------------------
   // PluginInterface protocol
   //------------------------------------------------------------------
@@ -298,6 +302,14 @@ public:
   GetLocationListFormat() const;
 
   lldb::ModuleSP GetDWOModule(lldb_private::ConstString name);
+
+  typedef std::map<lldb_private::ConstString, lldb::ModuleSP>
+      ExternalTypeModuleMap;
+
+  /// Return the list of Clang modules imported by this SymbolFile.
+  const ExternalTypeModuleMap& getExternalTypeModules() const {
+      return m_external_type_modules;
+  }
 
   virtual DWARFDIE GetDIE(const DIERef &die_ref);
 
@@ -444,9 +456,6 @@ protected:
 
   typedef std::set<lldb_private::Type *> TypeSet;
 
-  typedef std::map<lldb_private::ConstString, lldb::ModuleSP>
-      ExternalTypeModuleMap;
-
   void GetTypes(const DWARFDIE &die, dw_offset_t min_die_offset,
                 dw_offset_t max_die_offset, uint32_t type_mask,
                 TypeSet &type_set);
@@ -462,7 +471,7 @@ protected:
   lldb_private::ClangASTImporter &GetClangASTImporter();
 
   lldb_private::SwiftASTContext *
-  GetSwiftASTContextForCU(lldb_private::Error *error, DWARFCompileUnit &cu);
+  GetSwiftASTContextForCU(lldb_private::Status *error, DWARFCompileUnit &cu);
 
   lldb::user_id_t GetTypeUIDFromTypeAttribute(const DWARFFormValue &type_attr);
 

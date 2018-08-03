@@ -38,6 +38,9 @@ class TestAffineTransform : XCTestCase {
             ("test_AppendTransform", test_AppendTransform),
             ("test_PrependTransform", test_PrependTransform),
             ("test_TransformComposition", test_TransformComposition),
+            ("test_hashing_identity", test_hashing_identity),
+            ("test_hashing_values", test_hashing_values),
+            ("test_rotation_compose", test_rotation_compose),
             ("test_Equal", test_Equal),
             ("test_NSCoding", test_NSCoding),
         ]
@@ -194,14 +197,14 @@ class TestAffineTransform : XCTestCase {
     func test_Inversion() {
         let point = NSPoint(x: CGFloat(10.0), y: CGFloat(10.0))
         
-        let translate = NSAffineTransform()
-        translate.translateX(by: CGFloat(-30.0), yBy: CGFloat(40.0))
+        var translate = AffineTransform()
+        translate.translate(x: CGFloat(-30.0), y: CGFloat(40.0))
         
-        let rotate = NSAffineTransform()
+        var rotate = AffineTransform()
         translate.rotate(byDegrees: CGFloat(30.0))
         
-        let scale = NSAffineTransform()
-        scale.scale(by: CGFloat(2.0))
+        var scale = AffineTransform()
+        scale.scale(CGFloat(2.0))
         
         let identityTransform = NSAffineTransform()
         
@@ -267,15 +270,15 @@ class TestAffineTransform : XCTestCase {
     func test_AppendTransform() {
         let point = NSPoint(x: CGFloat(10.0), y: CGFloat(10.0))
         
-        let identityTransform = NSAffineTransform()
+        var identityTransform = AffineTransform()
         identityTransform.append(identityTransform)
-        checkPointTransformation(identityTransform, point: point, expectedPoint: point)
+        checkPointTransformation(NSAffineTransform(transform: identityTransform), point: point, expectedPoint: point)
         
-        let translate = NSAffineTransform()
-        translate.translateX(by: CGFloat(10.0), yBy: CGFloat())
+        var translate = AffineTransform()
+        translate.translate(x: CGFloat(10.0), y: CGFloat())
         
-        let scale = NSAffineTransform()
-        scale.scale(by: CGFloat(2.0))
+        var scale = AffineTransform()
+        scale.scale(CGFloat(2.0))
         
         let translateThenScale = NSAffineTransform(transform: translate)
         translateThenScale.append(scale)
@@ -285,15 +288,15 @@ class TestAffineTransform : XCTestCase {
     func test_PrependTransform() {
         let point = NSPoint(x: CGFloat(10.0), y: CGFloat(10.0))
         
-        let identityTransform = NSAffineTransform()
+        var identityTransform = AffineTransform()
         identityTransform.prepend(identityTransform)
-        checkPointTransformation(identityTransform, point: point, expectedPoint: point)
+        checkPointTransformation(NSAffineTransform(transform: identityTransform), point: point, expectedPoint: point)
         
-        let translate = NSAffineTransform()
-        translate.translateX(by: CGFloat(10.0), yBy: CGFloat())
+        var translate = AffineTransform()
+        translate.translate(x: CGFloat(10.0), y: CGFloat())
         
-        let scale = NSAffineTransform()
-        scale.scale(by: CGFloat(2.0))
+        var scale = AffineTransform()
+        scale.scale(CGFloat(2.0))
         
         let scaleThenTranslate = NSAffineTransform(transform: translate)
         scaleThenTranslate.prepend(scale)
@@ -310,13 +313,13 @@ class TestAffineTransform : XCTestCase {
         let rotate = NSAffineTransform()
         rotate.rotate(byDegrees: CGFloat(90.0))
         
-        let moveOrigin = NSAffineTransform()
-        moveOrigin.translateX(by: -center.x, yBy: -center.y)
+        var moveOrigin = AffineTransform()
+        moveOrigin.translate(x: -center.x, y: -center.y)
         
-        let moveBack = NSAffineTransform(transform: moveOrigin)
+        var moveBack = moveOrigin
         moveBack.invert()
         
-        let rotateAboutCenter = NSAffineTransform(transform: rotate)
+        let rotateAboutCenter = rotate
         rotateAboutCenter.prepend(moveOrigin)
         rotateAboutCenter.append(moveBack)
         
@@ -341,9 +344,19 @@ class TestAffineTransform : XCTestCase {
         ]
         for val in values {
             let ref = NSAffineTransform()
-            ref.transformStruct = val
+            ref.transformStruct = NSAffineTransformStruct(m11: val.m11, m12: val.m12, m21: val.m21, m22: val.m22, tX: val.tX, tY: val.tY)
             XCTAssertEqual(ref.hashValue, val.hashValue)
         }
+    }
+
+    func test_rotation_compose() {
+        var t = AffineTransform.identity
+        t.translate(x: 1.0, y: 1.0)
+        t.rotate(byDegrees: 90)
+        t.translate(x: -1.0, y: -1.0)
+        let result = t.transform(NSPoint(x: 1.0, y: 2.0))
+        XCTAssertEqual(0.0, Double(result.x), accuracy: accuracyThreshold)
+        XCTAssertEqual(1.0, Double(result.y), accuracy: accuracyThreshold)
     }
     
     func test_Equal() {

@@ -26,6 +26,7 @@ endif()
 if (LLVM_BUILD_STATIC)
   target_link_libraries(c-index-test
     libclang_static
+    clangCodeGen
     clangIndex
     ${CINDEXTEST_LIBS}
   )

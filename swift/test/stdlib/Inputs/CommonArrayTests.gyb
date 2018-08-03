@@ -101,7 +101,8 @@ ${Suite}.test("${ArrayType}/Sliceable/Enums") {
   */
 }
 
-${Suite}.test("${ArrayType}/appendNonUnique") {
+${Suite}.test("${ArrayType}/appendNonUnique")
+  .code {
   var x: ${ArrayType}<Int> = []
   x.reserveCapacity(10002)
   let capacity = x.capacity
@@ -265,16 +266,16 @@ let withUnsafeMutableBufferPointerIfSupportedTests = [
   WithUnsafeMutableBufferPointerIfSupportedTest([ 10, 20, 30, 40, 50 ]),
 ]
 
-${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported") {
+${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported")
+  .code {
   for test in withUnsafeMutableBufferPointerIfSupportedTests {
     var a = getFresh${ArrayType}(test.sequence.map(OpaqueValue.init))
     do {
       // Read.
       var result = a._withUnsafeMutableBufferPointerIfSupported {
-        (baseAddress, count) -> OpaqueValue<[OpaqueValue<Int>]> in
-        let bufferPointer =
-          UnsafeMutableBufferPointer(start: baseAddress, count: count)
-        return OpaqueValue(Array(bufferPointer))
+        (bufferPointer) -> OpaqueValue<[OpaqueValue<Int>]> in
+        let r = OpaqueValue(Array(bufferPointer))
+        return r
       }
       expectType(Optional<OpaqueValue<Array<OpaqueValue<Int>>>>.self, &result)
       expectEqualSequence(test.sequence, result!.value.map { $0.value })
@@ -283,9 +284,7 @@ ${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported") {
     do {
       // Read and write.
       var result = a._withUnsafeMutableBufferPointerIfSupported {
-        (baseAddress, count) -> OpaqueValue<Array<OpaqueValue<Int>>> in
-        let bufferPointer =
-          UnsafeMutableBufferPointer(start: baseAddress, count: count)
+        (bufferPointer) -> OpaqueValue<Array<OpaqueValue<Int>>> in
         let result = OpaqueValue(Array(bufferPointer))
         for i in bufferPointer.indices {
           bufferPointer[i] = OpaqueValue(bufferPointer[i].value * 10)
@@ -302,10 +301,11 @@ ${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported") {
   // FIXME: tests for arrays bridged from Objective-C.
 }
 
-${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/ReplacingTheBufferTraps/1") {
+${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/ReplacingTheBufferTraps/1")
+  .code {
   var a = getFresh${ArrayType}([ OpaqueValue(10) ])
   var result = a._withUnsafeMutableBufferPointerIfSupported {
-    (baseAddress, count) -> OpaqueValue<Int> in
+    (bufferPointer) -> OpaqueValue<Int> in
     // buffer = UnsafeMutableBufferPointer(start: buffer.baseAddress, count: 0)
     // FIXME: does not trap since the buffer is not passed inout.
     // expectCrashLater()
@@ -313,10 +313,11 @@ ${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/Replacing
   }
 }
 
-${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/ReplacingTheBufferTraps/2") {
+${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/ReplacingTheBufferTraps/2")
+  .code {
   var a = getFresh${ArrayType}([ OpaqueValue(10) ])
   var result = a._withUnsafeMutableBufferPointerIfSupported {
-    (baseAddress, count) -> OpaqueValue<Int> in
+    (bufferPointer) -> OpaqueValue<Int> in
     // buffer = UnsafeMutableBufferPointer(start: nil, count: 1)
     // FIXME: does not trap since the buffer is not passed inout.
     // expectCrashLater()
@@ -329,7 +330,8 @@ ${Suite}.test("${ArrayType}/_withUnsafeMutableBufferPointerIfSupported/Replacing
 //===----------------------------------------------------------------------===//
 
 // Test the uniqueness of the raw buffer.
-${Suite}.test("${ArrayType}/withUnsafeMutableBytes") {
+${Suite}.test("${ArrayType}/withUnsafeMutableBytes")
+  .code {
   var a = getFresh${ArrayType}([UInt8](repeating: 10, count: 1))
   let b = a
   a.withUnsafeMutableBytes { bytes in
@@ -352,7 +354,8 @@ ${Suite}.test(
 }
 
 ${Suite}.test(
-  "${ArrayType}/mutationDoesNotAffectIterator/subscript/append") {
+  "${ArrayType}/mutationDoesNotAffectIterator/subscript/append")
+  .code {
   var arr: ${ArrayType}<Int> = [ 1010, 1020, 1030 ]
   var iter = arr.makeIterator()
   arr.append(1040)
@@ -418,6 +421,5 @@ ${Suite}.test("${ArrayType}/AssociatedTypes") {
     iteratorType: IndexingIterator<Collection>.self,
     subSequenceType: CollectionSlice.self,
     indexType: Int.self,
-    indexDistanceType: Int.self,
     indicesType: CountableRange<Int>.self)
 }

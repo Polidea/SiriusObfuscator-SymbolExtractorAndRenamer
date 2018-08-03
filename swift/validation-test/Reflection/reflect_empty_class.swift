@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift -lswiftSwiftReflectionTest %s -o %t/reflect_empty_class
 // RUN: %target-run %target-swift-reflection-test %t/reflect_empty_class 2>&1 | %FileCheck %s --check-prefix=CHECK-%target-ptrsize
 // REQUIRES: objc_interop
@@ -26,7 +26,7 @@ reflect(object: obj)
 // CHECK-32: (class reflect_empty_class.EmptyClass)
 
 // CHECK-32: Type info:
-// CHECK-32: (class_instance size=12 alignment=1 stride=12 num_extra_inhabitants=0)
+// CHECK-32: (class_instance size=8 alignment=1 stride=8 num_extra_inhabitants=0)
 
 doneReflecting()
 

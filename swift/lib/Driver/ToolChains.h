@@ -33,7 +33,9 @@ protected:
 public:
   Darwin(const Driver &D, const llvm::Triple &Triple) : ToolChain(D, Triple) {}
   ~Darwin() = default;
-
+  bool sanitizerRuntimeLibExists(const llvm::opt::ArgList &args,
+                                 StringRef sanitizerLibName)
+      const override;
 };
 
 class LLVM_LIBRARY_VISIBILITY GenericUnix : public ToolChain {
@@ -64,36 +66,15 @@ protected:
   /// default is to return true (and so specify an -rpath).
   virtual bool shouldProvideRPathToLinker() const;
 
-  /// Provides a path to an object that should be linked first. On platforms
-  /// that use ELF binaries, an object that provides markers and sizes for
-  /// metadata sections must be linked first. Platforms that do not need this
-  /// object may return an empty string; no additional objects are linked in
-  /// this case.
-  ///
-  /// \param RuntimeLibraryPath A path to the Swift resource directory, which
-  ///        on ARM architectures will contain metadata "begin" and "end"
-  ///        objects.
-  virtual std::string
-  getPreInputObjectPath(StringRef RuntimeLibraryPath) const;
-
-  /// Provides a path to an object that should be linked last. On platforms
-  /// that use ELF binaries, an object that provides markers and sizes for
-  /// metadata sections must be linked last. Platforms that do not need this
-  /// object may return an empty string; no additional objects are linked in
-  /// this case.
-  ///
-  /// \param RuntimeLibraryPath A path to the Swift resource directory, which
-  ///        on ARM architectures will contain metadata "begin" and "end"
-  ///        objects.
-  virtual std::string
-  getPostInputObjectPath(StringRef RuntimeLibraryPath) const;
-
   InvocationInfo constructInvocation(const LinkJobAction &job,
                                      const JobContext &context) const override;
 
 public:
   GenericUnix(const Driver &D, const llvm::Triple &Triple) : ToolChain(D, Triple) {}
   ~GenericUnix() = default;
+  bool sanitizerRuntimeLibExists(const llvm::opt::ArgList &args,
+                                 StringRef sanitizerLibName)
+      const override;
 };
 
 class LLVM_LIBRARY_VISIBILITY Android : public GenericUnix {
@@ -112,11 +93,6 @@ protected:
 
   std::string getTargetForLinker() const override;
 
-  std::string getPreInputObjectPath(
-    StringRef RuntimeLibraryPath) const override;
-
-  std::string getPostInputObjectPath(
-    StringRef RuntimeLibraryPath) const override;
 public:
   Cygwin(const Driver &D, const llvm::Triple &Triple) : GenericUnix(D, Triple) {}
   ~Cygwin() = default;

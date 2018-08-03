@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "swift/AST/ASTWalker.h"
-#include "swift/AST/SourceEntityWalker.h"
+#include "swift/IDE/SourceEntityWalker.h"
 #include "swift/Parse/Parser.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Basic/SourceManager.h"
@@ -485,11 +485,11 @@ public:
 };
 
 class FormatWalker : public SourceEntityWalker {
-  typedef std::vector<Token>::iterator TokenIt;
+  typedef ArrayRef<Token>::iterator TokenIt;
   class SiblingCollector {
     SourceLoc FoundSibling;
     SourceManager &SM;
-    std::vector<Token> &Tokens;
+    ArrayRef<Token> Tokens;
     SourceLoc &TargetLoc;
     TokenIt TI;
     bool NeedExtraIndentation;
@@ -552,7 +552,7 @@ class FormatWalker : public SourceEntityWalker {
     }
 
   public:
-    SiblingCollector(SourceManager &SM, std::vector<Token> &Tokens,
+    SiblingCollector(SourceManager &SM, ArrayRef<Token> Tokens,
                      SourceLoc &TargetLoc) : SM(SM), Tokens(Tokens),
     TargetLoc(TargetLoc), TI(Tokens.begin()),
     NeedExtraIndentation(false) {}
@@ -660,7 +660,7 @@ class FormatWalker : public SourceEntityWalker {
   bool InDocCommentBlock = false;
   bool InCommentLine = false;
   bool InStringLiteral = false;
-  std::vector<Token> Tokens;
+  ArrayRef<Token> Tokens;
   LangOptions Options;
   TokenIt CurrentTokIt;
   unsigned TargetLine;
@@ -669,7 +669,7 @@ class FormatWalker : public SourceEntityWalker {
   /// Sometimes, target is a part of "parent", for instance, "#else" is a part
   /// of an ifconfigstmt, so that ifconfigstmt is not really the parent of "#else".
   bool isTargetPartOf(swift::ASTWalker::ParentTy Parent) {
-    if (auto Conf = dyn_cast_or_null<IfConfigStmt>(Parent.getAsStmt())) {
+    if (auto Conf = dyn_cast_or_null<IfConfigDecl>(Parent.getAsDecl())) {
       for (auto Clause : Conf->getClauses()) {
         if (Clause.Loc == TargetLocation)
           return true;
@@ -739,7 +739,7 @@ class FormatWalker : public SourceEntityWalker {
 public:
   explicit FormatWalker(SourceFile &SF, SourceManager &SM)
   :SF(SF), SM(SM),
-  Tokens(tokenize(Options, SM, SF.getBufferID().getValue())),
+  Tokens(SF.getAllTokens()),
   CurrentTokIt(Tokens.begin()),
   SCollector(SM, Tokens, TargetLocation) {}
 

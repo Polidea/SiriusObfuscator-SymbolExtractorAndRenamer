@@ -155,6 +155,15 @@ func defaultToAny(i: Int, s: String) {
   let _: Int = a6 // expected-error{{value of type '[A]'}}
 }
 
+func noInferAny(iob: inout B, ioc: inout C) {
+  var b = B()
+  var c = C()
+  let _ = [b, c, iob, ioc] // do not infer [Any] when elements are lvalues or inout
+  let _: [A] = [b, c, iob, ioc] // do not infer [Any] when elements are lvalues or inout
+  b = B()
+  c = C()
+}
+
 /// Check handling of 'nil'.
 protocol Proto1 {}
 protocol Proto2 {}
@@ -267,7 +276,7 @@ class Employee: Person { }
 
 class Manager: Person { }
 
-let router = Company(
+let routerPeople = Company(
   routes: [
     { () -> Employee.Type in
       _ = ()
@@ -293,10 +302,8 @@ protocol Pear : Fruit {}
 
 struct Beef : Pear {}
 
-let router = Company(
+let routerFruit = Company(
   routes: [
-    // FIXME: implement join() for existentials
-    // expected-error@+1 {{cannot convert value of type '() -> Tomato.Type' to expected element type '() -> _'}}
     { () -> Tomato.Type in
       _ = ()
       return Chicken.self
@@ -315,3 +322,21 @@ let router = Company(
 //        accident.
 let SR3786a: [Int] = [1, 2, 3]
 let SR3786aa = [SR3786a.reversed(), SR3786a]
+
+// Conditional conformance
+protocol P { }
+
+struct PArray<T> { }
+
+extension PArray : ExpressibleByArrayLiteral where T: P {
+  typealias ArrayLiteralElement = T
+
+  init(arrayLiteral elements: T...) { }
+}
+
+extension Int: P { }
+
+func testConditional(i: Int, s: String) {
+  let _: PArray<Int> = [i, i, i]
+  let _: PArray<String> = [s, s, s] // expected-error{{contextual type 'PArray<String>' cannot be used with array literal}}
+}

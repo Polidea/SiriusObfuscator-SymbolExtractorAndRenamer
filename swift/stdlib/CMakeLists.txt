@@ -91,20 +91,6 @@ add_custom_target(swift-stdlib-sibgen
 add_custom_target(swift-test-stdlib ALL
     DEPENDS "swift-test-stdlib${SWIFT_PRIMARY_VARIANT_SUFFIX}")
 
-if(SWIFT_STDLIB_ENABLE_RESILIENCE)
-  set(STDLIB_SIL_SERIALIZE_ALL)
-  set(STDLIB_SIL_SERIALIZE_WITNESS_TABLES)
-else()
-  if(SWIFT_STDLIB_SIL_SERIALIZE_ALL)
-    set(STDLIB_SIL_SERIALIZE_ALL "-Xfrontend" "-sil-serialize-all")
-    set(STDLIB_SIL_SERIALIZE_WITNESS_TABLES "-Xfrontend" "-sil-serialize-witness-tables")
-  else()
-    set(STDLIB_SIL_SERIALIZE_ALL)
-    set(STDLIB_SIL_SERIALIZE_WITNESS_TABLES)
-  endif()
-endif()
-
 add_subdirectory(public)
-add_subdirectory(internal)
 add_subdirectory(private)
 

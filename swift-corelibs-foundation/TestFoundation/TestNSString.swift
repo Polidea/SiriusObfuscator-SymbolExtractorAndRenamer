@@ -63,6 +63,8 @@ class TestNSString : XCTestCase {
             ("test_rangeOfCharacterFromSet", test_rangeOfCharacterFromSet ),
             ("test_CFStringCreateMutableCopy", test_CFStringCreateMutableCopy),
             ("test_FromContentsOfURL",test_FromContentsOfURL),
+            ("test_FromContentOfFileUsedEncodingIgnored", test_FromContentOfFileUsedEncodingIgnored),
+            ("test_FromContentOfFileUsedEncodingUTF8", test_FromContentOfFileUsedEncodingUTF8),
             ("test_FromContentsOfURLUsedEncodingUTF16BE", test_FromContentsOfURLUsedEncodingUTF16BE),
             ("test_FromContentsOfURLUsedEncodingUTF16LE", test_FromContentsOfURLUsedEncodingUTF16LE),
             ("test_FromContentsOfURLUsedEncodingUTF32BE", test_FromContentsOfURLUsedEncodingUTF32BE),
@@ -75,6 +77,7 @@ class TestNSString : XCTestCase {
             ("test_initializeWithFormat", test_initializeWithFormat),
             ("test_initializeWithFormat2", test_initializeWithFormat2),
             ("test_initializeWithFormat3", test_initializeWithFormat3),
+            ("test_appendingPathComponent", test_appendingPathComponent),
             ("test_deletingLastPathComponent", test_deletingLastPathComponent),
             ("test_getCString_simple", test_getCString_simple),
             ("test_getCString_nonASCII_withASCIIAccessor", test_getCString_nonASCII_withASCIIAccessor),
@@ -97,6 +100,7 @@ class TestNSString : XCTestCase {
             ("test_replacingOccurrences", test_replacingOccurrences),
             ("test_getLineStart", test_getLineStart),
             ("test_substringWithRange", test_substringWithRange),
+            ("test_createCopy", test_createCopy),
         ]
     }
 
@@ -262,21 +266,21 @@ class TestNSString : XCTestCase {
 
     func test_FromNullTerminatedCStringInASCII() {
         let bytes = mockASCIIStringBytes + [0x00]
-        let string = NSString(CString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.ascii.rawValue)
+        let string = NSString(cString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.ascii.rawValue)
         XCTAssertNotNil(string)
         XCTAssertTrue(string?.isEqual(to: mockASCIIString) ?? false)
     }
 
     func test_FromNullTerminatedCStringInUTF8() {
         let bytes = mockUTF8StringBytes + [0x00]
-        let string = NSString(CString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.utf8.rawValue)
+        let string = NSString(cString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.utf8.rawValue)
         XCTAssertNotNil(string)
         XCTAssertTrue(string?.isEqual(to: mockUTF8String) ?? false)
     }
 
     func test_FromMalformedNullTerminatedCStringInUTF8() {
         let bytes = mockMalformedUTF8StringBytes + [0x00]
-        let string = NSString(CString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.utf8.rawValue)
+        let string = NSString(cString: bytes.map { Int8(bitPattern: $0) }, encoding: String.Encoding.utf8.rawValue)
         XCTAssertNil(string)
     }
 
@@ -297,6 +301,32 @@ class TestNSString : XCTestCase {
             XCTAssertNotEqual(string, "swift-corelibs-foundation", "Wrong result when reading UTF-8 file with UTF-16 encoding in contentsOf:encoding")
         } catch {
             XCTFail("Unable to init NSString from contentsOf:encoding:")
+        }
+    }
+
+    func test_FromContentOfFileUsedEncodingIgnored() {
+        let testFilePath = testBundle().path(forResource: "NSStringTestData", ofType: "txt")
+        XCTAssertNotNil(testFilePath)
+        
+        do {
+            let str = try NSString(contentsOfFile: testFilePath!, usedEncoding: nil)
+            XCTAssertEqual(str, "swift-corelibs-foundation")
+        } catch {
+            XCTFail("Unable to init NSString from contentsOfFile:encoding:")
+        }
+    }
+    
+    func test_FromContentOfFileUsedEncodingUTF8() {
+        let testFilePath = testBundle().path(forResource: "NSStringTestData", ofType: "txt")
+        XCTAssertNotNil(testFilePath)
+        
+        do {
+            var encoding: UInt = 0
+            let str = try NSString(contentsOfFile: testFilePath!, usedEncoding: &encoding)
+            XCTAssertEqual(str, "swift-corelibs-foundation")
+            XCTAssertEqual(encoding, String.Encoding.utf8.rawValue, "Wrong encoding detected from UTF8 file")
+        } catch {
+            XCTFail("Unable to init NSString from contentsOfFile:encoding:")
         }
     }
 
@@ -449,7 +479,7 @@ class TestNSString : XCTestCase {
         XCTAssertEqual(string.rangeOfCharacter(from: letters).location, 1)
         XCTAssertEqual(string.rangeOfCharacter(from: decimalDigits).location, 0)
         XCTAssertEqual(string.rangeOfCharacter(from: letters, options: .backwards).location, 2)
-        XCTAssertEqual(string.rangeOfCharacter(from: letters, options: [], range: NSMakeRange(2, 1)).location, 2)
+        XCTAssertEqual(string.rangeOfCharacter(from: letters, options: [], range: NSRange(location: 2, length: 1)).location, 2)
     }
     
     func test_CFStringCreateMutableCopy() {
@@ -574,7 +604,7 @@ class TestNSString : XCTestCase {
             var matches: [String] = []
             let count = path.completePath(into: &outName, caseSensitive: false, matchesInto: &matches, filterTypes: nil)
             XCTAssert(outName == "", "If no matches found then outName is nil.")
-            XCTAssert(matches.count == 0 && count == 0, "If no matches found then return 0 and matches is empty.")
+            XCTAssert(matches.isEmpty && count == 0, "If no matches found then return 0 and matches is empty.")
         }
 
         do {
@@ -583,7 +613,7 @@ class TestNSString : XCTestCase {
             var matches: [String] = []
             let count = path.completePath(into: &outName, caseSensitive: false, matchesInto: &matches, filterTypes: nil)
             XCTAssert(outName == "", "If no matches found then outName is nil.")
-            XCTAssert(matches.count == 0 && count == 0, "If no matches found then return 0 and matches is empty.")
+            XCTAssert(matches.isEmpty && count == 0, "If no matches found then return 0 and matches is empty.")
         }
 
         do {
@@ -723,6 +753,32 @@ class TestNSString : XCTestCase {
             let string = NSString(format: "NSDictionary value is %d (%.1f)", locale: loc, arguments: pointer)
             XCTAssertEqual(string, "NSDictionary value is 1000 (42&0)")
         }
+    }
+
+    func test_appendingPathComponent() {
+        do {
+            let path: NSString = "/tmp"
+            let result = path.appendingPathComponent("scratch.tiff")
+            XCTAssertEqual(result, "/tmp/scratch.tiff")
+        }
+
+        do {
+            let path: NSString = "/tmp/"
+            let result = path.appendingPathComponent("scratch.tiff")
+            XCTAssertEqual(result, "/tmp/scratch.tiff")
+        }
+
+        do {
+            let path: NSString = "/"
+            let result = path.appendingPathComponent("scratch.tiff")
+            XCTAssertEqual(result, "/scratch.tiff")
+        }
+
+        do {
+            let path: NSString = ""
+            let result = path.appendingPathComponent("scratch.tiff")
+            XCTAssertEqual(result, "scratch.tiff")
+        }                        
     }
     
     func test_deletingLastPathComponent() {
@@ -882,7 +938,7 @@ class TestNSString : XCTestCase {
             let path = NSString(string: "~\(userName)/")
             let result = path.expandingTildeInPath
           	// next assert fails in VirtualBox because home directory for unknown user resolved to /var/run/vboxadd
-            XCTAssert(result == "~\(userName)", "Return copy of reciver if home directory could no be resolved.")
+            XCTAssertEqual(result, "~\(userName)", "Return copy of receiver if home directory could not be resolved.")
         }
     }
     
@@ -1022,6 +1078,7 @@ class TestNSString : XCTestCase {
             NSString(string: "scratch..tiff") : "scratch.",
             NSString(string: ".tiff") : ".tiff",
             NSString(string: "/") : "/",
+            NSString(string: "..") : "..",
         ]
         for (fileName, expectedResult) in values {
             let result = fileName.deletingPathExtension
@@ -1103,43 +1160,53 @@ class TestNSString : XCTestCase {
 
     func test_substringWithRange() {
         let trivial = NSString(string: "swift.org")
-        XCTAssertEqual(trivial.substring(with: NSMakeRange(0, 5)), "swift")
+        XCTAssertEqual(trivial.substring(with: NSRange(location: 0, length: 5)), "swift")
 
         let surrogatePairSuffix = NSString(string: "Hurray🎉")
-        XCTAssertEqual(surrogatePairSuffix.substring(with: NSMakeRange(0, 7)), "Hurray�")
+        XCTAssertEqual(surrogatePairSuffix.substring(with: NSRange(location: 0, length: 7)), "Hurray�")
 
         let surrogatePairPrefix = NSString(string: "🐱Cat")
-        XCTAssertEqual(surrogatePairPrefix.substring(with: NSMakeRange(1, 4)), "�Cat")
+        XCTAssertEqual(surrogatePairPrefix.substring(with: NSRange(location: 1, length: 4)), "�Cat")
 
         let singleChar = NSString(string: "😹")
-        XCTAssertEqual(singleChar.substring(with: NSMakeRange(0,1)), "�")
+        XCTAssertEqual(singleChar.substring(with: NSRange(location: 0, length: 1)), "�")
 
         let crlf = NSString(string: "\r\n")
-        XCTAssertEqual(crlf.substring(with: NSMakeRange(0,1)), "\r")
-        XCTAssertEqual(crlf.substring(with: NSMakeRange(1,1)), "\n")
-        XCTAssertEqual(crlf.substring(with: NSMakeRange(1,0)), "")
+        XCTAssertEqual(crlf.substring(with: NSRange(location: 0, length: 1)), "\r")
+        XCTAssertEqual(crlf.substring(with: NSRange(location: 1, length: 1)), "\n")
+        XCTAssertEqual(crlf.substring(with: NSRange(location: 1, length: 0)), "")
 
         let bothEnds1 = NSString(string: "😺😺")
-        XCTAssertEqual(bothEnds1.substring(with: NSMakeRange(1,2)), "��") 
+        XCTAssertEqual(bothEnds1.substring(with: NSRange(location: 1, length: 2)), "��") 
 
         let s1 = NSString(string: "😺\r\n")
-        XCTAssertEqual(s1.substring(with: NSMakeRange(1,2)), "�\r")
+        XCTAssertEqual(s1.substring(with: NSRange(location: 1, length: 2)), "�\r")
 
         let s2 = NSString(string: "\r\n😺")
-        XCTAssertEqual(s2.substring(with: NSMakeRange(1,2)), "\n�")
+        XCTAssertEqual(s2.substring(with: NSRange(location: 1, length: 2)), "\n�")
 
         let s3 = NSString(string: "😺cats😺")
-        XCTAssertEqual(s3.substring(with: NSMakeRange(1,6)), "�cats�")
+        XCTAssertEqual(s3.substring(with: NSRange(location: 1, length: 6)), "�cats�")
 
         let s4 = NSString(string: "😺cats\r\n")
-        XCTAssertEqual(s4.substring(with: NSMakeRange(1,6)), "�cats\r")
+        XCTAssertEqual(s4.substring(with: NSRange(location: 1, length: 6)), "�cats\r")
 
         let s5 = NSString(string: "\r\ncats😺")
-        XCTAssertEqual(s5.substring(with: NSMakeRange(1,6)), "\ncats�")
+        XCTAssertEqual(s5.substring(with: NSRange(location: 1, length: 6)), "\ncats�")
 
         // SR-3363
         let s6 = NSString(string: "Beyonce\u{301} and Tay")
-        XCTAssertEqual(s6.substring(with: NSMakeRange(7, 9)), "\u{301} and Tay")
+        XCTAssertEqual(s6.substring(with: NSRange(location: 7, length: 9)), "\u{301} and Tay")
+    }
+    
+    func test_createCopy() {
+        let string: NSMutableString = "foo"
+        let stringCopy = string.copy() as! NSString
+        XCTAssertEqual(string, stringCopy)
+        string.append("bar")
+        XCTAssertNotEqual(string, stringCopy)
+        XCTAssertEqual(string, "foobar")
+        XCTAssertEqual(stringCopy, "foo")
     }
 }
 
@@ -1295,11 +1362,11 @@ func checkHasPrefixHasSuffix(_ lhs: String, _ rhs: String, _ stack: [UInt]) -> I
     // To determine the expected results, compare grapheme clusters,
     // scalar-to-scalar, of the NFD form of the strings.
     let lhsNFDGraphemeClusters =
-        lhs.decomposedStringWithCanonicalMapping.characters.map {
+        lhs.decomposedStringWithCanonicalMapping.map {
             Array(String($0).unicodeScalars)
     }
     let rhsNFDGraphemeClusters =
-        rhs.decomposedStringWithCanonicalMapping.characters.map {
+        rhs.decomposedStringWithCanonicalMapping.map {
             Array(String($0).unicodeScalars)
     }
     let expectHasPrefix = lhsNFDGraphemeClusters.starts(

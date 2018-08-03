@@ -28,6 +28,7 @@ namespace {
   class DeclPrinter : public DeclVisitor<DeclPrinter> {
     raw_ostream &Out;
     PrintingPolicy Policy;
+    const ASTContext &Context;
     unsigned Indentation;
     bool PrintInstantiation;
 
@@ -48,9 +49,10 @@ namespace {
 
   public:
     DeclPrinter(raw_ostream &Out, const PrintingPolicy &Policy,
-                unsigned Indentation = 0, bool PrintInstantiation = false)
-      : Out(Out), Policy(Policy), Indentation(Indentation),
-        PrintInstantiation(PrintInstantiation) { }
+                const ASTContext &Context, unsigned Indentation = 0,
+                bool PrintInstantiation = false)
+        : Out(Out), Policy(Policy), Context(Context), Indentation(Indentation),
+          PrintInstantiation(PrintInstantiation) {}
 
     void VisitDeclContext(DeclContext *DC, bool Indent = true);
 
@@ -115,8 +117,17 @@ void Decl::print(raw_ostream &Out, unsigned Indentation,
 
 void Decl::print(raw_ostream &Out, const PrintingPolicy &Policy,
                  unsigned Indentation, bool PrintInstantiation) const {
-  DeclPrinter Printer(Out, Policy, Indentation, PrintInstantiation);
+  DeclPrinter Printer(Out, Policy, getASTContext(), Indentation,
+                      PrintInstantiation);
   Printer.Visit(const_cast<Decl*>(this));
+}
+
+void TemplateParameterList::print(raw_ostream &Out,
+                                  const PrintingPolicy &Policy,
+                                  const ASTContext &Context,
+                                  unsigned Indentation) const {
+  DeclPrinter Printer(Out, Policy, Context, Indentation);
+  Printer.printTemplateParameters(this);
 }
 
 static QualType GetBaseType(QualType T) {
@@ -192,7 +203,7 @@ LLVM_DUMP_METHOD void DeclContext::dumpDeclContext() const {
     DC = DC->getParent();
   
   ASTContext &Ctx = cast<TranslationUnitDecl>(DC)->getASTContext();
-  DeclPrinter Printer(llvm::errs(), Ctx.getPrintingPolicy(), 0);
+  DeclPrinter Printer(llvm::errs(), Ctx.getPrintingPolicy(), Ctx, 0);
   Printer.VisitDeclContext(const_cast<DeclContext *>(this), /*Indent=*/false);
 }
 
@@ -464,9 +475,10 @@ void DeclPrinter::VisitRecordDecl(RecordDecl *D) {
 
 void DeclPrinter::VisitEnumConstantDecl(EnumConstantDecl *D) {
   Out << *D;
+  prettyPrintAttributes(D);
   if (Expr *Init = D->getInitExpr()) {
     Out << " = ";
-    Init->printPretty(Out, nullptr, Policy, Indentation);
+    Init->printPretty(Out, nullptr, Policy, Indentation, &Context);
   }
 }
 
@@ -477,17 +489,25 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
 
   if (D->isFunctionTemplateSpecialization())
     Out << "template<> ";
+  else if (!D->getDescribedFunctionTemplate()) {
+    for (unsigned I = 0, NumTemplateParams = D->getNumTemplateParameterLists();
+         I < NumTemplateParams; ++I)
+      printTemplateParameters(D->getTemplateParameterList(I));
+  }
 
   CXXConstructorDecl *CDecl = dyn_cast<CXXConstructorDecl>(D);
   CXXConversionDecl *ConversionDecl = dyn_cast<CXXConversionDecl>(D);
+  CXXDeductionGuideDecl *GuideDecl = dyn_cast<CXXDeductionGuideDecl>(D);
   if (!Policy.SuppressSpecifiers) {
-    switch (D->getStorageClass()) {
-    case SC_None: break;
-    case SC_Extern: Out << "extern "; break;
-    case SC_Static: Out << "static "; break;
-    case SC_PrivateExtern: Out << "__private_extern__ "; break;
-    case SC_Auto: case SC_Register:
-      llvm_unreachable("invalid for functions");
+    if (!Policy.SupressStorageClassSpecifiers) {
+      switch (D->getStorageClass()) {
+      case SC_None: break;
+      case SC_Extern: Out << "extern "; break;
+      case SC_Static: Out << "static "; break;
+      case SC_PrivateExtern: Out << "__private_extern__ "; break;
+      case SC_Auto: case SC_Register:
+        llvm_unreachable("invalid for functions");
+      }
     }
 
     if (D->isInlineSpecified())  Out << "inline ";
@@ -495,7 +515,8 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
     if (D->isModulePrivate())    Out << "__module_private__ ";
     if (D->isConstexpr() && !D->isExplicitlyDefaulted()) Out << "constexpr ";
     if ((CDecl && CDecl->isExplicitSpecified()) ||
-        (ConversionDecl && ConversionDecl->isExplicit()))
+        (ConversionDecl && ConversionDecl->isExplicitSpecified()) ||
+        (GuideDecl && GuideDecl->isExplicitSpecified()))
       Out << "explicit ";
   }
 
@@ -509,9 +530,11 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
     }
   }
   Proto += D->getNameInfo().getAsString();
+  if (GuideDecl)
+    Proto = GuideDecl->getDeducedTemplate()->getDeclName().getAsString();
   if (const TemplateArgumentList *TArgs = D->getTemplateSpecializationArgs()) {
     llvm::raw_string_ostream POut(Proto);
-    DeclPrinter TArgPrinter(POut, SubPolicy, Indentation);
+    DeclPrinter TArgPrinter(POut, SubPolicy, Context, Indentation);
     TArgPrinter.printTemplateArguments(*TArgs);
   }
 
@@ -529,7 +552,7 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
     Proto += "(";
     if (FT) {
       llvm::raw_string_ostream POut(Proto);
-      DeclPrinter ParamPrinter(POut, SubPolicy, Indentation);
+      DeclPrinter ParamPrinter(POut, SubPolicy, Context, Indentation);
       for (unsigned i = 0, e = D->getNumParams(); i != e; ++i) {
         if (i) POut << ", ";
         ParamPrinter.VisitParmVarDecl(D->getParamDecl(i));
@@ -658,7 +681,9 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
       }
     } else if (!ConversionDecl && !isa<CXXDestructorDecl>(D)) {
       if (FT && FT->hasTrailingReturn()) {
-        Out << "auto " << Proto << " -> ";
+        if (!GuideDecl)
+          Out << "auto ";
+        Out << Proto << " -> ";
         Proto.clear();
       }
       AFT->getReturnType().print(Out, Policy, Proto);
@@ -683,7 +708,7 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
         // This is a K&R function definition, so we need to print the
         // parameters.
         Out << '\n';
-        DeclPrinter ParamPrinter(Out, SubPolicy, Indentation);
+        DeclPrinter ParamPrinter(Out, SubPolicy, Context, Indentation);
         Indentation += Policy.Indentation;
         for (unsigned i = 0, e = D->getNumParams(); i != e; ++i) {
           Indent();
@@ -1048,9 +1073,18 @@ void DeclPrinter::VisitTemplateDecl(const TemplateDecl *D) {
 
 void DeclPrinter::VisitFunctionTemplateDecl(FunctionTemplateDecl *D) {
   prettyPrintPragmas(D->getTemplatedDecl());
+  // Print any leading template parameter lists.
+  if (const FunctionDecl *FD = D->getTemplatedDecl()) {
+    for (unsigned I = 0, NumTemplateParams = FD->getNumTemplateParameterLists();
+         I < NumTemplateParams; ++I)
+      printTemplateParameters(FD->getTemplateParameterList(I));
+  }
   VisitRedeclarableTemplateDecl(D);
 
-  if (PrintInstantiation) {
+  // Never print "instantiations" for deduction guides (they don't really
+  // have them).
+  if (PrintInstantiation &&
+      !isa<CXXDeductionGuideDecl>(D->getTemplatedDecl())) {
     FunctionDecl *PrevDecl = D->getTemplatedDecl();
     const FunctionDecl *Def;
     if (PrevDecl->isDefined(Def) && Def != PrevDecl)

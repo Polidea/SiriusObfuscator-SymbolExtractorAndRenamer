@@ -1,7 +1,7 @@
 // RUN: %clang_tsan %s -o %t -framework Foundation
 // RUN: %deflake %run %t 2>&1 | FileCheck %s
 
-// XFAIL: ios
+// UNSUPPORTED: ios
 
 #import <Foundation/Foundation.h>
 #import <xpc/xpc.h>
@@ -76,8 +76,8 @@ int main(int argc, const char *argv[]) {
 // CHECK: Hello world.
 // CHECK: WARNING: ThreadSanitizer: data race
 // CHECK:   Write of size 8
-// CHECK:     #0 {{.*}}xpc-race.mm:34
+// CHECK:     #0 {{.*}}xpc-race.mm:36
 // CHECK:   Previous write of size 8
-// CHECK:     #0 {{.*}}xpc-race.mm:34
+// CHECK:     #0 {{.*}}xpc-race.mm:36
 // CHECK: Location is global 'global'
 // CHECK: Done.

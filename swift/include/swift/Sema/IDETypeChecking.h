@@ -29,6 +29,11 @@ namespace swift {
   class LazyResolver;
   class ExtensionDecl;
   class ProtocolDecl;
+  class Type;
+  class DeclContext;
+  class ConcreteDeclRef;
+  class ValueDecl;
+  class DeclName;
 
   /// \brief Typecheck a declaration parsed during code completion.
   ///
@@ -131,6 +136,41 @@ namespace swift {
 
   /// Creates a lazy type resolver for use in lookups.
   OwnedResolver createLazyResolver(ASTContext &Ctx);
+
+  struct ExtensionInfo {
+    // The extension with the declarations to apply.
+    ExtensionDecl *Ext;
+    // The extension that enables the former to apply, if any (i.e. a
+    // conditional
+    // conformance to Foo enables 'extension Foo').
+    ExtensionDecl *EnablingExt;
+    bool IsSynthesized;
+  };
+
+  typedef llvm::function_ref<void(ArrayRef<ExtensionInfo>)>
+      ExtensionGroupOperation;
+
+  class SynthesizedExtensionAnalyzer {
+    struct Implementation;
+    Implementation &Impl;
+  public:
+    SynthesizedExtensionAnalyzer(NominalTypeDecl *Target,
+                                 PrintOptions Options,
+                                 bool IncludeUnconditional = true);
+    ~SynthesizedExtensionAnalyzer();
+
+    enum class MergeGroupKind : char {
+      All,
+      MergeableWithTypeDef,
+      UnmergeableWithTypeDef,
+    };
+
+    void forEachExtensionMergeGroup(MergeGroupKind Kind,
+                                    ExtensionGroupOperation Fn);
+    bool isInSynthesizedExtension(const ValueDecl *VD);
+    bool shouldPrintRequirement(ExtensionDecl *ED, StringRef Req);
+    bool hasMergeGroup(MergeGroupKind Kind);
+  };
 }
 
 #endif

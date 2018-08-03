@@ -24,6 +24,7 @@
 #include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Breakpoint/BreakpointList.h"
+#include "lldb/Breakpoint/BreakpointName.h"
 #include "lldb/Breakpoint/WatchpointList.h"
 #include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Broadcaster.h"
@@ -91,6 +92,10 @@ public:
   lldb::DynamicValueType GetPreferDynamicValue() const;
 
   bool SetPreferDynamicValue(lldb::DynamicValueType d);
+
+  bool GetPreloadSymbols() const;
+
+  void SetPreloadSymbols(bool b);
 
   bool GetDisableASLR() const;
 
@@ -520,7 +525,7 @@ public:
   //    UpdateInstanceName ();
 
   lldb::ModuleSP GetSharedModule(const ModuleSpec &module_spec,
-                                 Error *error_ptr = nullptr);
+                                 Status *error_ptr = nullptr);
 
   //----------------------------------------------------------------------
   // Settings accessors
@@ -558,11 +563,11 @@ public:
 
   void Destroy();
 
-  Error Launch(ProcessLaunchInfo &launch_info,
-               Stream *stream); // Optional stream to receive first stop info
+  Status Launch(ProcessLaunchInfo &launch_info,
+                Stream *stream); // Optional stream to receive first stop info
 
-  Error Attach(ProcessAttachInfo &attach_info,
-               Stream *stream); // Optional stream to receive first stop info
+  Status Attach(ProcessAttachInfo &attach_info,
+                Stream *stream); // Optional stream to receive first stop info
 
   //------------------------------------------------------------------
   // This part handles the breakpoints.
@@ -641,7 +646,7 @@ public:
   CreateExceptionBreakpoint(enum lldb::LanguageType language, bool catch_bp,
                             bool throw_bp, bool internal,
                             Args *additional_args = nullptr,
-                            Error *additional_args_error = nullptr);
+                            Status *additional_args_error = nullptr);
 
   // This is the same as the func_name breakpoint except that you can specify a
   // vector of names.  This is cheaper
@@ -674,19 +679,52 @@ public:
   // Use this to create a watchpoint:
   lldb::WatchpointSP CreateWatchpoint(lldb::addr_t addr, size_t size,
                                       const CompilerType *type, uint32_t kind,
-                                      Error &error);
+                                      Status &error);
 
   lldb::WatchpointSP GetLastCreatedWatchpoint() {
     return m_last_created_watchpoint;
   }
 
   WatchpointList &GetWatchpointList() { return m_watchpoint_list; }
-
+  
+  // Manages breakpoint names:
+  void AddNameToBreakpoint(BreakpointID &id, const char *name, Status &error);
+  
+  void AddNameToBreakpoint(lldb::BreakpointSP &bp_sp, const char *name, 
+                           Status &error);
+  
+  void RemoveNameFromBreakpoint(lldb::BreakpointSP &bp_sp, 
+                                const ConstString &name);
+  
+  BreakpointName *FindBreakpointName(const ConstString &name, bool can_create, 
+                                     Status &error);
+                                     
+  void DeleteBreakpointName(const ConstString &name);
+  
+  void ConfigureBreakpointName(BreakpointName &bp_name,
+                               const BreakpointOptions &options,
+                               const BreakpointName::Permissions &permissions);
+ void ApplyNameToBreakpoints(BreakpointName &bp_name);
+   
+  
+  // This takes ownership of the name obj passed in.
+  void AddBreakpointName(BreakpointName *bp_name);
+  
+  void GetBreakpointNames(std::vector<std::string> &names);
+                               
+  //This call removes ALL breakpoints regardless of permission.
   void RemoveAllBreakpoints(bool internal_also = false);
+  
+  // This removes all the breakpoints, but obeys the ePermDelete on them.
+  void RemoveAllowedBreakpoints();
 
   void DisableAllBreakpoints(bool internal_also = false);
+  
+  void DisableAllowedBreakpoints();
 
   void EnableAllBreakpoints(bool internal_also = false);
+  
+  void EnableAllowedBreakpoints();
 
   bool DisableBreakpointByID(lldb::break_id_t break_id);
 
@@ -717,15 +755,16 @@ public:
 
   bool IgnoreWatchpointByID(lldb::watch_id_t watch_id, uint32_t ignore_count);
 
-  Error SerializeBreakpointsToFile(const FileSpec &file,
-                                   const BreakpointIDList &bp_ids, bool append);
+  Status SerializeBreakpointsToFile(const FileSpec &file,
+                                    const BreakpointIDList &bp_ids,
+                                    bool append);
 
-  Error CreateBreakpointsFromFile(const FileSpec &file,
-                                  BreakpointIDList &new_bps);
+  Status CreateBreakpointsFromFile(const FileSpec &file,
+                                   BreakpointIDList &new_bps);
 
-  Error CreateBreakpointsFromFile(const FileSpec &file,
-                                  std::vector<std::string> &names,
-                                  BreakpointIDList &new_bps);
+  Status CreateBreakpointsFromFile(const FileSpec &file,
+                                   std::vector<std::string> &names,
+                                   BreakpointIDList &new_bps);
 
   //------------------------------------------------------------------
   /// Get \a load_addr as a callable code load address for this target
@@ -838,7 +877,7 @@ public:
   //------------------------------------------------------------------
   void SetExecutableModule(lldb::ModuleSP &module_sp, bool get_dependent_files);
 
-  bool LoadScriptingResources(std::list<Error> &errors,
+  bool LoadScriptingResources(std::list<Status> &errors,
                               Stream *feedback_stream = nullptr,
                               bool continue_on_error = true) {
     return m_images.LoadScriptingResourcesInTarget(
@@ -944,7 +983,7 @@ public:
   Debugger &GetDebugger() { return m_debugger; }
 
   size_t ReadMemoryFromFileCache(const Address &addr, void *dst, size_t dst_len,
-                                 Error &error);
+                                 Status &error);
 
   // Reading memory through the target allows us to skip going to the process
   // for reading memory if possible and it allows us to try and read from
@@ -957,27 +996,27 @@ public:
   // 2 - if there is a valid process, try and read from its memory
   // 3 - if (prefer_file_cache == false) then read from object file cache
   size_t ReadMemory(const Address &addr, bool prefer_file_cache, void *dst,
-                    size_t dst_len, Error &error,
+                    size_t dst_len, Status &error,
                     lldb::addr_t *load_addr_ptr = nullptr);
 
   size_t ReadCStringFromMemory(const Address &addr, std::string &out_str,
-                               Error &error);
+                               Status &error);
 
   size_t ReadCStringFromMemory(const Address &addr, char *dst,
-                               size_t dst_max_len, Error &result_error);
+                               size_t dst_max_len, Status &result_error);
 
   size_t ReadScalarIntegerFromMemory(const Address &addr,
                                      bool prefer_file_cache, uint32_t byte_size,
                                      bool is_signed, Scalar &scalar,
-                                     Error &error);
+                                     Status &error);
 
   uint64_t ReadUnsignedIntegerFromMemory(const Address &addr,
                                          bool prefer_file_cache,
                                          size_t integer_byte_size,
-                                         uint64_t fail_value, Error &error);
+                                         uint64_t fail_value, Status &error);
 
   bool ReadPointerFromMemory(const Address &addr, bool prefer_file_cache,
-                             Error &error, Address &pointer_addr);
+                             Status &error, Address &pointer_addr);
 
   SectionLoadList &GetSectionLoadList() {
     return m_section_load_history.GetCurrentSectionLoadList();
@@ -1016,20 +1055,19 @@ public:
   // The analyzer will then assume that it must be null-checked at every use,
   // which is what we want.
   TypeSystem *GetScratchTypeSystemForLanguage(
-      Error *error, lldb::LanguageType language, bool create_on_demand = true,
+      Status *error, lldb::LanguageType language, bool create_on_demand = true,
       const char *compiler_options = nullptr) __attribute__((always_inline)) {
-    TypeSystem *ret = GetScratchTypeSystemForLanguageImpl(
-        error, language, create_on_demand, compiler_options);
+    TypeSystem *ret =
+        GetScratchTypeSystemForLanguageImpl(error, language, create_on_demand);
     return ret ? ret : nullptr;
   }
 
-  TypeSystem *
-  GetScratchTypeSystemForLanguageImpl(Error *error, lldb::LanguageType language,
-                                      bool create_on_demand = true,
-                                      const char *compiler_options = nullptr);
+  TypeSystem *GetScratchTypeSystemForLanguageImpl(
+      Status *error, lldb::LanguageType language, bool create_on_demand = true,
+      const char *compiler_options = nullptr);
 #else
   TypeSystem *
-  GetScratchTypeSystemForLanguage(Error *error, lldb::LanguageType language,
+  GetScratchTypeSystemForLanguage(Status *error, lldb::LanguageType language,
                                   bool create_on_demand = true,
                                   const char *compiler_options = nullptr);
 #endif
@@ -1061,7 +1099,7 @@ public:
   UserExpression *GetUserExpressionForLanguage(
       llvm::StringRef expr, llvm::StringRef prefix, lldb::LanguageType language,
       Expression::ResultType desired_type,
-      const EvaluateExpressionOptions &options, Error &error);
+      const EvaluateExpressionOptions &options, Status &error);
 
   // Creates a FunctionCaller for the given language, the rest of the parameters
   // have the
@@ -1076,7 +1114,7 @@ public:
                                                const CompilerType &return_type,
                                                const Address &function_address,
                                                const ValueList &arg_value_list,
-                                               const char *name, Error &error);
+                                               const char *name, Status &error);
 
   // Creates a UtilityFunction for the given language, the rest of the
   // parameters have the
@@ -1086,7 +1124,7 @@ public:
   UtilityFunction *GetUtilityFunctionForLanguage(const char *expr,
                                                  lldb::LanguageType language,
                                                  const char *name,
-                                                 Error &error);
+                                                 Status &error);
 
 #ifdef __clang_analyzer__
   // See GetScratchTypeSystemForLanguage()
@@ -1107,7 +1145,7 @@ public:
 #ifdef __clang_analyzer__
   // See GetScratchTypeSystemForLanguage()
   SwiftASTContext *
-  GetScratchSwiftASTContext(Error &error, bool create_on_demand = true,
+  GetScratchSwiftASTContext(Status &error, bool create_on_demand = true,
                             const char *extra_options = nullptr)
       __attribute__((always_inline)) {
     SwiftASTContext *ret =
@@ -1117,11 +1155,11 @@ public:
   }
 
   SwiftASTContext *
-  GetScratchSwiftASTContextImpl(Error &error, bool create_on_demand = true,
+  GetScratchSwiftASTContextImpl(Status &error, bool create_on_demand = true,
                                 const char *extra_options = nullptr);
 #else
   SwiftASTContext *
-  GetScratchSwiftASTContext(Error &error, bool create_on_demand = true,
+  GetScratchSwiftASTContext(Status &error, bool create_on_demand = true,
                             const char *extra_options = nullptr);
 #endif
 
@@ -1129,7 +1167,7 @@ public:
   // Install any files through the platform that need be to installed
   // prior to launching or attaching.
   //----------------------------------------------------------------------
-  Error Install(ProcessLaunchInfo *launch_info);
+  Status Install(ProcessLaunchInfo *launch_info);
 
   bool ResolveFileAddress(lldb::addr_t load_addr, Address &so_addr);
 
@@ -1292,7 +1330,7 @@ public:
   GetSearchFilterForModuleAndCUList(const FileSpecList *containingModules,
                                     const FileSpecList *containingSourceFiles);
 
-  lldb::REPLSP GetREPL(Error &err, lldb::LanguageType language,
+  lldb::REPLSP GetREPL(Status &err, lldb::LanguageType language,
                        const char *repl_options, bool can_create);
 
   void SetREPL(lldb::LanguageType language, lldb::REPLSP repl_sp);
@@ -1326,6 +1364,9 @@ protected:
   SectionLoadHistory m_section_load_history;
   BreakpointList m_breakpoint_list;
   BreakpointList m_internal_breakpoint_list;
+  using BreakpointNameList = std::map<ConstString, BreakpointName *>;
+  BreakpointNameList m_breakpoint_names;
+  
   lldb::BreakpointSP m_last_created_breakpoint;
   WatchpointList m_watchpoint_list;
   lldb::WatchpointSP m_last_created_watchpoint;

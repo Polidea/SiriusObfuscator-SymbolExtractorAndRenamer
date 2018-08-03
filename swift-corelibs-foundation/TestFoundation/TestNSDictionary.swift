@@ -24,7 +24,7 @@ class TestNSDictionary : XCTestCase {
     static var allTests: [(String, (TestNSDictionary) -> () throws -> Void)] {
         return [
             ("test_BasicConstruction", test_BasicConstruction),
-//            ("test_ArrayConstruction", test_ArrayConstruction),
+            ("test_ArrayConstruction", test_ArrayConstruction),
             ("test_description", test_description),
             ("test_enumeration", test_enumeration),
             ("test_equality", test_equality),
@@ -32,6 +32,7 @@ class TestNSDictionary : XCTestCase {
             ("test_mutableCopying", test_mutableCopying),
             ("test_writeToFile", test_writeToFile),
             ("test_initWithContentsOfFile", test_initWithContentsOfFile),
+            ("test_settingWithStringKey", test_settingWithStringKey),
         ]
     }
         
@@ -60,12 +61,12 @@ class TestNSDictionary : XCTestCase {
         XCTAssertEqual(dict2[1] as? NSNumber, NSNumber(value: 2))
     }
     
-//    func test_ArrayConstruction() {
-//        let objects = ["foo", "bar", "baz"]
-//        let keys = ["foo", "bar", "baz"]
-//        let dict = NSDictionary(objects: objects, forKeys: keys)
-//        XCTAssertEqual(dict.count, 3)
-//    }
+    func test_ArrayConstruction() {
+        let objects = ["foo", "bar", "baz"]
+        let keys: [NSString] = ["foo", "bar", "baz"]
+        let dict = NSDictionary(objects: objects, forKeys: keys)
+        XCTAssertEqual(dict.count, 3)
+    }
     
     func test_enumeration() {
         let dict : NSDictionary = ["foo" : "bar", "whiz" : "bang", "toil" : "trouble"]
@@ -211,7 +212,7 @@ class TestNSDictionary : XCTestCase {
             let d1: NSDictionary = ["Hello":["world":"again"]]
             let isWritten = d1.write(toFile: testFilePath!, atomically: true)
             if(isWritten) {
-                let dict = NSMutableDictionary.init(contentsOfFile: testFilePath!)
+                let dict = NSDictionary(contentsOfFile: testFilePath!)
                 XCTAssert(dict == d1)
             } else {
                 XCTFail("Write to file failed")
@@ -220,6 +221,12 @@ class TestNSDictionary : XCTestCase {
         } else {
             XCTFail("Temporary file creation failed")
         }
+    }
+
+    func test_settingWithStringKey() {
+        let dict = NSMutableDictionary()
+        // has crashed in the past
+        dict["stringKey"] = "value"
     }
 
     private func createTestFile(_ path: String, _contents: Data) -> String? {

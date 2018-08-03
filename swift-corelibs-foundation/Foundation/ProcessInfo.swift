@@ -41,13 +41,22 @@ open class ProcessInfo: NSObject {
         
     }
     
-    
-    internal static var _environment: [String : String] = {
-        return Dictionary<String, String>._unconditionallyBridgeFromObjectiveC(__CFGetEnvironment()._nsObject)
-    }()
-    
     open var environment: [String : String] {
-        return ProcessInfo._environment
+        let equalSign = Character("=")
+        let strEncoding = String.defaultCStringEncoding
+        let envp = _CFEnviron()
+        var env: [String : String] = [:]
+        var idx = 0
+
+        while let entry = envp.advanced(by: idx).pointee {
+            if let entry = String(cString: entry, encoding: strEncoding), let i = entry.index(of: equalSign) {
+                let key = String(entry.prefix(upTo: i))
+                let value = String(entry.suffix(from: i).dropFirst())
+                env[key] = value
+            }
+            idx += 1
+        }
+        return env
     }
     
     open var arguments: [String] {
@@ -88,11 +97,11 @@ open class ProcessInfo: NSObject {
         }
         
         let productVersionKey = unsafeBitCast(_kCFSystemVersionProductVersionKey, to: UnsafeRawPointer.self)
-        guard let productVersion = unsafeBitCast(CFDictionaryGetValue(systemVersionDictionary, productVersionKey), to: NSString!.self) else {
+        guard let productVersion = unsafeBitCast(CFDictionaryGetValue(systemVersionDictionary, productVersionKey), to: NSString?.self) else {
             return OperatingSystemVersion(majorVersion: fallbackMajor, minorVersion: fallbackMinor, patchVersion: fallbackPatch)
         }
         
-        let versionComponents = productVersion._swiftObject.characters.split(separator: ".").map(String.init).flatMap({ Int($0) })
+        let versionComponents = productVersion._swiftObject.split(separator: ".").map(String.init).flatMap({ Int($0) })
         let majorVersion = versionComponents.dropFirst(0).first ?? fallbackMajor
         let minorVersion = versionComponents.dropFirst(1).first ?? fallbackMinor
         let patchVersion = versionComponents.dropFirst(2).first ?? fallbackPatch

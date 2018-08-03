@@ -14,10 +14,12 @@
     import SwiftFoundation
     import SwiftXCTest
 #endif
-import CoreFoundation
 
 class TestProcess : XCTestCase {
     static var allTests: [(String, (TestProcess) -> () throws -> Void)] {
+#if os(Android)
+	return []
+#else
         return [
                    ("test_exit0" , test_exit0),
                    ("test_exit1" , test_exit1),
@@ -29,16 +31,16 @@ class TestProcess : XCTestCase {
                    ("test_pipe_stdout", test_pipe_stdout),
                    ("test_pipe_stderr", test_pipe_stderr),
                    ("test_current_working_directory", test_current_working_directory),
-                   // disabled for now
-                   // ("test_pipe_stdout_and_stderr_same_pipe", test_pipe_stdout_and_stderr_same_pipe),
+                   ("test_pipe_stdout_and_stderr_same_pipe", test_pipe_stdout_and_stderr_same_pipe),
                    ("test_file_stdout", test_file_stdout),
-                   // disabled for now
-                   // ("test_passthrough_environment", test_passthrough_environment),
-                   // ("test_no_environment", test_no_environment),
-                   // ("test_custom_environment", test_custom_environment),
+                   ("test_passthrough_environment", test_passthrough_environment),
+                   ("test_no_environment", test_no_environment),
+                   ("test_custom_environment", test_custom_environment),
         ]
+#endif
     }
     
+#if !os(Android)
     func test_exit0() {
         
         let process = Process()
@@ -184,7 +186,7 @@ class TestProcess : XCTestCase {
             XCTFail("Could not read stdout")
             return
         }
-        // testing the return value of an external process is does not port well, and may change.
+        // testing the return value of an external process does not port well, and may change.
         // XCTAssertEqual(string, "/bin/cat: invalid_file_name: No such file or directory\n")
     }
 
@@ -198,6 +200,9 @@ class TestProcess : XCTestCase {
         process.standardOutput = pipe
         process.standardError = pipe
 
+        // Clear the environment to stop the malloc debug flags used in Xcode debug being
+        // set in the subprocess.
+        process.environment = [:]
         process.launch()
         process.waitUntilExit()
         XCTAssertEqual(process.terminationStatus, 1)
@@ -207,7 +212,12 @@ class TestProcess : XCTestCase {
             XCTFail("Could not read stdout")
             return
         }
-        XCTAssertEqual(string, "/bin/cat: invalid_file_name: No such file or directory\n")
+
+        // Remove the leading '/bin/' since on macOS '/bin/cat' just outputs 'cat:'
+        let searchStr = "/bin/"
+        let errMsg = string.replacingOccurrences(of: searchStr, with: "", options: [.literal, .anchored],
+                                              range: searchStr.startIndex..<searchStr.endIndex)
+        XCTAssertEqual(errMsg, "cat: invalid_file_name: No such file or directory\n")
     }
 
     func test_file_stdout() {
@@ -235,7 +245,7 @@ class TestProcess : XCTestCase {
     
     func test_passthrough_environment() {
         do {
-            let output = try runTask(["/usr/bin/env"], environment: nil)
+            let (output, _) = try runTask(["/usr/bin/env"], environment: nil)
             let env = try parseEnv(output)
             XCTAssertGreaterThan(env.count, 0)
         } catch let error {
@@ -245,7 +255,7 @@ class TestProcess : XCTestCase {
 
     func test_no_environment() {
         do {
-            let output = try runTask(["/usr/bin/env"], environment: [:])
+            let (output, _) = try runTask(["/usr/bin/env"], environment: [:])
             let env = try parseEnv(output)
             XCTAssertEqual(env.count, 0)
         } catch let error {
@@ -256,7 +266,7 @@ class TestProcess : XCTestCase {
     func test_custom_environment() {
         do {
             let input = ["HELLO": "WORLD", "HOME": "CUPERTINO"]
-            let output = try runTask(["/usr/bin/env"], environment: input)
+            let (output, _) = try runTask(["/usr/bin/env"], environment: input)
             let env = try parseEnv(output)
             XCTAssertEqual(env, input)
         } catch let error {
@@ -268,14 +278,15 @@ class TestProcess : XCTestCase {
         do {
             let previousWorkingDirectory = FileManager.default.currentDirectoryPath
 
-            // `bash` will not be found if the current working directory is not set correctly.
-            let _ = try runTask(["bash", "-c", "exit 0"], currentDirectoryPath: "/bin")
-
+            // Darwin Foundation requires the full path to the executable (.launchPath)
+            let (output, _) = try runTask(["/bin/bash", "-c", "pwd"], currentDirectoryPath: "/bin")
+            XCTAssertEqual(output.trimmingCharacters(in: .newlines), "/bin")
             XCTAssertEqual(previousWorkingDirectory, FileManager.default.currentDirectoryPath)
         } catch let error {
             XCTFail("Test failed: \(error)")
         }
     }
+#endif
 }
 
 private func mkstemp(template: String, body: (FileHandle) throws -> Void) rethrows {
@@ -298,21 +309,27 @@ private enum Error: Swift.Error {
     case InvalidEnvironmentVariable(String)
 }
 
-private func runTask(_ arguments: [String], environment: [String: String]? = nil, currentDirectoryPath: String? = nil) throws -> String {
+#if !os(Android)
+private func runTask(_ arguments: [String], environment: [String: String]? = nil, currentDirectoryPath: String? = nil) throws -> (String, String) {
     let process = Process()
 
     var arguments = arguments
     process.launchPath = arguments.removeFirst()
     process.arguments = arguments
-    process.environment = environment
+    // Darwin Foundation doesnt allow .environment to be set to nil although the documentation
+    // says it is an optional. https://developer.apple.com/documentation/foundation/process/1409412-environment
+    if let e = environment {
+        process.environment = e
+    }
 
     if let directoryPath = currentDirectoryPath {
         process.currentDirectoryPath = directoryPath
     }
 
-    let pipe = Pipe()
-    process.standardOutput = pipe
-    process.standardError = pipe
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
     process.launch()
     process.waitUntilExit()
 
@@ -320,12 +337,17 @@ private func runTask(_ arguments: [String], environment: [String: String]? = nil
         throw Error.TerminationStatus(process.terminationStatus)
     }
 
-    let data = pipe.fileHandleForReading.availableData
-    guard let output = String(data: data, encoding: .utf8) else {
-        throw Error.UnicodeDecodingError(data)
+    let stdoutData = stdoutPipe.fileHandleForReading.availableData
+    guard let stdout = String(data: stdoutData, encoding: .utf8) else {
+        throw Error.UnicodeDecodingError(stdoutData)
     }
 
-    return output
+    let stderrData = stderrPipe.fileHandleForReading.availableData
+    guard let stderr = String(data: stderrData, encoding: .utf8) else {
+        throw Error.UnicodeDecodingError(stderrData)
+    }
+
+    return (stdout, stderr)
 }
 
 private func parseEnv(_ env: String) throws -> [String: String] {
@@ -334,9 +356,9 @@ private func parseEnv(_ env: String) throws -> [String: String] {
         guard let range = line.range(of: "=") else {
             throw Error.InvalidEnvironmentVariable(line)
         }
-        result[line.substring(to: range.lowerBound)] = line.substring(from: range.upperBound)
+        result[String(line[..<range.lowerBound])] = String(line[range.upperBound...])
     }
     return result
 }
-
+#endif
 

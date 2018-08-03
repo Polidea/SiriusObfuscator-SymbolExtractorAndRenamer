@@ -25,6 +25,7 @@
 #include "swift/AST/ExistentialLayout.h"
 #include "swift/AST/IRGenOptions.h"
 #include "swift/AST/ASTMangler.h"
+#include "swift/AST/GenericSignature.h"
 #include "swift/AST/NameLookup.h"
 #include "swift/AST/SearchPathOptions.h"
 #include "swift/AST/Type.h"
@@ -63,6 +64,7 @@
 #include "swift/../../lib/IRGen/FixedTypeInfo.h"
 #include "swift/../../lib/IRGen/GenEnum.h"
 #include "swift/../../lib/IRGen/GenHeap.h"
+#include "swift/../../lib/IRGen/IRGenMangler.h"
 #include "swift/../../lib/IRGen/IRGenModule.h"
 #include "swift/../../lib/IRGen/TypeInfo.h"
 #include "swift/../../lib/IRGen/IRGenMangler.h"
@@ -74,8 +76,7 @@
 #include "Plugins/ExpressionParser/Swift/SwiftUserExpression.h"
 #include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/Error.h"
-#include "lldb/Core/Log.h"
+#include "lldb/Core/DumpDataExtractor.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
@@ -83,11 +84,12 @@
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/ThreadSafeDenseMap.h"
 #include "lldb/Expression/DiagnosticManager.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Host/StringConvert.h"
+#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
+#include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/Platform.h"
@@ -95,7 +97,10 @@
 #include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/CleanUp.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/LLDBAssert.h"
+#include "lldb/Utility/Log.h"
 
 #include "Plugins/Platform/MacOSX/PlatformDarwin.h"
 #include "Plugins/SymbolFile/DWARF/DWARFASTParserSwift.h"
@@ -268,6 +273,15 @@ static EnumInfoCache *GetEnumInfoCache(const swift::ASTContext *a) {
     return g_cache.find(a)->second.get();
   }
   return pos->second.get();
+}
+
+namespace {
+  bool IsDirectory(const FileSpec &spec) {
+    return llvm::sys::fs::is_directory(spec.GetPath());
+  }
+  bool IsRegularFile(const FileSpec &spec) {
+    return llvm::sys::fs::is_regular_file(spec.GetPath());
+  }
 }
 
 llvm::LLVMContext &SwiftASTContext::GetGlobalLLVMContext() {
@@ -1076,6 +1090,11 @@ static bool IsDeviceSupport(const char *path) {
         if (strstr(DeviceSupport, "Symbols"))
           return true;
 
+  // Don't look in the simulator runtime frameworks either.  They either 
+  // duplicate what the SDK has, or for older simulators conflict with them.
+  if (path && strstr(path, ".simruntime/Contents/Resources/"))
+    return true;
+
   return false;
 }
 }
@@ -1434,11 +1453,9 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(lldb::LanguageType language,
               if (path_spec.Exists()) {
                 static const ConstString s_hmap_extension("hmap");
 
-                if (path_spec.GetFileType() ==
-                    FileSpec::FileType::eFileTypeDirectory) {
+                if (IsDirectory(path_spec)) {
                   swift_ast_sp->AddModuleSearchPath(search_path.c_str());
-                } else if (path_spec.GetFileType() ==
-                               FileSpec::FileType::eFileTypeRegular &&
+                } else if (IsRegularFile(path_spec) &&
                            path_spec.GetFileNameExtension() ==
                                s_hmap_extension) {
                   std::string argument("-I");
@@ -1540,7 +1557,7 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(lldb::LanguageType language,
         handled_sdk_path = true;
       }
 
-      Error module_error;
+      Status module_error;
       for (size_t mi = 0; mi != num_images; ++mi) {
         ModuleSP module_sp = target->GetImages().GetModuleAtIndex(mi);
 
@@ -1678,7 +1695,7 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(lldb::LanguageType language,
         if (!set_triple) {
           ModuleSP exe_module_sp(target->GetExecutableModule());
           if (exe_module_sp) {
-            Error exe_error;
+            Status exe_error;
             SwiftASTContext *exe_swift_ctx =
                 llvm::dyn_cast_or_null<SwiftASTContext>(
                     exe_module_sp->GetTypeSystemForLanguage(
@@ -1763,7 +1780,7 @@ lldb::TypeSystemSP SwiftASTContext::CreateInstance(lldb::LanguageType language,
 
               SymbolFile *sym_file = sym_vendor->GetSymbolFile();
               if (sym_file) {
-                Error sym_file_error;
+                Status sym_file_error;
                 SwiftASTContext *ast_context =
                     llvm::dyn_cast_or_null<SwiftASTContext>(
                         sym_file->GetTypeSystemForLanguage(
@@ -1907,10 +1924,10 @@ bool SwiftASTContext::SupportsLanguage(lldb::LanguageType language) {
   return SwiftASTContextSupportsLanguage(language);
 }
 
-Error SwiftASTContext::IsCompatible() { return GetFatalErrors(); }
+Status SwiftASTContext::IsCompatible() { return GetFatalErrors(); }
 
-Error SwiftASTContext::GetFatalErrors() {
-  Error error;
+Status SwiftASTContext::GetFatalErrors() {
+  Status error;
   if (HasFatalErrors()) {
     error = m_fatal_errors;
     if (error.Success())
@@ -2003,6 +2020,12 @@ bool SwiftASTContext::SetTriple(const char *triple_cstr, Module *module) {
                     this, triple_cstr, triple.c_str(),
                     m_target_wp.lock() ? " (target)" : "");
       m_compiler_invocation_ap->setTargetTriple(triple);
+
+      // Every time the triple is changed the LangOpts must be
+      // updated too, because Swift default-initializes the
+      // EnableObjCInterop flag based on the triple.
+      GetLanguageOptions().EnableObjCInterop = llvm_triple.isOSDarwin();
+
       return true;
     } else {
       if (log)
@@ -2039,7 +2062,7 @@ static std::string GetXcodeContentsPath() {
     int signo = 0;
     std::string output;
     const char *command = "xcrun -sdk macosx --show-sdk-path";
-    lldb_private::Error error = Host::RunShellCommand(
+    lldb_private::Status error = Host::RunShellCommand(
         command, // shell command to run
         NULL,    // current working directory
         &status, // Put the exit status of the process in here
@@ -2148,8 +2171,9 @@ static bool SDKSupportsSwift(const FileSpec &sdk_path, SDKType desired_type) {
         }
       }
 
+      // For non-Darwin SDKs assume Swift is supported
       if (sdk_type == SDKType::unknown)
-        return false;
+        return true;
     } else {
       if (sdk_name.startswith(sdk_strings[(int)desired_type])) {
         version_part =
@@ -2213,7 +2237,7 @@ static bool SDKSupportsSwift(const FileSpec &sdk_path, SDKType desired_type) {
 }
 
 FileSpec::EnumerateDirectoryResult
-DirectoryEnumerator(void *baton, FileSpec::FileType file_type,
+DirectoryEnumerator(void *baton, llvm::sys::fs::file_type file_type,
                     const FileSpec &spec) {
   SDKEnumeratorInfo *enumerator_info = static_cast<SDKEnumeratorInfo *>(baton);
 
@@ -2228,7 +2252,7 @@ DirectoryEnumerator(void *baton, FileSpec::FileType file_type,
 static ConstString EnumerateSDKsForVersion(FileSpec sdks_spec, SDKType sdk_type,
                                            uint32_t least_major,
                                            uint32_t least_minor) {
-  if (!sdks_spec.IsDirectory())
+  if (!IsDirectory(sdks_spec))
     return ConstString();
 
   const bool find_directories = true;
@@ -2245,7 +2269,7 @@ static ConstString EnumerateSDKsForVersion(FileSpec sdks_spec, SDKType sdk_type,
                                find_files, find_other, DirectoryEnumerator,
                                &enumerator_info);
 
-  if (enumerator_info.found_path.IsDirectory())
+  if (IsDirectory(enumerator_info.found_path))
     return ConstString(enumerator_info.found_path.GetPath());
   else
     return ConstString();
@@ -2272,11 +2296,11 @@ static ConstString GetSDKDirectory(SDKType sdk_type, uint32_t least_major,
       // path.
 
       std::string WatchOS_candidate_path = sdks_path + "/WatchOS.platform/";
-      if (FileSpec(WatchOS_candidate_path.c_str(), false).IsDirectory()) {
+      if (IsDirectory(FileSpec(WatchOS_candidate_path.c_str(), false))) {
         sdks_path = WatchOS_candidate_path;
       } else {
         std::string watchOS_candidate_path = sdks_path + "/watchOS.platform/";
-        if (FileSpec(watchOS_candidate_path.c_str(), false).IsDirectory()) {
+        if (IsDirectory(FileSpec(watchOS_candidate_path.c_str(), false))) {
           sdks_path = watchOS_candidate_path;
         } else {
           return ConstString();
@@ -2394,7 +2418,7 @@ static ConstString GetResourceDir() {
         FileSpec swift_clang_dir_spec = swift_dir_spec;
         swift_clang_dir_spec.AppendPathComponent("clang");
 
-        if (swift_clang_dir_spec.IsDirectory()) {
+        if (IsDirectory(swift_clang_dir_spec)) {
           g_cached_resource_dir = ConstString(swift_dir_spec.GetPath());
           if (log)
             log->Printf("%s: found Swift resource dir via "
@@ -2420,7 +2444,7 @@ static ConstString GetResourceDir() {
           log->Printf("%s: trying toolchain-based lib path: %s", __FUNCTION__,
                       xcode_toolchain_path.c_str());
 
-        if (FileSpec(xcode_toolchain_path, false).IsDirectory()) {
+        if (IsDirectory(FileSpec(xcode_toolchain_path, false))) {
           g_cached_resource_dir = ConstString(xcode_toolchain_path);
           if (log)
             log->Printf("%s: found Swift resource dir via "
@@ -2447,7 +2471,7 @@ static ConstString GetResourceDir() {
           log->Printf("%s: trying Xcode-based lib path: %s", __FUNCTION__,
                       xcode_contents_path.c_str());
 
-        if (FileSpec(xcode_contents_path, false).IsDirectory()) {
+        if (IsDirectory(FileSpec(xcode_contents_path, false))) {
           g_cached_resource_dir = ConstString(xcode_contents_path);
           if (log)
             log->Printf("%s: found Swift resource dir via "
@@ -2474,7 +2498,7 @@ static ConstString GetResourceDir() {
                       "path: %s",
                       __FUNCTION__, cl_tools_path.c_str());
 
-        if (FileSpec(cl_tools_path, false).IsDirectory()) {
+        if (IsDirectory(FileSpec(cl_tools_path, false))) {
           g_cached_resource_dir = ConstString(cl_tools_path);
           if (log)
             log->Printf("%s: found Swift resource dir via "
@@ -2552,7 +2576,7 @@ static ConstString GetResourceDir() {
                                     build_tree_resource_dir.c_str());
                     FileSpec swift_resource_dir_spec(
                         build_tree_resource_dir.c_str(), false);
-                    if (swift_resource_dir_spec.IsDirectory())
+                    if (IsDirectory(swift_resource_dir_spec))
                     {
                         g_cached_resource_dir =
                             ConstString(swift_resource_dir_spec.GetPath());
@@ -3281,7 +3305,7 @@ SwiftASTContext::GetCachedModule(const ConstString &module_name) {
 
 swift::ModuleDecl *
 SwiftASTContext::CreateModule(const ConstString &module_basename,
-                              Error &error) {
+                              Status &error) {
   VALID_OR_RETURN(nullptr);
 
   if (module_basename) {
@@ -3326,7 +3350,7 @@ void SwiftASTContext::CacheModule(swift::ModuleDecl *module) {
 }
 
 swift::ModuleDecl *
-SwiftASTContext::GetModule(const ConstString &module_basename, Error &error) {
+SwiftASTContext::GetModule(const ConstString &module_basename, Status &error) {
   VALID_OR_RETURN(nullptr);
 
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
@@ -3413,7 +3437,7 @@ SwiftASTContext::GetModule(const ConstString &module_basename, Error &error) {
 }
 
 swift::ModuleDecl *SwiftASTContext::GetModule(const FileSpec &module_spec,
-                                              Error &error) {
+                                              Status &error) {
   VALID_OR_RETURN(nullptr);
 
   ConstString module_basename(module_spec.GetFileNameStrippingExtension());
@@ -3502,7 +3526,7 @@ swift::ModuleDecl *SwiftASTContext::GetModule(const FileSpec &module_spec,
 
 swift::ModuleDecl *
 SwiftASTContext::FindAndLoadModule(const ConstString &module_basename,
-                                   Process &process, Error &error) {
+                                   Process &process, Status &error) {
   VALID_OR_RETURN(nullptr);
 
   swift::ModuleDecl *swift_module = GetModule(module_basename, error);
@@ -3514,7 +3538,7 @@ SwiftASTContext::FindAndLoadModule(const ConstString &module_basename,
 
 swift::ModuleDecl *
 SwiftASTContext::FindAndLoadModule(const FileSpec &module_spec,
-                                   Process &process, Error &error) {
+                                   Process &process, Status &error) {
   VALID_OR_RETURN(nullptr);
 
   swift::ModuleDecl *swift_module = GetModule(module_spec, error);
@@ -3525,7 +3549,7 @@ SwiftASTContext::FindAndLoadModule(const FileSpec &module_spec,
 }
 
 bool SwiftASTContext::LoadOneImage(Process &process, FileSpec &link_lib_spec,
-                                   Error &error) {
+                                   Status &error) {
   VALID_OR_RETURN(false);
 
   error.Clear();
@@ -3549,12 +3573,12 @@ GetLibrarySearchPaths(std::vector<std::string> &paths,
 }
 
 void SwiftASTContext::LoadModule(swift::ModuleDecl *swift_module,
-                                 Process &process, Error &error) {
+                                 Process &process, Status &error) {
   VALID_OR_RETURN_VOID();
 
-  Error current_error;
+  Status current_error;
   auto addLinkLibrary = [&](swift::LinkLibrary link_lib) {
-    Error load_image_error;
+    Status load_image_error;
     StreamString all_dlopen_errors;
     const char *library_name = link_lib.getName().data();
 
@@ -3735,7 +3759,7 @@ bool SwiftASTContext::LoadLibraryUsingPaths(
     StreamString &all_dlopen_errors) {
   VALID_OR_RETURN(false);
 
-  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TYPES | LIBLLDB_LOG_TEMPORARY));
+  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_TYPES));
 
   SwiftLanguageRuntime *runtime = process.GetSwiftLanguageRuntime();
   if (!runtime) {
@@ -3791,7 +3815,7 @@ bool SwiftASTContext::LoadLibraryUsingPaths(
   FileSpec library_spec;
   std::string library_path;
   std::unordered_set<std::string> seen_paths;
-  Error load_image_error;
+  Status load_image_error;
 
   for (const std::string &library_search_dir : search_paths) {
     // The library search dir as it comes from the AST context often has
@@ -3835,7 +3859,7 @@ bool SwiftASTContext::LoadLibraryUsingPaths(
   return false;
 }
 
-void SwiftASTContext::LoadExtraDylibs(Process &process, Error &error) {
+void SwiftASTContext::LoadExtraDylibs(Process &process, Status &error) {
   VALID_OR_RETURN_VOID();
 
   error.Clear();
@@ -3952,7 +3976,7 @@ void SwiftASTContext::ValidateSectionModules(
     Module &module, const std::vector<std::string> &module_names) {
   VALID_OR_RETURN_VOID();
 
-  Error error;
+  Status error;
 
   for (const std::string &module_name : module_names)
     if (!GetModule(ConstString(module_name.c_str()), error))
@@ -4014,7 +4038,7 @@ void SwiftASTContext::CacheDemangledTypeFailure(const char *name) {
 
 CompilerType
 SwiftASTContext::GetTypeFromMangledTypename(const char *mangled_typename,
-                                            Error &error) {
+                                            Status &error) {
   VALID_OR_RETURN(CompilerType());
 
   if (mangled_typename 
@@ -4069,6 +4093,13 @@ SwiftASTContext::GetTypeFromMangledTypename(const char *mangled_typename,
                      .getPointer();
 
     if (found_type) {
+      // If we have an inout type at the top level, turn it into an lvalue type.
+      // Function parameters that are inout are treated the same as mutable vars
+      // here.
+      if (auto *inout_type = found_type->getAs<swift::InOutType>()) {
+        found_type = swift::LValueType::get(inout_type->getObjectType());
+      }
+
       CacheDemangledType(mangled_name.GetCString(), found_type);
       CompilerType result_type(ast_ctx, found_type);
       if (log)
@@ -4444,7 +4475,7 @@ CompilerType SwiftASTContext::FindFirstType(const char *name,
   return CompilerType();
 }
 
-CompilerType SwiftASTContext::ImportType(CompilerType &type, Error &error) {
+CompilerType SwiftASTContext::ImportType(CompilerType &type, Status &error) {
   VALID_OR_RETURN(CompilerType());
 
   if (m_ast_context_ap.get() == NULL)
@@ -4473,7 +4504,7 @@ CompilerType SwiftASTContext::ImportType(CompilerType &type, Error &error) {
     if (our_type_base)
       return CompilerType(m_ast_context_ap.get(), our_type_base);
     else {
-      Error error;
+      Status error;
 
       CompilerType our_type(
           GetTypeFromMangledTypename(mangled_name.GetCString(), error));
@@ -4596,7 +4627,7 @@ CompilerType
 SwiftASTContext::CreateTupleType(const std::vector<CompilerType> &elements) {
   VALID_OR_RETURN(CompilerType());
 
-  Error error;
+  Status error;
   if (elements.size() == 0)
     return CompilerType(GetASTContext(), GetASTContext()->TheEmptyTupleType);
   else {
@@ -4618,7 +4649,7 @@ CompilerType
 SwiftASTContext::CreateTupleType(const std::vector<TupleElement> &elements) {
   VALID_OR_RETURN(CompilerType());
 
-  Error error;
+  Status error;
   if (elements.size() == 0)
     return CompilerType(GetASTContext(), GetASTContext()->TheEmptyTupleType);
   else {
@@ -4675,7 +4706,7 @@ CompilerType SwiftASTContext::GetErrorType() {
   return CompilerType();
 }
 
-CompilerType SwiftASTContext::GetNSErrorType(Error &error) {
+CompilerType SwiftASTContext::GetNSErrorType(Status &error) {
   VALID_OR_RETURN(CompilerType());
 
   return GetTypeFromMangledTypename(SwiftLanguageRuntime::GetCurrentMangledName("_TtC10Foundation7NSError").c_str(), error);
@@ -4895,11 +4926,11 @@ void SwiftASTContext::AddDebuggerClient(
 }
 
 SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation()
-    : m_is_trivial_option_set(false), m_is_zero_size(false) {}
+    : m_flags(false, false) {}
 
 SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation(
     swift::CanType swift_can_type)
-    : m_is_trivial_option_set(false), m_is_zero_size(false) {
+    : m_flags(false, false) {
   static ConstString g_rawValue("rawValue");
 
   swift::ASTContext &ast_ctx = swift_can_type->getASTContext();
@@ -4917,7 +4948,7 @@ SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation(
                  nominal_decl->getStoredProperties()) {
               swift::Identifier name = stored_property->getName();
               if (name.str() == g_rawValue.GetStringRef()) {
-                m_is_trivial_option_set = true;
+                m_flags.m_is_trivial_option_set = true;
                 break;
               }
             }
@@ -4932,7 +4963,7 @@ SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation(
     if (!metatype_type->hasRepresentation() ||
         (swift::MetatypeRepresentation::Thin ==
          metatype_type->getRepresentation()))
-      m_is_zero_size = true;
+      m_flags.m_is_zero_size = true;
   } else if (auto enum_decl = swift_can_type->getEnumOrBoundGenericEnum()) {
     size_t num_nopayload = 0, num_payload = 0;
     for (auto the_case : enum_decl->getAllElements()) {
@@ -4945,7 +4976,7 @@ SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation(
       }
     }
     if (num_nopayload == 1 && num_payload == 0)
-      m_is_zero_size = true;
+      m_flags.m_is_zero_size = true;
   } else if (auto struct_decl =
                  swift_can_type->getStructOrBoundGenericStruct()) {
     bool has_storage = false;
@@ -4959,10 +4990,10 @@ SwiftASTContext::ExtraTypeInformation::ExtraTypeInformation(
         }
       }
     }
-    m_is_zero_size = !has_storage;
+    m_flags.m_is_zero_size = !has_storage;
   } else if (auto tuple_type = swift::dyn_cast_or_null<swift::TupleType>(
                  swift_can_type)) {
-    m_is_zero_size = (tuple_type->getNumElements() == 0);
+    m_flags.m_is_zero_size = (tuple_type->getNumElements() == 0);
   }
 }
 
@@ -5347,7 +5378,7 @@ bool SwiftASTContext::IsPossibleZeroSizeType(
     return ast
         ->GetExtraTypeInformation(
             GetCanonicalSwiftType(compiler_type).getPointer())
-        .m_is_zero_size;
+        .m_flags.m_is_zero_size;
   return false;
 }
 
@@ -5382,7 +5413,7 @@ bool SwiftASTContext::IsTrivialOptionSetType(
   if (compiler_type.IsValid() &&
       llvm::dyn_cast_or_null<SwiftASTContext>(compiler_type.GetTypeSystem()))
     return GetExtraTypeInformation(compiler_type.GetOpaqueQualType())
-        .m_is_trivial_option_set;
+        .m_flags.m_is_trivial_option_set;
   return false;
 }
 
@@ -6885,7 +6916,7 @@ static int64_t GetInstanceVariableOffset_Symbol(ExecutionContext *exe_ctx,
                       ivar_const_str.AsCString(), ivar_offset_ptr);
 
         if (ivar_offset_ptr != LLDB_INVALID_ADDRESS) {
-          Error error;
+          Status error;
           return target->ReadUnsignedIntegerFromMemory(
               ivar_offset_ptr,
               false,                     // prefer_file_cache
@@ -6914,9 +6945,14 @@ static int64_t GetInstanceVariableOffset_Metadata(
     SwiftLanguageRuntime *runtime = process->GetSwiftLanguageRuntime();
     if (runtime) {
       if (auto resolver_sp = runtime->GetMemberVariableOffsetResolver(type)) {
-        Error error;
+        Status error;
         if (auto result = resolver_sp->ResolveOffset(valobj, ivar_name, &error))
+        {
+          if (log)
+            log->Printf("[GetInstanceVariableOffset_Metadata] for %s: %llu",
+                        ivar_name.AsCString(), result.getValue());
           return result.getValue();
+        }
         else if (log)
           log->Printf(
               "[GetInstanceVariableOffset_Metadata] resolver failure: %s",
@@ -7804,7 +7840,7 @@ bool SwiftASTContext::DumpTypeValue(
       byte_size = 4;
       break;
     }
-    return data.Dump(s, byte_offset, format, byte_size, item_count, UINT32_MAX,
+    return DumpDataExtractor(data, s, byte_offset, format, byte_size, item_count, UINT32_MAX,
                      LLDB_INVALID_ADDRESS, bitfield_bit_size,
                      bitfield_bit_offset, exe_scope);
   } break;
@@ -7849,7 +7885,7 @@ bool SwiftASTContext::DumpTypeValue(
 
   case swift::TypeKind::ExistentialMetatype:
   case swift::TypeKind::Metatype: {
-    return data.Dump(s, byte_offset, eFormatPointer, byte_size, 1, UINT32_MAX,
+    return DumpDataExtractor(data, s, byte_offset, eFormatPointer, byte_size, 1, UINT32_MAX,
                      LLDB_INVALID_ADDRESS, bitfield_bit_size,
                      bitfield_bit_offset, exe_scope);
   } break;

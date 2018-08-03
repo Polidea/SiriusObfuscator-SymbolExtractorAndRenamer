@@ -44,9 +44,16 @@ var h10 : Int?.Type?.Type
 
 var i = Int?(42)
 
-var bad_io : (Int) -> (inout Int, Int)  // expected-error {{'inout' may only be used on parameters}}
-
-func bad_io2(_ a: (inout Int, Int)) {}    // expected-error {{'inout' may only be used on parameters}}
+func testInvalidUseOfParameterAttr() {
+  var bad_io : (Int) -> (inout Int, Int)  // expected-error {{'inout' may only be used on parameters}}
+  func bad_io2(_ a: (inout Int, Int)) {}    // expected-error {{'inout' may only be used on parameters}}
+  
+  var bad_is : (Int) -> (__shared Int, Int)  // expected-error {{'__shared' may only be used on parameters}}
+  func bad_is2(_ a: (__shared Int, Int)) {}    // expected-error {{'__shared' may only be used on parameters}}
+  
+  var bad_iow : (Int) -> (__owned Int, Int)
+  func bad_iow2(_ a: (__owned Int, Int)) {}
+}
 
 // <rdar://problem/15588967> Array type sugar default construction syntax doesn't work
 func test_array_construct<T>(_: T) {
@@ -145,7 +152,7 @@ let tupleTypeWithNames = (age:Int, count:Int)(4, 5)
 let dictWithTuple = [String: (age:Int, count:Int)]()
 
 // <rdar://problem/21684837> typeexpr not being formed for postfix !
-let bb2 = [Int!](repeating: nil, count: 2)
+let bb2 = [Int!](repeating: nil, count: 2) // expected-warning {{using '!' in this location is deprecated and will be removed in a future release; consider changing this to '?' instead}}
 
 // <rdar://problem/21560309> inout allowed on function return type
 func r21560309<U>(_ body: (_: inout Int) -> inout U) {}  // expected-error {{'inout' may only be used on parameters}}
@@ -176,3 +183,8 @@ class C {
 let _ : inout @convention(c) Int -> Int // expected-error {{'inout' may only be used on parameters}}
 func foo3(inout a: Int -> Void) {} // expected-error {{'inout' before a parameter name is not allowed, place it before the parameter type instead}} {{11-16=}} {{20-20=inout }}
                                    // expected-error @-1 {{single argument function types require parentheses}} {{20-20=(}} {{23-23=)}}
+
+func sr5505(arg: Int) -> String {
+  return "hello"
+}
+var _: sr5505 = sr5505 // expected-error {{use of undeclared type 'sr5505'}}

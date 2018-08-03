@@ -31,6 +31,8 @@ void LangOptions::resetNonModularOptions() {
 
   // These options do not affect AST generation.
   SanitizerBlacklistFiles.clear();
+  XRayAlwaysInstrumentFiles.clear();
+  XRayNeverInstrumentFiles.clear();
 
   CurrentModule.clear();
   IsHeaderFile = false;

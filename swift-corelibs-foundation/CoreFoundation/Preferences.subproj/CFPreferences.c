@@ -1,7 +1,7 @@
 /*	CFPreferences.c
-	Copyright (c) 1998-2016, Apple Inc. and the Swift project authors
+	Copyright (c) 1998-2017, Apple Inc. and the Swift project authors
  
-	Portions Copyright (c) 2014-2016 Apple Inc. and the Swift project authors
+	Portions Copyright (c) 2014-2017, Apple Inc. and the Swift project authors
 	Licensed under Apache License v2.0 with Runtime Library Exception
 	See http://swift.org/LICENSE.txt for license information
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
@@ -445,7 +445,7 @@ static CFStringRef  _CFPreferencesStandardDomainCacheKey(CFStringRef  domainName
 static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef domainName, CFStringRef userName, CFStringRef hostName, unsigned long safeLevel) {
     CFURLRef theURL = NULL;
     CFAllocatorRef prefAlloc = __CFPreferencesAllocator();
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_WINDOWS
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_LINUX || DEPLOYMENT_TARGET_WINDOWS
     CFURLRef prefDir = _preferencesDirectoryForUserHostSafetyLevel(userName, hostName, safeLevel);
     CFStringRef  appName;
     CFStringRef  fileName;
@@ -479,7 +479,7 @@ static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef do
 	CFRelease(appName);
     }
     if (fileName) {
-#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED
+#if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_LINUX
         theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLPOSIXPathStyle, false, prefDir);
 #elif DEPLOYMENT_TARGET_WINDOWS
 		theURL = CFURLCreateWithFileSystemPathRelativeToBase(prefAlloc, fileName, kCFURLWindowsPathStyle, false, prefDir);
@@ -496,10 +496,6 @@ static CFURLRef _CFPreferencesURLForStandardDomainWithSafetyLevel(CFStringRef do
 static CFURLRef _CFPreferencesURLForStandardDomain(CFStringRef domainName, CFStringRef userName, CFStringRef hostName) {
     return _CFPreferencesURLForStandardDomainWithSafetyLevel(domainName, userName, hostName, __CFSafeLaunchLevel);
 }
-
-const _CFPreferencesDomainCallBacks __kCFXMLPropertyListDomainCallBacks = {
-    
-};
 
 CFPreferencesDomainRef _CFPreferencesStandardDomain(CFStringRef  domainName, CFStringRef  userName, CFStringRef  hostName) {
     CFPreferencesDomainRef domain;
@@ -794,7 +790,7 @@ static void getVolatileKeysAndValues(CFAllocatorRef alloc, CFTypeRef context, vo
             CFDictionaryGetKeysAndValues(dict, (const void **)*buf, (const void **)values);
         } else if (alloc != kCFAllocatorNull) {
             if (*buf) {
-                *buf = (void **)CFAllocatorReallocate(alloc, *buf, count * 2 * sizeof(void *), 0);
+                *buf = __CFSafelyReallocateWithAllocator(alloc, *buf, count * 2 * sizeof(void *), 0, NULL);
             } else {
                 *buf = (void **)CFAllocatorAllocate(alloc, count*2*sizeof(void *), 0);
             }

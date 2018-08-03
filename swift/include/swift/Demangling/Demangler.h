@@ -394,6 +394,8 @@ protected:
   NodePointer demangleIdentifier();
   NodePointer demangleOperatorIdentifier();
 
+  std::string demangleBridgedMethodParams();
+
   NodePointer demangleMultiSubstitutions();
   NodePointer pushMultiSubstitutions(int RepeatCount, size_t SubstIdx);
   NodePointer createSwiftType(Node::Kind typeKind, const char *name);
@@ -445,8 +447,11 @@ protected:
   NodePointer demangleWitness();
   NodePointer demangleSpecialType();
   NodePointer demangleMetatypeRepresentation();
+  NodePointer demangleAccessor(NodePointer ChildNode);
   NodePointer demangleFunctionEntity();
   NodePointer demangleEntity(Node::Kind Kind);
+  NodePointer demangleVariable();
+  NodePointer demangleSubscript();
   NodePointer demangleProtocolList();
   NodePointer demangleProtocolListType();
   NodePointer demangleGenericSignature(bool hasParamCounts);

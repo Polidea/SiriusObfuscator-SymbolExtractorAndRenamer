@@ -237,7 +237,7 @@ void CodeGenFunction::registerGlobalDtorWithAtExit(const VarDecl &VD,
     llvm::FunctionType::get(IntTy, dtorStub->getType(), false);
 
   llvm::Constant *atexit =
-      CGM.CreateRuntimeFunction(atexitTy, "atexit", llvm::AttributeSet(),
+      CGM.CreateRuntimeFunction(atexitTy, "atexit", llvm::AttributeList(),
                                 /*Local=*/true);
   if (llvm::Function *atexitFn = dyn_cast<llvm::Function>(atexit))
     atexitFn->setDoesNotThrow();
@@ -278,17 +278,25 @@ llvm::Function *CodeGenModule::CreateGlobalInitOrDestructFunction(
   if (!getLangOpts().Exceptions)
     Fn->setDoesNotThrow();
 
-  if (!isInSanitizerBlacklist(Fn, Loc)) {
-    if (getLangOpts().Sanitize.hasOneOf(SanitizerKind::Address |
-                                        SanitizerKind::KernelAddress))
-      Fn->addFnAttr(llvm::Attribute::SanitizeAddress);
-    if (getLangOpts().Sanitize.has(SanitizerKind::Thread))
-      Fn->addFnAttr(llvm::Attribute::SanitizeThread);
-    if (getLangOpts().Sanitize.has(SanitizerKind::Memory))
-      Fn->addFnAttr(llvm::Attribute::SanitizeMemory);
-    if (getLangOpts().Sanitize.has(SanitizerKind::SafeStack))
-      Fn->addFnAttr(llvm::Attribute::SafeStack);
-  }
+  if (getLangOpts().Sanitize.has(SanitizerKind::Address) &&
+      !isInSanitizerBlacklist(SanitizerKind::Address, Fn, Loc))
+    Fn->addFnAttr(llvm::Attribute::SanitizeAddress);
+
+  if (getLangOpts().Sanitize.has(SanitizerKind::KernelAddress) &&
+      !isInSanitizerBlacklist(SanitizerKind::KernelAddress, Fn, Loc))
+    Fn->addFnAttr(llvm::Attribute::SanitizeAddress);
+
+  if (getLangOpts().Sanitize.has(SanitizerKind::Thread) &&
+      !isInSanitizerBlacklist(SanitizerKind::Thread, Fn, Loc))
+    Fn->addFnAttr(llvm::Attribute::SanitizeThread);
+
+  if (getLangOpts().Sanitize.has(SanitizerKind::Memory) &&
+      !isInSanitizerBlacklist(SanitizerKind::Memory, Fn, Loc))
+    Fn->addFnAttr(llvm::Attribute::SanitizeMemory);
+
+  if (getLangOpts().Sanitize.has(SanitizerKind::SafeStack) &&
+      !isInSanitizerBlacklist(SanitizerKind::SafeStack, Fn, Loc))
+    Fn->addFnAttr(llvm::Attribute::SafeStack);
 
   return Fn;
 }
@@ -571,9 +579,10 @@ CodeGenFunction::GenerateCXXGlobalInitFunc(llvm::Function *Fn,
   FinishFunction();
 }
 
-void CodeGenFunction::GenerateCXXGlobalDtorsFunc(llvm::Function *Fn,
-                  const std::vector<std::pair<llvm::WeakVH, llvm::Constant*> >
-                                                &DtorsAndObjects) {
+void CodeGenFunction::GenerateCXXGlobalDtorsFunc(
+    llvm::Function *Fn,
+    const std::vector<std::pair<llvm::WeakTrackingVH, llvm::Constant *>>
+        &DtorsAndObjects) {
   {
     auto NL = ApplyDebugLocation::CreateEmpty(*this);
     StartFunction(GlobalDecl(), getContext().VoidTy, Fn,
@@ -602,9 +611,9 @@ llvm::Function *CodeGenFunction::generateDestroyHelper(
     Address addr, QualType type, Destroyer *destroyer,
     bool useEHCleanupForArray, const VarDecl *VD) {
   FunctionArgList args;
-  ImplicitParamDecl dst(getContext(), nullptr, SourceLocation(), nullptr,
-                        getContext().VoidPtrTy);
-  args.push_back(&dst);
+  ImplicitParamDecl Dst(getContext(), getContext().VoidPtrTy,
+                        ImplicitParamDecl::Other);
+  args.push_back(&Dst);
 
   const CGFunctionInfo &FI =
     CGM.getTypes().arrangeBuiltinFunctionDeclaration(getContext().VoidTy, args);

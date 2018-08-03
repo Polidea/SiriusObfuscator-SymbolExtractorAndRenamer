@@ -60,6 +60,10 @@ class BuildSystemFrontend {
   const BuildSystemInvocation& invocation;
   llvm::Optional<BuildSystem> buildSystem;
 
+private:
+
+  bool setupBuild();
+
 public:
   BuildSystemFrontend(BuildSystemFrontendDelegate& delegate,
                       const BuildSystemInvocation& invocation);
@@ -92,6 +96,11 @@ public:
   /// \returns True on success, or false if there were errors.
   bool build(StringRef targetToBuild);
 
+  /// Build a single node using the specified invocation parameters.
+  ///
+  /// \returns True on success, or false if there were errors.
+  bool buildNode(StringRef nodeToBuild);
+
   /// @}
 };
 
@@ -111,11 +120,6 @@ private:
 
   /// Default implementation, cannot be overriden by subclasses.
   virtual void setFileContentsBeingParsed(StringRef buffer) override;
-
-  /// Provides a default error implementation which will delegate to the
-  /// provided source manager. Cannot be overriden by subclasses.
-  virtual void error(StringRef filename, const Token& at,
-                     const Twine& message) override;
   
 public:
   /// Create a frontend delegate.
@@ -156,6 +160,11 @@ public:
 
   /// Report a non-file specific error message.
   void error(const Twine& message);
+
+  /// Provides a default error implementation which will delegate to the
+  /// provided source manager.
+  virtual void error(StringRef filename, const Token& at,
+                     const Twine& message) override;
   
   /// @}
 

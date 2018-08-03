@@ -849,10 +849,33 @@ CollectionTypeTests.test("AssociatedTypes/${Collection}") {
     iteratorType: IndexingIterator<C>.self,
     subSequenceType: ${Slice}<C>.self,
     indexType: FatalIndex.self,
-    indexDistanceType: Int.self,
     indicesType: ${Indices}<C>.self)
 }
 % end
+
+
+struct RACollectionWithIntIndex<T> {
+  var contents: [T]
+}
+
+extension RACollectionWithIntIndex: RandomAccessCollection {
+  var startIndex: Int { return contents.startIndex }
+  var endIndex: Int { return contents.endIndex }
+  subscript(index: Int) -> T {
+    get { return contents[index] }
+    set { }
+  }
+}
+
+CollectionTypeTests.test("AssociatedTypes/RACollectionWithIntIndex") {
+  typealias C = RACollectionWithIntIndex<Void>
+  expectCollectionAssociatedTypes(
+    collectionType: C.self,
+    iteratorType: IndexingIterator<C>.self,
+    subSequenceType: Slice<C>.self,
+    indexType: Int.self,
+    indicesType: CountableRange<Int>.self)
+}
 
 
 runAllTests()

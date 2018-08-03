@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -parse-stdlib -emit-silgen %s | %FileCheck %s
+// RUN: %target-swift-frontend -parse-stdlib -emit-silgen -enable-sil-ownership %s | %FileCheck %s
 
 import Swift
 
@@ -53,7 +53,7 @@ func class_metatypes(c: SomeClass, s: SomeSubclass)
 }
 
 // CHECK-LABEL: sil hidden @_T09metatypes010archetype_A0{{[_0-9a-zA-Z]*}}F
-// CHECK: bb0(%0 : $*T):
+// CHECK: bb0(%0 : @trivial $*T):
 func archetype_metatypes<T>(t: T) -> (T.Type, T.Type) {
   // CHECK: [[STATIC_T:%[0-9]+]] = metatype $@thick T.Type
   // CHECK: [[DYN_T:%[0-9]+]] = value_metatype $@thick T.Type, %0
@@ -89,8 +89,8 @@ func existential_metatype_from_thin() -> Any.Type {
 }
 
 // CHECK-LABEL: sil hidden @_T09metatypes36existential_metatype_from_thin_valueypXpyF : $@convention(thin) () -> @thick Any.Type
+// CHECK:      [[T1:%.*]] = metatype $@thin SomeStruct.Type
 // CHECK:      [[T0:%.*]] = function_ref @_T09metatypes10SomeStructV{{[_0-9a-zA-Z]*}}fC
-// CHECK-NEXT: [[T1:%.*]] = metatype $@thin SomeStruct.Type
 // CHECK-NEXT: [[T2:%.*]] = apply [[T0]]([[T1]])
 // CHECK-NEXT: debug_value [[T2]] : $SomeStruct, let, name "s"
 // CHECK-NEXT: [[T0:%.*]] = metatype $@thin SomeStruct.Type

@@ -16,8 +16,8 @@
 #define LLVM_LIB_CODEGEN_MIRPARSER_MILEXER_H
 
 #include "llvm/ADT/APSInt.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringRef.h"
 #include <functional>
 
 namespace llvm {
@@ -65,9 +65,18 @@ struct MIToken {
     kw_debug_location,
     kw_cfi_same_value,
     kw_cfi_offset,
+    kw_cfi_rel_offset,
     kw_cfi_def_cfa_register,
     kw_cfi_def_cfa_offset,
+    kw_cfi_adjust_cfa_offset,
+    kw_cfi_escape,
     kw_cfi_def_cfa,
+    kw_cfi_register,
+    kw_cfi_remember_state,
+    kw_cfi_restore,
+    kw_cfi_restore_state,
+    kw_cfi_undefined,
+    kw_cfi_window_save,
     kw_blockaddress,
     kw_intrinsic,
     kw_target_index,
@@ -100,6 +109,7 @@ struct MIToken {
     md_alias_scope,
     md_noalias,
     md_range,
+    md_diexpr,
 
     // Identifier tokens
     Identifier,
@@ -127,7 +137,8 @@ struct MIToken {
     NamedIRValue,
     IRValue,
     QuotedIRValue, // `<constant value>`
-    SubRegisterIndex
+    SubRegisterIndex,
+    StringConstant
   };
 
 private:
@@ -168,7 +179,8 @@ public:
 
   bool isMemoryOperandFlag() const {
     return Kind == kw_volatile || Kind == kw_non_temporal ||
-           Kind == kw_dereferenceable || Kind == kw_invariant;
+           Kind == kw_dereferenceable || Kind == kw_invariant ||
+           Kind == StringConstant;
   }
 
   bool is(TokenKind K) const { return Kind == K; }

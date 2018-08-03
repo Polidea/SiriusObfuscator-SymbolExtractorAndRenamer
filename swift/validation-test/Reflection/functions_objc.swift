@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift -lswiftSwiftReflectionTest %s -o %t/functions
 // RUN: %target-run %target-swift-reflection-test %t/functions | %FileCheck %s --check-prefix=CHECK --check-prefix=CHECK-%target-ptrsize
 // REQUIRES: objc_interop
@@ -15,16 +15,16 @@ func capturesImportedTypes(x: Int, n: NSURL, r: CGRect, c: NSCoding) {
 // CHECK-32-NEXT: (builtin Builtin.NativeObject)
 
 // CHECK-32:      Type info:
-// CHECK-32-NEXT: (closure_context size=40 alignment=4 stride=40 num_extra_inhabitants=0
-// CHECK-32-NEXT:   (field offset=12
+// CHECK-32-NEXT: (closure_context size=36 alignment=4 stride=36 num_extra_inhabitants=0
+// CHECK-32-NEXT:   (field offset=8
 // CHECK-32-NEXT:     (struct size=4 alignment=4 stride=4 num_extra_inhabitants=0
 // CHECK-32-NEXT:       (field name=_value offset=0
 // CHECK-32-NEXT:         (builtin size=4 alignment=4 stride=4 num_extra_inhabitants=0))))
-// CHECK-32-NEXT:   (field offset=16
+// CHECK-32-NEXT:   (field offset=12
 // CHECK-32-NEXT:     (reference kind=strong refcounting=unknown))
-// CHECK-32-NEXT:   (field offset=20
+// CHECK-32-NEXT:   (field offset=16
 // CHECK-32-NEXT:     (builtin size=16 alignment=4 stride=16 num_extra_inhabitants=0))
-// CHECK-32-NEXT:   (field offset=36
+// CHECK-32-NEXT:   (field offset=32
 // CHECK-32-NEXT:     (reference kind=strong refcounting=unknown)))
 
 // CHECK-64:      Type reference:

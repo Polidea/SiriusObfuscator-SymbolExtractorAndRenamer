@@ -13,12 +13,12 @@
 // C++ Includes
 // Other libraries and framework includes
 // Project includes
-#include "lldb/Core/Stream.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Target/Language.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/Stream.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -498,7 +498,7 @@ bool DumpValueObjectOptions::PointerDepth::CanAllowExpansion() const {
   case Mode::Always:
   case Mode::Default:
   case Mode::Formatters:
-    return (m_count > 0);
+    return m_count > 0;
   case Mode::Never:
     return false;
   }

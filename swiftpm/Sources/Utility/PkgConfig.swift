@@ -131,7 +131,7 @@ public struct PkgConfig {
 //
 // FIXME: This is only internal so it can be unit tested.
 struct PkgConfigParser {
-    private let pcFile: AbsolutePath
+    let pcFile: AbsolutePath
     private let fileSystem: FileSystem
     private(set) var variables = [String: String]()
     var dependencies = [String]()
@@ -151,6 +151,9 @@ struct PkgConfigParser {
             }
             return line
         }
+
+        // Add pcfiledir variable. This is path to the directory containing the pc file.
+        variables["pcfiledir"] = pcFile.parentDirectory.asString
 
         let fileContents = try fileSystem.readFileContents(pcFile)
         // FIXME: Should we error out instead if content is not UTF8 representable?
@@ -273,12 +276,12 @@ struct PkgConfigParser {
                 // Append the contents before the variable.
                 result += fragment[fragment.startIndex..<variable.startIndex]
                 guard let variableValue = variables[variable.name] else {
-                    throw PkgConfigError.parsingError("Expected variable in \(pcFile)")
+                    throw PkgConfigError.parsingError("Expected a value for variable '\(variable.name)' in \(pcFile.asString). Variables: \(variables)")
                 }
                 // Append the value of the variable.
                 result += variableValue
                 // Update the fragment with post variable string.
-                fragment = fragment[fragment.index(after: variable.endIndex)..<fragment.endIndex]
+                fragment = String(fragment[fragment.index(after: variable.endIndex)...])
             } else {
                 // No variable found, just append rest of the fragment to result.
                 result += fragment

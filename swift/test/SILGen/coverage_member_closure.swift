@@ -8,8 +8,9 @@ class C {
     }
   }
 
-  // Closures in members show up at the end of the constructor's map.
-  // CHECK-NOT: sil_coverage_map
-  // CHECK: [[@LINE+1]]:55 -> [[@LINE+1]]:79 : 2
+  // Closures in members receive their own coverage mapping.
+  // Note: Don't use the full mangled name here, because the mangling changes after 4.1.
+  // CHECK: sil_coverage_map {{.*}} _T023coverage_member_closure1CC17completionHandler
+  // CHECK: [[@LINE+1]]:55 -> [[@LINE+1]]:79 : 0
   var completionHandler: (String, [String]) -> Void = { (foo, bar) in return }
 }

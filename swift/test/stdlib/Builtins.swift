@@ -9,7 +9,7 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 //   note: building with -Onone to test debug-mode-only safety checks
 // RUN: %target-build-swift %s -parse-stdlib -Xfrontend -disable-access-control -Onone -o %t/Builtins
 // RUN: %target-run %t/Builtins
@@ -33,6 +33,31 @@ tests.test("_isUnique/NativeObject") {
   expectNotEqual(false, _isUnique_native(&a))
   var b = a
   expectFalse(_isUnique_native(&a))
+  expectFalse(_isUnique_native(&b))
+}
+
+tests.test("_isUnique/NativeObjectWithPreviousStrongRef") {
+  var a: Builtin.NativeObject = Builtin.castToNativeObject(X())
+  expectTrue(_isUnique_native(&a))
+  var b: Builtin.NativeObject? = a
+  expectFalse(_isUnique_native(&a))
+  b = nil
+  expectTrue(_isUnique_native(&a))
+}
+
+tests.test("_isUnique/NativeObjectWithWeakRef") {
+  var a: Builtin.NativeObject = Builtin.castToNativeObject(X())
+  expectTrue(_isUnique_native(&a))
+  weak var b = a
+  expectTrue(_isUnique_native(&a))
+  expectFalse(_isUnique_native(&b))
+}
+
+tests.test("_isUnique/NativeObjectWithUnownedRef") {
+  var a: Builtin.NativeObject = Builtin.castToNativeObject(X())
+  expectTrue(_isUnique_native(&a))
+  unowned var b = a
+  expectTrue(_isUnique_native(&a))
   expectFalse(_isUnique_native(&b))
 }
 
@@ -138,7 +163,7 @@ func exerciseArrayValueWitnesses<T>(_ value: T) {
   Builtin.takeArrayFrontToBack(T.self, buf._rawValue, (buf + 1)._rawValue, 4._builtinWordValue)
   Builtin.destroyArray(T.self, buf._rawValue, 4._builtinWordValue)
 
-  buf.deallocate(capacity: 5)
+  buf.deallocate()
 }
 
 tests.test("array value witnesses") {

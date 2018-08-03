@@ -63,10 +63,10 @@ struct __CFURLComponents {
 static Boolean __CFURLComponentsEqual(CFTypeRef left, CFTypeRef right);
 
 static CFStringRef __CFURLComponentsCopyDescription(CFTypeRef cf) {
-    return CFSTR("A really nice CFURLComponents object");
+    return CFRetain(CFSTR("A really nice CFURLComponents object"));
 }
 
-CF_SWIFT_EXPORT void __CFURLComponentsDeallocate(CFURLComponentsRef instance) {
+CF_CROSS_PLATFORM_EXPORT void __CFURLComponentsDeallocate(CFURLComponentsRef instance) {
     __CFGenericValidateType(instance, _CFURLComponentsGetTypeID());
     
     if (instance->_urlString) CFRelease(instance->_urlString);
@@ -556,11 +556,11 @@ CF_EXPORT CFStringRef _CFURLComponentsCopyPath(CFURLComponentsRef components) {
         components->_pathComponentValid = true;
     }
     if (!components->_pathComponent) {
-        result = CFSTR("");
+        result = CFStringCreateCopy(kCFAllocatorSystemDefault, CFSTR(""));
     } else {
         result = _CFStringCreateByRemovingPercentEncoding(kCFAllocatorSystemDefault, components->_pathComponent);
         if (!result) {
-            result = CFSTR("");
+            result = CFStringCreateCopy(kCFAllocatorSystemDefault, CFSTR(""));
         }
     }
     __CFUnlock(&components->_lock);
@@ -745,7 +745,7 @@ CF_EXPORT CFStringRef _CFURLComponentsCopyPercentEncodedPath(CFURLComponentsRef 
     result = components->_pathComponent ? CFRetain(components->_pathComponent) : NULL;
     __CFUnlock(&components->_lock);
     
-    if (!result) result = CFSTR("");
+    if (!result) result = CFStringCreateCopy(kCFAllocatorSystemDefault, CFSTR(""));
     
     return ( result );
 }
@@ -1054,7 +1054,7 @@ CF_EXPORT CFArrayRef _CFURLComponentsCopyQueryItems(CFURLComponentsRef component
                             }
                         }
                         else {
-                            nameString = CFSTR("");
+                            nameString = (CFStringRef)CFRetain(CFSTR(""));
                         }
                         nameRange.location = kCFNotFound;
                         valueRange.location = idx + 1;
@@ -1076,7 +1076,7 @@ CF_EXPORT CFArrayRef _CFURLComponentsCopyQueryItems(CFURLComponentsRef component
                             }
                         }
                         else {
-                            valueString = CFSTR("");
+                            valueString = (CFStringRef)CFRetain(CFSTR(""));
                         }
                         CFStringRef name = CFSTR("name");
                         CFTypeRef keys[] = {name, CFSTR("value")};
@@ -1101,7 +1101,7 @@ CF_EXPORT CFArrayRef _CFURLComponentsCopyQueryItems(CFURLComponentsRef component
                             }
                         }
                         else {
-                            nameString =  CFSTR("");
+                            nameString =  (CFStringRef)CFRetain(CFSTR(""));
                         }
                         CFStringRef name = CFSTR("name");
                         CFTypeRef keys[] = {name};
@@ -1131,7 +1131,7 @@ CF_EXPORT CFArrayRef _CFURLComponentsCopyQueryItems(CFURLComponentsRef component
                     }
                 }
                 else {
-                    valueString = CFSTR("");
+                    valueString = (CFStringRef)CFRetain(CFSTR(""));
                 }
                 CFStringRef name = CFSTR("name");
                 CFTypeRef keys[] = {name, CFSTR("value")};
@@ -1155,7 +1155,7 @@ CF_EXPORT CFArrayRef _CFURLComponentsCopyQueryItems(CFURLComponentsRef component
                     }
                 }
                 else {
-                    nameString =  CFSTR("");
+                    nameString =  (CFStringRef)CFRetain(CFSTR(""));
                 }
                 CFStringRef name = CFSTR("name");
                 CFTypeRef keys[] = {name};

@@ -55,22 +55,26 @@ class DIMemoryObjectInfo {
 public:
   /// This is the instruction that represents the memory.  It is either an
   /// allocation (alloc_box, alloc_stack) or a mark_uninitialized.
-  SILInstruction *MemoryInst;
+  SingleValueInstruction *MemoryInst;
 
   /// This is the base type of the memory allocation.
   SILType MemorySILType;
-
-  /// True if the memory object being analyzed represents a 'let', which is
-  /// initialize-only (reassignments are not allowed).
-  bool IsLet = false;
 
   /// This is the count of elements being analyzed.  For memory objects that are
   /// tuples, this is the flattened element count.  For 'self' members in init
   /// methods, this is the local field count (+1 for derive classes).
   unsigned NumElements;
 
+  /// True if the memory object being analyzed represents a 'let', which is
+  /// initialize-only (reassignments are not allowed).
+  bool IsLet = false;
+
+  /// True if NumElements has a dummy value in it to force a struct to be
+  /// non-empty.
+  bool HasDummyElement = false;
+
 public:
-  DIMemoryObjectInfo(SILInstruction *MemoryInst);
+  DIMemoryObjectInfo(SingleValueInstruction *MemoryInst);
 
   SILLocation getLoc() const { return MemoryInst->getLoc(); }
   SILFunction &getFunction() const { return *MemoryInst->getFunction(); }
@@ -80,7 +84,7 @@ public:
 
   CanType getType() const { return MemorySILType.getSwiftRValueType(); }
 
-  SILInstruction *getAddress() const {
+  SingleValueInstruction *getAddress() const {
     if (isa<MarkUninitializedInst>(MemoryInst) ||
         isa<AllocStackInst>(MemoryInst))
       return MemoryInst;
@@ -105,32 +109,25 @@ public:
     return false;
   }
 
-  /// True if the memory object is the 'self' argument of an initializer in a
-  /// protocol extension.
-  bool isProtocolInitSelf() const {
-    if (auto *MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
-      if (MUI->isRootSelf() && isa<ArchetypeType>(getType()))
-        return true;
-    return false;
-  }
-
-  /// True if the memory object is the 'self' argument of an enum initializer.
-  bool isEnumInitSelf() const {
-    if (auto *MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
-      if (MUI->isRootSelf())
-        if (auto decl = getType()->getAnyNominal())
-          if (isa<EnumDecl>(decl))
-            return true;
-    return false;
-  }
-
   /// True if the memory object is the 'self' argument of a struct initializer.
   bool isStructInitSelf() const {
     if (auto *MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
-      if (MUI->isRootSelf())
+      if (MUI->isRootSelf() || MUI->isCrossModuleRootSelf())
         if (auto decl = getType()->getAnyNominal())
           if (isa<StructDecl>(decl))
             return true;
+    return false;
+  }
+
+  /// True if the memory object is the 'self' argument of a non-delegating
+  /// cross-module struct initializer.
+  bool isCrossModuleStructInitSelf() const {
+    if (auto *MUI = dyn_cast<MarkUninitializedInst>(MemoryInst)) {
+      if (MUI->isCrossModuleRootSelf()) {
+        assert(isStructInitSelf());
+        return true;
+      }
+    }
     return false;
   }
 
@@ -144,17 +141,15 @@ public:
     return false;
   }
 
-  /// isDerivedClassSelf - Return true if this memory object is the 'self' of
-  /// a derived class init method.
+  /// True if this memory object is the 'self' of a derived class initializer.
   bool isDerivedClassSelf() const {
     if (auto MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
       return MUI->isDerivedClassSelf();
     return false;
   }
 
-  /// isDerivedClassSelfOnly - Return true if this memory object is the 'self'
-  /// of a derived class init method for which we can assume that all ivars
-  /// have been initialized.
+  /// True if this memory object is the 'self' of a derived class initializer for
+  /// which we can assume that all ivars have been initialized.
   bool isDerivedClassSelfOnly() const {
     if (auto MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
       return MUI->isDerivedClassSelfOnly();
@@ -166,6 +161,15 @@ public:
   bool isAnyDerivedClassSelf() const {
     if (auto MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
       return MUI->isDerivedClassSelf() || MUI->isDerivedClassSelfOnly();
+    return false;
+  }
+
+  /// True if this memory object is the 'self' of a non-root class init method.
+  bool isNonRootClassSelf() const {
+    if (isClassInitSelf())
+      if (auto MUI = dyn_cast<MarkUninitializedInst>(MemoryInst))
+        return !MUI->isRootSelf();
+
     return false;
   }
 
@@ -181,17 +185,27 @@ public:
   /// stored properties.
   bool isNonDelegatingInit() const {
     if (auto *MUI = dyn_cast<MarkUninitializedInst>(MemoryInst)) {
-      if (MUI->isDerivedClassSelf() || MUI->isDerivedClassSelfOnly() ||
-          (MUI->isRootSelf() && !isEnumInitSelf()))
+      switch (MUI->getKind()) {
+      case MarkUninitializedInst::Var:
+        return false;
+      case MarkUninitializedInst::RootSelf:
+      case MarkUninitializedInst::CrossModuleRootSelf:
+      case MarkUninitializedInst::DerivedSelf:
+      case MarkUninitializedInst::DerivedSelfOnly:
         return true;
+      case MarkUninitializedInst::DelegatingSelf:
+        return false;
+      }
     }
     return false;
   }
 
   /// emitElementAddress - Given an element number (in the flattened sense)
   /// return a pointer to a leaf element of the specified number.
-  SILValue emitElementAddress(unsigned TupleEltNo, SILLocation Loc,
-                              SILBuilder &B) const;
+  SILValue
+  emitElementAddress(unsigned TupleEltNo, SILLocation Loc, SILBuilder &B,
+                     llvm::SmallVectorImpl<std::pair<SILValue, SILValue>>
+                         &EndBorrowList) const;
 
   /// getElementType - Return the swift type of the specified element.
   SILType getElementType(unsigned EltNo) const;
@@ -237,11 +251,8 @@ enum DIUseKind {
   /// closure that captures it.
   Escape,
 
-  /// This instruction is a call to 'super.init' in a 'self' initializer of a
-  /// derived class.
-  SuperInit,
-
-  /// This instruction is a call to 'self.init' in a delegating initializer.
+  /// This instruction is a call to 'self.init' in a delegating initializer,
+  /// or a call to 'super.init' in a designated initializer of a derived class..
   SelfInit
 };
 
@@ -289,18 +300,13 @@ struct DIMemoryUse {
 struct DIElementUseInfo {
   SmallVector<DIMemoryUse, 16> Uses;
   SmallVector<SILInstruction *, 4> Releases;
-  TinyPtrVector<TermInst *> FailableInits;
+  TinyPtrVector<SILInstruction *> StoresToSelf;
 
   void trackUse(DIMemoryUse Use) { Uses.push_back(Use); }
 
   void trackDestroy(SILInstruction *Destroy) { Releases.push_back(Destroy); }
 
-  void trackFailableInitCall(const DIMemoryObjectInfo &TheMemory,
-                             SILInstruction *I);
-
-private:
-  void trackFailureBlock(const DIMemoryObjectInfo &TheMemory, TermInst *TI,
-                         SILBasicBlock *BB);
+  void trackStoreToSelf(SILInstruction *I);
 };
 
 /// collectDIElementUsesFrom - Analyze all uses of the specified allocation

@@ -29,7 +29,9 @@ class TestNSURLRequest : XCTestCase {
             ("test_mutableCopy_3", test_mutableCopy_3),
             ("test_NSCoding_1", test_NSCoding_1),
             ("test_NSCoding_2", test_NSCoding_2),
-            ("test_NSCoding_3", test_NSCoding_3)
+            ("test_NSCoding_3", test_NSCoding_3),
+            ("test_methodNormalization", test_methodNormalization),
+            ("test_description", test_description),
         ]
     }
     
@@ -239,5 +241,61 @@ class TestNSURLRequest : XCTestCase {
         XCTAssertNotNil(requestB.httpBody)
         XCTAssertEqual(3, requestB.httpBody!.count)
         XCTAssertEqual(requestB.httpBody, requestA.httpBody)
+    }
+
+    func test_methodNormalization() {
+        let expectedNormalizations = [
+            "GET": "GET",
+            "get": "GET",
+            "gEt": "GET",
+            "HEAD": "HEAD",
+            "hEAD": "HEAD",
+            "head": "HEAD",
+            "HEAd": "HEAD",
+            "POST": "POST",
+            "post": "POST",
+            "pOST": "POST",
+            "POSt": "POST",
+            "PUT": "PUT",
+            "put": "PUT",
+            "PUt": "PUT",
+            "DELETE": "DELETE",
+            "delete": "DELETE",
+            "DeleTE": "DELETE",
+            "dELETe": "DELETE",
+            "CONNECT": "CONNECT",
+            "connect": "CONNECT",
+            "Connect": "CONNECT",
+            "cOnNeCt": "CONNECT",
+            "OPTIONS": "OPTIONS",
+            "options": "options",
+            "TRACE": "TRACE",
+            "trace": "trace",
+            "PATCH": "PATCH",
+            "patch": "patch",
+            "foo": "foo",
+            "BAR": "BAR",
+        ]
+
+        let request = NSMutableURLRequest(url: url)
+
+        for n in expectedNormalizations {
+            request.httpMethod = n.key
+            XCTAssertEqual(request.httpMethod, n.value)
+        }
+    }
+
+    func test_description() {
+        let url = URL(string: "http://swift.org")!
+        let request = NSMutableURLRequest(url: url)
+
+        if request.description.range(of: "http://swift.org") == nil {
+            XCTFail("description should contain URL")
+        }
+
+        request.url = nil
+        if request.description.range(of: "(null)") == nil {
+            XCTFail("description of nil URL should contain (null)")
+        }
     }
 }

@@ -61,13 +61,17 @@ class Token {
 public:
   Token() : Kind(tok::NUM_TOKENS), AtStartOfLine(false), CommentLength(0),
             EscapedIdentifier(false) {}
-  Token(tok Kind, StringRef Text)
-    : Kind(Kind), AtStartOfLine(false), CommentLength(0),
-      EscapedIdentifier(false), MultilineString(false),
-      Text(Text) {}
-  
+
+  Token(tok Kind, StringRef Text, unsigned CommentLength)
+          : Kind(Kind), AtStartOfLine(false), CommentLength(CommentLength),
+            EscapedIdentifier(false), MultilineString(false),
+            Text(Text) {}
+
+  Token(tok Kind, StringRef Text): Token(Kind, Text, 0) {};
+
   tok getKind() const { return Kind; }
   void setKind(tok K) { Kind = K; }
+  void clearCommentLength() { CommentLength = 0; }
   
   /// is/isNot - Predicates to check if this token is a specific kind, as in
   /// "if (Tok.is(tok::l_brace)) {...}".
@@ -175,11 +179,18 @@ public:
   /// used
   bool canBeArgumentLabel() const {
     // Identifiers, escaped identifiers, and '_' can be argument labels.
-    if (is(tok::identifier) || isEscapedIdentifier() || is(tok::kw__))
+    if (is(tok::identifier) || isEscapedIdentifier() || is(tok::kw__)) {
+      // ... except for '__shared' and '__owned'.
+      if (getRawText().equals("__shared") ||
+          getRawText().equals("__owned"))
+        return false;
+
       return true;
+    }
 
     // 'let', 'var', and 'inout' cannot be argument labels.
-    if (isAny(tok::kw_let, tok::kw_var, tok::kw_inout)) return false;
+    if (isAny(tok::kw_let, tok::kw_var, tok::kw_inout))
+      return false;
 
     // All other keywords can be argument labels.
     return isKeyword();

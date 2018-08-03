@@ -100,12 +100,12 @@ static void addReturnValueImpl(SILBasicBlock *RetBB, SILBasicBlock *NewRetBB,
     if (NewRetVal->getType().isVoid()) {
       // Canonicalize Void return type into something that isTrivialReturnBlock
       // expects.
-      auto *TupleI = cast<SILInstruction>(RetInst->getOperand(0));
-      if (TupleI->hasOneUse()) {
-        TupleI->removeFromParent();
-        RetBB->insert(RetInst, TupleI);
+      auto *TupleI = dyn_cast<TupleInst>(RetInst->getOperand(0));
+      if (TupleI && TupleI->hasOneUse()) {
+        TupleI->moveBefore(RetInst);
       } else {
-        TupleI = TupleI->clone(RetInst);
+        Builder.setInsertionPoint(RetInst);
+        TupleI = Builder.createTuple(RetInst->getLoc(), {});
         RetInst->setOperand(0, TupleI);
       }
       MergedBB = RetBB->split(TupleI->getIterator());
@@ -627,7 +627,9 @@ emitArgumentConversion(SmallVectorImpl<SILValue> &CallArgs) {
         ReInfo.createSpecializedType(SubstitutedType, Builder.getModule());
   }
 
-  assert(OrigArgs.size() == ReInfo.getNumArguments() && "signature mismatch");
+  assert(!substConv.useLoweredAddresses()
+         || OrigArgs.size() == ReInfo.getNumArguments() &&
+         "signature mismatch");
 
   CallArgs.reserve(OrigArgs.size());
   SILValue StoreResultTo;

@@ -1,9 +1,7 @@
-// RUN: %target-swiftc_driver %s -g -sanitize=address -o %t_tsan-binary
-// RUN: not env ASAN_OPTIONS=abort_on_error=0 %target-run %t_tsan-binary 2>&1 | %FileCheck %s
+// RUN: %target-swiftc_driver %s -target %sanitizers-target-triple -g -sanitize=address -o %t_asan-binary
+// RUN: not env %env-ASAN_OPTIONS=abort_on_error=0 %target-run %t_asan-binary 2>&1 | %FileCheck %s
 // REQUIRES: executable_test
-// REQUIRES: objc_interop
 // REQUIRES: asan_runtime
-// XFAIL: linux
 
 // Make sure we can handle swifterror. LLVM's address sanitizer pass needs to
 // ignore swifterror addresses.
@@ -30,9 +28,9 @@ public func call_foobar() {
 var a = UnsafeMutablePointer<Int>.allocate(capacity: 1)
 a.initialize(to: 5)
 a.deinitialize(count: 1)
-a.deallocate(capacity: 1)
+a.deallocate()
 print(a.pointee)
 a.deinitialize(count: 1)
-a.deallocate(capacity: 1)
+a.deallocate()
 
 // CHECK: AddressSanitizer: heap-use-after-free

@@ -1,6 +1,6 @@
 // RUN: %empty-directory(%t)
-// RUN: %target-swift-frontend -emit-module -enable-resilience -emit-module-path=%t/resilient_protocol.swiftmodule -module-name=resilient_protocol %S/../Inputs/resilient_protocol.swift
-// RUN: %target-swift-frontend -I %t -emit-silgen -enable-resilience %s | %FileCheck %s
+// RUN: %target-swift-frontend -emit-module -enable-sil-ownership -enable-resilience -emit-module-path=%t/resilient_protocol.swiftmodule -module-name=resilient_protocol %S/../Inputs/resilient_protocol.swift
+// RUN: %target-swift-frontend -I %t -emit-silgen -enable-sil-ownership -enable-resilience %s | %FileCheck %s
 
 import resilient_protocol
 
@@ -110,18 +110,18 @@ public protocol ResilientStorage {
 
 extension ResilientStorage {
 
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP19propertyWithDefaultSifg
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE19propertyWithDefaultSifg
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP19propertyWithDefaultSivg
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE19propertyWithDefaultSivg
   public var propertyWithDefault: Int {
     get { return 0 }
   }
 
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifg
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE26mutablePropertyWithDefaultSifg
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifs
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE26mutablePropertyWithDefaultSifs
-// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifmytfU_
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifm
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivg
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE26mutablePropertyWithDefaultSivg
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivs
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE26mutablePropertyWithDefaultSivs
+// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivmytfU_
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivm
   public var mutablePropertyWithDefault: Int {
     get { return 0 }
     set { }
@@ -132,12 +132,12 @@ extension ResilientStorage {
     set { }
   }
 
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfg
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE33mutableGenericPropertyWithDefault1TQzfg
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfs
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE33mutableGenericPropertyWithDefault1TQzfs
-// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfmytfU_
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfm
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvg
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE33mutableGenericPropertyWithDefault1TQzvg
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvs
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE33mutableGenericPropertyWithDefault1TQzvs
+// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvmytfU_
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvm
   public var mutableGenericPropertyWithDefault: T {
     get {
       return T(default: ())
@@ -145,12 +145,12 @@ extension ResilientStorage {
     set { }
   }
 
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfg
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE9subscript1TQzAFcfg
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfs
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE9subscript1TQzAFcfs
-// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfmytfU_
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfm
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP1TQzAEcig
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE1TQzAEcig
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP1TQzAEcis
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE1TQzAEcis
+// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP1TQzAEcimytfU_
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP1TQzAEcim
   public subscript(x: T) -> T {
     get {
       return x
@@ -158,12 +158,12 @@ extension ResilientStorage {
     set { }
   }
 
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifg
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE36mutatingGetterWithNonMutatingDefaultSifg
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifs
-// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE36mutatingGetterWithNonMutatingDefaultSifs
-// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifmytfU_
-// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifm
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivg
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE36mutatingGetterWithNonMutatingDefaultSivg
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivs
+// CHECK-LABEL: sil @_T019protocol_resilience16ResilientStoragePAAE36mutatingGetterWithNonMutatingDefaultSivs
+// CHECK-LABEL: sil private [transparent] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivmytfU_
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivm
   public var mutatingGetterWithNonMutatingDefault: Int {
     get {
       return 0
@@ -221,13 +221,25 @@ extension ReabstractSelfBase {
   }
 }
 
+// CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcvg : $@convention(witness_method: ReabstractSelfRefined) <τ_0_0 where τ_0_0 : ReabstractSelfRefined> (@guaranteed τ_0_0) -> @owned @callee_guaranteed (@owned τ_0_0) -> @owned τ_0_0
+// CHECK: [[SELF_BOX:%.*]] = alloc_stack $τ_0_0
+// CHECK-NEXT: [[SELF_COPY:%.*]] = copy_value %0 : $τ_0_0
+// CHECK-NEXT: store [[SELF_COPY]] to [init] [[SELF_BOX]] : $*τ_0_0
+// CHECK: [[WITNESS:%.*]] = function_ref @_T019protocol_resilience18ReabstractSelfBasePAAE8callbackxxcvg
+// CHECK-NEXT: [[RESULT:%.*]] = apply [[WITNESS]]<τ_0_0>([[SELF_BOX]])
+// CHECK: [[THUNK_FN:%.*]] = function_ref @_T0xxIegir_xxIegxo_19protocol_resilience21ReabstractSelfRefinedRzlTR
+// CHECK-NEXT: [[THUNK:%.*]] = partial_apply [callee_guaranteed] [[THUNK_FN]]<τ_0_0>([[RESULT]])
+// CHECK-NEXT: destroy_addr [[SELF_BOX]]
+// CHECK-NEXT: dealloc_stack [[SELF_BOX]]
+// CHECK-NEXT: return [[THUNK]]
+
 final class X : ReabstractSelfRefined {}
 
 func inoutFunc(_ x: inout Int) {}
 
 // CHECK-LABEL: sil hidden @_T019protocol_resilience22inoutResilientProtocoly010resilient_A005OtherdE0_pzF
 func inoutResilientProtocol(_ x: inout OtherResilientProtocol) {
-  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE19propertyInExtensionSifm
+  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE19propertyInExtensionSivm
   inoutFunc(&x.propertyInExtension)
 }
 
@@ -235,24 +247,11 @@ struct OtherConformingType : OtherResilientProtocol {}
 
 // CHECK-LABEL: sil hidden @_T019protocol_resilience22inoutResilientProtocolyAA19OtherConformingTypeVzF
 func inoutResilientProtocol(_ x: inout OtherConformingType) {
-  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE19propertyInExtensionSifm
+  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE19propertyInExtensionSivm
   inoutFunc(&x.propertyInExtension)
 
-  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE25staticPropertyInExtensionSifmZ
+  // CHECK: function_ref @_T018resilient_protocol22OtherResilientProtocolPAAE25staticPropertyInExtensionSivmZ
   inoutFunc(&OtherConformingType.staticPropertyInExtension)
-}
-
-// Protocol is not public -- make sure default witnesses have the right linkage
-protocol InternalProtocol {
-  func noDefaultF()
-  func defaultG()
-}
-
-extension InternalProtocol {
-
-  // CHECK-LABEL: sil private [transparent] [thunk] @_T019protocol_resilience16InternalProtocolP8defaultGyyF
-  // CHECK: return
-  func defaultG() {}
 }
 
 // CHECK-LABEL: sil_default_witness_table P {
@@ -282,23 +281,23 @@ extension InternalProtocol {
 // CHECK-LABEL: sil_default_witness_table ResilientStorage {
 // CHECK-NEXT:   no_default
 // CHECK-NEXT:   no_default
-// CHECK-NEXT:   method #ResilientStorage.propertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP19propertyWithDefaultSifg
+// CHECK-NEXT:   method #ResilientStorage.propertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP19propertyWithDefaultSivg
 // CHECK-NEXT:   no_default
-// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifg
-// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifs
-// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSifm
+// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivg
+// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivs
+// CHECK-NEXT:   method #ResilientStorage.mutablePropertyWithDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP26mutablePropertyWithDefaultSivm
 // CHECK-NEXT:   no_default
 // CHECK-NEXT:   no_default
 // CHECK-NEXT:   no_default
-// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfg
-// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfs
-// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzfm
-// CHECK-NEXT:   method #ResilientStorage.subscript!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfg
-// CHECK-NEXT:   method #ResilientStorage.subscript!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfs
-// CHECK-NEXT:   method #ResilientStorage.subscript!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP9subscript1TQzAFcfm
-// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifg
-// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifs
-// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSifm
+// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvg
+// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvs
+// CHECK-NEXT:   method #ResilientStorage.mutableGenericPropertyWithDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP33mutableGenericPropertyWithDefault1TQzvm
+// CHECK-NEXT:   method #ResilientStorage.subscript!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP1TQzAEcig
+// CHECK-NEXT:   method #ResilientStorage.subscript!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP1TQzAEcis
+// CHECK-NEXT:   method #ResilientStorage.subscript!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP1TQzAEcim
+// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!getter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivg
+// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!setter.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivs
+// CHECK-NEXT:   method #ResilientStorage.mutatingGetterWithNonMutatingDefault!materializeForSet.1: {{.*}} : @_T019protocol_resilience16ResilientStorageP36mutatingGetterWithNonMutatingDefaultSivm
 // CHECK-NEXT: }
 
 // CHECK-LABEL: sil_default_witness_table ResilientOperators {
@@ -312,12 +311,7 @@ extension InternalProtocol {
 
 // CHECK-LABEL: sil_default_witness_table ReabstractSelfRefined {
 // CHECK-NEXT:   no_default
-// CHECK-NEXT:   method #ReabstractSelfRefined.callback!getter.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcfg
-// CHECK-NEXT:   method #ReabstractSelfRefined.callback!setter.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcfs
-// CHECK-NEXT:   method #ReabstractSelfRefined.callback!materializeForSet.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcfm
-// CHECK-NEXT: }
-
-// CHECK-LABEL: sil_default_witness_table hidden InternalProtocol {
-// CHECK-NEXT:   no_default
-// CHECK-NEXT:   method #InternalProtocol.defaultG!1: {{.*}} : @_T019protocol_resilience16InternalProtocolP8defaultGyyF
+// CHECK-NEXT:   method #ReabstractSelfRefined.callback!getter.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcvg
+// CHECK-NEXT:   method #ReabstractSelfRefined.callback!setter.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcvs
+// CHECK-NEXT:   method #ReabstractSelfRefined.callback!materializeForSet.1: {{.*}} : @_T019protocol_resilience21ReabstractSelfRefinedP8callbackxxcvm
 // CHECK-NEXT: }

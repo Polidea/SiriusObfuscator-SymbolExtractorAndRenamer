@@ -261,8 +261,28 @@ func inout2(x: inout Int) { }
 func optional(x: Int?) { } // expected-note{{previously declared}}
 func optional(x: Int!) { } // expected-error{{invalid redeclaration of 'optional(x:)'}}
 
-func optional_2(x: (Int?) -> Int) { } // expected-note{{previously declared}}
-func optional_2(x: (Int!) -> Int) { } // expected-error{{invalid redeclaration of 'optional_2(x:)'}}
+func optionalInOut(x: inout Int?) { } // expected-note{{previously declared}}
+// expected-note@-1 {{previously declared}}
+func optionalInOut(x: inout Int!) { } // expected-warning{{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-1 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+  // expected-warning@-2 {{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-3 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+
+class optionalOverloads {
+  class func optionalInOut(x: inout Int?) { } // expected-note{{previously declared}}
+  // expected-note@-1 {{previously declared}}
+  class func optionalInOut(x: inout Int!) { } // expected-warning{{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-1 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+  // expected-warning@-2 {{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-3 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+
+  func optionalInOut(x: inout Int?) { } // expected-note{{previously declared}}
+  // expected-note@-1 {{previously declared}}
+  func optionalInOut(x: inout Int!) { } // expected-warning{{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-1 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+  // expected-warning@-2 {{invalid redeclaration of 'optionalInOut(x:)' which differs only by the kind of optional passed as an inout argument ('Int!' vs. 'Int?')}}
+  // expected-note@-3 {{overloading by kind of optional is deprecated and will be removed in a future release}}
+}
 
 func optional_3() -> Int? { } // expected-note{{previously declared}}
 func optional_3() -> Int! { } // expected-error{{invalid redeclaration of 'optional_3()'}}
@@ -275,7 +295,7 @@ protocol ProtocolWithMutating {
   mutating func test2(_ a: Int?) // expected-note {{previously declared}}
   func test2(_ a: Int!) // expected-error{{invalid redeclaration of 'test2'}}
 
-  mutating static func classTest1() // expected-error {{static functions may not be declared mutating}} {{3-12=}} expected-note {{previously declared}}
+  mutating static func classTest1() // expected-error {{static functions must not be declared mutating}} {{3-12=}} expected-note {{previously declared}}
   static func classTest1() // expected-error{{invalid redeclaration of 'classTest1()'}}
 }
 
@@ -295,11 +315,11 @@ enum EnumWithMutating {
 // <rdar://problem/21783216> Ban members named Type and Protocol without backticks
 // https://twitter.com/jadengeller/status/619989059046240256
 protocol r21783216a {
-  // expected-error @+2 {{type member may not be named 'Type', since it would conflict with the 'foo.Type' expression}}
+  // expected-error @+2 {{type member must not be named 'Type', since it would conflict with the 'foo.Type' expression}}
   // expected-note @+1 {{if this name is unavoidable, use backticks to escape it}} {{18-22=`Type`}}
   associatedtype Type
   
-  // expected-error @+2 {{type member may not be named 'Protocol', since it would conflict with the 'foo.Protocol' expression}}
+  // expected-error @+2 {{type member must not be named 'Protocol', since it would conflict with the 'foo.Protocol' expression}}
   // expected-note @+1 {{if this name is unavoidable, use backticks to escape it}} {{18-26=`Protocol`}}
   associatedtype Protocol
 }

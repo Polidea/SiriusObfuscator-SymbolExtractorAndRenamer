@@ -798,12 +798,70 @@ class PackageBuilderV4Tests: XCTestCase {
         }
     }
 
+    func testExcludes() {
+        // The exclude should win if a file is in exclude as well as sources.
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/bar/barExcluded.swift",
+            "/Sources/bar/bar.swift"
+        )
+
+        let package = Package(
+            name: "pkg",
+            targets: [
+                .target(
+                    name: "bar",
+                    exclude: ["barExcluded.swift",],
+                    sources: ["bar.swift", "barExcluded.swift"]
+                ),
+            ]
+        )
+        PackageBuilderTester(package, in: fs) { result in
+            result.checkModule("bar") { moduleResult in
+                moduleResult.check(c99name: "bar", type: .library)
+                moduleResult.checkSources(root: "/Sources/bar", paths: "bar.swift")
+            }
+        }
+    }
+    
+    func testDuplicateProducts() {
+        // Check that declaring executable product doesn't collide with the
+        // inferred products.
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/foo/foo.swift"
+        )
+        
+        let package = Package(
+            name: "pkg",
+            products: [
+                .library(name: "foo", targets: ["foo"]),
+                .library(name: "foo", type: .static, targets: ["foo"]),
+                .library(name: "foo", type: .dynamic, targets: ["foo"]),
+                .library(name: "foo-dy", type: .dynamic, targets: ["foo"]),
+            ],
+            targets: [
+                .target(name: "foo"),
+            ]
+        )
+        PackageBuilderTester(package, in: fs) { result in
+            result.checkModule("foo") { _ in }
+            result.checkProduct("foo") { productResult in
+                productResult.check(type: .library(.automatic), targets: ["foo"])
+            }
+            result.checkProduct("foo-dy") { productResult in
+                productResult.check(type: .library(.dynamic), targets: ["foo"])
+            }
+            result.checkDiagnostic("Ignoring duplicate product 'foo' (static)")
+            result.checkDiagnostic("Ignoring duplicate product 'foo' (dynamic)")
+        }
+    }
+
     static var allTests = [
         ("testCompatibleSwiftVersions", testCompatibleSwiftVersions),
         ("testCustomTargetDependencies", testCustomTargetDependencies),
         ("testCustomTargetPaths", testCustomTargetPaths),
         ("testCustomTargetPathsOverlap", testCustomTargetPathsOverlap),
         ("testDeclaredExecutableProducts", testDeclaredExecutableProducts),
+        ("testDuplicateProducts", testDuplicateProducts),
         ("testExecutableAsADep", testExecutableAsADep),
         ("testInvalidManifestConfigForNonSystemModules", testInvalidManifestConfigForNonSystemModules),
         ("testLinuxMain", testLinuxMain),
@@ -817,5 +875,6 @@ class PackageBuilderV4Tests: XCTestCase {
         ("testPredefinedTargetSearchError", testPredefinedTargetSearchError),
         ("testSpecialTargetDir", testSpecialTargetDir),
         ("testDuplicateTargets", testDuplicateTargets),
+        ("testExcludes", testExcludes),
     ]
 }

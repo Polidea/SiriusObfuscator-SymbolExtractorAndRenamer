@@ -1628,7 +1628,7 @@ rnb_err_t RNBRemote::HandlePacket_H(const char *p) {
 }
 
 rnb_err_t RNBRemote::HandlePacket_qLaunchSuccess(const char *p) {
-  if (m_ctx.HasValidProcessID() || m_ctx.LaunchStatus().Error() == 0)
+  if (m_ctx.HasValidProcessID() || m_ctx.LaunchStatus().Status() == 0)
     return SendPacket("OK");
   std::ostringstream ret_str;
   std::string status_str;
@@ -2247,7 +2247,7 @@ rnb_err_t set_logging(const char *p) {
                 continue;
             }
             char *fn = (char *) alloca (c - p + 1);
-            strncpy (fn, p, c - p);
+            strlcpy (fn, p, c - p);
             fn[c - p] = '\0';
 
             // A file name of "asl" is special and is another way to indicate
@@ -3049,7 +3049,7 @@ rnb_err_t RNBRemote::HandlePacket_last_signal(const char *unused) {
 
     // If we have an empty exit packet, lets fill one in to be safe.
     if (!pid_exited_packet[0]) {
-      strncpy(pid_exited_packet, "W00", sizeof(pid_exited_packet) - 1);
+      strlcpy(pid_exited_packet, "W00", sizeof(pid_exited_packet) - 1);
       pid_exited_packet[sizeof(pid_exited_packet) - 1] = '\0';
     }
 
@@ -3611,9 +3611,6 @@ rnb_err_t RNBRemote::HandlePacket_qSupported(const char *p) {
   snprintf(buf, sizeof(buf), "qXfer:features:read+;PacketSize=%x;qEcho+",
            max_packet_size);
 
-  // By default, don't enable compression.  It's only worth doing when we are
-  // working
-  // with a low speed communication channel.
   bool enable_compression = false;
   (void)enable_compression;
 
@@ -4986,6 +4983,13 @@ void UpdateTargetXML() {
   s << g_target_xml_header << std::endl;
 
   // Set the architecture
+  //
+  // On raw targets (no OS, vendor info), I've seen replies like
+  // <architecture>i386:x86-64</architecture> (for x86_64 systems - from vmware)
+  // <architecture>arm</architecture> (for an unspecified arm device - from a Segger JLink)
+  // For good interop, I'm not sure what's expected here.  e.g. will anyone understand
+  // <architecture>x86_64</architecture> ? Or is i386:x86_64 the expected phrasing?
+  //
   // s << "<architecture>" << arch "</architecture>" << std::endl;
 
   // Set the OSABI
@@ -6061,7 +6065,7 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
         // need to override the host cpusubtype (which is in the
         // CPU_SUBTYPE_ARM64 subtype namespace)
         // with a reasonable CPU_SUBTYPE_ARMV7 subtype.
-        cpusubtype = 11; // CPU_SUBTYPE_ARM_V7S
+        cpusubtype = 12; // CPU_SUBTYPE_ARM_V7K
       }
     }
     rep << "cpusubtype:" << std::hex << cpusubtype << ';';

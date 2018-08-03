@@ -13,7 +13,8 @@ public class BridgedClass : NSObject, NSCopying {
 
 public class BridgedClassSub : BridgedClass { }
 
-// Attempt to bridge to a non-whitelisted type from another module.
+// Attempt to bridge to a type from another module. We only allow this for a
+// few specific types, like String.
 extension LazyFilterIterator : _ObjectiveCBridgeable { // expected-error{{conformance of 'LazyFilterIterator' to '_ObjectiveCBridgeable' can only be written in module 'Swift'}}
   public typealias _ObjectiveCType = BridgedClassSub
 
@@ -180,8 +181,10 @@ func dictionaryToNSDictionary() {
 struct NotEquatable {}
 func notEquatableError(_ d: Dictionary<Int, NotEquatable>) -> Bool {
   // FIXME: Another awful diagnostic.
-  return d == d // expected-error{{binary operator '==' cannot be applied to two 'Dictionary<Int, NotEquatable>' operands}}
-  // expected-note @-1 {{overloads for '==' exist with these partially matching parameter lists: }}
+  return d == d // expected-error{{'<Self where Self : Equatable> (Self.Type) -> (Self, Self) -> Bool' requires that 'NotEquatable' conform to 'Equatable'}}
+  // expected-note @-1 {{requirement from conditional conformance of 'Dictionary<Int, NotEquatable>' to 'Equatable'}}
+  // expected-error @-2 {{type 'NotEquatable' does not conform to protocol 'Equatable'}}
+  // expected-note @-3{{requirement specified as 'NotEquatable' : 'Equatable'}}
 }
 
 // NSString -> String
@@ -194,7 +197,7 @@ let d: Double = 3.14159
 inferDouble = d
 
 // rdar://problem/17962491
-_ = 1 % 3 / 3.0 // expected-error{{'%' is unavailable: Use truncatingRemainder instead}}
+_ = 1 % 3 / 3.0 // expected-error{{'%' is unavailable: For floating point numbers use truncatingRemainder instead}}
 var inferDouble2 = 1 / 3 / 3.0
 let d2: Double = 3.14159
 inferDouble2 = d2

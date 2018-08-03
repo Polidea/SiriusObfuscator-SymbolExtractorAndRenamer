@@ -32,6 +32,7 @@
 #
 # RUN: mkdir -p %t.build/missing-dir
 # RUN: mkdir -p %t.build/dir/subdir
+# RUN: echo "created" > %t.build/dir/subdir/file
 # RUN: echo "modified" > %t.build/file
 # RUN: %{llbuild} buildsystem build --serial --chdir %t.build > %t.modified.out
 # RUN: %{FileCheck} --check-prefix=CHECK-MODIFIED --input-file=%t.modified.out %s
@@ -39,6 +40,17 @@
 # CHECK-MODIFIED: DTS-MISSING-CHANGED
 # CHECK-MODIFIED: DTS-FILE-CHANGED
 # CHECK-MODIFIED: DTS-DIR-CHANGED
+
+
+# Check that a mutation of a file is detected.
+#
+# RUN: echo "mutated" >> %t.build/dir/subdir/file
+# RUN: %{llbuild} buildsystem build --serial --chdir %t.build > %t.mutated.out
+# RUN: %{FileCheck} --check-prefix=CHECK-MUTATED --input-file=%t.mutated.out %s
+#
+# CHECK-MUTATED-NOT: DTS-MISSING-CHANGED
+# CHECK-MUTATED-NOT: DTS-FILE-CHANGED
+# CHECK-MUTATED: DTS-DIR-CHANGED
 
 client:
   name: basic

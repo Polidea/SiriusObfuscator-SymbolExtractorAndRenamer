@@ -530,6 +530,12 @@ class Predicate<string cond> {
   /// PredicateName - User-level name to use for the predicate. Mainly for use
   /// in diagnostics such as missing feature errors in the asm matcher.
   string PredicateName = "";
+
+  /// Setting this to '1' indicates that the predicate must be recomputed on
+  /// every function change. Most predicates can leave this at '0'.
+  ///
+  /// Ignored by SelectionDAG, it always recomputes the predicate on every use.
+  bit RecomputePerFunction = 0;
 }
 
 /// NoHonorSignDependentRounding - This predicate is true if support for
@@ -674,6 +680,11 @@ class RegisterOperand<RegisterClass regclass, string pm = "printOperand">
   // this type. The method normally will just use an alt-name index to look
   // up the name to print. Default to the generic printOperand().
   string PrintMethod = pm;
+
+  // EncoderMethod - The target method name to call to encode this register
+  // operand.
+  string EncoderMethod = "";
+
   // ParserMatchClass - The "match class" that operands of this type fit
   // in. Match classes are used to define the order in which instructions are
   // match, to ensure that which instructions gets matched is deterministic.
@@ -685,6 +696,12 @@ class RegisterOperand<RegisterClass regclass, string pm = "printOperand">
   AsmOperandClass ParserMatchClass;
 
   string OperandType = "OPERAND_REGISTER";
+
+  // When referenced in the result of a CodeGen pattern, GlobalISel will
+  // normally copy the matched operand to the result. When this is set, it will
+  // emit a special copy that will replace zero-immediates with the specified
+  // zero-register.
+  Register GIZeroRegister = ?;
 }
 
 let OperandType = "OPERAND_IMMEDIATE" in {
@@ -703,6 +720,7 @@ def f64imm : Operand<f64>;
 // have the same LLT).
 class TypedOperand<string Ty> : Operand<untyped> {
   let OperandType = Ty;
+  bit IsPointer = 0;
 }
 
 def type0 : TypedOperand<"OPERAND_GENERIC_0">;
@@ -711,6 +729,15 @@ def type2 : TypedOperand<"OPERAND_GENERIC_2">;
 def type3 : TypedOperand<"OPERAND_GENERIC_3">;
 def type4 : TypedOperand<"OPERAND_GENERIC_4">;
 def type5 : TypedOperand<"OPERAND_GENERIC_5">;
+
+let IsPointer = 1 in {
+  def ptype0 : TypedOperand<"OPERAND_GENERIC_0">;
+  def ptype1 : TypedOperand<"OPERAND_GENERIC_1">;
+  def ptype2 : TypedOperand<"OPERAND_GENERIC_2">;
+  def ptype3 : TypedOperand<"OPERAND_GENERIC_3">;
+  def ptype4 : TypedOperand<"OPERAND_GENERIC_4">;
+  def ptype5 : TypedOperand<"OPERAND_GENERIC_5">;
+}
 
 /// zero_reg definition - Special node to stand for the zero register.
 ///
@@ -795,60 +822,69 @@ class InstrInfo {
 // Standard Pseudo Instructions.
 // This list must match TargetOpcodes.h and CodeGenTarget.cpp.
 // Only these instructions are allowed in the TargetOpcode namespace.
-let isCodeGenOnly = 1, isPseudo = 1, hasNoSchedulingInfo = 1,
-    Namespace = "TargetOpcode" in {
-def PHI : Instruction {
+// Ensure mayLoad and mayStore have a default value, so as not to break
+// targets that set guessInstructionProperties=0. Any local definition of
+// mayLoad/mayStore takes precedence over these default values.
+class StandardPseudoInstruction : Instruction {
+  let mayLoad = 0;
+  let mayStore = 0;
+  let isCodeGenOnly = 1;
+  let isPseudo = 1;
+  let hasNoSchedulingInfo = 1;
+  let Namespace = "TargetOpcode";
+}
+def PHI : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let AsmString = "PHINODE";
 }
-def INLINEASM : Instruction {
+def INLINEASM : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "";
   let hasSideEffects = 0;  // Note side effect is encoded in an operand.
 }
-def CFI_INSTRUCTION : Instruction {
+def CFI_INSTRUCTION : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "";
   let hasCtrlDep = 1;
   let isNotDuplicable = 1;
 }
-def EH_LABEL : Instruction {
+def EH_LABEL : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "";
   let hasCtrlDep = 1;
   let isNotDuplicable = 1;
 }
-def GC_LABEL : Instruction {
+def GC_LABEL : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "";
   let hasCtrlDep = 1;
   let isNotDuplicable = 1;
 }
-def KILL : Instruction {
+def KILL : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "";
   let hasSideEffects = 0;
 }
-def EXTRACT_SUBREG : Instruction {
+def EXTRACT_SUBREG : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, i32imm:$subidx);
   let AsmString = "";
   let hasSideEffects = 0;
 }
-def INSERT_SUBREG : Instruction {
+def INSERT_SUBREG : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, unknown:$subsrc, i32imm:$subidx);
   let AsmString = "";
   let hasSideEffects = 0;
   let Constraints = "$supersrc = $dst";
 }
-def IMPLICIT_DEF : Instruction {
+def IMPLICIT_DEF : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins);
   let AsmString = "";
@@ -856,33 +892,33 @@ def IMPLICIT_DEF : Instruction {
   let isReMaterializable = 1;
   let isAsCheapAsAMove = 1;
 }
-def SUBREG_TO_REG : Instruction {
+def SUBREG_TO_REG : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$implsrc, unknown:$subsrc, i32imm:$subidx);
   let AsmString = "";
   let hasSideEffects = 0;
 }
-def COPY_TO_REGCLASS : Instruction {
+def COPY_TO_REGCLASS : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$src, i32imm:$regclass);
   let AsmString = "";
   let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
 }
-def DBG_VALUE : Instruction {
+def DBG_VALUE : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "DBG_VALUE";
   let hasSideEffects = 0;
 }
-def REG_SEQUENCE : Instruction {
+def REG_SEQUENCE : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, variable_ops);
   let AsmString = "";
   let hasSideEffects = 0;
   let isAsCheapAsAMove = 1;
 }
-def COPY : Instruction {
+def COPY : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$src);
   let AsmString = "";
@@ -890,31 +926,31 @@ def COPY : Instruction {
   let isAsCheapAsAMove = 1;
   let hasNoSchedulingInfo = 0;
 }
-def BUNDLE : Instruction {
+def BUNDLE : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let AsmString = "BUNDLE";
 }
-def LIFETIME_START : Instruction {
+def LIFETIME_START : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "LIFETIME_START";
   let hasSideEffects = 0;
 }
-def LIFETIME_END : Instruction {
+def LIFETIME_END : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i32imm:$id);
   let AsmString = "LIFETIME_END";
   let hasSideEffects = 0;
 }
-def STACKMAP : Instruction {
+def STACKMAP : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins i64imm:$id, i32imm:$nbytes, variable_ops);
   let isCall = 1;
   let mayLoad = 1;
   let usesCustomInserter = 1;
 }
-def PATCHPOINT : Instruction {
+def PATCHPOINT : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins i64imm:$id, i32imm:$nbytes, unknown:$callee,
                        i32imm:$nargs, i32imm:$cc, variable_ops);
@@ -922,7 +958,7 @@ def PATCHPOINT : Instruction {
   let mayLoad = 1;
   let usesCustomInserter = 1;
 }
-def STATEPOINT : Instruction {
+def STATEPOINT : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins variable_ops);
   let usesCustomInserter = 1;
@@ -931,7 +967,7 @@ def STATEPOINT : Instruction {
   let hasSideEffects = 1;
   let isCall = 1;
 }
-def LOAD_STACK_GUARD : Instruction {
+def LOAD_STACK_GUARD : StandardPseudoInstruction {
   let OutOperandList = (outs ptr_rc:$dst);
   let InOperandList = (ins);
   let mayLoad = 1;
@@ -939,7 +975,7 @@ def LOAD_STACK_GUARD : Instruction {
   let hasSideEffects = 0;
   bit isPseudo = 1;
 }
-def LOCAL_ESCAPE : Instruction {
+def LOCAL_ESCAPE : StandardPseudoInstruction {
   // This instruction is really just a label. It has to be part of the chain so
   // that it doesn't get dropped from the DAG, but it produces nothing and has
   // no side effects.
@@ -948,15 +984,16 @@ def LOCAL_ESCAPE : Instruction {
   let hasSideEffects = 0;
   let hasCtrlDep = 1;
 }
-def FAULTING_LOAD_OP : Instruction {
+def FAULTING_OP : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let usesCustomInserter = 1;
   let mayLoad = 1;
+  let mayStore = 1;
   let isTerminator = 1;
   let isBranch = 1;
 }
-def PATCHABLE_OP : Instruction {
+def PATCHABLE_OP : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let usesCustomInserter = 1;
@@ -964,14 +1001,14 @@ def PATCHABLE_OP : Instruction {
   let mayStore = 1;
   let hasSideEffects = 1;
 }
-def PATCHABLE_FUNCTION_ENTER : Instruction {
+def PATCHABLE_FUNCTION_ENTER : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins);
   let AsmString = "# XRay Function Enter.";
   let usesCustomInserter = 1;
   let hasSideEffects = 0;
 }
-def PATCHABLE_RET : Instruction {
+def PATCHABLE_RET : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let AsmString = "# XRay Function Patchable RET.";
@@ -979,7 +1016,7 @@ def PATCHABLE_RET : Instruction {
   let hasSideEffects = 1;
   let isReturn = 1;
 }
-def PATCHABLE_FUNCTION_EXIT : Instruction {
+def PATCHABLE_FUNCTION_EXIT : StandardPseudoInstruction {
   let OutOperandList = (outs);
   let InOperandList = (ins);
   let AsmString = "# XRay Function Exit.";
@@ -987,7 +1024,7 @@ def PATCHABLE_FUNCTION_EXIT : Instruction {
   let hasSideEffects = 0; // FIXME: is this correct?
   let isReturn = 0; // Original return instruction will follow
 }
-def PATCHABLE_TAIL_CALL : Instruction {
+def PATCHABLE_TAIL_CALL : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins variable_ops);
   let AsmString = "# XRay Tail Call Exit.";
@@ -995,11 +1032,28 @@ def PATCHABLE_TAIL_CALL : Instruction {
   let hasSideEffects = 1;
   let isReturn = 1;
 }
+def PATCHABLE_EVENT_CALL : StandardPseudoInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins ptr_rc:$event, i8imm:$size);
+  let AsmString = "# XRay Custom Event Log.";
+  let usesCustomInserter = 1;
+  let isCall = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let hasSideEffects = 1;
+}
+def FENTRY_CALL : StandardPseudoInstruction {
+  let OutOperandList = (outs unknown:$dst);
+  let InOperandList = (ins variable_ops);
+  let AsmString = "# FEntry call";
+  let usesCustomInserter = 1;
+  let mayLoad = 1;
+  let mayStore = 1;
+  let hasSideEffects = 1;
+}
 
 // Generic opcodes used in GlobalISel.
 include "llvm/Target/GenericOpcodes.td"
-
-}
 
 //===----------------------------------------------------------------------===//
 // AsmParser - This class can be implemented by targets that wish to implement

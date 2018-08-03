@@ -1,8 +1,15 @@
 cmake_minimum_required(VERSION 3.4.3)
 
-include(cmake/modules/LLDBStandalone.cmake)
-include(cmake/modules/LLDBConfig.cmake)
-include(cmake/modules/AddLLDB.cmake)
+# Add path for custom modules
+set(CMAKE_MODULE_PATH
+  ${CMAKE_MODULE_PATH}
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules"
+  )
+
+include(LLDBStandalone)
+include(LLDBConfig)
+include(AddLLDB)
 
 if(NOT LLDB_BUILT_STANDALONE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../swift)
    list(APPEND CMAKE_MODULE_PATH
@@ -10,7 +17,7 @@ if(NOT LLDB_BUILT_STANDALONE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../swift)
         "${CMAKE_CURRENT_SOURCE_DIR}/../swift/cmake/modules")
 endif()
 
-if (__ANDROID_NDK__ OR (CMAKE_SYSTEM_NAME MATCHES "Windows"))
+if (CMAKE_SYSTEM_NAME MATCHES "Windows|Android")
   set(LLDB_DEFAULT_DISABLE_LIBEDIT 1)
 else()
   set(LLDB_DEFAULT_DISABLE_LIBEDIT 0)
@@ -26,6 +33,10 @@ endif()
 # add_subdirectory(include)
 add_subdirectory(docs)
 if (NOT LLDB_DISABLE_PYTHON)
+  if(LLDB_USE_SYSTEM_SIX)
+    set(SIX_EXTRA_ARGS "--useSystemSix")
+  endif()
+
   set(LLDB_PYTHON_TARGET_DIR ${LLDB_BINARY_DIR}/scripts)
   if(LLDB_BUILD_FRAMEWORK)
     set(LLDB_PYTHON_TARGET_DIR
@@ -56,6 +67,7 @@ if (NOT LLDB_DISABLE_PYTHON)
                --prefix=${CMAKE_BINARY_DIR}
                --cmakeBuildConfiguration=${CMAKE_CFG_INTDIR}
                --lldbLibDir=lib${LLVM_LIBDIR_SUFFIX}
+               ${SIX_EXTRA_ARGS}
                ${FINISH_EXTRA_ARGS}
         VERBATIM
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/scripts/finishSwigWrapperClasses.py

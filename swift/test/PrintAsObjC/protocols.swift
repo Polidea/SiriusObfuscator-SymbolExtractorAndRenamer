@@ -1,7 +1,6 @@
 // Please keep this file in alphabetical order!
 
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t  %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -56,6 +55,7 @@ protocol CustomNameType2 {}
 // CHECK-LABEL: @interface MyObject : NSObject <NSCoding, Fungible>
 // CHECK-NEXT: initWithCoder
 // CHECK-NEXT: init SWIFT_UNAVAILABLE
+// CHECK-NEXT: new SWIFT_DEPRECATED
 // CHECK-NEXT: @end
 // NEGATIVE-NOT: @protocol NSCoding
 class MyObject : NSObject, NSCoding, Fungible {
@@ -189,6 +189,18 @@ extension NSString : A, ZZZ {}
 
 // CHECK-LABEL: @interface Subclass : RootClass1 <ZZZ>{{$}}
 @objc class Subclass : RootClass1, ZZZ {}
+
+// CHECK-LABEL: @protocol UnownedProperty
+// CHECK-NEXT: @property (nonatomic, assign) id _Nonnull unownedProp;
+@objc protocol UnownedProperty {
+  unowned var unownedProp: AnyObject { get set }
+}
+
+// CHECK-LABEL: @protocol WeakProperty
+// CHECK-NEXT: @property (nonatomic, weak) id _Nullable weakProp;
+@objc protocol WeakProperty {
+  weak var weakProp: AnyObject? { get set }
+}
 
 // Deliberately at the end of the file.
 @objc protocol ZZZ {}

@@ -30,8 +30,8 @@
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/Mutex.h"
 #include "llvm/Support/Timer.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/YAMLTraits.h"
+#include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstring>
 using namespace llvm;
@@ -166,9 +166,10 @@ void llvm::PrintStatisticsJSON(raw_ostream &OS) {
   const char *delim = "";
   for (const Statistic *Stat : Stats.Stats) {
     OS << delim;
-    assert(!yaml::needsQuotes(Stat->getDebugType()) &&
+    assert(yaml::needsQuotes(Stat->getDebugType()) == yaml::QuotingType::None &&
            "Statistic group/type name is simple.");
-    assert(!yaml::needsQuotes(Stat->getName()) && "Statistic name is simple");
+    assert(yaml::needsQuotes(Stat->getName()) == yaml::QuotingType::None &&
+           "Statistic name is simple");
     OS << "\t\"" << Stat->getDebugType() << '.' << Stat->getName() << "\": "
        << Stat->getValue();
     delim = ",\n";

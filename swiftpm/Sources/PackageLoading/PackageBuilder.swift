@@ -408,9 +408,10 @@ public final class PackageBuilder {
         // Check for a modulemap file, which indicates a system target.
         let moduleMapPath = packagePath.appending(component: moduleMapFilename)
         if fileSystem.isFile(moduleMapPath) {
-            // Package contains a modulemap at the top level, so we assuming it's a system target.
+            // Package contains a modulemap at the top level, so we assuming
+            // it's a system library target.
             return [
-                CTarget(
+                SystemLibraryTarget(
                     name: manifest.name,
                     path: packagePath,
                     pkgConfig: manifest.package.pkgConfig,
@@ -565,7 +566,7 @@ public final class PackageBuilder {
         let successors: (PotentialModule) -> [PotentialModule] = {
             // No reference of this target in manifest, i.e. it has no dependencies.
             guard let target = targetMap[$0.name] else { return [] }
-            return target.dependencies.flatMap({
+            return target.dependencies.compactMap({
                 switch $0 {
                 case .targetItem(let name):
                     // Since we already checked above that all referenced targets
@@ -598,7 +599,7 @@ public final class PackageBuilder {
             try validateModuleName(potentialModule.path, potentialModule.name, isTest: potentialModule.isTest)
             // Get the intra-package dependencies of this target.
             var deps: [Target] = targetMap[potentialModule.name].map({
-                $0.dependencies.flatMap({
+                $0.dependencies.compactMap({
                     switch $0 {
                     case .targetItem(let name):
                         // We don't create an object for targets which have no sources.
@@ -629,7 +630,7 @@ public final class PackageBuilder {
 
             // Figure out the product dependencies.
             let productDeps: [(String, String?)]
-            productDeps = manifestTarget?.dependencies.flatMap({
+            productDeps = manifestTarget?.dependencies.compactMap({
                 switch $0 {
                 case .targetItem:
                     return nil
@@ -791,14 +792,10 @@ public final class PackageBuilder {
 
             let sources = Sources(paths: cSources, root: potentialModule.path)
 
-            // Select the right language standard.
-            let isCXX = sources.containsCXXFiles
-            let languageStandard = isCXX ? manifest.package.cxxLanguageStandard?.rawValue : manifest.package.cLanguageStandard?.rawValue 
-
             return ClangTarget(
                 name: potentialModule.name,
-                isCXX: isCXX,
-                languageStandard: languageStandard,
+                cLanguageStandard: manifest.package.cLanguageStandard?.rawValue,
+                cxxLanguageStandard: manifest.package.cxxLanguageStandard?.rawValue,
                 includeDir: publicHeadersPath,
                 isTest: potentialModule.isTest,
                 sources: sources,
@@ -910,7 +907,18 @@ public final class PackageBuilder {
 
     /// Collects the products defined by a package.
     private func constructProducts(_ targets: [Target]) throws -> [Product] {
-        var products = [Product]()
+        var products = OrderedSet<KeyedPair<Product, String>>()
+
+        /// Helper method to append to products array.
+        func append(_ product: Product) {
+            let inserted = products.append(KeyedPair(product, key: product.name))
+            if !inserted {
+                diagnostics.emit(
+                    data: PackageBuilderDiagnostics.DuplicateProduct(product: product),
+                    location: PackageLocation.Local(name: manifest.name, packagePath: packagePath)
+                )
+            }
+        }
 
         // Collect all test targets.
         let testModules = targets.filter({ target in
@@ -930,7 +938,7 @@ public final class PackageBuilder {
         if shouldCreateMultipleTestProducts {
             for testTarget in testModules {
                 let product = Product(name: testTarget.name, type: .test, targets: [testTarget])
-                products.append(product)
+                append(product)
             }
         } else if !testModules.isEmpty {
             // Otherwise we only need to create one test product for all of the
@@ -943,7 +951,7 @@ public final class PackageBuilder {
 
             let product = Product(
                 name: productName, type: .test, targets: testModules, linuxMain: linuxMain)
-            products.append(product)
+            append(product)
         }
 
         // Map containing targets mapped to their names.
@@ -968,7 +976,7 @@ public final class PackageBuilder {
         for p in manifest.legacyProducts {
             let targets = try modulesFrom(targetNames: p.modules, product: p.name)
             let product = Product(name: p.name, type: .init(p.type), targets: targets)
-            products.append(product)
+            append(product)
         }
 
         // Auto creates executable products from executables targets if that
@@ -981,7 +989,7 @@ public final class PackageBuilder {
                     continue
                 }
                 let product = Product(name: target.name, type: .executable, targets: [target])
-                products.append(product)
+                append(product)
             }
         }
 
@@ -992,11 +1000,13 @@ public final class PackageBuilder {
             createExecutables()
 
             // Create one product containing all of the package's library targets.
-            if !isRootPackage {
-                let libraryModules = targets.filter({ $0.type == .library })
-                if !libraryModules.isEmpty {
-                    products += [Product(name: manifest.name, type: .library(.automatic), targets: libraryModules)]
-                }
+            //
+            // We also check that there is no product with same name as the manifest.
+            // That could happen if there is an executable with the same name. In those
+            // cases we are unable to generate a libary product for this package.
+            let libraryModules = targets.filter({ $0.type == .library })
+            if !libraryModules.isEmpty && !products.map({ $0.key }).contains(manifest.name) {
+                append(Product(name: manifest.name, type: .library(.automatic), targets: libraryModules))
             }
 
         case .v4(let package):
@@ -1022,7 +1032,7 @@ public final class PackageBuilder {
                 switch product {
                 case let p as PackageDescription4.Product.Executable:
                     let targets = try modulesFrom(targetNames: p.targets, product: p.name)
-                    products.append(Product(name: p.name, type: .executable, targets: targets))
+                    append(Product(name: p.name, type: .executable, targets: targets))
                 case let p as PackageDescription4.Product.Library:
                     // Get the library type.
                     let type: PackageModel.ProductType
@@ -1032,14 +1042,14 @@ public final class PackageBuilder {
                     case nil: type = .library(.automatic)
                     }
                     let targets = try modulesFrom(targetNames: p.targets, product: p.name)
-                    products.append(Product(name: p.name, type: type, targets: targets))
+                    append(Product(name: p.name, type: type, targets: targets))
                 default:
                     fatalError("Unreachable")
                 }
             }
         }
 
-        return products
+        return products.map({ $0.item })
     }
 
 }
@@ -1081,7 +1091,7 @@ private extension Manifest {
     /// Returns the names of all the referenced targets in the manifest.
     func allReferencedModules() -> Set<String> {
         let names = package.targets.flatMap({ target in
-            [target.name] + target.dependencies.flatMap({
+            [target.name] + target.dependencies.compactMap({
                 switch $0 {
                 case .targetItem(let name):
                     return name

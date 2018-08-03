@@ -17,6 +17,7 @@
 #include "MCTargetDesc/X86BaseInfo.h"
 #include "X86InstrInfo.h"
 #include "X86MachineFunctionInfo.h"
+#include "llvm/BinaryFormat/COFF.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineModuleInfoImpls.h"
 #include "llvm/CodeGen/MachineValueType.h"
@@ -34,7 +35,6 @@
 #include "llvm/MC/MCSectionMachO.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
-#include "llvm/Support/COFF.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -344,6 +344,8 @@ static void printIntelMemReference(X86AsmPrinter &P, const MachineInstr *MI,
 static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
                               char Mode, raw_ostream &O) {
   unsigned Reg = MO.getReg();
+  bool EmitPercent = true;
+
   switch (Mode) {
   default: return true;  // Unknown mode.
   case 'b': // Print QImode register
@@ -358,6 +360,9 @@ static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
   case 'k': // Print SImode register
     Reg = getX86SubSuperRegister(Reg, 32);
     break;
+  case 'V':
+    EmitPercent = false;
+    LLVM_FALLTHROUGH;
   case 'q':
     // Print 64-bit register names if 64-bit integer registers are available.
     // Otherwise, print 32-bit register names.
@@ -365,7 +370,10 @@ static bool printAsmMRegister(X86AsmPrinter &P, const MachineOperand &MO,
     break;
   }
 
-  O << '%' << X86ATTInstPrinter::getRegisterName(Reg);
+  if (EmitPercent)
+    O << '%';
+
+  O << X86ATTInstPrinter::getRegisterName(Reg);
   return false;
 }
 
@@ -438,6 +446,7 @@ bool X86AsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
     case 'w': // Print HImode register
     case 'k': // Print SImode register
     case 'q': // Print DImode register
+    case 'V': // Print native register without '%'
       if (MO.isReg())
         return printAsmMRegister(*this, MO, ExtraCode[0], O);
       printOperand(*this, MI, OpNo, O);

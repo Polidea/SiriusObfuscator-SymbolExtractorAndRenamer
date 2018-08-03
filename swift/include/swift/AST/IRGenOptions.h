@@ -20,6 +20,8 @@
 
 #include "swift/AST/LinkLibrary.h"
 #include "swift/Basic/Sanitizers.h"
+#include "swift/Basic/OptionSet.h"
+#include "swift/Basic/OptimizationMode.h"
 // FIXME: This include is just for llvm::SanitizerCoverageOptions. We should
 // split the header upstream so we don't include so much.
 #include "llvm/Transforms/Instrumentation.h"
@@ -93,14 +95,10 @@ public:
   /// well-formed?
   unsigned Verify : 1;
 
-  /// Whether or not to run optimization passes.
-  unsigned Optimize : 1;
-
-  /// Whether or not to optimize for code size.
-  unsigned OptimizeForSize : 1;
+  OptimizationMode OptMode;
 
   /// Which sanitizer is turned on.
-  SanitizerKind Sanitize : 2;
+  OptionSet<SanitizerKind> Sanitizers;
 
   /// Whether we should emit debug info.
   IRGenDebugInfoKind DebugInfoKind : 2;
@@ -138,9 +136,6 @@ public:
   /// Frameworks that we should not autolink against.
   SmallVector<std::string, 1> DisableAutolinkFrameworks;
 
-  /// Instrument code to generate profiling information.
-  unsigned GenerateProfile : 1;
-
   /// Print the LLVM inline tree at the end of the LLVM pass pipeline.
   unsigned PrintInlineTree : 1;
 
@@ -167,6 +162,12 @@ public:
   /// Enable use of the swiftcall calling convention.
   unsigned UseSwiftCall : 1;
 
+  /// Instrument code to generate profiling information.
+  unsigned GenerateProfile : 1;
+
+  /// Path to the profdata file to be used for PGO, or the empty string.
+  std::string UseProfile = "";
+
   /// List of backend command-line options for -embed-bitcode.
   std::vector<uint8_t> CmdArgs;
 
@@ -175,16 +176,16 @@ public:
 
   IRGenOptions()
       : DWARFVersion(2), OutputKind(IRGenOutputKind::LLVMAssembly),
-        Verify(true), Optimize(false), OptimizeForSize(false),
-        Sanitize(SanitizerKind::None),
+        Verify(true), OptMode(OptimizationMode::NotSet),
+        Sanitizers(OptionSet<SanitizerKind>()),
         DebugInfoKind(IRGenDebugInfoKind::None), UseJIT(false),
         DisableLLVMOptzns(false), DisableLLVMARCOpts(false),
         DisableLLVMSLPVectorizer(false), DisableFPElim(true), Playground(false),
-        EmitStackPromotionChecks(false), GenerateProfile(false),
-        PrintInlineTree(false), EmbedMode(IRGenEmbedMode::None),
-        HasValueNamesSetting(false), ValueNames(false),
-        EnableReflectionMetadata(true), EnableReflectionNames(true),
-        UseIncrementalLLVMCodeGen(true), UseSwiftCall(false), CmdArgs(),
+        EmitStackPromotionChecks(false), PrintInlineTree(false),
+        EmbedMode(IRGenEmbedMode::None), HasValueNamesSetting(false),
+        ValueNames(false), EnableReflectionMetadata(true),
+        EnableReflectionNames(true), UseIncrementalLLVMCodeGen(true),
+        UseSwiftCall(false), GenerateProfile(false), CmdArgs(),
         SanitizeCoverage(llvm::SanitizerCoverageOptions()) {}
 
   /// Gets the name of the specified output filename.
@@ -198,9 +199,7 @@ public:
   // Get a hash of all options which influence the llvm compilation but are not
   // reflected in the llvm module itself.
   unsigned getLLVMCodeGenOptionsHash() {
-    unsigned Hash = 0;
-    Hash = (Hash << 1) | Optimize;
-    Hash = (Hash << 1) | OptimizeForSize;
+    unsigned Hash = (unsigned)OptMode;
     Hash = (Hash << 1) | DisableLLVMOptzns;
     Hash = (Hash << 1) | DisableLLVMARCOpts;
     return Hash;
@@ -216,6 +215,14 @@ public:
     } else {
       return OutputKind == IRGenOutputKind::LLVMAssembly;
     }
+  }
+
+  bool shouldOptimize() const {
+    return OptMode > OptimizationMode::NoOptimization;
+  }
+
+  bool optimizeForSize() const {
+    return OptMode == OptimizationMode::ForSize;
   }
 
   /// Return a hash code of any components from these options that should

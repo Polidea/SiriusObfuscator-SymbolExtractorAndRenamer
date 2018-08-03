@@ -10,16 +10,17 @@
 #if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
 import Foundation
 import XCTest
-import Glibc
 #else
 import SwiftFoundation
 import SwiftXCTest
-import Darwin
 #endif
 
-internal func testBundle() -> Bundle {
-    return Bundle.main
-}
+#if os(OSX) || os(iOS)
+    import Darwin
+#elseif os(Linux)
+    import Glibc
+#endif
+
 
 // ignore SIGPIPE which is sent when writing to closed file descriptors.
 _ = signal(SIGPIPE, SIG_IGN)
@@ -66,6 +67,7 @@ XCTMain([
     testCase(TestPipe.allTests),
     testCase(TestNSPredicate.allTests),
     testCase(TestProcessInfo.allTests),
+    testCase(TestHost.allTests),
     testCase(TestPropertyListSerialization.allTests),
     testCase(TestNSRange.allTests),
     testCase(TestNSRegularExpression.allTests),
@@ -74,7 +76,7 @@ XCTMain([
     testCase(TestNSSet.allTests),
     testCase(TestStream.allTests),
     testCase(TestNSString.allTests),
-//    testCase(TestThread.allTests),
+    testCase(TestThread.allTests),
     testCase(TestProcess.allTests),
     testCase(TestNSTextCheckingResult.allTests),
     testCase(TestTimer.allTests),
@@ -105,4 +107,6 @@ XCTMain([
     testCase(TestMassFormatter.allTests),
     testCase(TestJSONEncoder.allTests),
     testCase(TestCodable.allTests),
+    testCase(TestUnit.allTests),
+    testCase(TestNSLock.allTests),
 ])

@@ -258,7 +258,7 @@ public final class Process: ObjectIdentifierProtocol {
         // modify, so we have to take care about the set we use.
         var mostSignals = sigset_t()
         sigemptyset(&mostSignals)
-        for i in 1 ..< SIGUNUSED {
+        for i in 1 ..< SIGSYS {
             if i == SIGKILL || i == SIGSTOP {
                 continue
             }
@@ -554,6 +554,7 @@ extension ProcessResult.Error: CustomStringConvertible {
             case .signalled(let signal):
                 stream <<< "signalled(\(signal)): "
             }
+ 
             // Strip sandbox information from arguments to keep things pretty.
             var args = result.arguments
             // This seems a little fragile.
@@ -561,6 +562,17 @@ extension ProcessResult.Error: CustomStringConvertible {
                 args = args.suffix(from: 3).map({$0})
             }
             stream <<< args.map({ $0.shellEscaped() }).joined(separator: " ")
+
+            // Include the output, if present.
+            if let output = try? result.utf8Output() {
+                // We indent the output to keep it visually separated from everything else.
+                let indentation = "    "
+                stream <<< " output:\n" <<< indentation <<< output.replacingOccurrences(of: "\n", with: "\n" + indentation)
+                if !output.hasSuffix("\n") {
+                    stream <<< "\n"
+                }
+            }
+            
             return stream.bytes.asString!
         }
     }

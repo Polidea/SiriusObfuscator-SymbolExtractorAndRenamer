@@ -82,7 +82,7 @@
 #include "swift/Basic/OwnedString.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <deque>
+#include <vector>
 
 namespace swift {
 namespace syntax {
@@ -184,6 +184,23 @@ struct TriviaPiece {
     return TriviaPiece {TriviaKind::Backtick, 1, OwnedString{}};
   }
 
+  size_t getTextLength() const {
+    switch (Kind) {
+      case TriviaKind::LineComment:
+      case TriviaKind::BlockComment:
+      case TriviaKind::DocBlockComment:
+      case TriviaKind::DocLineComment:
+        return Text.size();
+      case TriviaKind::Newline:
+      case TriviaKind::Space:
+      case TriviaKind::Backtick:
+      case TriviaKind::Tab:
+      case TriviaKind::VerticalTab:
+      case TriviaKind::Formfeed:
+        return Count;
+    }
+  }
+
   void accumulateAbsolutePosition(AbsolutePosition &Pos) const;
 
   /// Print a debug representation of this trivia piece to the provided output
@@ -204,7 +221,7 @@ struct TriviaPiece {
   }
 };
 
-using TriviaList = std::deque<TriviaPiece>;
+using TriviaList = std::vector<TriviaPiece>;
 
 /// A collection of leading or trailing trivia. This is the main data structure
 /// for thinking about trivia.
@@ -228,7 +245,12 @@ struct Trivia {
 
   /// Add a piece to the beginning of the collection.
   void push_front(const TriviaPiece &Piece) {
-    Pieces.push_front(Piece);
+    Pieces.insert(Pieces.begin(), Piece);
+  }
+
+  /// Clear pieces.
+  void clear() {
+    Pieces.clear();
   }
 
   /// Return a reference to the first piece.
@@ -263,6 +285,13 @@ struct Trivia {
   /// Return the number of pieces in this Trivia collection.
   size_t size() const {
     return Pieces.size();
+  }
+
+  size_t getTextLength() const {
+    size_t Len = 0;
+    for (auto &P : Pieces)
+      Len += P.getTextLength();
+    return Len;
   }
 
   /// Dump a debug representation of this Trivia collection to standard error.

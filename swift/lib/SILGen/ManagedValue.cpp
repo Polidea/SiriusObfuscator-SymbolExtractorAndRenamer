@@ -23,7 +23,7 @@ using namespace swift;
 using namespace Lowering;
 
 /// Emit a copy of this value with independent ownership.
-ManagedValue ManagedValue::copy(SILGenFunction &SGF, SILLocation loc) {
+ManagedValue ManagedValue::copy(SILGenFunction &SGF, SILLocation loc) const {
   auto &lowering = SGF.getTypeLowering(getType());
   if (lowering.isTrivial())
     return *this;
@@ -40,7 +40,7 @@ ManagedValue ManagedValue::copy(SILGenFunction &SGF, SILLocation loc) {
 /// Emit a copy of this value with independent ownership.
 ManagedValue ManagedValue::formalAccessCopy(SILGenFunction &SGF,
                                             SILLocation loc) {
-  assert(SGF.InWritebackScope && "Can only perform a formal access copy in a "
+  assert(SGF.InFormalEvaluationScope && "Can only perform a formal access copy in a "
                                  "formal evaluation scope");
   auto &lowering = SGF.getTypeLowering(getType());
   if (lowering.isTrivial())
@@ -110,10 +110,15 @@ SILValue ManagedValue::forward(SILGenFunction &SGF) const {
 
 void ManagedValue::forwardInto(SILGenFunction &SGF, SILLocation loc,
                                SILValue address) {
+  if (!hasCleanup() && getOwnershipKind() != ValueOwnershipKind::Trivial)
+    return copyUnmanaged(SGF, loc).forwardInto(SGF, loc, address);
+
   if (hasCleanup())
     forwardCleanup(SGF);
+
   auto &addrTL = SGF.getTypeLowering(address->getType());
-  SGF.emitSemanticStore(loc, getValue(), address, addrTL, IsInitialization);
+  SGF.emitSemanticStore(loc, getValue(), address,
+                        addrTL, IsInitialization);
 }
 
 void ManagedValue::assignInto(SILGenFunction &SGF, SILLocation loc,
@@ -124,6 +129,12 @@ void ManagedValue::assignInto(SILGenFunction &SGF, SILLocation loc,
   auto &addrTL = SGF.getTypeLowering(address->getType());
   SGF.emitSemanticStore(loc, getValue(), address, addrTL,
                         IsNotInitialization);
+}
+
+void ManagedValue::forwardInto(SILGenFunction &SGF, SILLocation loc,
+                               Initialization *dest) {
+  dest->copyOrInitValueInto(SGF, loc, *this, /*isInit*/ true);
+  dest->finishInitialization(SGF);
 }
 
 ManagedValue ManagedValue::borrow(SILGenFunction &SGF, SILLocation loc) const {
@@ -172,7 +183,30 @@ void ManagedValue::print(raw_ostream &os) const {
 }
 
 void ManagedValue::dump() const {
-#ifndef NDEBUG
-  print(llvm::dbgs());
-#endif
+  dump(llvm::errs());
+}
+
+void ManagedValue::dump(raw_ostream &os, unsigned indent) const {
+  os.indent(indent);
+  if (isInContext()) {
+    os << "InContext\n";
+    return;
+  }
+  if (isLValue()) os << "[lvalue] ";
+  if (hasCleanup()) os << "[cleanup] ";
+  if (SILValue v = getValue()) {
+    v->print(os);
+  } else {
+    os << "<null>\n";
+  }
+}
+
+ManagedValue ManagedValue::ensurePlusOne(SILGenFunction &SGF,
+                                         SILLocation loc) const {
+  // guaranteed-normal-args-todo: We only copy here when guaranteed normal args
+  // are explicitly enabled. Otherwise, this always just returns self.
+  if (SGF.getOptions().EnableGuaranteedNormalArguments && !hasCleanup()) {
+    return copy(SGF, loc);
+  }
+  return *this;
 }

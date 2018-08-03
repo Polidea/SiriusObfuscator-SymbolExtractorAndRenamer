@@ -50,27 +50,17 @@ def unique_string_match(yourentry, list):
     return candidate
 
 
-def is_supported_on_platform(category, platform, compiler_paths):
+def is_supported_on_platform(category, platform, compiler_path):
     if category == "dwo":
         # -gsplit-dwarf is not implemented by clang on Windows.
         return platform in ["linux", "freebsd"]
     elif category == "dsym":
-        return platform in ["darwin", "macosx", "ios"]
+        return platform in ["darwin", "macosx", "ios", "watchos", "tvos", "bridgeos"]
     elif category == "gmodules":
         # First, check to see if the platform can even support gmodules.
-        if platform not in ["linux", "freebsd", "darwin", "macosx", "ios"]:
+        if platform not in ["linux", "freebsd", "darwin", "macosx", "ios", "watchos", "tvos", "bridgeos"]:
             return False
-        # If all compilers specified support gmodules, we'll enable it.
-        for compiler_path in compiler_paths:
-            if not gmodules.is_compiler_clang_with_gmodules(compiler_path):
-                # Ideally in a multi-compiler scenario during a single test run, this would
-                # allow gmodules on compilers that support it and not on ones that don't.
-                # However, I didn't see an easy way for all the callers of this to know
-                # the compiler being used for a test invocation.  As we tend to run with
-                # a single compiler per test run, this shouldn't be a major
-                # issue.
-                return False
-        return True
+        return gmodules.is_compiler_clang_with_gmodules(compiler_path)
     return True
 
 

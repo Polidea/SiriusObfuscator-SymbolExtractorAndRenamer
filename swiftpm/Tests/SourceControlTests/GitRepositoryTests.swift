@@ -402,14 +402,20 @@ class GitRepositoryTests: XCTestCase {
             // Create a file (which we will modify later).
             try localFileSystem.writeFileContents(testRepoPath.appending(component: "test.txt"), bytes: "Hi")
             let repo = GitRepository(path: testRepoPath)
+
+            XCTAssert(repo.hasUncommittedChanges())
+
             try repo.stage(file: "test.txt")
+
+            XCTAssert(repo.hasUncommittedChanges())
+
             try repo.commit()
 
-            XCTAssertFalse(repo.hasUncommitedChanges())
+            XCTAssertFalse(repo.hasUncommittedChanges())
 
             // Modify the file in the repo.
             try localFileSystem.writeFileContents(repo.path.appending(component: "test.txt"), bytes: "Hello")
-            XCTAssert(repo.hasUncommitedChanges())
+            XCTAssert(repo.hasUncommittedChanges())
         }
     }
 
@@ -464,19 +470,19 @@ class GitRepositoryTests: XCTestCase {
             XCTAssertEqual(try repo.currentBranch(), "TestBranch")
             // Create some random file.
             try createAndStageTestFile()
-            XCTAssert(repo.hasUncommitedChanges())
+            XCTAssert(repo.hasUncommittedChanges())
             // Checkout current revision again, the test file should go away.
             let currentRevision = try repo.getCurrentRevision()
             try repo.checkout(revision: currentRevision)
-            XCTAssertFalse(repo.hasUncommitedChanges())
+            XCTAssertFalse(repo.hasUncommittedChanges())
             // We should be on detached head.
             XCTAssertEqual(try repo.currentBranch(), "HEAD")
 
             // Try again and checkout to a previous branch.
             try createAndStageTestFile()
-            XCTAssert(repo.hasUncommitedChanges())
+            XCTAssert(repo.hasUncommittedChanges())
             try repo.checkout(revision: Revision(identifier: "TestBranch"))
-            XCTAssertFalse(repo.hasUncommitedChanges())
+            XCTAssertFalse(repo.hasUncommittedChanges())
             XCTAssertEqual(try repo.currentBranch(), "TestBranch")
 
             do {
@@ -567,6 +573,37 @@ class GitRepositoryTests: XCTestCase {
         }
     }
 
+    func testAlternativeObjectStoreValidation() throws {
+        mktmpdir { path in
+            // Create a repo.
+            let testRepoPath = path.appending(component: "test-repo")
+            try makeDirectories(testRepoPath)
+            initGitRepo(testRepoPath, tag: "1.2.3")
+            let repo = GitRepository(path: testRepoPath)
+            XCTAssertEqual(repo.tags, ["1.2.3"])
+
+            // Clone it somewhere.
+            let testClonePath = path.appending(component: "clone")
+            let provider = GitRepositoryProvider()
+            let repoSpec = RepositorySpecifier(url: testRepoPath.asString)
+            try provider.fetch(repository: repoSpec, to: testClonePath)
+            let clonedRepo = provider.open(repository: repoSpec, at: testClonePath)
+            XCTAssertEqual(clonedRepo.tags, ["1.2.3"])
+
+            // Clone off a checkout.
+            let checkoutPath = path.appending(component: "checkout")
+            try provider.cloneCheckout(repository: repoSpec, at: testClonePath, to: checkoutPath, editable: false)
+            let checkoutRepo = try provider.openCheckout(at: checkoutPath)
+
+            // The object store should be valid.
+            XCTAssertTrue(checkoutRepo.isAlternateObjectStoreValid())
+
+            // Delete the clone (alternative object store).
+            try localFileSystem.removeFileTree(testClonePath)
+            XCTAssertFalse(checkoutRepo.isAlternateObjectStoreValid())
+        }
+    }
+
     static var allTests = [
         ("testBranchOperations", testBranchOperations),
         ("testCheckoutRevision", testCheckoutRevision),
@@ -582,5 +619,6 @@ class GitRepositoryTests: XCTestCase {
         ("testSubmoduleRead", testSubmoduleRead),
         ("testSubmodules", testSubmodules),
         ("testUncommitedChanges", testUncommitedChanges),
+        ("testAlternativeObjectStoreValidation", testAlternativeObjectStoreValidation),
     ]
 }
