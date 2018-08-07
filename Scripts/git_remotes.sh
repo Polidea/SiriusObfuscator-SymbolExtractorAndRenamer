@@ -14,7 +14,6 @@ names=(
     "swift-corelibs-libdispatch"
     "swift-integration-tests"
     "swift-xcode-playground-support"
-    "ninja"
 )
 
 paths=(
@@ -31,128 +30,84 @@ paths=(
     "apple/swift-corelibs-libdispatch"
     "apple/swift-integration-tests"
     "apple/swift-xcode-playground-support"
-    "ninja-build/ninja"
 )
 
-masterbranches=(
-    "stable"
-    "stable"
-    "master"
-    "stable"
-    "master"
-    "master"
-    "master"
-    "stable"
-    "master"
-    "master"
-    "master"
-    "master"
-    "master"
-    "release"
-)
-
-swift_3_0_branches=(
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "swift-3.0-branch"
-    "release"
-)
-
-swift_3_1_branches=(
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "swift-3.1-branch"
-    "release"
-)
-
-swift_4_0_branches=(
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "swift-4.0-branch"
-    "release"
-)
-
-swift_4_1_branches=(
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "swift-4.1-branch"
-    "release"
-)
+swift_3_0_tag="swift-3.0-RELEASE"
+swift_3_0_1_tag="swift-3.0.1-RELEASE"
+swift_3_0_2_tag="swift-3.0.2-RELEASE"
+swift_3_1_tag="swift-3.1-RELEASE"
+swift_3_1_1_tag="swift-3.1.1-RELEASE"
+swift_4_0_tag="swift-4.0-RELEASE"
+swift_4_0_2_tag="swift-4.0.2-RELEASE"
+swift_4_0_3_tag="swift-4.0.3-RELEASE"
+swift_4_1_tag="swift-4.1-RELEASE"
+swift_4_1_1_tag="swift-4.1.1-RELEASE"
+swift_4_1_2_tag="swift-4.1.2-RELEASE"
+swift_4_1_3_tag="swift-4.1.3-RELEASE"
 
 if [ $# -eq 0 ]
 then
-    echo "Using default branches: Swift 4.0"
-    branches=( "${swift_4_0_branches[@]}" ) # default to swift 4.0
+    echo "Using default: Swift 4.1.2"
+    tag=$swift_4_1_2_tag # default to swift 4.1.2
+
 else
-    branch_parameter="$1"
-    case $branch_parameter in
-        -m|--master)
-        branches=( "${masterbranches[@]}" )
-        ;;
+    tag_parameter="$1"
+    case $tag_parameter in
         -3.0|--swift-3.0)
-        branches=( "${swift_3_0_branches[@]}" )
+	tag=$swift_3_0_tag
+        ;;
+        -3.0.1|--swift-3.0.1)
+	tag=$swift_3_0_1_tag
+        ;;
+        -3.0.2|--swift-3.0.2)
+	tag=$swift_3_0_2_tag
         ;;
         -3.1|--swift-3.1)
-        branches=( "${swift_3_1_branches[@]}" )
+	tag=$swift_3_1_tag
+        ;;
+        -3.1.1|--swift-3.1.1)
+	tag=$swift_3_1_1_tag
         ;;
         -4.0|--swift-4.0)
-        branches=( "${swift_4_0_branches[@]}" )
+	tag=$swift_4_0_tag
+        ;;
+        -4.0.2|--swift-4.0.2)
+	tag=$swift_4_0_2_tag
+        ;;
+        -4.0.3|--swift-4.0.3)
+	tag=$swift_4_0_3_tag
         ;;
         -4.1|--swift-4.1)
-        branches=( "${swift_4_1_branches[@]}" )
+	tag=$swift_4_1_tag
+        ;;
+        -4.1.1|--swift-4.1.1)
+	tag=$swift_4_1_1_tag
+        ;;
+        -4.1.2|--swift-4.1.2)
+	tag=$swift_4_1_2_tag
+        ;;
+        -4.1.3|--swift-4.1.3)
+	tag=$swift_4_1_3_tag
         ;;
         -h|--help)
         echo "Available parameters for checing dependencies in given version:"
         echo ""
-        echo "-m   | --master    -> current master branch (not frozen)"
-        echo "-3.0 | --swift-3.0 -> branch for Swift 3.0 (frozen)"
-        echo "-3.1 | --swift-3.1 -> branch for Swift 3.1 (frozen)"
-        echo "-4.0 | --swift-4.0 -> branch for Swift 4.0 (frozen)"
-        echo "-4.1 | --swift-4.1 -> branch for Swift 4.1 (frozen)"
+        echo "-3.0   | --swift-3.0   -> Swift 3.0   (release)"
+        echo "-3.0.1 | --swift-3.0.1 -> Swift 3.0.1 (release)"
+        echo "-3.0.2 | --swift-3.0.2 -> Swift 3.0.2 (release)"
+        echo "-3.1   | --swift-3.1   -> Swift 3.1   (release)"
+        echo "-3.1.1 | --swift-3.1.1 -> Swift 3.1.1 (release)"
+        echo "-4.0   | --swift-4.0   -> Swift 4.0   (release)"
+        echo "-4.0.2 | --swift-4.0.2 -> Swift 4.0.2 (release)"
+        echo "-4.0.3 | --swift-4.0.3 -> Swift 4.0.3 (release)"
+        echo "-4.1   | --swift-4.1   -> Swift 4.1   (release)"
+        echo "-4.1.1 | --swift-4.1.1 -> Swift 4.1.1 (release)"
+        echo "-4.1.2 | --swift-4.1.2 -> Swift 4.1.2 (release)"
+        echo "-4.1.3 | --swift-4.1.3 -> Swift 4.1.3 (release)"
         exit 0
         ;;
         *)
-        echo "Invalid parameter ${branch_parameter}"
+        echo "Invalid parameter ${tag_parameter}"
         echo "Use --help or -h to discover valid parameters"
         exit 1
         ;;
@@ -169,19 +124,27 @@ echo "RESET TO START: git reset --hard ${diff_start}"
 git reset --hard ${diff_start}
 
 for i in ${!names[@]}; do
-  echo "DATA: ${names[$i]} -> ${paths[$i]} -> ${branches[$i]}"
+  echo "DATA: ${names[$i]} -> ${paths[$i]} -> ${tag_parameter}"
   echo "GIT REMOVE: git rm -r ${names[$i]}"
   git rm -r ${names[$i]}
   echo "REMOTE: git remote add ${names[$i]} https://github.com/${paths[$i]}.git"
   git remote add ${names[$i]} https://github.com/${paths[$i]}.git
-  echo "FETCH: git fetch ${names[$i]}"
-  git fetch ${names[$i]}
-  echo "READ-TREE: git read-tree --prefix=${names[$i]} -u ${names[$i]}/${branches[$i]}"
-  git read-tree --prefix=${names[$i]} -u ${names[$i]}/${branches[$i]}
+  echo "FETCH: git fetch --tags ${names[$i]} \"+refs/tags/*:refs/rtags/${names[$i]}/*\""
+  git fetch --tags ${names[$i]} "+refs/tags/*:refs/rtags/${names[$i]}/*"
+  echo "READ-TREE: git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}"
+  git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}
 done
 
-echo "APPLY PATCH: git apply obfuscator.patch"
-git apply obfuscator.patch
+git rm -r ninja
+git remote add ninja https://github.com/ninja-build/ninja.git
+git fetch ninja
+git read-tree --prefix=ninja -u ninja/release
+
+git add . -A
+git commit -m "Temporary commit for changing dependencies to ${tag}"
+
+echo "APPLY PATCH: git am < obfuscator.patch"
+git am --3way < obfuscator.patch
 
 echo "REMOVE PATCH: rm obfuscator.patch"
 rm obfuscator.patch
