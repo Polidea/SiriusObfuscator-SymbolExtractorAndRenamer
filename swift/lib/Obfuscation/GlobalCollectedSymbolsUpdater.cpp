@@ -195,9 +195,9 @@ void ExtensionSymbolsUpdater::load(std::vector<DeclWithSymbolWithRange> &Declara
                         FuncExtractor.functionSignature(ExtFunction);
                       auto ProtocolFunctionSignature =
                         FuncExtractor.functionSignature(ProtocolFunction);
-                      auto ExtFunctionName = ExtFunction->getName().str().str();
+                      auto ExtFunctionName = ExtFunction->getBaseName().userFacingName().str();
                       auto ProtocolFunctionName =
-                      ProtocolFunction->getName().str().str();
+                      ProtocolFunction->getBaseName().userFacingName().str();
 
                       if (ExtFunctionSignature == ProtocolFunctionSignature
                           && ExtFunctionName == ProtocolFunctionName) {
@@ -223,9 +223,9 @@ void ExtensionSymbolsUpdater::load(std::vector<DeclWithSymbolWithRange> &Declara
                       ExtFunction->getInterfaceType().getString();
                       auto ProtocolFunctionSignature =
                       ProtocolFunction->getInterfaceType().getString();
-                      auto ExtFunctionName = ExtFunction->getName().str().str();
+                      auto ExtFunctionName = ExtFunction->getBaseName().userFacingName().str();
                       auto ProtocolFunctionName =
-                      ProtocolFunction->getName().str().str();
+                      ProtocolFunction->getBaseName().userFacingName().str();
 
                       if (ExtFunctionSignature == ProtocolFunctionSignature
                           && ExtFunctionName == ProtocolFunctionName) {

@@ -319,6 +319,26 @@ struct ScalarEnumerationTraits<SymbolType> {
 };
 
 template <>
+struct SequenceElementTraits<ExplicitlyLinkedFrameworks> {
+  static const bool flow = false;
+};
+
+template <>
+struct SequenceElementTraits<Symbol> {
+  static const bool flow = false;
+};
+
+template <>
+struct SequenceElementTraits<SymbolRenaming> {
+  static const bool flow = false;
+};
+
+template <>
+struct SequenceElementTraits<std::unique_ptr<Exclusion>> {
+  static const bool flow = false;
+};
+
+template <>
 struct MappingTraits<Symbol> {
   static void mapping(IO &Io, Symbol &Object);
 };
@@ -363,11 +383,11 @@ struct MappingTraits<ConformanceExclusion> {
   static void mapping(IO &Io, ConformanceExclusion &Object);
 };
 
-template <typename U>
-struct SequenceTraits<std::vector<U>> {
-  static size_t size(IO &Io, std::vector<U> &Vec);
-  static U &element(IO &Io, std::vector<U> &Vec, size_t Index);
-};
+//template <typename U>
+//struct SequenceTraits<std::vector<U>> {
+//  static size_t size(IO &Io, std::vector<U> &Vec);
+//  static U &element(IO &Io, std::vector<U> &Vec, size_t Index);
+//};
   
 template<class T>
 Expected<T> deserialize(StringRef Json);
