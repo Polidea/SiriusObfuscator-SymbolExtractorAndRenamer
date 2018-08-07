@@ -29,6 +29,10 @@ final class PackageToolTests: XCTestCase {
         XCTAssert(try execute(["--help"]).contains("USAGE: swift package"))
     }
 
+    func testSeeAlso() throws {
+        XCTAssert(try execute(["--help"]).contains("SEE ALSO: swift build, swift run, swift test"))
+    }
+
     func testVersion() throws {
         XCTAssert(try execute(["--version"]).contains("Swift Package Manager"))
     }
@@ -77,7 +81,7 @@ final class PackageToolTests: XCTestCase {
     }
 
     func testDescribe() throws {
-        fixture(name: "ClangModules/SwiftCMixed") { prefix in
+        fixture(name: "CFamilyTargets/SwiftCMixed") { prefix in
             let output = try execute(["describe", "--type=json"], packagePath: prefix)
             let json = try JSON(bytes: ByteString(encodingAsUTF8: output))
 
@@ -138,7 +142,7 @@ final class PackageToolTests: XCTestCase {
 
     func testInitEmpty() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init", "--type", "empty"])
@@ -150,7 +154,7 @@ final class PackageToolTests: XCTestCase {
 
     func testInitExecutable() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init", "--type", "executable"])
@@ -168,7 +172,7 @@ final class PackageToolTests: XCTestCase {
 
     func testInitLibrary() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init"])
@@ -379,8 +383,8 @@ final class PackageToolTests: XCTestCase {
                 XCTAssertEqual(pinsStore.pins.map{$0}.count, 2)
                 for pkg in ["bar", "baz"] {
                     let pin = pinsStore.pinsMap[pkg]!
-                    XCTAssertEqual(pin.package, pkg)
-                    XCTAssert(pin.repository.url.hasSuffix(pkg))
+                    XCTAssertEqual(pin.packageRef.identity, pkg)
+                    XCTAssert(pin.packageRef.repository.url.hasSuffix(pkg))
                     XCTAssertEqual(pin.state.version, "1.2.3")
                 }
             }
@@ -435,6 +439,56 @@ final class PackageToolTests: XCTestCase {
         }
     }
 
+    func testSymlinkedDependency() {
+        mktmpdir { path in
+            let fs = localFileSystem
+            let root = path.appending(components: "root")
+            let dep = path.appending(components: "dep")
+            let depSym = path.appending(components: "depSym")
+
+            // Create root package.
+            try fs.writeFileContents(root.appending(components: "Sources", "root", "main.swift")) { $0 <<< "" }
+            try fs.writeFileContents(root.appending(component: "Package.swift")) {
+                $0 <<< """
+                // swift-tools-version:4.0
+                import PackageDescription
+                let package = Package(
+                name: "root",
+                dependencies: [.package(url: "../depSym", from: "1.0.0")],
+                targets: [.target(name: "root", dependencies: ["dep"])]
+                )
+
+                """
+            }
+
+            // Create dependency.
+            try fs.writeFileContents(dep.appending(components: "Sources", "dep", "lib.swift")) { $0 <<< "" }
+            try fs.writeFileContents(dep.appending(component: "Package.swift")) {
+                $0 <<< """
+                // swift-tools-version:4.0
+                import PackageDescription
+                let package = Package(
+                name: "dep",
+                products: [.library(name: "dep", targets: ["dep"])],
+                targets: [.target(name: "dep")]
+                )
+                """
+            }
+            do {
+                let depGit = GitRepository(path: dep)
+                try depGit.create()
+                try depGit.stageEverything()
+                try depGit.commit()
+                try depGit.tag(name: "1.0.0")
+            }
+
+            // Create symlink to the dependency.
+            try createSymlink(depSym, pointingAt: dep)
+
+            _ = try execute(["resolve"], packagePath: root)
+        }
+    }
+
     static var allTests = [
         ("testDescribe", testDescribe),
         ("testUsage", testUsage),
@@ -452,5 +506,6 @@ final class PackageToolTests: XCTestCase {
         ("testPackageReset", testPackageReset),
         ("testPinning", testPinning),
         ("testPinningBranchAndRevision", testPinningBranchAndRevision),
+        ("testSymlinkedDependency", testSymlinkedDependency),
     ]
 }

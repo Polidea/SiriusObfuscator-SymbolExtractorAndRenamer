@@ -1,11 +1,13 @@
 add_swift_library(swiftSIL STATIC
   AbstractionPattern.cpp
+  BasicBlockUtils.cpp
   Bridging.cpp
   Dominance.cpp
   DynamicCasts.cpp
   InstructionUtils.cpp
   Linker.cpp
   LoopInfo.cpp
+  OptimizationRemark.cpp
   PrettyStackTrace.cpp
   Projection.cpp
   SIL.cpp
@@ -25,6 +27,7 @@ add_swift_library(swiftSIL STATIC
   SILModule.cpp
   SILOpenedArchetypesTracker.cpp
   SILPrinter.cpp
+  SILProfiler.cpp
   SILSuccessor.cpp
   SILType.cpp
   SILValue.cpp
@@ -40,9 +43,7 @@ add_swift_library(swiftSIL STATIC
 )
 
 # intrinsics_gen is the LLVM tablegen target that generates the include files
-# where intrinsics and attributes are declared. See the comment in lib/AST for
-# more detail.
-if(NOT SWIFT_BUILT_STANDALONE)
-  get_property(CLANG_TABLEGEN_TARGETS GLOBAL PROPERTY CLANG_TABLEGEN_TARGETS)
-  add_dependencies(swiftSIL intrinsics_gen ${CLANG_TABLEGEN_TARGETS})
-endif()
+# where intrinsics and attributes are declared. swiftSIL depends on these
+# headers.
+# For more information see the comment at the top of lib/CMakeLists.txt.
+add_dependencies(swiftSIL intrinsics_gen clang-tablegen-targets)

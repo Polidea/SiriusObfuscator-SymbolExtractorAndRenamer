@@ -38,6 +38,8 @@
 #ifndef GTEST_INCLUDE_GTEST_GTEST_DEATH_TEST_H_
 #define GTEST_INCLUDE_GTEST_GTEST_DEATH_TEST_H_
 
+#include "gtest/gtest-llbuild-config.h"
+
 #include "gtest/internal/gtest-death-test-internal.h"
 
 namespace testing {
@@ -50,6 +52,17 @@ namespace testing {
 GTEST_DECLARE_string_(death_test_style);
 
 #if GTEST_HAS_DEATH_TEST
+
+namespace internal {
+
+// Returns a Boolean value indicating whether the caller is currently
+// executing in the context of the death test child process.  Tools such as
+// Valgrind heap checkers may need this to modify their behavior in death
+// tests.  IMPORTANT: This is an internal utility.  Using it may break the
+// implementation of death tests.  User code MUST NOT use it.
+GTEST_API_ bool InDeathTestChild();
+
+}  // namespace internal
 
 // The following macros are useful for writing death tests.
 
@@ -75,7 +88,7 @@ GTEST_DECLARE_string_(death_test_style);
 //   for (int i = 0; i < 5; i++) {
 //     EXPECT_DEATH(server.ProcessRequest(i),
 //                  "Invalid request .* in ProcessRequest()")
-//         << "Failed to die on request " << i);
+//                  << "Failed to die on request " << i;
 //   }
 //
 //   ASSERT_EXIT(server.ExitNow(), ::testing::ExitedWithCode(0), "Exiting");
@@ -245,10 +258,10 @@ class GTEST_API_ KilledBySignal {
 # ifdef NDEBUG
 
 #  define EXPECT_DEBUG_DEATH(statement, regex) \
-  do { statement; } while (::testing::internal::AlwaysFalse())
+  GTEST_EXECUTE_STATEMENT_(statement, regex)
 
 #  define ASSERT_DEBUG_DEATH(statement, regex) \
-  do { statement; } while (::testing::internal::AlwaysFalse())
+  GTEST_EXECUTE_STATEMENT_(statement, regex)
 
 # else
 

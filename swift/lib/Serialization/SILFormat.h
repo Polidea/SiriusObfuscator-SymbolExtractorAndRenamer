@@ -47,6 +47,13 @@ enum SILLinkageEncoding : uint8_t {
 };
 using SILLinkageField = BCFixed<3>;
 
+enum SILVTableEntryKindEncoding : uint8_t {
+  SIL_VTABLE_ENTRY_NORMAL,
+  SIL_VTABLE_ENTRY_INHERITED,
+  SIL_VTABLE_ENTRY_OVERRIDE,
+};
+using SILVTableEntryKindField = BCFixed<2>;
+
 enum CheckedCastKindEncoding : uint8_t {
   SIL_CHECKED_CAST_ARCHETYPE_TO_ARCHETYPE,
   SIL_CHECKED_CAST_ARCHETYPE_TO_CONCRETE,
@@ -152,6 +159,7 @@ namespace sil_block {
     SIL_WITNESS_BASE_ENTRY,
     SIL_WITNESS_ASSOC_PROTOCOL,
     SIL_WITNESS_ASSOC_ENTRY,
+    SIL_WITNESS_CONDITIONAL_CONFORMANCE,
     SIL_DEFAULT_WITNESS_TABLE,
     SIL_DEFAULT_WITNESS_TABLE_ENTRY,
     SIL_DEFAULT_WITNESS_TABLE_NO_ENTRY,
@@ -179,12 +187,14 @@ namespace sil_block {
 
   using VTableLayout = BCRecordLayout<
     SIL_VTABLE,
-    DeclIDField   // Class Decl
+    DeclIDField,   // Class Decl
+    BCFixed<1>     // IsSerialized.
   >;
 
   using VTableEntryLayout = BCRecordLayout<
     SIL_VTABLE_ENTRY,
     DeclIDField,  // SILFunction name
+    SILVTableEntryKindField,  // Kind
     SILLinkageField,      // Linkage
     BCArray<ValueIDField> // SILDeclRef
   >;
@@ -225,6 +235,12 @@ namespace sil_block {
     TypeIDField
   >;
 
+  using WitnessConditionalConformanceLayout = BCRecordLayout<
+    SIL_WITNESS_CONDITIONAL_CONFORMANCE,
+    TypeIDField // ID of associated type
+    // Trailed by the conformance itself if appropriate.
+  >;
+
   using DefaultWitnessTableLayout = BCRecordLayout<
     SIL_DEFAULT_WITNESS_TABLE,
     DeclIDField,  // ID of ProtocolDecl
@@ -259,8 +275,9 @@ namespace sil_block {
                      BCFixed<2>,  // thunk/reabstraction_thunk
                      BCFixed<1>,  // global_init
                      BCFixed<2>,  // inlineStrategy
+                     BCFixed<2>,  // optimizationMode
                      BCFixed<2>,  // side effect info.
-                     BCFixed<2>,  // number of specialize attributes
+                     BCVBR<8>,    // number of specialize attributes
                      BCFixed<1>,  // has qualified ownership
                      TypeIDField, // SILFunctionType
                      GenericEnvironmentIDField,
@@ -346,7 +363,9 @@ namespace sil_block {
     SIL_PARTIAL_APPLY,
     SIL_BUILTIN,
     SIL_TRY_APPLY,
-    SIL_NON_THROWING_APPLY
+    SIL_NON_THROWING_APPLY,
+    SIL_BEGIN_APPLY,
+    SIL_NON_THROWING_BEGIN_APPLY
   };
   
   using SILInstApplyLayout = BCRecordLayout<

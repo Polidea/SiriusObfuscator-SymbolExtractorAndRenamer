@@ -37,24 +37,10 @@ namespace llvm {
 
 namespace swift {
   class ArchetypeType;
-  class AssociatedTypeDecl;
-  class ClassDecl;
-  class ConstructorDecl;
-  class Decl;
-  class ExtensionDecl;
-  class FuncDecl;
-  class EnumElementDecl;
-  class EnumType;
-  class Pattern;
-  class PatternBindingDecl;
+  class IRGenOptions;
   class SILDebugScope;
   class SILType;
-  class KeyPathInst;
   class SourceLoc;
-  class StructType;
-  class Substitution;
-  class ValueDecl;
-  class VarDecl;
 
 namespace Lowering {
   class TypeConverter;
@@ -80,12 +66,18 @@ public:
   IRGenModule &IGM;
   IRBuilder Builder;
 
+  /// If != OptimizationMode::NotSet, the optimization mode specified with an
+  /// function attribute.
+  OptimizationMode OptMode;
+
   llvm::Function *CurFn;
   ModuleDecl *getSwiftModule() const;
   SILModule &getSILModule() const;
   Lowering::TypeConverter &getSILTypes() const;
+  const IRGenOptions &getOptions() const;
 
   IRGenFunction(IRGenModule &IGM, llvm::Function *fn,
+                OptimizationMode Mode = OptimizationMode::NotSet,
                 const SILDebugScope *DbgScope = nullptr,
                 Optional<SILLocation> DbgLoc = None);
   ~IRGenFunction();
@@ -98,7 +90,7 @@ public:
 public:
   Explosion collectParameters();
   void emitScalarReturn(SILType resultTy, Explosion &scalars,
-                        bool isSwiftCCReturn);
+                        bool isSwiftCCReturn, bool isOutlined);
   void emitScalarReturn(llvm::Type *resultTy, Explosion &scalars);
   
   void emitBBForReturn();
@@ -124,6 +116,16 @@ private:
 
 //--- Helper methods -----------------------------------------------------------
 public:
+
+  /// Returns the optimization mode for the function. If no mode is set for the
+  /// function, returns the global mode, i.e. the mode in IRGenOptions.
+  OptimizationMode getEffectiveOptimizationMode() const;
+
+  /// Returns true if this function should be optimized for size.
+  bool optimizeForSize() const {
+    return getEffectiveOptimizationMode() == OptimizationMode::ForSize;
+  }
+
   Address createAlloca(llvm::Type *ty, Alignment align,
                        const llvm::Twine &name);
   Address createAlloca(llvm::Type *ty, llvm::Value *ArraySize, Alignment align,
@@ -150,6 +152,13 @@ public:
   Address emitByteOffsetGEP(llvm::Value *base, llvm::Value *offset,
                             const TypeInfo &type,
                             const llvm::Twine &name = "");
+  Address emitAddressAtOffset(llvm::Value *base, Offset offset,
+                              llvm::Type *objectType,
+                              Alignment objectAlignment,
+                              const llvm::Twine &name = "");
+
+  llvm::Value *emitInvariantLoad(Address address,
+                                 const llvm::Twine &name = "");
 
   void emitStoreOfRelativeIndirectablePointer(llvm::Value *value,
                                               Address addr,
@@ -167,6 +176,9 @@ public:
   llvm::Value *emitInitStackObjectCall(llvm::Value *metadata,
                                        llvm::Value *object,
                                        const llvm::Twine &name = "");
+  llvm::Value *emitInitStaticObjectCall(llvm::Value *metadata,
+                                        llvm::Value *object,
+                                        const llvm::Twine &name = "");
   llvm::Value *emitVerifyEndOfLifetimeCall(llvm::Value *object,
                                            const llvm::Twine &name = "");
   llvm::Value *emitAllocRawCall(llvm::Value *size, llvm::Value *alignMask,
@@ -215,11 +227,14 @@ public:
   llvm::Value *emitTypeMetadataRefForLayout(SILType type);
   
   llvm::Value *emitValueWitnessTableRef(CanType type);
-  llvm::Value *emitValueWitnessTableRefForLayout(SILType type);
+  llvm::Value *emitValueWitnessTableRef(SILType type,
+                                        llvm::Value **metadataSlot = nullptr);
   llvm::Value *emitValueWitnessTableRefForMetadata(llvm::Value *metadata);
   
-  llvm::Value *emitValueWitness(CanType type, ValueWitness index);
-  llvm::Value *emitValueWitnessForLayout(SILType type, ValueWitness index);
+  llvm::Value *emitValueWitnessValue(SILType type, ValueWitness index);
+  FunctionPointer emitValueWitnessFunctionRef(SILType type,
+                                              llvm::Value *&metadataSlot,
+                                              ValueWitness index);
 
   /// Emit a load of a reference to the given Objective-C selector.
   llvm::Value *emitObjCSelectorRefLoad(StringRef selector);
@@ -457,6 +472,13 @@ public:
   void bindLocalTypeDataFromTypeMetadata(CanType type, IsExact_t isExact,
                                          llvm::Value *metadata);
 
+  /// Given the witness table parameter, bind local type data for
+  /// the witness table itself and any conditional requirements.
+  void bindLocalTypeDataFromSelfWitnessTable(
+                const ProtocolConformance *conformance,
+                llvm::Value *selfTable,
+                llvm::function_ref<CanType (CanType)> mapTypeIntoContext);
+
   void setDominanceResolver(DominanceResolverFunction resolver) {
     assert(DominanceResolver == nullptr);
     DominanceResolver = resolver;
@@ -554,7 +576,7 @@ public:
 
   llvm::Value *getLocalSelfMetadata();
   void setLocalSelfMetadata(llvm::Value *value, LocalSelfKind kind);
-  
+
 private:
   LocalTypeDataCache &getOrCreateLocalTypeData();
   void destroyLocalTypeData();

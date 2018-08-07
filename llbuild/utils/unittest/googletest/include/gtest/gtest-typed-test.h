@@ -32,6 +32,8 @@
 #ifndef GTEST_INCLUDE_GTEST_GTEST_TYPED_TEST_H_
 #define GTEST_INCLUDE_GTEST_GTEST_TYPED_TEST_H_
 
+#include "gtest/gtest-llbuild-config.h"
+
 // This header implements typed tests and type-parameterized tests.
 
 // Typed (aka type-driven) tests repeat the same test for types in a
@@ -181,7 +183,8 @@ INSTANTIATE_TYPED_TEST_CASE_P(My, FooTest, MyTypes);
           ::testing::internal::TemplateSel< \
               GTEST_TEST_CLASS_NAME_(CaseName, TestName)>, \
           GTEST_TYPE_PARAMS_(CaseName)>::Register(\
-              "", #CaseName, #TestName, 0); \
+              "", ::testing::internal::CodeLocation(__FILE__, __LINE__), \
+              #CaseName, #TestName, 0); \
   template <typename gtest_TypeParam_> \
   void GTEST_TEST_CLASS_NAME_(CaseName, TestName)<gtest_TypeParam_>::TestBody()
 
@@ -236,8 +239,6 @@ INSTANTIATE_TYPED_TEST_CASE_P(My, FooTest, MyTypes);
   template <typename gtest_TypeParam_> \
   void GTEST_CASE_NAMESPACE_(CaseName)::TestName<gtest_TypeParam_>::TestBody()
 
-// Silencing C99 build warnings
-#if 0
 # define REGISTER_TYPED_TEST_CASE_P(CaseName, ...) \
   namespace GTEST_CASE_NAMESPACE_(CaseName) { \
   typedef ::testing::internal::Templates<__VA_ARGS__>::type gtest_AllTests_; \
@@ -245,7 +246,6 @@ INSTANTIATE_TYPED_TEST_CASE_P(My, FooTest, MyTypes);
   static const char* const GTEST_REGISTERED_TEST_NAMES_(CaseName) = \
       GTEST_TYPED_TEST_CASE_P_STATE_(CaseName).VerifyRegisteredTestNames(\
           __FILE__, __LINE__, #__VA_ARGS__)
-#endif
 
 // The 'Types' template argument below must have spaces around it
 // since some compilers may choke on '>>' when passing a template
@@ -255,7 +255,10 @@ INSTANTIATE_TYPED_TEST_CASE_P(My, FooTest, MyTypes);
       ::testing::internal::TypeParameterizedTestCase<CaseName, \
           GTEST_CASE_NAMESPACE_(CaseName)::gtest_AllTests_, \
           ::testing::internal::TypeList< Types >::type>::Register(\
-              #Prefix, #CaseName, GTEST_REGISTERED_TEST_NAMES_(CaseName))
+              #Prefix, \
+              ::testing::internal::CodeLocation(__FILE__, __LINE__), \
+              &GTEST_TYPED_TEST_CASE_P_STATE_(CaseName), \
+              #CaseName, GTEST_REGISTERED_TEST_NAMES_(CaseName))
 
 #endif  // GTEST_HAS_TYPED_TEST_P
 

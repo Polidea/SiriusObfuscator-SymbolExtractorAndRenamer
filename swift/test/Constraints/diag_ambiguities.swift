@@ -1,4 +1,4 @@
-// RUN: %target-typecheck-verify-swift -verify-ignore-unknown
+// RUN: %target-typecheck-verify-swift
 
 func f0(_ i: Int, _ d: Double) {} // expected-note{{found this candidate}}
 func f0(_ d: Double, _ i: Int) {} // expected-note{{found this candidate}}
@@ -57,12 +57,8 @@ struct SR3715 {
 // we emit a diagnostic instead of crashing.
 struct Movie {}
 
-protocol P {
-  associatedtype itemType
-  var items: [itemType] { get set }
-}
-
-class MoviesViewController : P {
+class MoviesViewController {
+  typealias itemType = Movie // expected-note {{'itemType' declared here}}
   let itemType = [Movie].self // expected-note {{'itemType' declared here}}
   var items: [Movie] = [Movie]()
 

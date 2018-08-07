@@ -34,6 +34,7 @@ public enum ImplicitlyUnwrappedOptional<Wrapped> : ExpressibleByNilLiteral {
   case some(Wrapped)
 
   /// Creates an instance that stores the given value.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(_ some: Wrapped) { self = .some(some) }
 
   /// Creates an instance initialized with `nil`.
@@ -42,37 +43,16 @@ public enum ImplicitlyUnwrappedOptional<Wrapped> : ExpressibleByNilLiteral {
   /// you initialize an `Optional` instance with a `nil` literal. For example:
   ///
   ///     let i: Index! = nil
+  @_inlineable // FIXME(sil-serialize-all)
   @_transparent
   public init(nilLiteral: ()) {
     self = .none
   }
 }
 
-extension ImplicitlyUnwrappedOptional : CustomStringConvertible {
-  /// A textual representation of the value, or `nil`.
-  public var description: String {
-    switch self {
-    case .some(let value):
-      return String(describing: value)
-    case .none:
-      return "nil"
-    }
-  }
-}
-
-/// Directly conform to CustomDebugStringConvertible to support
-/// optional printing. Implementation of that feature relies on
-/// _isOptional thus cannot distinguish ImplicitlyUnwrappedOptional
-/// from Optional. When conditional conformance is available, this
-/// outright conformance can be removed.
-extension ImplicitlyUnwrappedOptional : CustomDebugStringConvertible {
-  public var debugDescription: String {
-    return description
-  }
-}
-
 #if _runtime(_ObjC)
 extension ImplicitlyUnwrappedOptional : _ObjectiveCBridgeable {
+  @_inlineable // FIXME(sil-serialize-all)
   public func _bridgeToObjectiveC() -> AnyObject {
     switch self {
     case .none:
@@ -83,6 +63,7 @@ extension ImplicitlyUnwrappedOptional : _ObjectiveCBridgeable {
     }
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   public static func _forceBridgeFromObjectiveC(
     _ x: AnyObject,
     result: inout ImplicitlyUnwrappedOptional<Wrapped>?
@@ -90,6 +71,7 @@ extension ImplicitlyUnwrappedOptional : _ObjectiveCBridgeable {
     result = Swift._forceBridgeFromObjectiveC(x, Wrapped.self)
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   public static func _conditionallyBridgeFromObjectiveC(
     _ x: AnyObject,
     result: inout ImplicitlyUnwrappedOptional<Wrapped>?
@@ -103,6 +85,7 @@ extension ImplicitlyUnwrappedOptional : _ObjectiveCBridgeable {
     return false
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   public static func _unconditionallyBridgeFromObjectiveC(_ source: AnyObject?)
       -> Wrapped! {
     var result: ImplicitlyUnwrappedOptional<Wrapped>?
@@ -111,24 +94,3 @@ extension ImplicitlyUnwrappedOptional : _ObjectiveCBridgeable {
   }
 }
 #endif
-
-extension ImplicitlyUnwrappedOptional {
-  @available(*, unavailable, message: "Please use nil literal instead.")
-  public init() {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, message: "Has been removed in Swift 3.")
-  public func map<U>(
-    _ f: (Wrapped) throws -> U
-  ) rethrows -> ImplicitlyUnwrappedOptional<U> {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, message: "Has been removed in Swift 3.")
-  public func flatMap<U>(
-      _ f: (Wrapped) throws -> ImplicitlyUnwrappedOptional<U>
-  ) rethrows -> ImplicitlyUnwrappedOptional<U> {
-    Builtin.unreachable()
-  }
-}

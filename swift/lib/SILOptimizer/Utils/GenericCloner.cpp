@@ -41,14 +41,14 @@ SILFunction *GenericCloner::initCloned(SILFunction *Orig,
   SILFunction *NewF = Orig->getModule().createFunction(
       getSpecializedLinkage(Orig, Orig->getLinkage()), NewName,
       ReInfo.getSpecializedType(), ReInfo.getSpecializedGenericEnvironment(),
-      Orig->getLocation(), Orig->isBare(), Orig->isTransparent(),
-      Serialized, Orig->isThunk(), Orig->getClassSubclassScope(),
+      Orig->getLocation(), Orig->isBare(), Orig->isTransparent(), Serialized,
+      Orig->getEntryCount(), Orig->isThunk(), Orig->getClassSubclassScope(),
       Orig->getInlineStrategy(), Orig->getEffectsKind(), Orig,
       Orig->getDebugScope());
   for (auto &Attr : Orig->getSemanticsAttrs()) {
     NewF->addSemanticsAttr(Attr);
   }
-  if (Orig->hasUnqualifiedOwnership()) {
+  if (!Orig->hasQualifiedOwnership()) {
     NewF->setUnqualifiedOwnership();
   }
   return NewF;

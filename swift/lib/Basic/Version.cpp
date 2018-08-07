@@ -319,14 +319,16 @@ Optional<Version> Version::getEffectiveLanguageVersion() const {
   switch (Components[0]) {
   case 3:
 #ifdef SWIFT_VERSION_PATCHLEVEL
-    return Version{3, 2, SWIFT_VERSION_PATCHLEVEL};
+    return Version{3, 3, SWIFT_VERSION_PATCHLEVEL};
 #else
-    return Version{3, 2};
+    return Version{3, 3};
 #endif
   case 4:
     static_assert(SWIFT_VERSION_MAJOR == 4,
                   "getCurrentLanguageVersion is no longer correct here");
     return Version::getCurrentLanguageVersion();
+  case 5:
+    return Version{5, 0};
   default:
     return None;
   }
@@ -386,31 +388,7 @@ std::string getSwiftFullVersion(Version effectiveVersion) {
   OS << SWIFT_VENDOR " ";
 #endif
 
-  OS << "Swift version " SWIFT_VERSION_STRING;
-#ifndef SWIFT_COMPILER_VERSION
-  OS << "-dev";
-#endif
-
-  if (!(effectiveVersion == Version::getCurrentLanguageVersion())) {
-    OS << " effective-" << effectiveVersion;
-  }
-
-#if defined(SWIFT_COMPILER_VERSION)
-  OS << " (swiftlang-" SWIFT_COMPILER_VERSION;
-#if defined(CLANG_COMPILER_VERSION)
-  OS << " clang-" CLANG_COMPILER_VERSION;
-#endif
-  OS << ")";
-#elif defined(LLVM_REVISION) || defined(CLANG_REVISION) || \
-      defined(SWIFT_REVISION)
-  OS << " (";
-  printFullRevisionString(OS);
-  OS << ")";
-#endif
-
-  // Suppress unused function warning
-  (void)&printFullRevisionString;
-
+  OS << "Swift version " SWIFT_VERSION_STRING " (swift-4.1-RELEASE)";
   return OS.str();
 }
 

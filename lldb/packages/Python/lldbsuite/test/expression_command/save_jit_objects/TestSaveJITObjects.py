@@ -26,22 +26,16 @@ class SaveJITObjectsTestCase(TestBase):
     mydir = TestBase.compute_mydir(__file__)
 
     @expectedFailureAll(oslist=["windows"])
+    @expectedFailureDarwin("rdar://35774408")
     def test_save_jit_objects(self):
         self.build()
         src_file = "main.c"
         src_file_spec = lldb.SBFileSpec(src_file)
   
-        exe_path = os.path.join(os.getcwd(), "a.out")
-        target = self.dbg.CreateTarget(exe_path)
+        (target, process, thread, bkpt) = lldbutil.run_to_source_breakpoint(
+            self, "break", src_file_spec)
 
-        breakpoint = target.BreakpointCreateBySourceRegex(
-            "break", src_file_spec)
-
-        process = target.LaunchSimple(None, None,
-                                      self.get_process_working_directory())
-
-        thread = process.GetSelectedThread()
-        frame = thread.GetSelectedFrame()
+        frame = thread.frames[0]
 
         cleanJITFiles()
         frame.EvaluateExpression("(void*)malloc(0x1)")

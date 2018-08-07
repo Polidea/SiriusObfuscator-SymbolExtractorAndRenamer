@@ -71,12 +71,6 @@ public:
     OS << '_';
   }
 
-  void visitParentMetadataSource(const ParentMetadataSource *P) {
-    OS << 'P';
-    visit(P->getChild());
-    OS << '_';
-  }
-
   void visitSelfMetadataSource(const SelfMetadataSource *S) {
     OS << 'S';
   }
@@ -154,13 +148,6 @@ public:
     printHeader("generic-argument");
     printField("index", GA->getIndex());
     printRec(GA->getSource());
-    closeForm();
-  }
-
-  void
-  visitParentMetadataSource(const ParentMetadataSource *P) {
-    printHeader("parent-of");
-    printRec(P->getChild());
     closeForm();
   }
 
@@ -340,7 +327,8 @@ class FieldTypeMetadataBuilder : public ReflectionMetadataBuilder {
     }
 
     if (IGM.IRGen.Opts.EnableReflectionNames) {
-      auto fieldName = IGM.getAddrOfFieldName(value->getNameStr());
+      auto name = value->getBaseName().getIdentifier().str();
+      auto fieldName = IGM.getAddrOfFieldName(name);
       B.addRelativeAddress(fieldName);
     } else {
       B.addInt32(0);
@@ -567,7 +555,6 @@ public:
 /// captures are generic.
 class CaptureDescriptorBuilder : public ReflectionMetadataBuilder {
   swift::reflection::MetadataSourceBuilder SourceBuilder;
-  SILFunction &Caller;
   CanSILFunctionType OrigCalleeType;
   CanSILFunctionType SubstCalleeType;
   SubstitutionList Subs;
@@ -575,13 +562,12 @@ class CaptureDescriptorBuilder : public ReflectionMetadataBuilder {
 
 public:
   CaptureDescriptorBuilder(IRGenModule &IGM,
-                           SILFunction &Caller,
                            CanSILFunctionType OrigCalleeType,
                            CanSILFunctionType SubstCalleeType,
                            SubstitutionList Subs,
                            const HeapLayout &Layout)
     : ReflectionMetadataBuilder(IGM),
-      Caller(Caller), OrigCalleeType(OrigCalleeType),
+      OrigCalleeType(OrigCalleeType),
       SubstCalleeType(SubstCalleeType), Subs(Subs),
       Layout(Layout) {}
 
@@ -662,7 +648,7 @@ public:
 
       auto Source = SourceBuilder.createClosureBinding(i);
       auto BindingType = Bindings[i].TypeParameter;
-      auto InterfaceType = Caller.mapTypeOutOfContext(BindingType);
+      auto InterfaceType = BindingType->mapTypeOutOfContext();
       SourceMap.push_back({InterfaceType->getCanonicalType(), Source});
     }
 
@@ -704,7 +690,7 @@ public:
       auto Src = Path.getMetadataSource(SourceBuilder, Root);
 
       auto SubstType = GenericParam.subst(SubstMap);
-      auto InterfaceType = Caller.mapTypeOutOfContext(SubstType);
+      auto InterfaceType = SubstType->mapTypeOutOfContext();
       SourceMap.push_back({InterfaceType->getCanonicalType(), Src});
     });
 
@@ -730,7 +716,7 @@ public:
         })->getCanonicalType();
       }
 
-      auto InterfaceType = Caller.mapTypeOutOfContext(SwiftType);
+      auto InterfaceType = SwiftType->mapTypeOutOfContext();
       CaptureTypes.push_back(InterfaceType->getCanonicalType());
     }
 
@@ -783,7 +769,7 @@ static std::string getReflectionSectionName(IRGenModule &IGM,
     OS << ".sw3" << FourCC;
     break;
   case llvm::Triple::ELF:
-    OS << ".swift3_" << LongName;
+    OS << "swift3_" << LongName;
     break;
   case llvm::Triple::MachO:
     assert(LongName.size() <= 7 &&
@@ -876,7 +862,7 @@ IRGenModule::getAddrOfCaptureDescriptor(SILFunction &Caller,
   if (CaptureDescriptorBuilder::hasOpenedExistential(OrigCalleeType, Layout))
     return llvm::Constant::getNullValue(CaptureDescriptorPtrTy);
 
-  CaptureDescriptorBuilder builder(*this, Caller,
+  CaptureDescriptorBuilder builder(*this,
                                    OrigCalleeType, SubstCalleeType, Subs,
                                    Layout);
   auto var = builder.emit();
@@ -893,13 +879,9 @@ emitAssociatedTypeMetadataRecord(const ProtocolConformance *Conformance) {
   auto collectTypeWitness = [&](const AssociatedTypeDecl *AssocTy,
                                 Type Replacement,
                                 const TypeDecl *TD) -> bool {
-
-    auto Subst = Conformance->getDeclContext()->mapTypeOutOfContext(
-        Replacement);
-
     AssociatedTypes.push_back({
       AssocTy->getNameStr(),
-      Subst->getCanonicalType()
+      Replacement->getCanonicalType()
     });
     return false;
   };
@@ -927,8 +909,7 @@ void IRGenModule::emitBuiltinReflectionMetadata() {
     // extra inhabitants as these. But maybe it's best not to codify
     // that in the ABI anyway.
     CanType thinFunction = CanFunctionType::get(
-      TupleType::getEmpty(Context),
-      TupleType::getEmpty(Context),
+      AnyFunctionType::CanParamArrayRef(), Context.TheEmptyTupleType,
       AnyFunctionType::ExtInfo().withRepresentation(
           FunctionTypeRepresentation::Thin));
     BuiltinTypes.insert(thinFunction);

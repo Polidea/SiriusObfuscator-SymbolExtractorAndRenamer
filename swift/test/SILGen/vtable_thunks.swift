@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -sdk %S/Inputs -emit-silgen -I %S/Inputs -enable-source-import %s -disable-objc-attr-requires-foundation-module | %FileCheck %s
+// RUN: %target-swift-frontend -sdk %S/Inputs -emit-silgen -I %S/Inputs -enable-source-import %s -disable-objc-attr-requires-foundation-module -enable-sil-ownership | %FileCheck %s
 
 protocol AddrOnly {}
 
@@ -133,7 +133,7 @@ class F: D {
 // forthcoming commits.
 //
 // CHECK-LABEL: sil private @_T013vtable_thunks1DC3iuo{{[_0-9a-zA-Z]*}}FTV
-// CHECK: bb0([[X:%.*]] : $B, [[Y:%.*]] : $Optional<B>, [[Z:%.*]] : $B, [[W:%.*]] : $D):
+// CHECK: bb0([[X:%.*]] : @owned $B, [[Y:%.*]] : @owned $Optional<B>, [[Z:%.*]] : @owned $B, [[W:%.*]] : @guaranteed $D):
 // CHECK:   [[WRAP_X:%.*]] = enum $Optional<B>, #Optional.some!enumelt.1, [[X]] : $B
 // CHECK:   switch_enum [[Y]] : $Optional<B>, case #Optional.some!enumelt.1: [[SOME_BB:bb[0-9]+]], case #Optional.none!enumelt: [[NONE_BB:bb[0-9]+]]
 
@@ -142,7 +142,7 @@ class F: D {
 // CHECK:   apply [[DIAGNOSE_UNREACHABLE_FUNC]]
 // CHECK:   unreachable
 
-// CHECK: [[SOME_BB]]([[UNWRAP_Y:%.*]] : $B):
+// CHECK: [[SOME_BB]]([[UNWRAP_Y:%.*]] : @owned $B):
 // CHECK:   [[THUNK_FUNC:%.*]] = function_ref @_T013vtable_thunks1DC3iuo{{.*}}
 // CHECK:   [[RES:%.*]] = apply [[THUNK_FUNC]]([[WRAP_X]], [[UNWRAP_Y]], [[Z]], [[W]])
 // CHECK:   [[WRAP_RES:%.*]] = enum $Optional<B>, {{.*}} [[RES]]
@@ -216,34 +216,35 @@ class Noot : Aap {
   override func map() -> (S?) -> () -> Noot {}
 }
 
-// CHECK-LABEL: sil private @_T013vtable_thunks3BarC3foo{{[_0-9a-zA-Z]*}}FTV : $@convention(method) (@owned @callee_owned (Int) -> Int, @guaranteed Bar) -> @owned Optional<@callee_owned (Int) -> Int>
+// CHECK-LABEL: sil private @_T013vtable_thunks3BarC3foo{{[_0-9a-zA-Z]*}}FTV : $@convention(method) (@owned @callee_guaranteed (Int) -> Int, @guaranteed Bar) -> @owned Optional<@callee_guaranteed (Int) -> Int>
 // CHECK:         [[IMPL:%.*]] = function_ref @_T013vtable_thunks3BarC3foo{{[_0-9a-zA-Z]*}}F
 // CHECK:         apply [[IMPL]]
 
 // CHECK-LABEL: sil private @_T013vtable_thunks4NootC4flip{{[_0-9a-zA-Z]*}}FTV
 // CHECK:         [[IMPL:%.*]] = function_ref @_T013vtable_thunks4NootC4flip{{[_0-9a-zA-Z]*}}F
 // CHECK:         [[INNER:%.*]] = apply %1(%0)
-// CHECK:         [[THUNK:%.*]] = function_ref @_T013vtable_thunks1SVIxd_ACSgIxd_TR
-// CHECK:         [[OUTER:%.*]] = partial_apply [[THUNK]]([[INNER]])
+// CHECK:         [[THUNK:%.*]] = function_ref @_T013vtable_thunks1SVIegd_ACSgIegd_TR
+// CHECK:         [[OUTER:%.*]] = partial_apply [callee_guaranteed] [[THUNK]]([[INNER]])
 // CHECK:         return [[OUTER]]
 
-// CHECK-LABEL: sil shared [transparent] [serializable] [reabstraction_thunk] @_T013vtable_thunks1SVIxd_ACSgIxd_TR
+// CHECK-LABEL: sil shared [transparent] [serializable] [reabstraction_thunk] @_T013vtable_thunks1SVIegd_ACSgIegd_TR
 // CHECK:         [[INNER:%.*]] = apply %0()
-// CHECK:         [[OUTER:%.*]] = enum $Optional<S>, #Optional.some!enumelt.1, %1 : $S
+// CHECK:         [[OUTER:%.*]] = enum $Optional<S>, #Optional.some!enumelt.1, [[INNER]] : $S
 // CHECK:         return [[OUTER]] : $Optional<S>
 
 // CHECK-LABEL: sil private @_T013vtable_thunks4NootC3map{{[_0-9a-zA-Z]*}}FTV
 // CHECK:         [[IMPL:%.*]] = function_ref @_T013vtable_thunks4NootC3map{{[_0-9a-zA-Z]*}}F
 // CHECK:         [[INNER:%.*]] = apply %1(%0)
-// CHECK:         [[THUNK:%.*]] = function_ref @_T013vtable_thunks1SVSgAA4NootCIxo_Ixyo_AcA3AapCSgIxo_Ixyo_TR
-// CHECK:         [[OUTER:%.*]] = partial_apply [[THUNK]]([[INNER]])
+// CHECK:         [[THUNK:%.*]] = function_ref @_T013vtable_thunks1SVSgAA4NootCIego_Iegyo_AcA3AapCSgIego_Iegyo_TR
+// CHECK:         [[OUTER:%.*]] = partial_apply [callee_guaranteed] [[THUNK]]([[INNER]])
 // CHECK:         return [[OUTER]]
 
-// CHECK-LABEL: sil shared [transparent] [serializable] [reabstraction_thunk] @_T013vtable_thunks1SVSgAA4NootCIxo_Ixyo_AcA3AapCSgIxo_Ixyo_TR
+// CHECK-LABEL: sil shared [transparent] [serializable] [reabstraction_thunk] @_T013vtable_thunks1SVSgAA4NootCIego_Iegyo_AcA3AapCSgIego_Iegyo_TR
 // CHECK:         [[ARG:%.*]] = enum $Optional<S>, #Optional.some!enumelt.1, %0
-// CHECK:         [[INNER:%.*]] = apply %1(%2)
-// CHECK:         [[OUTER:%.*]] = convert_function [[INNER]] : $@callee_owned () -> @owned Noot to $@callee_owned () -> @owned Optional<Aap>
+// CHECK:         [[INNER:%.*]] = apply %1([[ARG]])
+// CHECK:         [[OUTER:%.*]] = convert_function [[INNER]] : $@callee_guaranteed () -> @owned Noot to $@callee_guaranteed () -> @owned Optional<Aap>
 // CHECK:         return [[OUTER]]
+
 // CHECK-LABEL: sil_vtable D {
 // CHECK:         #B.iuo!1: {{.*}} : hidden _T013vtable_thunks1D{{[A-Z0-9a-z_]*}}FTV
 // CHECK:         #B.f!1: {{.*}} : _T013vtable_thunks1D{{[A-Z0-9a-z_]*}}F

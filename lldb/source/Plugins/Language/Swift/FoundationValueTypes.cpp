@@ -13,14 +13,15 @@
 #include "FoundationValueTypes.h"
 #include "ObjCRuntimeSyntheticProvider.h"
 
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
+#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Status.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -37,7 +38,7 @@ bool lldb_private::formatters::swift::Date_SummaryProvider(
     return false;
 
   DataExtractor data_extractor;
-  Error error;
+  Status error;
   if (!time_sp->GetData(data_extractor, error))
     return false;
 
@@ -177,7 +178,7 @@ bool lldb_private::formatters::swift::Measurement_SummaryProvider(
       lldb::eDynamicDontRunTarget, true);
 
   DataExtractor data_extractor;
-  Error error;
+  Status error;
   if (!value_sp->GetData(data_extractor, error))
     return false;
 

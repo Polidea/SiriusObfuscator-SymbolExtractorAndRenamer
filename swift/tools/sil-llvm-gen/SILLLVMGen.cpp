@@ -167,33 +167,13 @@ int main(int argc, char **argv) {
   Opts.OutputFilenames.push_back(OutputFilename);
   Opts.OutputKind = OutputKind;
 
-  // Load the input file.
+  serialization::ExtendedValidationInfo extendedInfo;
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> FileBufOrErr =
-      llvm::MemoryBuffer::getFileOrSTDIN(InputFilename);
+      Invocation.setUpInputForSILTool(InputFilename, ModuleName, false,
+                                      extendedInfo);
   if (!FileBufOrErr) {
     fprintf(stderr, "Error! Failed to open file: %s\n", InputFilename.c_str());
     exit(-1);
-  }
-
-  // If it looks like we have an AST, set the source file kind to SIL and the
-  // name of the module to the file's name.
-  Invocation.addInputBuffer(FileBufOrErr.get().get());
-
-  serialization::ExtendedValidationInfo extendedInfo;
-  auto result = serialization::validateSerializedAST(
-      FileBufOrErr.get()->getBuffer(), &extendedInfo);
-  bool HasSerializedAST = result.status == serialization::Status::Valid;
-
-  if (HasSerializedAST) {
-    const StringRef Stem = ModuleName.size()
-                               ? StringRef(ModuleName)
-                               : llvm::sys::path::stem(InputFilename);
-    Invocation.setModuleName(Stem);
-    Invocation.setInputKind(InputFileKind::IFK_Swift_Library);
-  } else {
-    const StringRef Name = ModuleName.size() ? StringRef(ModuleName) : "main";
-    Invocation.setModuleName(Name);
-    Invocation.setInputKind(InputFileKind::IFK_SIL);
   }
 
   CompilerInstance CI;
@@ -201,14 +181,8 @@ int main(int argc, char **argv) {
   CI.addDiagnosticConsumer(&PrintDiags);
 
   if (!PerformWMO) {
-    auto &FrontendOpts = Invocation.getFrontendOptions();
-    if (!InputFilename.empty() && InputFilename != "-") {
-      FrontendOpts.PrimaryInput =
-          SelectedInput(FrontendOpts.InputFilenames.size());
-    } else {
-      FrontendOpts.PrimaryInput = SelectedInput(
-          FrontendOpts.InputBuffers.size(), SelectedInput::InputKind::Buffer);
-    }
+    Invocation.getFrontendOptions().Inputs.setPrimaryInputForInputFilename(
+        InputFilename);
   }
 
   if (CI.setup(Invocation))
@@ -222,7 +196,7 @@ int main(int argc, char **argv) {
 
   // Load the SIL if we have a module. We have to do this after SILParse
   // creating the unfortunate double if statement.
-  if (HasSerializedAST) {
+  if (Invocation.hasSerializedAST()) {
     assert(!CI.hasSILModule() &&
            "performSema() should not create a SILModule.");
     CI.setSILModule(SILModule::createEmptyModule(

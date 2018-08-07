@@ -261,16 +261,16 @@ void Expr::propagateLValueAccessKind(AccessKind accessKind,
     }
 
     void visitMemberRefExpr(MemberRefExpr *E, AccessKind accessKind) {
-      if (!GetType(E->getBase())->isLValueType()) return;
+      if (!GetType(E->getBase())->hasLValueType()) return;
       visit(E->getBase(), getBaseAccessKind(E->getMember(), accessKind));
     }
     void visitSubscriptExpr(SubscriptExpr *E, AccessKind accessKind) {
-      if (!GetType(E->getBase())->isLValueType()) return;
+      if (!GetType(E->getBase())->hasLValueType()) return;
       visit(E->getBase(), getBaseAccessKind(E->getDecl(), accessKind));
     }
     void visitKeyPathApplicationExpr(KeyPathApplicationExpr *E,
                                      AccessKind accessKind) {
-      if (!GetType(E->getBase())->isLValueType()) return;
+      if (!GetType(E->getBase())->hasLValueType()) return;
       auto kpDecl = GetType(E->getKeyPath())->castTo<BoundGenericType>()
         ->getDecl();
       AccessKind baseAccess;
@@ -301,7 +301,7 @@ void Expr::propagateLValueAccessKind(AccessKind accessKind,
       if ((accessKind != AccessKind::Write &&
            memberDecl->isGetterMutating()) ||
           (accessKind != AccessKind::Read &&
-           !memberDecl->isSetterNonMutating())) {
+           memberDecl->isSetterMutating())) {
         return AccessKind::ReadWrite;
       }
 
@@ -502,6 +502,9 @@ ConcreteDeclRef Expr::getReferencedDecl() const {
   PASS_THROUGH_REFERENCE(PointerToPointer, getSubExpr);
   PASS_THROUGH_REFERENCE(ForeignObjectConversion, getSubExpr);
   PASS_THROUGH_REFERENCE(UnevaluatedInstance, getSubExpr);
+  PASS_THROUGH_REFERENCE(BridgeToObjC, getSubExpr);
+  PASS_THROUGH_REFERENCE(BridgeFromObjC, getSubExpr);
+  PASS_THROUGH_REFERENCE(ConditionalBridgeFromObjC, getSubExpr);
   NO_REFERENCE(Coerce);
   NO_REFERENCE(ForcedCheckedCast);
   NO_REFERENCE(ConditionalCheckedCast);
@@ -789,6 +792,9 @@ bool Expr::canAppendPostfixExpression(bool appendingPostfixOperator) const {
   case ExprKind::ForeignObjectConversion:
   case ExprKind::UnevaluatedInstance:
   case ExprKind::EnumIsCase:
+  case ExprKind::ConditionalBridgeFromObjC:
+  case ExprKind::BridgeFromObjC:
+  case ExprKind::BridgeToObjC:
     // Implicit conversion nodes have no syntax of their own; defer to the
     // subexpression.
     return cast<ImplicitConversionExpr>(this)->getSubExpr()
@@ -999,8 +1005,8 @@ static APInt getIntegerLiteralValue(bool IsNegative, StringRef Text,
   return Value;
 }
 
-APInt IntegerLiteralExpr::getValue(StringRef Text, unsigned BitWidth) {
-  return getIntegerLiteralValue(/*IsNegative=*/false, Text, BitWidth);
+APInt IntegerLiteralExpr::getValue(StringRef Text, unsigned BitWidth, bool Negative) {
+  return getIntegerLiteralValue(Negative, Text, BitWidth);
 }
 
 APInt IntegerLiteralExpr::getValue() const {
@@ -1029,8 +1035,9 @@ static APFloat getFloatLiteralValue(bool IsNegative, StringRef Text,
 }
 
 APFloat FloatLiteralExpr::getValue(StringRef Text,
-                                   const llvm::fltSemantics &Semantics) {
-  return getFloatLiteralValue(/*IsNegative*/false, Text, Semantics);
+                                   const llvm::fltSemantics &Semantics,
+                                   bool Negative) {
+  return getFloatLiteralValue(Negative, Text, Semantics);
 }
 
 llvm::APFloat FloatLiteralExpr::getValue() const {
@@ -1121,7 +1128,8 @@ computeSingleArgumentType(ASTContext &ctx, Expr *arg, bool implicit,
   // Handle parenthesized expressions.
   if (auto paren = dyn_cast<ParenExpr>(arg)) {
     if (auto type = getType(paren->getSubExpr())) {
-      arg->setType(ParenType::get(ctx, type));
+      auto parenFlags = ParameterTypeFlags().withInOut(type->is<InOutType>());
+      arg->setType(ParenType::get(ctx, type->getInOutObjectType(), parenFlags));
     }
     return;
   }
@@ -1133,7 +1141,10 @@ computeSingleArgumentType(ASTContext &ctx, Expr *arg, bool implicit,
     auto type = getType(tuple->getElement(i));
     if (!type) return;
 
-    typeElements.push_back(TupleTypeElt(type, tuple->getElementName(i)));
+    bool isInOut = tuple->getElement(i)->isSemanticallyInOutExpr();
+    typeElements.push_back(TupleTypeElt(type->getInOutObjectType(),
+                                        tuple->getElementName(i),
+                                        ParameterTypeFlags().withInOut(isInOut)));
   }
   arg->setType(TupleType::get(typeElements, ctx));
 }
@@ -1186,7 +1197,7 @@ packSingleArgument(ASTContext &ctx, SourceLoc lParenLoc, ArrayRef<Expr *> args,
       
     auto arg = TupleExpr::create(ctx, lParenLoc, args, argLabels, argLabelLocs,
                                  rParenLoc, /*HasTrailingClosure=*/false,
-                                 /*Implicit=*/false);
+                                 implicit);
     computeSingleArgumentType(ctx, arg, implicit, getType);
     return arg;
   }
@@ -1345,6 +1356,12 @@ bool OverloadSetRefExpr::hasBaseObject() const {
   return false;
 }
 
+InOutExpr::InOutExpr(SourceLoc operLoc, Expr *subExpr, Type baseType,
+                     bool isImplicit)
+  : Expr(ExprKind::InOut, isImplicit,
+         baseType.isNull() ? baseType : InOutType::get(baseType)),
+    SubExpr(subExpr), OperLoc(operLoc) {}
+
 SequenceExpr *SequenceExpr::create(ASTContext &ctx, ArrayRef<Expr*> elements) {
   assert(elements.size() & 1 && "even number of elements in sequence");
   void *Buffer = ctx.Allocate(sizeof(SequenceExpr) +
@@ -1437,6 +1454,16 @@ TupleExpr *TupleExpr::create(ASTContext &ctx,
                              SourceLoc RParenLoc, bool HasTrailingClosure, 
                              bool Implicit, Type Ty) {
   assert(!Ty || isa<TupleType>(Ty.getPointer()));
+  auto hasNonEmptyIdentifier = [](ArrayRef<Identifier> Ids) -> bool {
+    for (auto ident : Ids) {
+      if (!ident.empty())
+        return true;
+    }
+    return false;
+  };
+  assert((Implicit || ElementNames.size() == ElementNameLocs.size() ||
+          (!hasNonEmptyIdentifier(ElementNames) && ElementNameLocs.empty())) &&
+         "trying to create non-implicit tuple-expr without name locations");
 
   size_t size =
       totalSizeToAlloc<Expr *, Identifier, SourceLoc>(SubExprs.size(),
@@ -1565,8 +1592,8 @@ DynamicSubscriptExpr::DynamicSubscriptExpr(Expr *base, Expr *index,
                                            bool hasTrailingClosure,
                                            ConcreteDeclRef member,
                                            bool implicit)
-    : DynamicLookupExpr(ExprKind::DynamicSubscript),
-      Base(base), Index(index), Member(member) {
+    : DynamicLookupExpr(ExprKind::DynamicSubscript, member, base),
+      Index(index) {
   DynamicSubscriptExprBits.NumArgLabels = argLabels.size();
   DynamicSubscriptExprBits.HasArgLabelLocs = !argLabelLocs.empty();
   DynamicSubscriptExprBits.HasTrailingClosure = hasTrailingClosure;
@@ -1949,11 +1976,12 @@ Type TypeExpr::getInstanceType(
 
 
 TypeExpr *TypeExpr::createForDecl(SourceLoc Loc, TypeDecl *Decl,
+                                  DeclContext *DC,
                                   bool isImplicit) {
   ASTContext &C = Decl->getASTContext();
   assert(Loc.isValid() || isImplicit);
   auto *Repr = new (C) SimpleIdentTypeRepr(Loc, Decl->getName());
-  Repr->setValue(Decl);
+  Repr->setValue(Decl, DC);
   auto result = new (C) TypeExpr(TypeLoc(Repr, Type()));
   if (isImplicit)
     result->setImplicit();
@@ -1974,13 +2002,13 @@ TypeExpr *TypeExpr::createForMemberDecl(SourceLoc ParentNameLoc,
   // The first component is the parent type.
   auto *ParentComp = new (C) SimpleIdentTypeRepr(ParentNameLoc,
                                                  Parent->getName());
-  ParentComp->setValue(Parent);
+  ParentComp->setValue(Parent, nullptr);
   Components.push_back(ParentComp);
 
   // The second component is the member we just found.
   auto *NewComp = new (C) SimpleIdentTypeRepr(NameLoc,
                                               Decl->getName());
-  NewComp->setValue(Decl);
+  NewComp->setValue(Decl, nullptr);
   Components.push_back(NewComp);
 
   auto *NewTypeRepr = IdentTypeRepr::create(C, Components);
@@ -1997,9 +2025,11 @@ TypeExpr *TypeExpr::createForMemberDecl(IdentTypeRepr *ParentTR,
   for (auto *Component : ParentTR->getComponentRange())
     Components.push_back(Component);
 
+  assert(!Components.empty());
+
   // Add a new component for the member we just found.
   auto *NewComp = new (C) SimpleIdentTypeRepr(NameLoc, Decl->getName());
-  NewComp->setValue(Decl);
+  NewComp->setValue(Decl, nullptr);
   Components.push_back(NewComp);
 
   auto *NewTypeRepr = IdentTypeRepr::create(C, Components);
@@ -2048,7 +2078,7 @@ TypeExpr *TypeExpr::createForSpecializedDecl(IdentTypeRepr *ParentTR,
     auto *genericComp = new (C) GenericIdentTypeRepr(
       last->getIdLoc(), last->getIdentifier(),
       Args, AngleLocs);
-    genericComp->setValue(last->getBoundDecl());
+    genericComp->setValue(last->getBoundDecl(), last->getDeclContext());
     components.push_back(genericComp);
 
     auto *genericRepr = IdentTypeRepr::create(C, components);

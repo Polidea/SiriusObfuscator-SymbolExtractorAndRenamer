@@ -25,7 +25,7 @@ class FunctionalTests: XCTestCase {
             let pbx = prefix.appending(component: "Library.xcodeproj")
             XCTAssertDirectoryExists(pbx)
             XCTAssertXcodeBuild(project: pbx)
-            let build = prefix.appending(components: "build", "Debug")
+            let build = prefix.appending(components: "build", "Release")
             XCTAssertDirectoryExists(build.appending(component: "Library.framework"))
         }
 #endif
@@ -33,7 +33,7 @@ class FunctionalTests: XCTestCase {
 
     func testSwiftExecWithCDep() {
 #if os(macOS)
-        fixture(name: "ClangModules/SwiftCMixed") { prefix in
+        fixture(name: "CFamilyTargets/SwiftCMixed") { prefix in
             // This will also test Modulemap generation for xcodeproj.
             XCTAssertXcodeprojGen(prefix)
             let pbx = prefix.appending(component: "SwiftCMixed.xcodeproj")
@@ -42,7 +42,7 @@ class FunctionalTests: XCTestCase {
             XCTAssertFileExists(pbx.appending(component: "SeaLib_Info.plist"))
 
             XCTAssertXcodeBuild(project: pbx)
-            let build = prefix.appending(components: "build", "Debug")
+            let build = prefix.appending(components: "build", "Release")
             XCTAssertDirectoryExists(build.appending(component: "SeaLib.framework"))
             XCTAssertFileExists(build.appending(component: "SeaExec"))
             XCTAssertFileExists(build.appending(component: "CExec"))
@@ -76,12 +76,11 @@ class FunctionalTests: XCTestCase {
             }
             let moduleUser = prefix.appending(component: "SystemModuleUser")
             let env = ["PKG_CONFIG_PATH": prefix.asString]
-            XCTAssertBuilds(moduleUser, env: env)
             XCTAssertXcodeprojGen(moduleUser, env: env)
             let pbx = moduleUser.appending(component: "SystemModuleUser.xcodeproj")
             XCTAssertDirectoryExists(pbx)
             XCTAssertXcodeBuild(project: pbx)
-            XCTAssertFileExists(moduleUser.appending(components: "build", "Debug", "SystemModuleUser"))
+            XCTAssertFileExists(moduleUser.appending(components: "build", "Release", "SystemModuleUser"))
         }
 #endif
     }
@@ -93,7 +92,7 @@ class FunctionalTests: XCTestCase {
             let pbx = prefix.appending(component: "PackageWithNonc99NameModules.xcodeproj")
             XCTAssertDirectoryExists(pbx)
             XCTAssertXcodeBuild(project: pbx)
-            let build = prefix.appending(components: "build", "Debug")
+            let build = prefix.appending(components: "build", "Release")
             XCTAssertDirectoryExists(build.appending(component: "A_B.framework"))
             XCTAssertDirectoryExists(build.appending(component: "B_C.framework"))
             XCTAssertDirectoryExists(build.appending(component: "C_D.framework"))
@@ -114,8 +113,6 @@ class FunctionalTests: XCTestCase {
             args: "env", "-u", "TOOLCHAINS", "xcrun", "clang", "-dynamiclib", "/tmp/fake.c", "-o", "/tmp/libfake.dylib")
         // Now we use a fixture for both the system library wrapper and the text executable.
         fixture(name: "Miscellaneous/SystemModules") { prefix in
-            XCTAssertBuilds(prefix.appending(component: "TestExec"), Xld: ["-L/tmp/"])
-            XCTAssertFileExists(prefix.appending(components: "TestExec", ".build", Destination.host.target, "debug", "TestExec"))
             let fakeDir = prefix.appending(component: "CFake")
             XCTAssertDirectoryExists(fakeDir)
             let execDir = prefix.appending(component: "TestExec")
@@ -150,10 +147,24 @@ func XCTAssertXcodeBuild(project: AbsolutePath, file: StaticString = #file, line
             env["TOOLCHAINS"] = "default"
         }
         let xcconfig = project.appending(component: "overrides.xcconfig")
-        let swiftCompilerPath = Resources.default.swiftCompiler.asString
-        try localFileSystem.writeFileContents(xcconfig) {
-            $0 <<< "SWIFT_EXEC = " <<< swiftCompilerPath
+        let swiftCompilerPath = Resources.default.swiftCompiler
+
+        // Override path to the Swift compiler.
+        let stream = BufferedOutputByteStream()
+        stream <<< "SWIFT_EXEC = " <<< swiftCompilerPath.asString <<< "\n"
+
+        // Override Swift libary path, if present.
+        let swiftLibraryPath = resolveSymlinks(swiftCompilerPath).appending(components: "..", "..", "lib", "swift", "macosx")
+        if localFileSystem.exists(swiftCompilerPath) {
+            stream <<< "SWIFT_LIBRARY_PATH = " <<< swiftLibraryPath.asString <<< "\n"
+            stream <<< "TOOLCHAIN_DIR = " <<< swiftCompilerPath.appending(components: "..", "..").asString <<< "\n"
         }
+        
+        // We don't need dSYM generated for tests
+        stream <<< "DEBUG_INFORMATION_FORMAT = dwarf\n"
+        
+        try localFileSystem.writeFileContents(xcconfig, bytes: stream.bytes)
+
         try Process.checkNonZeroExit(
             args: "xcodebuild", "-project", project.asString, "-alltargets", "-xcconfig", xcconfig.asString, environment: env)
     } catch {

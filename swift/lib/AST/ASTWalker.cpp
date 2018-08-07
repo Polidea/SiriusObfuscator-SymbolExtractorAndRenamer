@@ -137,6 +137,12 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
       if (doIt(Inherit))
         return true;
     }
+    if (auto *Where = ED->getTrailingWhereClause()) {
+      for(auto &Req: Where->getRequirements()) {
+        if (doIt(Req))
+          return true;
+      }
+    }
     for (Decl *M : ED->getMembers()) {
       if (doIt(M))
         return true;
@@ -177,7 +183,7 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
   }
 
   bool visitIfConfigDecl(IfConfigDecl *ICD) {
-    // By default, just visit the declarations that are actually
+    // By default, just visit the elements that are actually
     // injected into the enclosing context.
     return false;
   }
@@ -212,15 +218,16 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
   }
 
   bool visitNominalTypeDecl(NominalTypeDecl *NTD) {
-    if (NTD->getGenericParams() &&
-        Walker.shouldWalkIntoGenericParams()) {
+    bool WalkGenerics = NTD->getGenericParams() &&
+        Walker.shouldWalkIntoGenericParams();
+
+    if (WalkGenerics) {
       // Visit generic params
       for (auto GP : NTD->getGenericParams()->getParams()) {
         if (doIt(GP))
           return true;
       }
-      // Visit param conformance
-      for (auto &Req : NTD->getGenericParams()->getRequirements()) {
+      for (auto Req: NTD->getGenericParams()->getNonTrailingRequirements()) {
         if (doIt(Req))
           return true;
       }
@@ -230,13 +237,20 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
       if (doIt(Inherit))
         return true;
     }
-    
+
+    // Visit requirements
     if (auto *Protocol = dyn_cast<ProtocolDecl>(NTD)) {
       if (auto *WhereClause = Protocol->getTrailingWhereClause()) {
         for (auto &Req: WhereClause->getRequirements()) {
           if (doIt(Req))
             return true;
         }
+      }
+    }
+    if (WalkGenerics) {
+      for (auto Req: NTD->getGenericParams()->getTrailingRequirements()) {
+        if (doIt(Req))
+          return true;
       }
     }
     
@@ -256,8 +270,31 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
   }
 
   bool visitSubscriptDecl(SubscriptDecl *SD) {
+    bool WalkGenerics = SD->getGenericParams() &&
+      Walker.shouldWalkIntoGenericParams();
+    if (WalkGenerics) {
+      // Visit generic params
+      for (auto &P : SD->getGenericParams()->getParams()) {
+        if (doIt(P))
+          return true;
+      }
+      for (auto Req : SD->getGenericParams()->getNonTrailingRequirements()) {
+        if (doIt(Req))
+          return true;
+      }
+    }
     visit(SD->getIndices());
-    return doIt(SD->getElementTypeLoc());
+    if (doIt(SD->getElementTypeLoc()))
+      return true;
+
+    if (WalkGenerics) {
+      // Visit generic requirements
+      for (auto Req : SD->getGenericParams()->getTrailingRequirements()) {
+        if (doIt(Req))
+          return true;
+      }
+    }
+    return false;
   }
 
   bool visitMissingMemberDecl(MissingMemberDecl *MMD) {
@@ -268,17 +305,20 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
 #ifndef NDEBUG
     PrettyStackTraceDecl debugStack("walking into body of", AFD);
 #endif
-    if (AFD->getGenericParams() &&
-        Walker.shouldWalkIntoGenericParams()) {
 
+    bool WalkGenerics = AFD->getGenericParams() &&
+        Walker.shouldWalkIntoGenericParams() &&
+        // accessor generics are visited from the storage decl
+        (!isa<FuncDecl>(AFD) || !cast<FuncDecl>(AFD)->isAccessor());
+
+    if (WalkGenerics) {
       // Visit generic params
       for (auto &P : AFD->getGenericParams()->getParams()) {
         if (doIt(P))
           return true;
       }
-
       // Visit param conformance
-      for (auto &Req : AFD->getGenericParams()->getRequirements()) {
+      for (auto Req : AFD->getGenericParams()->getNonTrailingRequirements()) {
         if (doIt(Req))
           return true;
       }
@@ -292,6 +332,14 @@ class Traversal : public ASTVisitor<Traversal, Expr*, Stmt*,
       if (!FD->isAccessor())
         if (doIt(FD->getBodyResultTypeLoc()))
           return true;
+
+    if (WalkGenerics) {
+      // Visit trailing requirments
+      for (auto Req : AFD->getGenericParams()->getTrailingRequirements()) {
+        if (doIt(Req))
+          return true;
+      }
+    }
 
     if (AFD->getBody(/*canSynthesize=*/false)) {
       AbstractFunctionDecl::BodyKind PreservedKind = AFD->getBodyKind();
@@ -1289,14 +1337,6 @@ Stmt *Traversal::visitGuardStmt(GuardStmt *US) {
   return US;
 }
 
-
-Stmt *Traversal::visitIfConfigStmt(IfConfigStmt *ICS) {
-  // Active members are attached to the enclosing declaration, so there's no
-  // need to walk anything within.
-  
-  return ICS;
-}
-
 Stmt *Traversal::visitDoStmt(DoStmt *DS) {
   if (Stmt *S2 = doIt(DS->getBody()))
     DS->setBody(S2);
@@ -1378,41 +1418,6 @@ Stmt *Traversal::visitRepeatWhileStmt(RepeatWhileStmt *RWS) {
   return RWS;
 }
 
-Stmt *Traversal::visitForStmt(ForStmt *FS) {
-  // Visit any var decls in the initializer.
-  for (auto D : FS->getInitializerVarDecls())
-    if (doIt(D))
-      return nullptr;
-
-  if (auto *Initializer = FS->getInitializer().getPtrOrNull()) {
-    if (Expr *E = doIt(Initializer))
-      FS->setInitializer(E);
-    else
-      return nullptr;
-  }
-
-  if (auto *Cond = FS->getCond().getPtrOrNull()) {
-    if (Expr *E2 = doIt(Cond))
-      FS->setCond(E2);
-    else
-      return nullptr;
-
-  }
-
-  if (auto *Increment = FS->getIncrement().getPtrOrNull()) {
-    if (Expr *E = doIt(Increment))
-      FS->setIncrement(E);
-    else
-      return nullptr;
-  }
-
-  if (Stmt *S = doIt(FS->getBody()))
-    FS->setBody(S);
-  else
-    return nullptr;
-  return FS;
-}
-
 Stmt *Traversal::visitForEachStmt(ForEachStmt *S) {
   if (Pattern *P = S->getPattern()) {
     if ((P = doIt(P)))
@@ -1464,12 +1469,19 @@ Stmt *Traversal::visitSwitchStmt(SwitchStmt *S) {
   else
     return nullptr;
 
-  for (CaseStmt *aCase : S->getCases()) {
-    if (Stmt *aStmt = doIt(aCase)) {
-      assert(aCase == aStmt && "switch case remap not supported");
-      (void)aStmt;
-    } else
-      return nullptr;
+  for (auto N : S->getRawCases()) {
+    if (Stmt *aCase = N.dyn_cast<Stmt*>()) {
+      assert(isa<CaseStmt>(aCase));
+      if (Stmt *aStmt = doIt(aCase)) {
+        assert(aCase == aStmt && "switch case remap not supported");
+        (void)aStmt;
+      } else
+        return nullptr;
+    } else {
+      assert(isa<IfConfigDecl>(N.get<Decl*>()));
+      if (doIt(N.get<Decl*>()))
+        return nullptr;
+    }
   }
 
   return S;
@@ -1650,8 +1662,8 @@ bool Traversal::visitImplicitlyUnwrappedOptionalTypeRepr(ImplicitlyUnwrappedOpti
 }
 
 bool Traversal::visitTupleTypeRepr(TupleTypeRepr *T) {
-  for (auto elem : T->getElements()) {
-    if (doIt(elem))
+  for (auto &elem : T->getElements()) {
+    if (doIt(elem.Type))
       return true;
   }
   return false;
@@ -1674,6 +1686,10 @@ bool Traversal::visitProtocolTypeRepr(ProtocolTypeRepr *T) {
 }
 
 bool Traversal::visitInOutTypeRepr(InOutTypeRepr *T) {
+  return doIt(T->getBase());
+}
+
+bool Traversal::visitSharedTypeRepr(SharedTypeRepr *T) {
   return doIt(T->getBase());
 }
 

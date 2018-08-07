@@ -13,6 +13,7 @@
 # ------------------------------------------------------------------------------
 
 import argparse
+import fnmatch
 import os
 import subprocess
 import sys
@@ -42,10 +43,21 @@ parser.add_argument('--foundation', action='store_true',
 
 args = parser.parse_args()
 
+def apply_patches(repo):
+    patches_dir = os.path.dirname(os.path.realpath(__file__))   # patch files will be in scripts/ dir just like this script
+    files = os.listdir(patches_dir)
+    patches = [
+        f for f in files if fnmatch.fnmatch(
+            f, repo + '.*.diff')]
+    for p in patches:
+        subprocess.call(["patch", '-p1', '-i',
+                         os.path.join(patches_dir, p)],
+                         cwd=repo)
 
 def checkout_git(dir, repo, branch):
     if not os.path.isdir(dir):
         subprocess.call(["git", "clone", "-b", branch, repo, dir])
+        apply_patches(dir)
 
 
 def update_git(dir):

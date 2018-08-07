@@ -89,7 +89,7 @@ public func makeDirectories(_ path: AbsolutePath) throws {
 }
 
 /// Recursively deletes the file system entity at `path`.  If there is no file system entity at `path`, this function
-/// does nothing (in particular, this is not considered to be an error).
+/// throws an error.
 public func removeFileTree(_ path: AbsolutePath) throws {
     try FileManager.default.removeItem(atPath: path.asString)
 }
@@ -214,16 +214,13 @@ public class RecursibleDirectoryContentsGenerator: IteratorProtocol, Sequence {
 extension AbsolutePath {
     /// Returns a path suitable for display to the user (if possible, it is made
     /// to be relative to the current working directory).
-    /// - Note: Therefore this function relies on the working directory's not
-    /// changing during execution.
-    public var prettyPath: String {
-        let currDir = currentWorkingDirectory
+    public func prettyPath(cwd: AbsolutePath = currentWorkingDirectory) -> String {
         // FIXME: Instead of string prefix comparison we should add a proper API
         // to AbsolutePath to determine ancestry.
-        if self == currDir {
+        if self == cwd {
             return "."
-        } else if self.asString.hasPrefix(currDir.asString + "/") {
-            return "./" + self.relative(to: currDir).asString
+        } else if self.asString.hasPrefix(cwd.asString + "/") {
+            return "./" + self.relative(to: cwd).asString
         } else {
             return self.asString
         }

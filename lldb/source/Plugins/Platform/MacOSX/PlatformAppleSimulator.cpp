@@ -19,11 +19,12 @@
 #include <thread>
 // Other libraries and framework includes
 // Project includes
-#include "lldb/Core/Error.h"
-#include "lldb/Core/StreamString.h"
+#include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Utility/LLDBAssert.h"
-#include "lldb/Utility/PseudoTerminal.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/StreamString.h"
+#include "llvm/Support/Threading.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -54,14 +55,14 @@ PlatformAppleSimulator::PlatformAppleSimulator()
 //------------------------------------------------------------------
 PlatformAppleSimulator::~PlatformAppleSimulator() {}
 
-lldb_private::Error PlatformAppleSimulator::LaunchProcess(
+lldb_private::Status PlatformAppleSimulator::LaunchProcess(
     lldb_private::ProcessLaunchInfo &launch_info) {
 #if defined(__APPLE__)
   LoadCoreSimulator();
   CoreSimulatorSupport::Device device(GetSimulatorDevice());
 
   if (device.GetState() != CoreSimulatorSupport::Device::State::Booted) {
-    Error boot_err;
+    Status boot_err;
     device.Boot(boot_err);
     if (boot_err.Fail())
       return boot_err;
@@ -71,11 +72,11 @@ lldb_private::Error PlatformAppleSimulator::LaunchProcess(
 
   if (spawned) {
     launch_info.SetProcessID(spawned.GetPID());
-    return Error();
+    return Status();
   } else
     return spawned.GetError();
 #else
-  Error err;
+  Status err;
   err.SetErrorString(UNSUPPORTED_ERROR);
   return err;
 #endif
@@ -123,9 +124,9 @@ void PlatformAppleSimulator::GetStatus(Stream &strm) {
 #endif
 }
 
-Error PlatformAppleSimulator::ConnectRemote(Args &args) {
+Status PlatformAppleSimulator::ConnectRemote(Args &args) {
 #if defined(__APPLE__)
-  Error error;
+  Status error;
   if (args.GetArgumentCount() == 1) {
     if (m_device)
       DisconnectRemote();
@@ -155,18 +156,18 @@ Error PlatformAppleSimulator::ConnectRemote(Args &args) {
   }
   return error;
 #else
-  Error err;
+  Status err;
   err.SetErrorString(UNSUPPORTED_ERROR);
   return err;
 #endif
 }
 
-Error PlatformAppleSimulator::DisconnectRemote() {
+Status PlatformAppleSimulator::DisconnectRemote() {
 #if defined(__APPLE__)
   m_device.reset();
-  return Error();
+  return Status();
 #else
-  Error err;
+  Status err;
   err.SetErrorString(UNSUPPORTED_ERROR);
   return err;
 #endif
@@ -176,7 +177,7 @@ lldb::ProcessSP PlatformAppleSimulator::DebugProcess(
     ProcessLaunchInfo &launch_info, Debugger &debugger,
     Target *target, // Can be NULL, if NULL create a new target, else use
                     // existing one
-    Error &error) {
+    Status &error) {
 #if defined(__APPLE__)
   ProcessSP process_sp;
   // Make sure we stop at the entry point
@@ -243,7 +244,7 @@ FileSpec PlatformAppleSimulator::GetCoreSimulatorPath() {
 void PlatformAppleSimulator::LoadCoreSimulator() {
 #if defined(__APPLE__)
   static std::once_flag g_load_core_sim_flag;
-  std::call_once(g_load_core_sim_flag, [this] {
+  llvm::call_once(g_load_core_sim_flag, [this] {
     const std::string core_sim_path(GetCoreSimulatorPath().GetPath());
     if (core_sim_path.size())
       dlopen(core_sim_path.c_str(), RTLD_LAZY);

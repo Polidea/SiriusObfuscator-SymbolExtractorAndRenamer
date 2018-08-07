@@ -26,6 +26,7 @@
 #define SWIFT_IRGEN_TYPEINFO_H
 
 #include "IRGen.h"
+#include "llvm/ADT/MapVector.h"
 
 namespace llvm {
   class Constant;
@@ -41,6 +42,7 @@ namespace irgen {
   class Address;
   class StackAddress;
   class IRGenFunction;
+  class IRGenTypeVerifierFunction;
   class IRGenModule;
   class Explosion;
   class ExplosionSchema;
@@ -231,10 +233,6 @@ public:
   Address getUndefAddress() const;
     
   /// Return the size and alignment of this type.
-  virtual std::pair<llvm::Value*,llvm::Value*>
-    getSizeAndAlignmentMask(IRGenFunction &IGF, SILType T) const = 0;
-  virtual std::tuple<llvm::Value*,llvm::Value*,llvm::Value*>
-    getSizeAndAlignmentMaskAndStride(IRGenFunction &IGF, SILType T) const = 0;
   virtual llvm::Value *getSize(IRGenFunction &IGF, SILType T) const = 0;
   virtual llvm::Value *getAlignmentMask(IRGenFunction &IGF, SILType T) const = 0;
   virtual llvm::Value *getStride(IRGenFunction &IGF, SILType T) const = 0;
@@ -272,81 +270,43 @@ public:
 
   /// Destroy the value of a variable of this type, then deallocate its
   /// memory.
-  virtual void destroyStack(IRGenFunction &IGF, StackAddress addr,
-                            SILType T) const = 0;
+  virtual void destroyStack(IRGenFunction &IGF, StackAddress addr, SILType T,
+                            bool isOutlined) const = 0;
 
   /// Copy or take a value out of one address and into another, destroying
   /// old value in the destination.  Equivalent to either assignWithCopy
   /// or assignWithTake depending on the value of isTake.
   void assign(IRGenFunction &IGF, Address dest, Address src, IsTake_t isTake,
-              SILType T) const;
+              SILType T, bool isOutlined) const;
 
   /// Copy a value out of an object and into another, destroying the
   /// old value in the destination.
-  virtual void assignWithCopy(IRGenFunction &IGF, Address dest,
-                              Address src, SILType T) const = 0;
+  virtual void assignWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                              SILType T, bool isOutlined) const = 0;
 
   /// Move a value out of an object and into another, destroying the
   /// old value there and leaving the source object in an invalid state.
-  virtual void assignWithTake(IRGenFunction &IGF, Address dest,
-                              Address src, SILType T) const = 0;
+  virtual void assignWithTake(IRGenFunction &IGF, Address dest, Address src,
+                              SILType T, bool isOutlined) const = 0;
 
   /// Copy-initialize or take-initialize an uninitialized object
   /// with the value from a different object.  Equivalent to either
   /// initializeWithCopy or initializeWithTake depending on the value
   /// of isTake.
   void initialize(IRGenFunction &IGF, Address dest, Address src,
-                  IsTake_t isTake, SILType T) const;
+                  IsTake_t isTake, SILType T, bool isOutlined) const;
 
   /// Perform a "take-initialization" from the given object.  A
   /// take-initialization is like a C++ move-initialization, except that
   /// the old object is actually no longer permitted to be destroyed.
   virtual void initializeWithTake(IRGenFunction &IGF, Address destAddr,
-                                  Address srcAddr, SILType T) const = 0;
+                                  Address srcAddr, SILType T,
+                                  bool isOutlined) const = 0;
 
   /// Perform a copy-initialization from the given object.
   virtual void initializeWithCopy(IRGenFunction &IGF, Address destAddr,
-                                  Address srcAddr, SILType T) const = 0;
-
-  /// Allocate space for an object of this type within an uninitialized
-  /// fixed-size buffer.
-  virtual Address allocateBuffer(IRGenFunction &IGF, Address buffer,
-                                 SILType T) const;
-
-  /// Project the address of an object of this type from an initialized
-  /// fixed-size buffer.
-  virtual Address projectBuffer(IRGenFunction &IGF, Address buffer,
-                                SILType T) const;
-
-  /// Perform a "take-initialization" from the given object into an
-  /// uninitialized fixed-size buffer, allocating the buffer if necessary.
-  /// Returns the address of the value inside the buffer.
-  ///
-  /// This is equivalent to:
-  ///   auto destAddress = allocateBuffer(IGF, destBuffer, T);
-  ///   initializeWithTake(IGF, destAddr, srcAddr, T);
-  ///   return destAddress;
-  /// but will be more efficient for dynamic types, since it uses a single
-  /// value witness call.
-  virtual Address initializeBufferWithTake(IRGenFunction &IGF,
-                                           Address destBuffer,
-                                           Address srcAddr,
-                                           SILType T) const;
-
-  /// Perform a copy-initialization from the given object into an
-  /// uninitialized fixed-size buffer, allocating the buffer if necessary.
-  /// Returns the address of the value inside the buffer.
-  ///
-  /// This is equivalent to:
-  ///   auto destAddress = allocateBuffer(IGF, destBuffer, T);
-  ///   initializeWithCopy(IGF, destAddr, srcAddr, T);
-  ///   return destAddress;
-  /// but will be more efficient for dynamic types, since it uses a single
-  /// value witness call.
-  virtual Address initializeBufferWithCopy(IRGenFunction &IGF,
-                                           Address destBuffer,
-                                           Address srcAddr,
-                                           SILType T) const;
+                                  Address srcAddr, SILType T,
+                                  bool isOutlined) const = 0;
 
   /// Perform a copy-initialization from the given fixed-size buffer
   /// into an uninitialized fixed-size buffer, allocating the buffer if
@@ -379,29 +339,14 @@ public:
                                                    Address srcBuffer,
                                                    SILType T) const;
 
-  /// Destroy an object of this type within an initialized fixed-size buffer
-  /// and deallocate the buffer.
-  ///
-  /// This is equivalent to:
-  ///   auto valueAddr = projectBuffer(IGF, buffer, T);
-  ///   destroy(IGF, valueAddr, T);
-  ///   deallocateBuffer(IGF, buffer, T);
-  /// but will be more efficient for dynamic types, since it uses a single
-  /// value witness call.
-  virtual void destroyBuffer(IRGenFunction &IGF, Address buffer,
-                             SILType T) const;
-
-  /// Deallocate the space for an object of this type within an initialized
-  /// fixed-size buffer.
-  virtual void deallocateBuffer(IRGenFunction &IGF, Address buffer,
-                                SILType T) const;
-
   /// Take-initialize an address from a parameter explosion.
   virtual void initializeFromParams(IRGenFunction &IGF, Explosion &params,
-                                    Address src, SILType T) const = 0;
+                                    Address src, SILType T,
+                                    bool isOutlined) const = 0;
 
   /// Destroy an object of this type in memory.
-  virtual void destroy(IRGenFunction &IGF, Address address, SILType T) const = 0;
+  virtual void destroy(IRGenFunction &IGF, Address address, SILType T,
+                       bool isOutlined) const = 0;
 
   /// Should optimizations be enabled which rely on the representation
   /// for this type being a single object pointer?
@@ -450,6 +395,20 @@ public:
                                   llvm::Value *metadata,
                                   llvm::Value *vwtable,
                                   SILType T) const = 0;
+
+  /// Get the tag of a single payload enum with a payload of this type (\p T) e.g
+  /// Optional<T>.
+  virtual llvm::Value *getEnumTagSinglePayload(IRGenFunction &IGF,
+                                               llvm::Value *numEmptyCases,
+                                               Address enumAddr,
+                                               SILType T) const = 0;
+
+  /// Store the tag of a single payload enum with a payload of this type.
+  virtual void storeEnumTagSinglePayload(IRGenFunction &IGF,
+                                         llvm::Value *whichCase,
+                                         llvm::Value *numEmptyCases,
+                                         Address enumAddr,
+                                         SILType T) const = 0;
   
   /// Compute the packing of values of this type into a fixed-size buffer.
   FixedPacking getFixedPacking(IRGenModule &IGM) const;
@@ -474,6 +433,12 @@ public:
                                        llvm::Value *count, SILType T) const;
   
   /// Initialize an array of objects of this type in memory by taking the
+  /// values from another array. The array must not overlap.
+  virtual void initializeArrayWithTakeNoAlias(IRGenFunction &IGF,
+                                       Address dest, Address src,
+                                       llvm::Value *count, SILType T) const;
+
+  /// Initialize an array of objects of this type in memory by taking the
   /// values from another array. The destination array may overlap the head of
   /// the source array because the elements are taken as if in front-to-back
   /// order.
@@ -489,11 +454,52 @@ public:
                                        Address dest, Address src,
                                        llvm::Value *count, SILType T) const;
 
+  /// Assign to an array of objects of this type in memory by copying the
+  /// values from another array. The array must not overlap.
+  virtual void assignArrayWithCopyNoAlias(IRGenFunction &IGF, Address dest,
+                                          Address src, llvm::Value *count,
+                                          SILType T) const;
+
+  /// Assign to an array of objects of this type in memory by copying the
+  /// values from another array. The destination array may overlap the head of
+  /// the source array because the elements are taken as if in front-to-back
+  /// order.
+  virtual void assignArrayWithCopyFrontToBack(IRGenFunction &IGF, Address dest,
+                                              Address src, llvm::Value *count,
+                                              SILType T) const;
+
+  /// Assign to an array of objects of this type in memory by copying the
+  /// values from another array. The destination array may overlap the tail of
+  /// the source array because the elements are taken as if in back-to-front
+  /// order.
+  virtual void assignArrayWithCopyBackToFront(IRGenFunction &IGF, Address dest,
+                                              Address src, llvm::Value *count,
+                                              SILType T) const;
+
+  /// Assign to an array of objects of this type in memory by taking the
+  /// values from another array. The array must not overlap.
+  virtual void assignArrayWithTake(IRGenFunction &IGF, Address dest,
+                                   Address src, llvm::Value *count,
+                                   SILType T) const;
+
+  /// Outlining helper function: recursively traverse the SILType:
+  /// When encountering an Archetype - add it to a type-metadata vec.
+  virtual void collectArchetypeMetadata(
+      IRGenFunction &IGF,
+      llvm::MapVector<CanType, llvm::Value *> &typeToMetadataVec,
+      SILType T) const;
+
   /// Get the native (abi) convention for a return value of this type.
   const NativeConventionSchema &nativeReturnValueSchema(IRGenModule &IGM) const;
 
   /// Get the native (abi) convention for a parameter value of this type.
   const NativeConventionSchema &nativeParameterValueSchema(IRGenModule &IGM) const;
+  
+  /// Emit verifier code that compares compile-time constant knowledge of
+  /// this kind of type's traits to its runtime manifestation.
+  virtual void verify(IRGenTypeVerifierFunction &IGF,
+                      llvm::Value *typeMetadata,
+                      SILType T) const;
 };
 
 } // end namespace irgen

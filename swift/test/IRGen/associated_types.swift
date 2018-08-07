@@ -1,6 +1,6 @@
 // RUN: %target-swift-frontend -assume-parsing-unqualified-ownership-sil -emit-ir -primary-file %s | %FileCheck %s
 
-// REQUIRES: CPU=i386_or_x86_64
+// REQUIRES: CPU=i386 || CPU=x86_64
 
 protocol Runcer {
   associatedtype Runcee
@@ -66,7 +66,8 @@ protocol FastRuncible {
 // information for archetypes from all paths to that archetype, not just
 // its parent relationships.
 
-func testFastRuncible<T: Runcible, U: FastRuncible where T.RuncerType == U.RuncerType>(_ t: T, u: U) {
+func testFastRuncible<T: Runcible, U: FastRuncible>(_ t: T, u: U)
+   where T.RuncerType == U.RuncerType {
   U.RuncerType.Runcee.accelerate()
 }
 

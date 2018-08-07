@@ -38,7 +38,6 @@ DataTestSuite.test("associated types") {
     iteratorType: Data.Iterator.self,
     subSequenceType: Subject.self,
     indexType: Int.self,
-    indexDistanceType: Int.self,
     indicesType: CountableRange<Int>.self)
 }
 
@@ -46,10 +45,7 @@ DataTestSuite.test("Data SubSequence") {
   let array: [UInt8] = [0, 1, 2, 3, 4, 5, 6, 7]
   var data = Data(bytes: array)
 
-  // FIXME: Iteration over Data slices is currently broken:
-  // [SR-4292] Foundation.Data.copyBytes is zero-based.
-  //           Data.Iterator assumes it is not.
-  // checkRandomAccessCollection(array, data)
+  checkRandomAccessCollection(array, data)
 
   for i in 0..<data.count {
     for j in i..<data.count {
@@ -59,10 +55,7 @@ DataTestSuite.test("Data SubSequence") {
         expectEqual(dataSlice.startIndex, i)
         expectEqual(dataSlice.endIndex, j)
         
-        // FIXME: Iteration over Data slices is currently broken:
-        // [SR-4292] Foundation.Data.copyBytes is zero-based.
-        //           Data.Iterator assumes it is not.
-        // expectEqual(dataSlice[i], arraySlice[i])
+        expectEqual(dataSlice[i], arraySlice[i])
 
         dataSlice[i] = 0xFF
         

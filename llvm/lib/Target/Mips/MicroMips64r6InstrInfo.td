@@ -352,6 +352,8 @@ class LWUPC_MM64R6_DESC {
   bit IsPCRelativeLoad = 1;
 }
 
+class JRC16_64_MMR6_DESC : JRC16_MMR6_DESC_BASE<"jrc16", GPR64Opnd>;
+
 //===----------------------------------------------------------------------===//
 //
 // Instruction Definitions
@@ -465,6 +467,9 @@ let DecoderNamespace = "MicroMipsR6" in {
   def LWUPC_MM64R6 : R6MMR6Rel, LWUPC_MM64R6_ENC, LWUPC_MM64R6_DESC,
                      ISA_MICROMIPS64R6;
 }
+let DecoderNamespace = "MicroMips64r6" in
+  def JRC16_64_MMR6 : R6MMR6Rel, JRC16_64_MMR6_DESC, JRC16_MMR6_ENC,
+                      ISA_MICROMIPS64R6;
 
 let AdditionalPredicates = [InMicroMips] in
 defm : MaterializeImms<i64, ZERO_64, DADDIU_MM64R6, LUi64, ORi64>;
@@ -475,29 +480,11 @@ defm : MaterializeImms<i64, ZERO_64, DADDIU_MM64R6, LUi64, ORi64>;
 //
 //===----------------------------------------------------------------------===//
 
-def : MipsPat<(MipsLo tglobaladdr:$in),
-              (DADDIU_MM64R6 ZERO_64, tglobaladdr:$in)>, ISA_MICROMIPS64R6;
-def : MipsPat<(MipsLo tblockaddress:$in),
-              (DADDIU_MM64R6 ZERO_64, tblockaddress:$in)>, ISA_MICROMIPS64R6;
-def : MipsPat<(MipsLo tjumptable:$in),
-              (DADDIU_MM64R6 ZERO_64, tjumptable:$in)>, ISA_MICROMIPS64R6;
-def : MipsPat<(MipsLo tconstpool:$in),
-              (DADDIU_MM64R6 ZERO_64, tconstpool:$in)>, ISA_MICROMIPS64R6;
-def : MipsPat<(MipsLo tglobaltlsaddr:$in),
-              (DADDIU_MM64R6 ZERO_64, tglobaltlsaddr:$in)>, ISA_MICROMIPS64R6;
-def : MipsPat<(MipsLo texternalsym:$in),
-              (DADDIU_MM64R6 ZERO_64, texternalsym:$in)>, ISA_MICROMIPS64R6;
+defm : MipsHiLoRelocs<LUi64, DADDIU_MM64R6, ZERO_64, GPR64Opnd>, SYM_32,
+                      ISA_MICROMIPS64R6;
 
-def : MipsPat<(add GPR64:$hi, (MipsLo tglobaladdr:$lo)),
-              (DADDIU_MM64R6 GPR64:$hi, tglobaladdr:$lo)>, ISA_MICROMIPS64R6;
-def : MipsPat<(add GPR64:$hi, (MipsLo tblockaddress:$lo)),
-              (DADDIU_MM64R6 GPR64:$hi, tblockaddress:$lo)>, ISA_MICROMIPS64R6;
-def : MipsPat<(add GPR64:$hi, (MipsLo tjumptable:$lo)),
-              (DADDIU_MM64R6 GPR64:$hi, tjumptable:$lo)>, ISA_MICROMIPS64R6;
-def : MipsPat<(add GPR64:$hi, (MipsLo tconstpool:$lo)),
-              (DADDIU_MM64R6 GPR64:$hi, tconstpool:$lo)>, ISA_MICROMIPS64R6;
-def : MipsPat<(add GPR64:$hi, (MipsLo tglobaltlsaddr:$lo)),
-              (DADDIU_MM64R6 GPR64:$hi, tglobaltlsaddr:$lo)>, ISA_MICROMIPS64R6;
+defm : MipsHighestHigherHiLoRelocs<LUi64, DADDIU_MM64R6>, SYM_64,
+                                   ISA_MICROMIPS64R6;
 
 def : MipsPat<(addc GPR64:$lhs, GPR64:$rhs),
               (DADDU_MM64R6 GPR64:$lhs, GPR64:$rhs)>, ISA_MICROMIPS64R6;
@@ -522,6 +509,9 @@ def : MipsPat<(subc GPR64:$lhs, GPR64:$rhs),
               (DSUBU_MM64R6 GPR64:$lhs, GPR64:$rhs)>, ISA_MICROMIPS64R6;
 
 def : MipsPat<(atomic_load_64 addr:$a), (LD_MM64R6 addr:$a)>, ISA_MICROMIPS64R6;
+
+def TAILCALLREG64_MMR6 : TailCallReg<JRC16_64_MMR6, GPR64Opnd>,
+                         ISA_MICROMIPS64R6;
 
 //===----------------------------------------------------------------------===//
 //
@@ -566,3 +556,15 @@ def : MipsInstAlias<"dnegu $rt, $rs",
 def : MipsInstAlias<"dnegu $rt",
                     (DSUBU_MM64R6 GPR64Opnd:$rt, ZERO_64, GPR64Opnd:$rt), 1>,
                     ISA_MICROMIPS64R6;
+def : MipsInstAlias<"dsll $rd, $rt, $rs",
+                    (DSLLV_MM64R6 GPR64Opnd:$rd, GPR64Opnd:$rt,
+                                  GPR32Opnd:$rs), 0>, ISA_MICROMIPS64R6;
+def : MipsInstAlias<"dsrl $rd, $rt, $rs",
+                    (DSRLV_MM64R6 GPR64Opnd:$rd, GPR64Opnd:$rt,
+                                  GPR32Opnd:$rs), 0>, ISA_MICROMIPS64R6;
+def : MipsInstAlias<"dsrl $rd, $rt",
+                    (DSRLV_MM64R6 GPR64Opnd:$rd, GPR64Opnd:$rd,
+                                  GPR32Opnd:$rt), 0>, ISA_MICROMIPS64R6;
+def : MipsInstAlias<"dsll $rd, $rt",
+                    (DSLLV_MM64R6 GPR64Opnd:$rd, GPR64Opnd:$rd,
+                                  GPR32Opnd:$rt), 0>, ISA_MICROMIPS64R6;

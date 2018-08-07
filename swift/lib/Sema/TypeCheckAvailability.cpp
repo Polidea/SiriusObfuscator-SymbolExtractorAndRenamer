@@ -1499,6 +1499,27 @@ bool TypeChecker::isInsideUnavailableDeclaration(
                                   IsUnavailable);
 }
 
+bool TypeChecker::isInsideCompatibleUnavailableDeclaration(
+    SourceRange ReferenceRange, const DeclContext *ReferenceDC,
+    const AvailableAttr *attr) {
+  if (!attr->isUnconditionallyUnavailable()) {
+    return false;
+  }
+  PlatformKind platform = attr->Platform;
+  if (platform == PlatformKind::none) {
+    return false;
+  }
+
+  auto IsUnavailable = [platform](const Decl *D) {
+    auto EnclosingUnavailable =
+        D->getAttrs().getUnavailable(D->getASTContext());
+    return EnclosingUnavailable && EnclosingUnavailable->Platform == platform;
+  };
+
+  return someEnclosingDeclMatches(ReferenceRange, ReferenceDC, *this,
+                                  IsUnavailable);
+}
+
 bool TypeChecker::isInsideDeprecatedDeclaration(SourceRange ReferenceRange,
                                                 const DeclContext *ReferenceDC){
   auto IsDeprecated = [](const Decl *D) {
@@ -2093,6 +2114,14 @@ bool TypeChecker::diagnoseExplicitUnavailability(
     return false;
   }
 
+  // Calling unavailable code from within code with the same
+  // unavailability is OK -- the eventual caller can't call the
+  // enclosing code in the same situations it wouldn't be able to
+  // call this code.
+  if (isInsideCompatibleUnavailableDeclaration(R, DC, Attr)) {
+    return false;
+  }
+
   SourceLoc Loc = R.Start;
   auto Name = D->getFullName();
 
@@ -2461,8 +2490,8 @@ bool AvailabilityWalker::diagnoseIncDecRemoval(const ValueDecl *D,
                                                SourceRange R,
                                                const AvailableAttr *Attr) {
   // We can only produce a fixit if we're talking about ++ or --.
-  bool isInc = D->getNameStr() == "++";
-  if (!isInc && D->getNameStr() != "--")
+  bool isInc = D->getBaseName() == "++";
+  if (!isInc && D->getBaseName() != "--")
     return false;
 
   // We can only handle the simple cases of lvalue++ and ++lvalue.  This is
@@ -2522,11 +2551,15 @@ bool AvailabilityWalker::diagnoseMemoryLayoutMigration(const ValueDecl *D,
   if (!D->getModuleContext()->isStdlibModule())
     return false;
 
-  StringRef Property = llvm::StringSwitch<StringRef>(D->getNameStr())
-    .Case("sizeof", "size")
-    .Case("alignof", "alignment")
-    .Case("strideof", "stride")
-    .Default(StringRef());
+  StringRef Property;
+  if (D->getBaseName() == "sizeof") {
+    Property = "size";
+  } else if (D->getBaseName() == "alignof") {
+    Property = "alignment";
+  } else if (D->getBaseName() == "strideof") {
+    Property = "stride";
+  }
+
   if (Property.empty())
     return false;
 

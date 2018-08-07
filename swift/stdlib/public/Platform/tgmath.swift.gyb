@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+import SwiftShims
+
 // Generic functions implementable directly on FloatingPoint.
 @_transparent
 public func fabs<T: FloatingPoint>(_ x: T) -> T
@@ -214,15 +216,15 @@ public func ${bfunc}(_ lhs: ${T}, _ rhs: ${T}) -> ${T} {
 @available(*, deprecated, message: "use the floatingPointClass property.")
 public func fpclassify(_ value: ${T}) -> Int {
 %if T == 'Double':
-#if os(Linux)
+#if os(Linux) || os(Haiku)
   return Int(__fpclassify(CDouble(value)))
-#elseif os(Windows) && !CYGWIN
+#elseif os(Windows) 
   return Int(_dclass(CDouble(value)))
 #else
   return Int(__fpclassifyd(CDouble(value)))
 #endif
 %else:
-#if os(Windows) && !CYGWIN
+#if os(Windows) 
   return Int(_${f}dclass(${CT}(value)))
 #else
   return Int(__fpclassify${f}(${CT}(value)))
@@ -298,7 +300,7 @@ public func scalbn(_ x: ${T}, _ n: Int) -> ${T} {
 
 % # This is AllFloatTypes not OverlayFloatTypes because of the tuple return.
 % for T, CT, f in AllFloatTypes():
-#if os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
+#if os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Cygwin) || os(Haiku)
 @_transparent
 public func lgamma(_ x: ${T}) -> (${T}, Int) {
   var sign = Int32(0)
@@ -306,30 +308,16 @@ public func lgamma(_ x: ${T}) -> (${T}, Int) {
   return (${T}(value), Int(sign))
 }
 #elseif os(Windows)
-#if CYGWIN
-@_transparent
-public func lgamma(_ x: ${T}) -> (${T}, Int) {
-  var sign = Int32(0)
-  let value = lgamma${f}_r(${CT}(x), &sign)
-  return (${T}(value), Int(sign))
-}
-#else
 // TODO(compnerd): implement
-#endif
 #else
-% # On Darwin platform,
-% # The real lgamma_r is not imported because it hides behind macro _REENTRANT.
-@_versioned
-@_silgen_name("_swift_Darwin_lgamma${f}_r")
-func _swift_Darwin_lgamma${f}_r(_: ${CT},
-                                _: UnsafeMutablePointer<Int32>) -> ${CT}
-
-@_transparent
+% # On Darwin platforms the real lgamma_r is not imported
+% # because it hides behind macro _REENTRANT.
+% # This is not @transparent because _stdlib_lgamma() is not public.
 public func lgamma(_ x: ${T}) -> (${T}, Int) {
   var sign = Int32(0)
   let value = withUnsafeMutablePointer(to: &sign) {
     (signp: UnsafeMutablePointer<Int32>) -> ${CT} in
-    return _swift_Darwin_lgamma${f}_r(${CT}(x), signp)
+    return _stdlib_lgamma${f}_r(${CT}(x), signp)
   }
   return (${T}(value), Int(sign))
 }
@@ -360,11 +348,7 @@ public func nan(_ tag: String) -> ${T} {
 @_transparent
 public func jn(_ n: Int, _ x: Double) -> Double {
 #if os(Windows)
-#if CYGWIN
-  return jn(Int32(n), x)
-#else
   return _jn(Int32(n), x)
-#endif
 #else
   return jn(Int32(n), x)
 #endif
@@ -373,11 +357,7 @@ public func jn(_ n: Int, _ x: Double) -> Double {
 @_transparent
 public func yn(_ n: Int, _ x: Double) -> Double {
 #if os(Windows)
-#if CYGWIN
-  return yn(Int32(n), x)
-#else
   return _yn(Int32(n), x)
-#endif
 #else
   return yn(Int32(n), x)
 #endif

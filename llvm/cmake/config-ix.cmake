@@ -8,6 +8,7 @@ include(CheckIncludeFileCXX)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
+include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
@@ -46,7 +47,6 @@ endfunction()
 check_include_file(dirent.h HAVE_DIRENT_H)
 check_include_file(dlfcn.h HAVE_DLFCN_H)
 check_include_file(errno.h HAVE_ERRNO_H)
-check_include_file(execinfo.h HAVE_EXECINFO_H)
 check_include_file(fcntl.h HAVE_FCNTL_H)
 check_include_file(inttypes.h HAVE_INTTYPES_H)
 check_include_file(link.h HAVE_LINK_H)
@@ -86,6 +86,15 @@ if(APPLE)
      asm(\".desc ___crashreporter_info__, 0x10\");
      int main() { return 0; }"
     HAVE_CRASHREPORTER_INFO)
+endif()
+
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  check_include_file(linux/magic.h HAVE_LINUX_MAGIC_H)
+  if(NOT HAVE_LINUX_MAGIC_H)
+    # older kernels use split files
+    check_include_file(linux/nfs_fs.h HAVE_LINUX_NFS_FS_H)
+    check_include_file(linux/smb.h HAVE_LINUX_SMB_H)
+  endif()
 endif()
 
 # library checks
@@ -156,7 +165,17 @@ endif()
 
 # function checks
 check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
-check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
+find_package(Backtrace)
+set(HAVE_BACKTRACE ${Backtrace_FOUND})
+set(BACKTRACE_HEADER ${Backtrace_HEADER})
+
+# Prevent check_symbol_exists from using API that is not supported for a given
+# deployment target.
+check_c_compiler_flag("-Werror=unguarded-availability-new" "C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW")
+if(C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW)
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -Werror=unguarded-availability-new")
+endif()
+
 check_symbol_exists(_Unwind_Backtrace "unwind.h" HAVE__UNWIND_BACKTRACE)
 check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
 check_symbol_exists(sysconf unistd.h HAVE_SYSCONF)
@@ -227,6 +246,7 @@ if( HAVE_DLFCN_H )
     list(APPEND CMAKE_REQUIRED_LIBRARIES dl)
   endif()
   check_symbol_exists(dlopen dlfcn.h HAVE_DLOPEN)
+  check_symbol_exists(dladdr dlfcn.h HAVE_DLADDR)
   if( HAVE_LIBDL )
     list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES dl)
   endif()
@@ -234,7 +254,15 @@ endif()
 
 check_symbol_exists(__GLIBC__ stdio.h LLVM_USING_GLIBC)
 if( LLVM_USING_GLIBC )
-  add_llvm_definitions( -D_GNU_SOURCE )
+  add_definitions( -D_GNU_SOURCE )
+endif()
+# This check requires _GNU_SOURCE
+if(HAVE_LIBPTHREAD)
+  check_library_exists(pthread pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(pthread pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
+elseif(PTHREAD_IN_LIBC)
+  check_library_exists(c pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(c pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
 endif()
 
 set(headers "sys/types.h")
@@ -489,8 +517,6 @@ if (LLVM_ENABLE_ZLIB )
   endif()
 endif()
 
-set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
-
 if (LLVM_ENABLE_DOXYGEN)
   message(STATUS "Doxygen enabled.")
   find_package(Doxygen REQUIRED)
@@ -511,16 +537,6 @@ if (LLVM_ENABLE_DOXYGEN)
   endif()
 else()
   message(STATUS "Doxygen disabled.")
-endif()
-
-if (LLVM_ENABLE_SPHINX)
-  message(STATUS "Sphinx enabled.")
-  find_package(Sphinx REQUIRED)
-  if (LLVM_BUILD_DOCS)
-    add_custom_target(sphinx ALL)
-  endif()
-else()
-  message(STATUS "Sphinx disabled.")
 endif()
 
 set(LLVM_BINDINGS "")
@@ -593,3 +609,34 @@ else()
 endif()
 
 string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")
+
+function(find_python_module module)
+  string(TOUPPER ${module} module_upper)
+  set(FOUND_VAR PY_${module_upper}_FOUND)
+
+  execute_process(COMMAND "${PYTHON_EXECUTABLE}" "-c" "import ${module}"
+    RESULT_VARIABLE status
+    ERROR_QUIET)
+
+  if(status)
+    set(${FOUND_VAR} 0 PARENT_SCOPE)
+    message(STATUS "Could NOT find Python module ${module}")
+  else()
+    set(${FOUND_VAR} 1 PARENT_SCOPE)
+    message(STATUS "Found Python module ${module}")
+  endif()
+endfunction()
+
+set (PYTHON_MODULES
+  pygments
+  yaml
+  )
+foreach(module ${PYTHON_MODULES})
+  find_python_module(${module})
+endforeach()
+
+if(PY_PYGMENTS_FOUND AND PY_YAML_FOUND)
+  set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
+else()
+  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
+endif()

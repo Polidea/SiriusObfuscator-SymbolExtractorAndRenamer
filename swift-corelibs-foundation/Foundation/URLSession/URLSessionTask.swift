@@ -21,10 +21,14 @@
 import CoreFoundation
 import Dispatch
 
-
 /// A cancelable object that refers to the lifetime
 /// of processing a given request.
 open class URLSessionTask : NSObject, NSCopying {
+    
+    public var countOfBytesClientExpectsToReceive: Int64 { NSUnimplemented() }
+    public var countOfBytesClientExpectsToSend: Int64 { NSUnimplemented() }
+    public var earliestBeginDate: Date? { NSUnimplemented() }
+    
     /// How many times the task has been suspended, 0 indicating a running task.
     internal var suspendCount = 1
     internal var session: URLSessionProtocol! //change to nil when task completes
@@ -154,7 +158,7 @@ open class URLSessionTask : NSObject, NSCopying {
     /// Number of body bytes we expect to send, derived from the Content-Length of the HTTP request */
     open internal(set) var countOfBytesExpectedToSend: Int64 = 0
     
-    /// Number of byte bytes we expect to receive, usually derived from the Content-Length header of an HTTP response. */
+    /// Number of bytes we expect to receive, usually derived from the Content-Length header of an HTTP response. */
     open internal(set) var countOfBytesExpectedToReceive: Int64 = 0
     
     /// The taskDescription property is available for the developer to
@@ -301,6 +305,12 @@ extension URLSessionTask {
         case canceling
         /// The task has completed and the session will receive no more delegate notifications
         case completed
+    }
+}
+
+extension URLSessionTask : ProgressReporting {
+    public var progress: Progress {
+        NSUnimplemented()
     }
 }
 

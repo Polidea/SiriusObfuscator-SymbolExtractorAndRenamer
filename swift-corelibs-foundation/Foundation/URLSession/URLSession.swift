@@ -137,11 +137,6 @@
 /// - SeeAlso: https://curl.haxx.se/libcurl/c/threadsafe.html
 /// - SeeAlso: URLSession+libcurl.swift
 ///
-/// The (publicly accessible) attributes of an `URLSessionTask` are made thread
-/// safe by using a concurrent libdispatch queue and only doing writes with a
-/// barrier while allowing concurrent reads. A single queue is shared for all
-/// tasks of a given session for this isolation. C.f. `taskAttributesIsolation`.
-///
 /// ## HTTP and RFC 2616
 ///
 /// Most of HTTP is defined in [RFC 2616](https://tools.ietf.org/html/rfc2616).
@@ -171,6 +166,13 @@
 import CoreFoundation
 import Dispatch
 
+extension URLSession {
+    public enum DelayedRequestDisposition {
+        case cancel
+        case continueLoading
+        case useNewRequest
+    }
+}
 
 fileprivate let globalVarSyncQ = DispatchQueue(label: "org.swift.Foundation.URLSession.GlobalVarSyncQ")
 fileprivate var sessionCounter = Int32(0)
@@ -187,9 +189,6 @@ open class URLSession : NSObject {
     fileprivate let multiHandle: _MultiHandle
     fileprivate var nextTaskIdentifier = 1
     internal let workQueue: DispatchQueue 
-    /// This queue is used to make public attributes on `URLSessionTask` instances thread safe.
-    /// - Note: It's a **concurrent** queue.
-    internal let taskAttributesIsolation: DispatchQueue 
     internal let taskRegistry = URLSession._TaskRegistry()
     fileprivate let identifier: Int32
     fileprivate var invalidated = false
@@ -202,8 +201,19 @@ open class URLSession : NSObject {
      * The shared session uses the currently set global URLCache,
      * HTTPCookieStorage and URLCredential.Storage objects.
      */
-    open class var shared: URLSession { NSUnimplemented() }
-    
+    open class var shared: URLSession {
+        return _shared
+    }
+
+    fileprivate static let _shared: URLSession = {
+        var configuration = URLSessionConfiguration.default
+        configuration.httpCookieStorage = HTTPCookieStorage.shared
+        //TODO: Set urlCache to URLCache.shared. Needs implementation of URLCache.
+        //TODO: Set urlCredentialStorage to `URLCredentialStorage.shared`. Needs implementation of URLCredentialStorage.
+        configuration.protocolClasses = URLProtocol.getProtocols()
+        return URLSession(configuration: configuration, delegate: nil, delegateQueue: nil)
+    }()
+
     /*
      * Customization of URLSession occurs during creation of a new session.
      * If you only need to use the convenience routines with custom
@@ -215,7 +225,6 @@ open class URLSession : NSObject {
         initializeLibcurl()
         identifier = nextSessionIdentifier()
         self.workQueue = DispatchQueue(label: "URLSession<\(identifier)>")
-        self.taskAttributesIsolation = DispatchQueue(label: "URLSession<\(identifier)>.taskAttributes", attributes: DispatchQueue.Attributes.concurrent)
         self.delegateQueue = OperationQueue()
         self.delegateQueue.maxConcurrentOperationCount = 1
         self.delegate = nil
@@ -238,7 +247,6 @@ open class URLSession : NSObject {
         initializeLibcurl()
         identifier = nextSessionIdentifier()
         self.workQueue = DispatchQueue(label: "URLSession<\(identifier)>")
-        self.taskAttributesIsolation = DispatchQueue(label: "URLSession<\(identifier)>.taskAttributes", attributes: DispatchQueue.Attributes.concurrent)
         if let _queue = queue {
            self.delegateQueue = _queue
         } else {
@@ -457,7 +465,7 @@ fileprivate extension URLSession {
  * as background sessions.
  *
  * Task objects are always created in a suspended state and
- * must be sent the -resume message before they will execute.
+ * must be sent the -resume message before they execute.
  */
 extension URLSession {
     /*

@@ -71,7 +71,13 @@ func xcodeProject(
             productType: .framework, name: "\(package.name)PackageDescription")
         let compilePhase = pdTarget.addSourcesBuildPhase()
         compilePhase.addBuildFile(fileRef: manifestFileRef)
-        pdTarget.buildSettings.common.OTHER_SWIFT_FLAGS += package.manifest.interpreterFlags
+
+        var interpreterFlags = package.manifest.interpreterFlags
+        if !interpreterFlags.isEmpty {
+            // Patch the interpreter flags to use Xcode supported toolchain macro instead of the resolved path.
+            interpreterFlags[3] = "$(TOOLCHAIN_DIR)/usr/lib/swift/pm/" + String(package.manifest.manifestVersion.rawValue)
+        }
+        pdTarget.buildSettings.common.OTHER_SWIFT_FLAGS += interpreterFlags
         pdTarget.buildSettings.common.SWIFT_VERSION = "\(package.manifest.manifestVersion.rawValue).0"
         pdTarget.buildSettings.common.LD = "/usr/bin/true"
     }
@@ -296,7 +302,11 @@ func xcodeProject(
         return sourcesGroup ?? srcPathsToGroups[targets[0].sources.root]
     }
 
-    let (rootModules, testModules) = graph.rootPackages[0].targets.split{ $0.type != .test }
+    let (rootModules, testModules) = { () -> ([ResolvedTarget], [ResolvedTarget]) in
+        var targets = graph.rootPackages[0].targets
+        let secondPartitionIndex = targets.partition(by: { $0.type == .test })
+        return (Array(targets[..<secondPartitionIndex]), Array(targets[secondPartitionIndex...]))
+    }()
 
     // Create a `Sources` group for the source targets in the root package.
     createSourceGroup(named: "Sources", for: rootModules, in: project.mainGroup)
@@ -312,7 +322,7 @@ func xcodeProject(
 
     // Determine the set of targets to generate in the project by excluding
     // any system targets.
-    let targets = graph.targets.filter({ $0.type != .systemModule })
+    let targets = graph.reachableTargets.filter({ $0.type != .systemModule })
 
     // If we have any external packages, we also add a `Dependencies` group at
     // the top level, along with a sources subgroup for each package.
@@ -413,14 +423,14 @@ func xcodeProject(
 
         if target.type == .test {
             targetSettings.common.EMBEDDED_CONTENT_CONTAINS_SWIFT = "YES"
-            targetSettings.common.LD_RUNPATH_SEARCH_PATHS = ["@loader_path/../Frameworks", "@loader_path/Frameworks"]
+            targetSettings.common.LD_RUNPATH_SEARCH_PATHS = ["$(inherited)", "@loader_path/../Frameworks", "@loader_path/Frameworks"]
         } else {
             // We currently force a search path to the toolchain, since we can't
             // establish an expected location for the Swift standard libraries.
             //
             // Note that this means that the built binaries are not suitable for
             // distribution, among other things.
-            targetSettings.common.LD_RUNPATH_SEARCH_PATHS = ["$(TOOLCHAIN_DIR)/usr/lib/swift/macosx"]
+            targetSettings.common.LD_RUNPATH_SEARCH_PATHS = ["$(inherited)", "$(TOOLCHAIN_DIR)/usr/lib/swift/macosx"]
             if target.type == .library {
                 targetSettings.common.ENABLE_TESTABILITY = "YES"
                 targetSettings.common.PRODUCT_NAME = "$(TARGET_NAME:c99extidentifier)"
@@ -435,6 +445,11 @@ func xcodeProject(
             }
         }
 
+        // Make sure that build settings for C flags, Swift flags, and linker
+        // flags include any inherited value at the beginning.  This is useful
+        // even if nothing ends up being added, since it's a cue to anyone who
+        // edits the setting that the inherited value should be preserved.
+        targetSettings.common.OTHER_CFLAGS = ["$(inherited)"]
         targetSettings.common.OTHER_LDFLAGS = ["$(inherited)"]
         targetSettings.common.OTHER_SWIFT_FLAGS = ["$(inherited)"]
 
@@ -455,11 +470,12 @@ func xcodeProject(
             // FIXME: We don't need SRCROOT macro below but there is an issue with sourcekit.
             // See: <rdar://problem/21912068> SourceKit cannot handle relative include paths (working directory)
             switch depModule.underlyingTarget {
-              case let cTarget as CTarget:
-                hdrInclPaths.append("$(SRCROOT)/" + cTarget.path.relative(to: sourceRootDir).asString)
-                if let pkgArgs = pkgConfigArgs(for: cTarget) {
+              case let systemTarget as SystemLibraryTarget:
+                hdrInclPaths.append("$(SRCROOT)/" + systemTarget.path.relative(to: sourceRootDir).asString)
+                if let pkgArgs = pkgConfigArgs(for: systemTarget) {
                     targetSettings.common.OTHER_LDFLAGS += pkgArgs.libs
                     targetSettings.common.OTHER_SWIFT_FLAGS += pkgArgs.cFlags
+                    targetSettings.common.OTHER_CFLAGS += pkgArgs.cFlags
                 }
             case let clangTarget as ClangTarget:
                 hdrInclPaths.append("$(SRCROOT)/" + clangTarget.includeDir.relative(to: sourceRootDir).asString)
@@ -505,6 +521,12 @@ func xcodeProject(
 
             // Also add the source file to the compile phase.
             compilePhase.addBuildFile(fileRef: srcFileRef)
+        }
+
+        // Set C/C++ language standard.
+        if case let clangTarget as ClangTarget = target.underlyingTarget {
+            targetSettings.common.GCC_C_LANGUAGE_STANDARD = clangTarget.cLanguageStandard
+            targetSettings.common.CLANG_CXX_LANGUAGE_STANDARD = clangTarget.cxxLanguageStandard
         }
 
         // Add the `include` group for a libary C language target.
@@ -598,7 +620,7 @@ func xcodeProject(
     // Create an aggregate target for every product for which there isn't already
     // a target with the same name.
     let targetNames: Set<String> = Set(modulesToTargets.values.map({ $0.name }))
-    for product in graph.products {
+    for product in graph.reachableProducts {
         // Go on to next product if we already have a target with the same name.
         if targetNames.contains(product.name) { continue }
         // Otherwise, create an aggreate target.
@@ -661,13 +683,13 @@ private extension ResolvedTarget {
 
         case is ClangTarget:
             guard let suffix = source.suffix else {
-                fatalError("Source \(source) doesn't have an extension in ClangModule \(name)")
+                fatalError("Source \(source) doesn't have an extension in C family target \(name)")
             }
             // Suffix includes `.` so drop it.
             assert(suffix.hasPrefix("."))
             let fileExtension = String(suffix.dropFirst())
             guard let ext = SupportedLanguageExtension(rawValue: fileExtension) else {
-                fatalError("Unknown source extension \(source) in ClangModule \(name)")
+                fatalError("Unknown source extension \(source) in C family target \(name)")
             }
             return ext.xcodeFileType
 

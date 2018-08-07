@@ -74,7 +74,7 @@ const uint32_t *
 AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
                                           CallingConv::ID CC) const {
   if (CC == CallingConv::GHC)
-    // This is academic becase all GHC calls are (supposed to be) tail calls
+    // This is academic because all GHC calls are (supposed to be) tail calls
     return CSR_AArch64_NoRegs_RegMask;
   if (CC == CallingConv::AnyReg)
     return CSR_AArch64_AllRegs_RegMask;
@@ -94,7 +94,7 @@ const uint32_t *AArch64RegisterInfo::getTLSCallPreservedMask() const {
   if (TT.isOSDarwin())
     return CSR_AArch64_TLS_Darwin_RegMask;
 
-  assert(TT.isOSBinFormatELF() && "only expect Darwin or ELF TLS");
+  assert(TT.isOSBinFormatELF() && "Invalid target");
   return CSR_AArch64_TLS_ELF_RegMask;
 }
 
@@ -118,25 +118,23 @@ AArch64RegisterInfo::getReservedRegs(const MachineFunction &MF) const {
 
   // FIXME: avoid re-calculating this every time.
   BitVector Reserved(getNumRegs());
-  markSuperRegs(Reserved, AArch64::SP);
-  markSuperRegs(Reserved, AArch64::XZR);
   markSuperRegs(Reserved, AArch64::WSP);
   markSuperRegs(Reserved, AArch64::WZR);
 
-  if (TFI->hasFP(MF) || TT.isOSDarwin()) {
-    markSuperRegs(Reserved, AArch64::FP);
+  if (TFI->hasFP(MF) || TT.isOSDarwin())
     markSuperRegs(Reserved, AArch64::W29);
+
+  const AArch64Subtarget &STI = MF.getSubtarget<AArch64Subtarget>();
+  if (STI.isX18Reserved())
+    markSuperRegs(Reserved, AArch64::W18); // Platform register
+  if (STI.limit16FPRegs()) {
+    assert((AArch64::B31 == AArch64::B16+15) && "consecutive reg numbers");
+    for (unsigned Reg = AArch64::B16; Reg <= AArch64::B31; ++Reg)
+      markSuperRegs(Reserved, Reg);
   }
 
-  if (MF.getSubtarget<AArch64Subtarget>().isX18Reserved()) {
-    markSuperRegs(Reserved, AArch64::X18); // Platform register
-    markSuperRegs(Reserved, AArch64::W18);
-  }
-
-  if (hasBasePointer(MF)) {
-    markSuperRegs(Reserved, AArch64::X19);
+  if (hasBasePointer(MF))
     markSuperRegs(Reserved, AArch64::W19);
-  }
 
   assert(checkAllSuperRegsMarked(Reserved));
   return Reserved;
@@ -175,7 +173,7 @@ bool AArch64RegisterInfo::isConstantPhysReg(unsigned PhysReg) const {
 const TargetRegisterClass *
 AArch64RegisterInfo::getPointerRegClass(const MachineFunction &MF,
                                       unsigned Kind) const {
-  return &AArch64::GPR64RegClass;
+  return &AArch64::GPR64spRegClass;
 }
 
 const TargetRegisterClass *
@@ -232,6 +230,9 @@ bool AArch64RegisterInfo::requiresVirtualBaseRegisters(
 bool
 AArch64RegisterInfo::useFPForScavengingIndex(const MachineFunction &MF) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
+  // See also AArch64FrameLowering::hasFP().
+  if (MFI.getMaxCallFrameSize() > 255)
+    return true;
   // AArch64FrameLowering::resolveFrameIndexReference() can always fall back
   // to the stack pointer, so only put the emergency spill slot next to the
   // FP when there's no better way to access it (SP or base pointer).

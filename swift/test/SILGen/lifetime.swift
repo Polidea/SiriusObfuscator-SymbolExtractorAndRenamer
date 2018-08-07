@@ -172,9 +172,9 @@ func reftype_call_store_to_local() {
 // CHECK-LABEL: sil hidden @_T08lifetime16reftype_call_argyyF
 func reftype_call_arg() {
     reftype_func_with_arg(reftype_func())
-    // CHECK: [[RFWA:%[0-9]+]] = function_ref @_T08lifetime21reftype_func_with_arg{{[_0-9a-zA-Z]*}}F
     // CHECK: [[RF:%[0-9]+]] = function_ref @_T08lifetime12reftype_func{{[_0-9a-zA-Z]*}}F
     // CHECK: [[R1:%[0-9]+]] = apply [[RF]]
+    // CHECK: [[RFWA:%[0-9]+]] = function_ref @_T08lifetime21reftype_func_with_arg{{[_0-9a-zA-Z]*}}F
     // CHECK: [[R2:%[0-9]+]] = apply [[RFWA]]([[R1]])
     // CHECK: destroy_value [[R2]]
     // CHECK: return
@@ -188,9 +188,9 @@ func reftype_call_arg() {
 // CHECK:   [[A1_COPY:%.*]] = copy_value [[BORROWED_A1]]
 // CHECK:   store [[A1_COPY]] to [init] [[PB]]
 // CHECK:   end_borrow [[BORROWED_A1]] from [[A1]]
-// CHECK:   [[RFWA:%[0-9]+]] = function_ref @_T08lifetime21reftype_func_with_arg{{[_0-9a-zA-Z]*}}F
 // CHECK:   [[READ:%.*]] = begin_access [read] [unknown] [[PB]]
 // CHECK:   [[A2:%[0-9]+]] = load [copy] [[READ]]
+// CHECK:   [[RFWA:%[0-9]+]] = function_ref @_T08lifetime21reftype_func_with_arg{{[_0-9a-zA-Z]*}}F
 // CHECK:   [[RESULT:%.*]] = apply [[RFWA]]([[A2]])
 // CHECK:   destroy_value [[RESULT]]
 // CHECK:   destroy_value [[AADDR]]
@@ -343,9 +343,9 @@ func struct_with_ref_ignore_return() {
 // CHECK-LABEL: sil hidden @_T08lifetime28struct_with_ref_materializedyyF
 func struct_with_ref_materialized() {
   fragile_struct_with_ref_elements().gimel()
-  // CHECK: [[METHOD:%[0-9]+]] = function_ref @_T08lifetime4BethV5gimel{{[_0-9a-zA-Z]*}}F
   // CHECK: [[FUNC:%[0-9]+]] = function_ref @_T08lifetime32fragile_struct_with_ref_elementsAA4BethVyF
   // CHECK: [[STRUCT:%[0-9]+]] = apply [[FUNC]]
+  // CHECK: [[METHOD:%[0-9]+]] = function_ref @_T08lifetime4BethV5gimel{{[_0-9a-zA-Z]*}}F
   // CHECK: apply [[METHOD]]([[STRUCT]])
 }
 
@@ -421,7 +421,7 @@ class Foo<T> {
     // CHECK: [[THIS:%[0-9]+]] = mark_uninitialized
 
     // -- initialization for y
-    // CHECK: [[Y_INIT:%[0-9]+]] = function_ref @_T08lifetime3FooC1ySi_AA3RefCtvfi : $@convention(thin) <τ_0_0> () -> (Int, @owned Ref)
+    // CHECK: [[Y_INIT:%[0-9]+]] = function_ref @_T08lifetime3FooC1ySi_AA3RefCtvpfi : $@convention(thin) <τ_0_0> () -> (Int, @owned Ref)
     // CHECK: [[Y_VALUE:%[0-9]+]] = apply [[Y_INIT]]<T>()
     // CHECK: [[BORROWED_Y_VALUE:%.*]] = begin_borrow [[Y_VALUE]]
     // CHECK: [[Y_EXTRACTED_0:%.*]] = tuple_extract [[BORROWED_Y_VALUE]] : $(Int, Ref), 0
@@ -440,7 +440,7 @@ class Foo<T> {
     // CHECK: end_borrow [[BORROWED_THIS]] from [[THIS]]
 
     // -- Initialization for w
-    // CHECK: [[Z_FUNC:%.*]] = function_ref @_T{{.*}}8lifetime3FooC1wAA3RefCvfi : $@convention(thin) <τ_0_0> () -> @owned Ref
+    // CHECK: [[Z_FUNC:%.*]] = function_ref @_T{{.*}}8lifetime3FooC1wAA3RefCvpfi : $@convention(thin) <τ_0_0> () -> @owned Ref
     // CHECK: [[Z_RESULT:%.*]] = apply [[Z_FUNC]]<T>()
     // CHECK: [[BORROWED_THIS:%.*]] = begin_borrow [[THIS]]
     // CHECK: [[THIS_Z:%.*]] = ref_element_addr [[BORROWED_THIS]]
@@ -744,9 +744,9 @@ class D : B {
     super.init(y: y)
     // CHECK: [[THIS1:%[0-9]+]] = load [take] [[PB_BOX]]
     // CHECK: [[THIS1_SUP:%[0-9]+]] = upcast [[THIS1]] : ${{.*}} to $B
-    // CHECK: [[SUPER_CTOR:%[0-9]+]] = function_ref @_T08lifetime1BCACSi1y_tcfc : $@convention(method) (Int, @owned B) -> @owned B
     // CHECK: [[READ:%.*]] = begin_access [read] [unknown] [[PY]]
     // CHECK: [[Y:%[0-9]+]] = load [trivial] [[READ]]
+    // CHECK: [[SUPER_CTOR:%[0-9]+]] = function_ref @_T08lifetime1BCACSi1y_tcfc : $@convention(method) (Int, @owned B) -> @owned B
     // CHECK: [[THIS2_SUP:%[0-9]+]] = apply [[SUPER_CTOR]]([[Y]], [[THIS1_SUP]])
     // CHECK: [[THIS2:%[0-9]+]] = unchecked_ref_cast [[THIS2_SUP]] : $B to $D
     // CHECK: [[THIS1:%[0-9]+]] = load [copy] [[PB_BOX]]

@@ -192,9 +192,14 @@ class ErrorHandlingWalker : public ASTWalker {
   Impl &asImpl() { return *static_cast<Impl*>(this); }
 public:
   bool walkToDeclPre(Decl *D) override {
+    ShouldRecurse_t recurse = ShouldRecurse;
     // Skip the implementations of all local declarations... except
     // PBD.  We should really just have a PatternBindingStmt.
-    return isa<PatternBindingDecl>(D);
+    if (auto ic = dyn_cast<IfConfigDecl>(D))
+      recurse = asImpl().checkIfConfig(ic);
+    else if (!isa<PatternBindingDecl>(D))
+      recurse = ShouldNotRecurse;
+    return bool(recurse);
   }
 
   std::pair<bool, Expr*> walkToExprPre(Expr *E) override {
@@ -230,8 +235,6 @@ public:
       recurse = asImpl().checkDoCatch(doCatch);
     } else if (auto thr = dyn_cast<ThrowStmt>(S)) {
       recurse = asImpl().checkThrow(thr);
-    } else if (auto ic = dyn_cast<IfConfigStmt>(S)) {
-      recurse = asImpl().checkIfConfig(ic);
     } else {
       assert(!isa<CatchStmt>(S));
     }
@@ -606,7 +609,7 @@ private:
       return ShouldRecurse;
     }
 
-    ShouldRecurse_t checkIfConfig(IfConfigStmt *S) {
+    ShouldRecurse_t checkIfConfig(IfConfigDecl *D) {
       return ShouldRecurse;
     }
 
@@ -1034,6 +1037,21 @@ public:
     
     TC.diagnose(loc, message).highlight(highlight);
     maybeAddRethrowsNote(TC, loc, reason);
+
+    // If this is a call without expected 'try[?|!]', like this:
+    //
+    // func foo() throws {}
+    // [let _ = ]foo()
+    //
+    // Let's suggest couple of alternative fix-its
+    // because complete context is unavailable.
+    if (reason.getKind() != PotentialReason::Kind::CallThrows)
+      return;
+
+    TC.diagnose(loc, diag::note_forgot_try).fixItInsert(loc, "try ");
+    TC.diagnose(loc, diag::note_error_to_optional).fixItInsert(loc, "try? ");
+    TC.diagnose(loc, diag::note_disable_error_propagation)
+        .fixItInsert(loc, "try! ");
   }
 
   void diagnoseThrowInLegalContext(TypeChecker &TC, ASTNode node,
@@ -1431,7 +1449,7 @@ private:
     return !type || type->hasError() ? ShouldNotRecurse : ShouldRecurse;
   }
 
-  ShouldRecurse_t checkIfConfig(IfConfigStmt *S) {
+  ShouldRecurse_t checkIfConfig(IfConfigDecl *ICD) {
     // Check the inactive regions of a #if block to disable warnings that may
     // be due to platform specific code.
     struct ConservativeThrowChecker : public ASTWalker {
@@ -1452,7 +1470,7 @@ private:
       }
     };
 
-    for (auto &clause : S->getClauses()) {
+    for (auto &clause : ICD->getClauses()) {
       // Active clauses are handled by the normal AST walk.
       if (clause.isActive) continue;
       
@@ -1573,6 +1591,10 @@ void TypeChecker::checkTopLevelErrorHandling(TopLevelCodeDecl *code) {
 }
 
 void TypeChecker::checkFunctionErrorHandling(AbstractFunctionDecl *fn) {
+  // In some cases, we won't have validated the signature
+  // by the time we got here.
+  if (!fn->hasInterfaceType()) return;
+
   CheckErrorCoverage checker(*this, Context::forFunction(fn));
 
   // If this is a debugger function, suppress 'try' marking at the top level.

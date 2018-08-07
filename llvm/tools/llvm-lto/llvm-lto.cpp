@@ -23,7 +23,6 @@
 #include "llvm/LTO/legacy/LTOCodeGenerator.h"
 #include "llvm/LTO/legacy/LTOModule.h"
 #include "llvm/LTO/legacy/ThinLTOCodeGenerator.h"
-#include "llvm/Object/ModuleSummaryIndexObjectFile.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/ManagedStatic.h"
@@ -206,34 +205,40 @@ static void handleDiagnostics(lto_codegen_diagnostic_severity_t Severity,
 }
 
 static std::string CurrentActivity;
-static void diagnosticHandler(const DiagnosticInfo &DI, void *Context) {
-  raw_ostream &OS = errs();
-  OS << "llvm-lto: ";
-  switch (DI.getSeverity()) {
-  case DS_Error:
-    OS << "error";
-    break;
-  case DS_Warning:
-    OS << "warning";
-    break;
-  case DS_Remark:
-    OS << "remark";
-    break;
-  case DS_Note:
-    OS << "note";
-    break;
+
+namespace {
+  struct LLVMLTODiagnosticHandler : public DiagnosticHandler {
+    bool handleDiagnostics(const DiagnosticInfo &DI) override {
+      raw_ostream &OS = errs();
+      OS << "llvm-lto: ";
+      switch (DI.getSeverity()) {
+      case DS_Error:
+        OS << "error";
+        break;
+      case DS_Warning:
+        OS << "warning";
+        break;
+      case DS_Remark:
+        OS << "remark";
+        break;
+      case DS_Note:
+        OS << "note";
+        break;
+      }
+      if (!CurrentActivity.empty())
+        OS << ' ' << CurrentActivity;
+      OS << ": ";
+
+      DiagnosticPrinterRawOStream DP(OS);
+      DI.print(DP);
+      OS << '\n';
+
+      if (DI.getSeverity() == DS_Error)
+        exit(1);
+      return true;
+    }
+  };
   }
-  if (!CurrentActivity.empty())
-    OS << ' ' << CurrentActivity;
-  OS << ": ";
-
-  DiagnosticPrinterRawOStream DP(OS);
-  DI.print(DP);
-  OS << '\n';
-
-  if (DI.getSeverity() == DS_Error)
-    exit(1);
-}
 
 static void error(const Twine &Msg) {
   errs() << "llvm-lto: " << Msg << '\n';
@@ -264,7 +269,8 @@ getLocalLTOModule(StringRef Path, std::unique_ptr<MemoryBuffer> &Buffer,
   Buffer = std::move(BufferOrErr.get());
   CurrentActivity = ("loading file '" + Path + "'").str();
   std::unique_ptr<LLVMContext> Context = llvm::make_unique<LLVMContext>();
-  Context->setDiagnosticHandler(diagnosticHandler, nullptr, true);
+  Context->setDiagnosticHandler(llvm::make_unique<LLVMLTODiagnosticHandler>(),
+                                true);
   ErrorOr<std::unique_ptr<LTOModule>> Ret = LTOModule::createInLocalContext(
       std::move(Context), Buffer->getBufferStart(), Buffer->getBufferSize(),
       Options, Path);
@@ -285,7 +291,7 @@ void printIndexStats() {
 
     unsigned Calls = 0, Refs = 0, Functions = 0, Alias = 0, Globals = 0;
     for (auto &Summaries : *Index) {
-      for (auto &Summary : Summaries.second) {
+      for (auto &Summary : Summaries.second.SummaryList) {
         Refs += Summary->refs().size();
         if (auto *FuncSummary = dyn_cast<FunctionSummary>(Summary.get())) {
           Functions++;
@@ -332,12 +338,9 @@ static void createCombinedModuleSummaryIndex() {
   uint64_t NextModuleId = 0;
   for (auto &Filename : InputFilenames) {
     ExitOnError ExitOnErr("llvm-lto: error loading file '" + Filename + "': ");
-    std::unique_ptr<ModuleSummaryIndex> Index =
-        ExitOnErr(llvm::getModuleSummaryIndexForFile(Filename));
-    // Skip files without a module summary.
-    if (!Index)
-      continue;
-    CombinedIndex.mergeFrom(std::move(Index), ++NextModuleId);
+    std::unique_ptr<MemoryBuffer> MB =
+        ExitOnErr(errorOrToExpected(MemoryBuffer::getFileOrSTDIN(Filename)));
+    ExitOnErr(readModuleSummaryIndex(*MB, CombinedIndex, ++NextModuleId));
   }
   std::error_code EC;
   assert(!OutputFilename.empty());
@@ -387,7 +390,7 @@ loadAllFilesForIndex(const ModuleSummaryIndex &Index) {
 
   for (auto &ModPath : Index.modulePaths()) {
     const auto &Filename = ModPath.first();
-    auto CurrentActivity = "loading file '" + Filename + "'";
+    std::string CurrentActivity = ("loading file '" + Filename + "'").str();
     auto InputOrErr = MemoryBuffer::getFile(Filename);
     error(InputOrErr, "error " + CurrentActivity);
     InputBuffers.push_back(std::move(*InputOrErr));
@@ -479,7 +482,7 @@ private:
     std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
     for (unsigned i = 0; i < InputFilenames.size(); ++i) {
       auto &Filename = InputFilenames[i];
-      StringRef CurrentActivity = "loading file '" + Filename + "'";
+      std::string CurrentActivity = "loading file '" + Filename + "'";
       auto InputOrErr = MemoryBuffer::getFile(Filename);
       error(InputOrErr, "error " + CurrentActivity);
       InputBuffers.push_back(std::move(*InputOrErr));
@@ -714,7 +717,7 @@ private:
     std::vector<std::unique_ptr<MemoryBuffer>> InputBuffers;
     for (unsigned i = 0; i < InputFilenames.size(); ++i) {
       auto &Filename = InputFilenames[i];
-      StringRef CurrentActivity = "loading file '" + Filename + "'";
+      std::string CurrentActivity = "loading file '" + Filename + "'";
       auto InputOrErr = MemoryBuffer::getFile(Filename);
       error(InputOrErr, "error " + CurrentActivity);
       InputBuffers.push_back(std::move(*InputOrErr));
@@ -812,7 +815,8 @@ int main(int argc, char **argv) {
   unsigned BaseArg = 0;
 
   LLVMContext Context;
-  Context.setDiagnosticHandler(diagnosticHandler, nullptr, true);
+  Context.setDiagnosticHandler(llvm::make_unique<LLVMLTODiagnosticHandler>(),
+                               true);
 
   LTOCodeGenerator CodeGen(Context);
 

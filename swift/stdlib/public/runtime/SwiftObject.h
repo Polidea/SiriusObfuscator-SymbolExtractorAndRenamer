@@ -34,6 +34,7 @@
 __attribute__((__objc_root_class__))
 #endif
 SWIFT_RUNTIME_EXPORT @interface SwiftObject<NSObject> {
+ @private
   Class isa;
   SWIFT_HEAPOBJECT_NON_OBJC_MEMBERS;
 }
@@ -58,6 +59,9 @@ SWIFT_RUNTIME_EXPORT @interface SwiftObject<NSObject> {
 - (BOOL)conformsToProtocol:(Protocol *)aProtocol;
 
 - (BOOL)respondsToSelector:(SEL)aSelector;
++ (BOOL)instancesRespondToSelector:(SEL)aSelector;
+- (IMP)methodForSelector:(SEL)aSelector;
++ (IMP)instanceMethodForSelector:(SEL)aSelector;
 
 - (instancetype)retain;
 - (oneway void)release;

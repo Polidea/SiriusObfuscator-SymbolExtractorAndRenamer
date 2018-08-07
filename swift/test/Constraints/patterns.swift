@@ -163,9 +163,8 @@ case nil?: break // expected-warning {{case is already handled by previous patte
 default: break
 }
 
-// <rdar://problem/21995744> QoI: Binary operator '~=' cannot be applied to operands of type 'String' and 'String?'
 switch ("foo" as String?) {
-case "what": break // expected-error{{expression pattern of type 'String' cannot match values of type 'String?'}} {{12-12=?}}
+case "what": break
 default: break
 }
 
@@ -334,5 +333,21 @@ func rdar32241441() {
     break;
   case .bar: // expected-error {{enum case 'bar' not found in type 'S_32241441.E_32241441?'}} {{12-12=?}}
     break;
+  }
+}
+
+
+// SR-6100
+struct One<Two> {
+    public enum E: Error {
+        // if you remove associated value, everything works
+        case SomeError(String)
+    }
+}
+
+func testOne() {
+  do {
+  } catch let error { // expected-warning{{'catch' block is unreachable because no errors are thrown in 'do' block}}
+    if case One.E.SomeError = error {} // expected-error{{generic enum type 'One.E' is ambiguous without explicit generic parameters when matching value of type 'Error'}}
   }
 }

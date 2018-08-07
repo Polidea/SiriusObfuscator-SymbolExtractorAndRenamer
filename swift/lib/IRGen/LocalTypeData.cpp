@@ -18,6 +18,7 @@
 #include "LocalTypeData.h"
 #include "Fulfillment.h"
 #include "GenMeta.h"
+#include "GenOpaque.h"
 #include "GenProto.h"
 #include "IRGenDebugInfo.h"
 #include "IRGenFunction.h"
@@ -194,7 +195,7 @@ static void maybeEmitDebugInfoForLocalTypeData(IRGenFunction &IGF,
 
   // At -O0, create an alloca to keep the type alive.
   auto name = type->getFullName();
-  if (!IGF.IGM.IRGen.Opts.Optimize) {
+  if (!IGF.IGM.IRGen.Opts.shouldOptimize()) {
     auto temp = IGF.createAlloca(data->getType(), IGF.IGM.getPointerAlignment(),
                                  name);
     IGF.Builder.CreateStore(data, temp);
@@ -250,16 +251,65 @@ void IRGenFunction::bindLocalTypeDataFromTypeMetadata(CanType type,
     .addAbstractForTypeMetadata(*this, type, isExact, metadata);
 }
 
+void IRGenFunction::bindLocalTypeDataFromSelfWitnessTable(
+                const ProtocolConformance *conformance,
+                llvm::Value *selfTable,
+                llvm::function_ref<CanType (CanType)> getTypeInContext) {
+  SILWitnessTable::enumerateWitnessTableConditionalConformances(
+      conformance,
+      [&](unsigned index, CanType type, ProtocolDecl *proto) {
+        auto archetype = getTypeInContext(type);
+        if (isa<ArchetypeType>(archetype)) {
+          WitnessIndex wIndex(privateWitnessTableIndexToTableOffset(index),
+                              /*prefix*/ false);
+
+          auto table =
+              emitInvariantLoadOfOpaqueWitness(*this, selfTable, wIndex);
+          table = Builder.CreateBitCast(table, IGM.WitnessTablePtrTy);
+          setProtocolWitnessTableName(IGM, table, archetype, proto);
+
+          setUnscopedLocalTypeData(
+              archetype,
+              LocalTypeDataKind::forAbstractProtocolWitnessTable(proto),
+              table);
+        }
+
+        return /*finished?*/ false;
+      });
+}
+
 void LocalTypeDataCache::addAbstractForTypeMetadata(IRGenFunction &IGF,
                                                     CanType type,
                                                     IsExact_t isExact,
                                                     llvm::Value *metadata) {
+  struct Callback : FulfillmentMap::InterestingKeysCallback {
+    bool isInterestingType(CanType type) const override {
+      return true;
+    }
+    bool hasInterestingType(CanType type) const override {
+      return true;
+    }
+    bool hasLimitedInterestingConformances(CanType type) const override {
+      return false;
+    }
+    GenericSignature::ConformsToArray
+    getInterestingConformances(CanType type) const override {
+      llvm_unreachable("no limits");
+    }
+    CanType getSuperclassBound(CanType type) const override {
+      if (auto arch = dyn_cast<ArchetypeType>(type))
+        if (auto superclassTy = arch->getSuperclass())
+          return superclassTy->getCanonicalType();
+      return CanType();
+    }
+  } callbacks;
+
   // Look for anything at all that's fulfilled by this.  If we don't find
   // anything, stop.
   FulfillmentMap fulfillments;
   if (!fulfillments.searchTypeMetadata(IGF.IGM, type, isExact,
                                        /*source*/ 0, MetadataPath(),
-                                       FulfillmentMap::Everything())) {
+                                       callbacks)) {
     return;
   }
 

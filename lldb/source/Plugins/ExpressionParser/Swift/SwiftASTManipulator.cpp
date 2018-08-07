@@ -12,12 +12,12 @@
 
 #include "SwiftASTManipulator.h"
 
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Error.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Expression/ExpressionParser.h"
 #include "lldb/Expression/ExpressionSourceCode.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Status.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/Decl.h"
@@ -91,11 +91,12 @@ static void DumpPlaceholdersIntoCall(
   }
 }
 
-bool SwiftASTManipulator::VariableInfo::GetIsLet() const {
+swift::VarDecl::Specifier
+SwiftASTManipulator::VariableInfo::GetVarSpecifier() const {
   if (m_decl)
-    return m_decl->isLet();
+    return m_decl->getSpecifier();
   else
-    return m_is_let;
+    return m_var_specifier;
 }
 
 bool SwiftASTManipulator::VariableInfo::GetIsCaptureList() const {
@@ -575,16 +576,16 @@ swift::Stmt *SwiftASTManipulator::ConvertExpressionToTmpReturnVarAccess(
   llvm::SmallVector<swift::ASTNode, 3> body;
   llvm::SmallVector<swift::Expr *, 3> false_body;
   const bool is_static = false;
-  const bool is_let = false;
+  const auto specifier = swift::VarDecl::Specifier::Var;
   const bool is_capture_list = false;
   result_loc_info.tmp_var_decl = new (ast_context) swift::VarDecl(
-      is_static, is_let, is_capture_list, source_loc, name, swift::Type(),
+      is_static, specifier, is_capture_list, source_loc, name, swift::Type(),
       new_decl_context);
   result_loc_info.tmp_var_decl->setImplicit();
-  result_loc_info.tmp_var_decl->setAccessibility(
-      swift::Accessibility::Internal);
-  result_loc_info.tmp_var_decl->setSetterAccessibility(
-      swift::Accessibility::Internal);
+  result_loc_info.tmp_var_decl->setAccess(
+      swift::AccessLevel::Internal);
+  result_loc_info.tmp_var_decl->setSetterAccess(
+      swift::AccessLevel::Internal);
 
   swift::NamedPattern *var_pattern =
       new (ast_context) swift::NamedPattern(result_loc_info.tmp_var_decl, true);
@@ -835,16 +836,16 @@ void SwiftASTManipulator::MakeDeclarationsPublic() {
     virtual bool walkToDeclPre(swift::Decl *decl) {
       if (swift::ValueDecl *value_decl =
               llvm::dyn_cast<swift::ValueDecl>(decl)) {
-        auto access = swift::Accessibility::Public;
+        auto access = swift::AccessLevel::Public;
         if (swift::isa<swift::ClassDecl>(value_decl) ||
             swift::isa<swift::ClassDecl>(value_decl->getDeclContext())) {
-          access = swift::Accessibility::Open;
+          access = swift::AccessLevel::Open;
         }
 
-        value_decl->overwriteAccessibility(access);
+        value_decl->overwriteAccess(access);
         if (swift::AbstractStorageDecl *var_decl =
                 llvm::dyn_cast<swift::AbstractStorageDecl>(decl))
-          var_decl->overwriteSetterAccessibility(access);
+          var_decl->overwriteSetterAccess(access);
       }
 
       return true;
@@ -980,8 +981,8 @@ void SwiftASTManipulator::InsertResult(
 
   CompilerType return_ast_type(&ast_context, result_type.getPointer());
 
-  result_var->overwriteAccessibility(swift::Accessibility::Public);
-  result_var->overwriteSetterAccessibility(swift::Accessibility::Public);
+  result_var->overwriteAccess(swift::AccessLevel::Public);
+  result_var->overwriteSetterAccess(swift::AccessLevel::Public);
 
   // Finally, go reset the return expression to the new result variable for each
   // of the return expressions.
@@ -1021,8 +1022,8 @@ void SwiftASTManipulator::InsertError(swift::VarDecl *error_var,
 
   CompilerType error_ast_type(&ast_context, error_type.getPointer());
 
-  error_var->overwriteAccessibility(swift::Accessibility::Public);
-  error_var->overwriteSetterAccessibility(swift::Accessibility::Public);
+  error_var->overwriteAccess(swift::AccessLevel::Public);
+  error_var->overwriteSetterAccess(swift::AccessLevel::Public);
 
   // Finally, go reset the return expression to the new result variable for each
   // of the return expressions.
@@ -1074,7 +1075,7 @@ void SwiftASTManipulator::InsertError(swift::VarDecl *error_var,
   m_catch_stmt->setBody(body_stmt);
 }
 
-bool SwiftASTManipulator::FixupResultAfterTypeChecking(Error &error) {
+bool SwiftASTManipulator::FixupResultAfterTypeChecking(Status &error) {
   if (!IsValid()) {
     error.SetErrorString("Operating on invalid SwiftASTManipulator");
     return false;
@@ -1128,8 +1129,8 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Error &error) {
   swift::VarDecl *result_var =
       AddExternalVariable(result_var_name, return_ast_type, metadata_sp);
 
-  result_var->overwriteAccessibility(swift::Accessibility::Public);
-  result_var->overwriteSetterAccessibility(swift::Accessibility::Public);
+  result_var->overwriteAccess(swift::AccessLevel::Public);
+  result_var->overwriteSetterAccess(swift::AccessLevel::Public);
 
   // Finally, go reset the return expression to the new result variable for each
   // of the return expressions.
@@ -1170,9 +1171,9 @@ bool SwiftASTManipulator::FixupResultAfterTypeChecking(Error &error) {
             swift::VarDecl *error_var = AddExternalVariable(
                 error_var_name, error_ast_type, error_metadata_sp);
 
-            error_var->overwriteAccessibility(swift::Accessibility::Public);
-            error_var->overwriteSetterAccessibility(
-                swift::Accessibility::Public);
+            error_var->overwriteAccess(swift::AccessLevel::Public);
+            error_var->overwriteSetterAccess(
+                swift::AccessLevel::Public);
 
             InsertError(error_var, error_type);
             break;
@@ -1254,7 +1255,7 @@ bool SwiftASTManipulator::AddExternalVariables(
     SwiftASTManipulator::VariableInfo &variable = variables[0];
 
     const bool is_static = false;
-    bool is_let = variable.GetIsLet();
+    auto specifier = variable.GetVarSpecifier();
     bool is_capture_list = variable.GetIsCaptureList();
     swift::SourceLoc loc;
     swift::Identifier name = variable.m_name;
@@ -1264,7 +1265,7 @@ bool SwiftASTManipulator::AddExternalVariables(
     // strip that part off:
 
     swift::VarDecl *redirected_var_decl = new (ast_context)
-        swift::VarDecl(is_static, is_let, is_capture_list, loc, name, var_type,
+        swift::VarDecl(is_static, specifier, is_capture_list, loc, name, var_type,
                        &m_source_file);
     redirected_var_decl->setInterfaceType(var_type);
 
@@ -1315,7 +1316,7 @@ bool SwiftASTManipulator::AddExternalVariables(
       swift::SourceLoc loc = m_function_decl->getBody()->getLBraceLoc();
       swift::FuncDecl *containing_function = m_function_decl;
       swift::Identifier name = variable.m_name;
-      bool is_let = variable.GetIsLet();
+      auto specifier = variable.GetVarSpecifier();
       bool is_capture_list = variable.GetIsCaptureList();
 
       bool is_self = !variable.m_name.str().compare("$__lldb_injected_self");
@@ -1353,7 +1354,7 @@ bool SwiftASTManipulator::AddExternalVariables(
       // it is inout or not, so we don't have to do anything more to get this to
       // work.
       swift::Type var_type =
-          GetSwiftType(referent_type)->getLValueOrInOutObjectType();
+          GetSwiftType(referent_type)->getWithoutSpecifierType();
       if (is_self) {
         // Another tricky bit is that the Metatype types we get have the
         // "Representation" already attached (i.e.
@@ -1370,10 +1371,10 @@ bool SwiftASTManipulator::AddExternalVariables(
       }
 
       swift::VarDecl *redirected_var_decl = new (ast_context) swift::VarDecl(
-          is_static, is_let, is_capture_list, loc, name, var_type,
+          is_static, specifier, is_capture_list, loc, name, var_type,
           containing_function);
       redirected_var_decl->setInterfaceType(
-          containing_function->mapTypeOutOfContext(var_type));
+          var_type->mapTypeOutOfContext());
       redirected_var_decl->setDebuggerVar(true);
       redirected_var_decl->setImplicit(true);
 
@@ -1545,7 +1546,7 @@ swift::ValueDecl *SwiftASTManipulator::MakeGlobalTypealias(
 
   if (type_alias_decl) {
     if (make_private) {
-      type_alias_decl->overwriteAccessibility(swift::Accessibility::Private);
+      type_alias_decl->overwriteAccess(swift::AccessLevel::Private);
     }
     m_source_file.Decls.push_back(type_alias_decl);
   }

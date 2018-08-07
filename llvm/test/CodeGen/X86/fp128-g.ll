@@ -1,4 +1,5 @@
-; RUN: llc < %s -O2 -mtriple=x86_64-linux-android -mattr=+mmx | FileCheck %s --check-prefix=X64
+; RUN: llc < %s -O2 -mtriple=x86_64-linux-android -mattr=+mmx \
+; RUN:    -enable-legalize-types-checking | FileCheck %s --check-prefix=X64
 ;
 ; These cases check if x86_64-linux-android works with -O2 -g,
 ; especially CSE matching needed by SoftenFloatRes_LOAD.
@@ -117,7 +118,7 @@ attributes #2 = { nounwind readnone }
 !llvm.module.flags = !{!8, !9, !10}
 !llvm.ident = !{!11}
 
-!0 = !DIGlobalVariableExpression(var: !1)
+!0 = !DIGlobalVariableExpression(var: !1, expr: !DIExpression())
 !1 = !DIGlobalVariable(name: "ld_ptr", scope: !2, file: !3, line: 17, type: !6, isLocal: false, isDefinition: true)
 !2 = distinct !DICompileUnit(language: DW_LANG_C99, file: !3, producer: "clang version 4.0.0 (trunk 281495)", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug, enums: !4, globals: !5)
 !3 = !DIFile(filename: "fp128-g.c", directory: "/disk5/chh/Debug/ld.loop")

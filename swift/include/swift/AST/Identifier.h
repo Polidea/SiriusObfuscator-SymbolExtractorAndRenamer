@@ -51,6 +51,8 @@ enum class DeclRefKind {
 /// ASTContext.  It just wraps a nul-terminated "const char*".
 class Identifier {
   friend class ASTContext;
+  friend class DeclBaseName;
+
   const char *Pointer;
   
   /// Constructor, only accessible by ASTContext, which handles the uniquing.
@@ -209,6 +211,22 @@ namespace swift {
 /// Wrapper that may either be an Identifier or a special name
 /// (e.g. for subscripts)
 class DeclBaseName {
+public:
+  enum class Kind: uint8_t {
+    Normal,
+    Subscript,
+    Destructor
+  };
+  
+private:
+  /// In a special DeclName represenenting a subscript, this opaque pointer
+  /// is used as the data of the base name identifier.
+  /// This is an implementation detail that should never leak outside of
+  /// DeclName.
+  static void *SubscriptIdentifierData;
+  /// As above, for special destructor DeclNames.
+  static void *DestructorIdentifierData;
+
   Identifier Ident;
 
 public:
@@ -216,7 +234,25 @@ public:
 
   DeclBaseName(Identifier I) : Ident(I) {}
 
-  bool isSpecial() const { return false; }
+  static DeclBaseName createSubscript() {
+    return DeclBaseName(Identifier((const char *)SubscriptIdentifierData));
+  }
+
+  static DeclBaseName createDestructor() {
+    return DeclBaseName(Identifier((const char *)DestructorIdentifierData));
+  }
+
+  Kind getKind() const {
+    if (Ident.get() == SubscriptIdentifierData) {
+      return Kind::Subscript;
+    } else if (Ident.get() == DestructorIdentifierData) {
+        return Kind::Destructor;
+    } else {
+      return Kind::Normal;
+    }
+  }
+
+  bool isSpecial() const { return getKind() != Kind::Normal; }
 
   /// Return the identifier backing the name. Assumes that the name is not
   /// special.
@@ -235,9 +271,24 @@ public:
     return !isSpecial() && getIdentifier().isEditorPlaceholder();
   }
 
+  /// A representation of the name to be displayed to users. May be ambiguous
+  /// between identifiers and special names.
+  StringRef userFacingName() const {
+    if (empty())
+      return "_";
+
+    switch (getKind()) {
+    case Kind::Normal:
+      return getIdentifier().str();
+    case Kind::Subscript:
+      return "subscript";
+    case Kind::Destructor:
+      return "deinit";
+    }
+  }
+
   int compare(DeclBaseName other) const {
-    // TODO: Sort special names cleverly
-    return getIdentifier().compare(other.getIdentifier());
+    return userFacingName().compare(other.userFacingName());
   }
 
   bool operator==(StringRef Str) const {
@@ -250,11 +301,6 @@ public:
 
   bool operator<(DeclBaseName RHS) const {
     return Ident.get() < RHS.Ident.get();
-  }
-
-  // TODO: Remove once migration to DeclBaseName has been completed
-  operator Identifier() {
-    return getIdentifier();
   }
 
   const void *getAsOpaquePointer() const { return Ident.get(); }

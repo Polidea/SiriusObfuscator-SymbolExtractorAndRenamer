@@ -158,7 +158,7 @@ open class FileManager : NSObject {
                 } else if let attr = attributes {
                     try self.setAttributes(attr, ofItemAtPath: path)
                 }
-            } else if isDir {
+            } else if isDir.boolValue {
                 return
             } else {
                 throw _NSErrorWithErrno(EEXIST, reading: false, path: path)
@@ -296,15 +296,13 @@ open class FileManager : NSObject {
         result[.systemNumber] = NSNumber(value: UInt64(s.st_dev))
         result[.systemFileNumber] = NSNumber(value: UInt64(s.st_ino))
         
-        let pwd = getpwuid(s.st_uid)
-        if pwd != nil && pwd!.pointee.pw_name != nil {
-            let name = String(cString: pwd!.pointee.pw_name)
+        if let pwd = getpwuid(s.st_uid), pwd.pointee.pw_name != nil {
+            let name = String(cString: pwd.pointee.pw_name)
             result[.ownerAccountName] = name
         }
         
-        let grd = getgrgid(s.st_gid)
-        if grd != nil && grd!.pointee.gr_name != nil {
-            let name = String(cString: grd!.pointee.gr_name)
+        if let grd = getgrgid(s.st_gid), grd.pointee.gr_name != nil {
+            let name = String(cString: grd.pointee.gr_name)
             result[.groupOwnerAccountName] = name
         }
 
@@ -343,7 +341,38 @@ open class FileManager : NSObject {
         This method replaces fileSystemAttributesAtPath:.
      */
     open func attributesOfFileSystem(forPath path: String) throws -> [FileAttributeKey : Any] {
+#if os(Android)
         NSUnimplemented()
+#else
+        // statvfs(2) doesn't support 64bit inode on Darwin (apfs), fallback to statfs(2)
+        #if os(OSX) || os(iOS)
+            var s = statfs()
+            guard statfs(path, &s) == 0 else {
+                throw _NSErrorWithErrno(errno, reading: true, path: path)
+            }
+        #else
+            var s = statvfs()
+            guard statvfs(path, &s) == 0 else {
+                throw _NSErrorWithErrno(errno, reading: true, path: path)
+            }
+        #endif
+        
+        
+        var result = [FileAttributeKey : Any]()
+        #if os(OSX) || os(iOS)
+            let blockSize = UInt64(s.f_bsize)
+            result[.systemNumber] = NSNumber(value: UInt64(s.f_fsid.val.0))
+        #else
+            let blockSize = UInt64(s.f_frsize)
+            result[.systemNumber] = NSNumber(value: UInt64(s.f_fsid))
+        #endif
+        result[.systemSize] = NSNumber(value: blockSize * UInt64(s.f_blocks))
+        result[.systemFreeSize] = NSNumber(value: blockSize * UInt64(s.f_bavail))
+        result[.systemNodes] = NSNumber(value: UInt64(s.f_files))
+        result[.systemFreeNodes] = NSNumber(value: UInt64(s.f_ffree))
+        
+        return result
+#endif
     }
     
     /* createSymbolicLinkAtPath:withDestination:error: returns YES if the symbolic link that point at 'destPath' was able to be created at the location specified by 'path'. If this method returns NO, the link was unable to be created and an NSError will be returned by reference in the 'error' parameter. This method does not traverse a terminal symlink.
@@ -406,9 +435,9 @@ open class FileManager : NSObject {
     }
     
     open func linkItem(atPath srcPath: String, toPath dstPath: String) throws {
-        var isDir = false
+        var isDir: ObjCBool = false
         if self.fileExists(atPath: srcPath, isDirectory: &isDir) {
-            if !isDir {
+            if !isDir.boolValue {
                 // TODO: Symlinks should be copied instead of hard-linked.
                 if link(srcPath, dstPath) == -1 {
                     throw _NSErrorWithErrno(errno, reading: false, path: srcPath)
@@ -431,7 +460,8 @@ open class FileManager : NSObject {
             ps.advanced(by: 1).initialize(to: nil)
             let stream = fts_open(ps, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nil)
             ps.deinitialize(count: 2)
-            ps.deallocate(capacity: 2)
+            ps.deallocate()
+            fsRep.deallocate()
 
             if stream != nil {
                 defer {
@@ -532,12 +562,13 @@ open class FileManager : NSObject {
             if let isDirectory = isDirectory {
                 if (s.st_mode & S_IFMT) == S_IFLNK {
                     if stat(path, &s) >= 0 {
-                        isDirectory.pointee = (s.st_mode & S_IFMT) == S_IFDIR
+                        isDirectory.pointee = ObjCBool((s.st_mode & S_IFMT) == S_IFDIR)
                     } else {
                         return false
                     }
                 } else {
-                    isDirectory.pointee = (s.st_mode & S_IFMT) == S_IFDIR
+                    let isDir = (s.st_mode & S_IFMT) == S_IFDIR
+                    isDirectory.pointee = ObjCBool(isDir)
                 }
             }
 
@@ -718,7 +749,11 @@ extension FileManager {
     open var homeDirectoryForCurrentUser: URL {
         return homeDirectory(forUser: CFCopyUserName().takeRetainedValue()._swiftObject)!
     }
-    open var temporaryDirectory: URL { NSUnimplemented() }
+    
+    open var temporaryDirectory: URL {
+        return URL(fileURLWithPath: NSTemporaryDirectory())
+    }
+    
     open func homeDirectory(forUser userName: String) -> URL? {
         guard !userName.isEmpty else { return nil }
         guard let url = CFCopyHomeDirectoryURLForUser(userName._cfObject) else { return nil }
@@ -1002,7 +1037,8 @@ extension FileManager {
                 ps.advanced(by: 1).initialize(to: nil)
                 _stream = fts_open(ps, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nil)
                 ps.deinitialize(count: 2)
-                ps.deallocate(capacity: 2)
+                ps.deallocate()
+                fsRep.deallocate()
             } else {
                 _rootError = _NSErrorWithErrno(ENOENT, reading: true, url: url)
             }

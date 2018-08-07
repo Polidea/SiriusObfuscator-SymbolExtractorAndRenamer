@@ -1,7 +1,7 @@
 /*	CFPlatform.c
-	Copyright (c) 1999-2016, Apple Inc. and the Swift project authors
+	Copyright (c) 1999-2017, Apple Inc. and the Swift project authors
  
-	Portions Copyright (c) 2014-2016 Apple Inc. and the Swift project authors
+	Portions Copyright (c) 2014-2017, Apple Inc. and the Swift project authors
 	Licensed under Apache License v2.0 with Runtime Library Exception
 	See http://swift.org/LICENSE.txt for license information
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
@@ -123,6 +123,10 @@ const char *_CFProcessPath(void) {
 #endif
 
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
+Boolean _CFIsMainThread(void) {
+    return pthread_main_np() == 1;
+}
+
 const char *_CFProcessPath(void) {
     if (__CFProcessPath) return __CFProcessPath;
 #if DEPLOYMENT_TARGET_MACOSX
@@ -576,9 +580,14 @@ CF_PRIVATE void __CFFinalizeWindowsThreadData() {
 #endif
 
 static pthread_key_t __CFTSDIndexKey;
+static pthread_once_t __CFTSDIndexKey_once = PTHREAD_ONCE_INIT;
+
+CF_PRIVATE void __CFTSDInitializeOnce() {
+    (void)pthread_key_create(&__CFTSDIndexKey, __CFTSDFinalize);
+}
 
 CF_PRIVATE void __CFTSDInitialize() {
-    (void)pthread_key_create(&__CFTSDIndexKey, __CFTSDFinalize);
+    (void)pthread_once(&__CFTSDIndexKey_once, __CFTSDInitializeOnce);
 }
 
 static void __CFTSDSetSpecific(void *arg) {
@@ -601,7 +610,7 @@ static void *__CFTSDGetSpecific() {
 #endif
 }
 
-CF_PRIVATE Boolean __CFMainThreadHasExited;
+CF_PRIVATE _Atomic(bool) __CFMainThreadHasExited;
 static void __CFTSDFinalize(void *arg) {
     if (pthread_main_np()) {
         __CFMainThreadHasExited = true;
@@ -664,7 +673,7 @@ static __CFTSDTable *__CFTSDGetTable(const Boolean create) {
 
 // For the use of CF and Foundation only
 CF_EXPORT void *_CFGetTSDCreateIfNeeded(const uint32_t slot, const Boolean create) {
-    if (slot > CF_TSD_MAX_SLOTS) {
+    if (slot >= CF_TSD_MAX_SLOTS) {
         _CFLogSimple(kCFLogLevelError, "Error: TSD slot %d out of range (get)", slot);
         HALT;
     }
@@ -689,7 +698,7 @@ CF_EXPORT void *_CFGetTSD(uint32_t slot) {
 
 // For the use of CF and Foundation only
 CF_EXPORT void *_CFSetTSD(uint32_t slot, void *newVal, tsdDestructor destructor) {
-    if (slot > CF_TSD_MAX_SLOTS) {
+    if (slot >= CF_TSD_MAX_SLOTS) {
         _CFLogSimple(kCFLogLevelError, "Error: TSD slot %d out of range (set)", slot);
         HALT;
     }
@@ -1261,7 +1270,7 @@ CF_PRIVATE int asprintf(char **ret, const char *format, ...) {
     if (cnt < sz - 1) return cnt;
     sz = cnt + 8;
     char *oldret = *ret;
-    *ret = (char *) realloc(*ret, sz * sizeof(char));
+    *ret = __CFSafelyReallocate(*ret, sz * sizeof(char), NULL);
     if (!*ret && oldret) free(oldret);
     if (!*ret) return -1;
     va_start(args, format);
@@ -1295,7 +1304,7 @@ CFTypeRef _Nullable _CFThreadSpecificGet(_CFThreadSpecificKey key) {
     return (CFTypeRef)pthread_getspecific(key);
 }
 
-void _CThreadSpecificSet(_CFThreadSpecificKey key, CFTypeRef _Nullable value) {
+void _CFThreadSpecificSet(_CFThreadSpecificKey key, CFTypeRef _Nullable value) {
     if (value != NULL) {
         swift_retain((void *)value);
         pthread_setspecific(key, value);
@@ -1310,17 +1319,21 @@ _CFThreadRef _CFThreadCreate(const _CFThreadAttributes attrs, void *_Nullable (*
     return thread;
 }
 
-CF_SWIFT_EXPORT void _CFThreadSetName(const char *_Nullable name) {
+CF_CROSS_PLATFORM_EXPORT int _CFThreadSetName(pthread_t thread, const char *_Nonnull name) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
-    pthread_setname_np(name);
+    if (pthread_equal(pthread_self(), thread)) {
+        return pthread_setname_np(name);
+    }
+    return EINVAL;
 #elif DEPLOYMENT_TARGET_LINUX
-    pthread_setname_np(pthread_self(), name);
+    return pthread_setname_np(thread, name);
 #endif
 }
 
-CF_SWIFT_EXPORT int _CFThreadGetName(char *buf, int length) {
+CF_CROSS_PLATFORM_EXPORT int _CFThreadGetName(char *_Nonnull buf, int length) {
 #if DEPLOYMENT_TARGET_MACOSX || DEPLOYMENT_TARGET_EMBEDDED || DEPLOYMENT_TARGET_EMBEDDED_MINI
     return pthread_getname_np(pthread_self(), buf, length);
+#elif DEPLOYMENT_TARGET_ANDROID
 #elif DEPLOYMENT_TARGET_LINUX
     return pthread_getname_np(pthread_self(), buf, length);
 #endif

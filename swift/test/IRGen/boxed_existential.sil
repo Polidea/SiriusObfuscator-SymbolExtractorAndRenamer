@@ -26,7 +26,7 @@ entry(%x : $*T):
   // CHECK: [[ADDR:%.*]] = extractvalue { %swift.error*, %swift.opaque* } [[BOX_PAIR]], 1
   %b = alloc_existential_box $Error, $T
   %p = project_existential_box $T in %b : $Error
-  // CHECK: call %swift.opaque* %initializeWithTake(%swift.opaque* [[ADDR]], %swift.opaque* %0, %swift.type* %T)
+  // CHECK: call %swift.opaque* %initializeWithTake(%swift.opaque* noalias [[ADDR]], %swift.opaque* noalias %0, %swift.type* %T)
   copy_addr [take] %x to [initialization] %p : $*T
   // CHECK: ret %swift.error* [[BOX]]
   return %b : $Error
@@ -105,10 +105,10 @@ entry(%b : $Error):
   %o = open_existential_box %b : $Error to $*@opened("01234567-89AB-CDEF-0123-000000000000") Error
   // CHECK: [[CODE_ADDR:%.*]] = getelementptr {{.*}} [[WITNESS]], i32 1
   // CHECK: [[CODE:%.*]] = load {{.*}} [[CODE_ADDR]]
-  %m = witness_method $@opened("01234567-89AB-CDEF-0123-000000000000") Error, #Error._code!getter.1, %o : $*@opened("01234567-89AB-CDEF-0123-000000000000") Error : $@convention(witness_method) <Self: Error> (@in_guaranteed Self) -> Int
+  %m = witness_method $@opened("01234567-89AB-CDEF-0123-000000000000") Error, #Error._code!getter.1, %o : $*@opened("01234567-89AB-CDEF-0123-000000000000") Error : $@convention(witness_method: Error) <Self: Error> (@in_guaranteed Self) -> Int
   // CHECK: [[CODE_FN:%.*]] = bitcast i8* [[CODE]] to [[INT:i[0-9]+]] (%swift.opaque*, %swift.type*, i8**)*
   // CHECK: [[RESULT:%.*]] = call swiftcc [[INT]] [[CODE_FN]](%swift.opaque* noalias nocapture swiftself [[ADDR]], %swift.type* [[TYPE]], i8** [[WITNESS]])
-  %c = apply %m<@opened("01234567-89AB-CDEF-0123-000000000000") Error>(%o) : $@convention(witness_method) <Self: Error> (@in_guaranteed Self) -> Int
+  %c = apply %m<@opened("01234567-89AB-CDEF-0123-000000000000") Error>(%o) : $@convention(witness_method: Error) <Self: Error> (@in_guaranteed Self) -> Int
   // CHECK: ret [[INT]] [[RESULT]]
   return %c : $Int
 }

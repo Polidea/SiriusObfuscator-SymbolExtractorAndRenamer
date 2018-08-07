@@ -137,11 +137,11 @@ func methodCalls(
 
   // CHECK: [[BORROW:%.*]] = begin_borrow %0 : $Base<Int> & P
   // CHECK: [[PAYLOAD:%.*]] = open_existential_ref [[BORROW]] : $Base<Int> & P to $@opened("{{.*}}") Base<Int> & P
-  // CHECK: [[METHOD:%.*]] = witness_method $@opened("{{.*}}") Base<Int> & P, #P.protocolSelfReturn!1 : <Self where Self : P> (Self) -> () -> @dynamic_self Self, %16 : $@opened("{{.*}}") Base<Int> & P : $@convention(witness_method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> @out τ_0_0
   // CHECK: [[RESULT_BOX:%.*]] = alloc_stack $@opened("{{.*}}") Base<Int> & P
   // CHECK: [[SELF_BOX:%.*]] = alloc_stack $@opened("{{.*}}") Base<Int> & P
   // CHECK: store_borrow [[PAYLOAD]] to [[SELF_BOX]] : $*@opened("{{.*}}") Base<Int> & P
-  // CHECK: apply [[METHOD]]<@opened("{{.*}}") Base<Int> & P>([[RESULT_BOX]], [[SELF_BOX]]) : $@convention(witness_method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> @out τ_0_0
+  // CHECK: [[METHOD:%.*]] = witness_method $@opened("{{.*}}") Base<Int> & P, #P.protocolSelfReturn!1 : <Self where Self : P> (Self) -> () -> @dynamic_self Self, [[PAYLOAD]] : $@opened("{{.*}}") Base<Int> & P : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> @out τ_0_0
+  // CHECK: apply [[METHOD]]<@opened("{{.*}}") Base<Int> & P>([[RESULT_BOX]], [[SELF_BOX]]) : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> @out τ_0_0
   // CHECK: dealloc_stack [[SELF_BOX]] : $*@opened("{{.*}}") Base<Int> & P
   // CHECK: [[RESULT_REF:%.*]] = load [take] [[RESULT_BOX]] : $*@opened("{{.*}}") Base<Int> & P
   // CHECK: [[RESULT:%.*]] = init_existential_ref [[RESULT_REF]] : $@opened("{{.*}}") Base<Int> & P : $@opened("{{.*}}") Base<Int> & P, $Base<Int> & P
@@ -151,8 +151,8 @@ func methodCalls(
   let _: Base<Int> & P = baseAndP.protocolSelfReturn()
 
   // CHECK: [[METATYPE:%.*]] = open_existential_metatype %1 : $@thick (Base<Int> & P).Type to $@thick (@opened("{{.*}}") (Base<Int> & P)).Type
-  // CHECK: [[METHOD:%.*]] = function_ref @_T021subclass_existentials4BaseC15classSelfReturnACyxGXDyFZ : $@convention(method) <τ_0_0> (@thick Base<τ_0_0>.Type) -> @owned Base<τ_0_0>
   // CHECK: [[METATYPE_REF:%.*]] = upcast [[METATYPE]] : $@thick (@opened("{{.*}}") (Base<Int> & P)).Type to $@thick Base<Int>.Type
+  // CHECK: [[METHOD:%.*]] = function_ref @_T021subclass_existentials4BaseC15classSelfReturnACyxGXDyFZ : $@convention(method) <τ_0_0> (@thick Base<τ_0_0>.Type) -> @owned Base<τ_0_0>
   // CHECK: [[RESULT_REF2:%.*]] = apply [[METHOD]]<Int>([[METATYPE_REF]])
   // CHECK: [[RESULT_REF:%.*]] = unchecked_ref_cast [[RESULT_REF2]] : $Base<Int> to $@opened("{{.*}}") (Base<Int> & P)
   // CHECK: [[RESULT:%.*]] = init_existential_ref [[RESULT_REF]] : $@opened("{{.*}}") (Base<Int> & P) : $@opened("{{.*}}") (Base<Int> & P), $Base<Int> & P
@@ -160,9 +160,9 @@ func methodCalls(
   let _: Base<Int> & P = baseAndPType.classSelfReturn()
 
   // CHECK: [[METATYPE:%.*]] = open_existential_metatype %1 : $@thick (Base<Int> & P).Type to $@thick (@opened("{{.*}}") (Base<Int> & P)).Type
-  // CHECK: [[METHOD:%.*]] = witness_method $@opened("{{.*}}") (Base<Int> & P), #P.protocolSelfReturn!1 : <Self where Self : P> (Self.Type) -> () -> @dynamic_self Self, [[METATYPE]] : $@thick (@opened("{{.*}}") (Base<Int> & P)).Type : $@convention(witness_method) <τ_0_0 where τ_0_0 : P> (@thick τ_0_0.Type) -> @out τ_0_0
   // CHECK: [[RESULT:%.*]] = alloc_stack $@opened("{{.*}}") (Base<Int> & P)
-  // CHECK: apply [[METHOD]]<@opened("{{.*}}") (Base<Int> & P)>(%37, %35) : $@convention(witness_method) <τ_0_0 where τ_0_0 : P> (@thick τ_0_0.Type) -> @out τ_0_0
+  // CHECK: [[METHOD:%.*]] = witness_method $@opened("{{.*}}") (Base<Int> & P), #P.protocolSelfReturn!1 : <Self where Self : P> (Self.Type) -> () -> @dynamic_self Self, [[METATYPE]] : $@thick (@opened("{{.*}}") (Base<Int> & P)).Type : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@thick τ_0_0.Type) -> @out τ_0_0
+  // CHECK: apply [[METHOD]]<@opened("{{.*}}") (Base<Int> & P)>([[RESULT]], [[METATYPE]]) : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@thick τ_0_0.Type) -> @out τ_0_0
   // CHECK: [[RESULT_REF:%.*]] = load [take] [[RESULT]] : $*@opened("{{.*}}") (Base<Int> & P)
   // CHECK: [[RESULT_VALUE:%.*]] = init_existential_ref [[RESULT_REF]] : $@opened("{{.*}}") (Base<Int> & P) : $@opened("{{.*}}") (Base<Int> & P), $Base<Int> & P
   // CHECK: destroy_value [[RESULT_VALUE]]
@@ -222,7 +222,7 @@ func propertyAccesses(_ x: PropertyP & PropertyC) {
   xx[(1, 2)] += 1
 }
 
-// CHECK-LABEL: sil hidden @_T021subclass_existentials19functionConversionsyAA1P_AA4BaseCySiGXcyc07returnsE4AndP_AaC_AFXcXpyc0feG5PTypeAA7DerivedCyc0fI0AJmyc0fI4TypeAA1R_AJXcyc0fiG1RAaM_AJXcXpyc0fiG5RTypetF : $@convention(thin) (@owned @callee_owned () -> @owned Base<Int> & P, @owned @callee_owned () -> @thick (Base<Int> & P).Type, @owned @callee_owned () -> @owned Derived, @owned @callee_owned () -> @thick Derived.Type, @owned @callee_owned () -> @owned Derived & R, @owned @callee_owned () -> @thick (Derived & R).Type) -> () {
+// CHECK-LABEL: sil hidden @_T021subclass_existentials19functionConversionsyAA1P_AA4BaseCySiGXcyc07returnsE4AndP_AaC_AFXcXpyc0feG5PTypeAA7DerivedCyc0fI0AJmyc0fI4TypeAA1R_AJXcyc0fiG1RAaM_AJXcXpyc0fiG5RTypetF : $@convention(thin) (@owned @callee_guaranteed () -> @owned Base<Int> & P, @owned @callee_guaranteed () -> @thick (Base<Int> & P).Type, @owned @callee_guaranteed () -> @owned Derived, @owned @callee_guaranteed () -> @thick Derived.Type, @owned @callee_guaranteed () -> @owned Derived & R, @owned @callee_guaranteed () -> @thick (Derived & R).Type) -> () {
 func functionConversions(
   returnsBaseAndP: @escaping () -> (Base<Int> & P),
   returnsBaseAndPType: @escaping () -> (Base<Int> & P).Type,
@@ -362,7 +362,7 @@ func archetypeDowncasts<S,
   // CHECK:      [[COPY:%.*]] = alloc_stack $S
   // CHECK-NEXT: copy_addr %0 to [initialization] [[COPY]] : $*S
   // CHECK-NEXT: [[RESULT:%.*]] = alloc_stack $Base<T> & P
-  // CHECK-NEXT: unconditional_checked_cast_addr take_always S in [[COPY]] : $*S to Base<T> & P in [[RESULT]] : $*Base<T> & P
+  // CHECK-NEXT: unconditional_checked_cast_addr S in [[COPY]] : $*S to Base<T> & P in [[RESULT]] : $*Base<T> & P
   let _ = s as! (Base<T> & P)
 
   // CHECK:      [[COPY:%.*]] = alloc_stack $S
@@ -374,7 +374,7 @@ func archetypeDowncasts<S,
   // CHECK:      [[COPY:%.*]] = alloc_stack $S
   // CHECK-NEXT: copy_addr %0 to [initialization] [[COPY]] : $*S
   // CHECK-NEXT: [[RESULT:%.*]] = alloc_stack $Base<Int> & P
-  // CHECK-NEXT: unconditional_checked_cast_addr take_always S in [[COPY]] : $*S to Base<Int> & P in [[RESULT]] : $*Base<Int> & P
+  // CHECK-NEXT: unconditional_checked_cast_addr S in [[COPY]] : $*S to Base<Int> & P in [[RESULT]] : $*Base<Int> & P
   let _ = s as! (Base<Int> & P)
 
   // CHECK:      [[BORROWED:%.*]] = begin_borrow %5 : $BaseTAndP
@@ -401,7 +401,7 @@ func archetypeDowncasts<S,
   // CHECK-NEXT: [[COPIED:%.*]] = copy_value [[BORROWED]] : $Base<T> & P
   // CHECK-NEXT: store [[COPIED]] to [init] [[COPY]] : $*Base<T> & P
   // CHECK-NEXT: [[RESULT:%.*]] = alloc_stack $S
-  // CHECK-NEXT: unconditional_checked_cast_addr take_always Base<T> & P in [[COPY]] : $*Base<T> & P to S in [[RESULT]] : $*S
+  // CHECK-NEXT: unconditional_checked_cast_addr Base<T> & P in [[COPY]] : $*Base<T> & P to S in [[RESULT]] : $*S
   let _ = baseTAndP_concrete as! S
 
   // CHECK:      [[BORROWED:%.*]] = begin_borrow %9 : $Base<T> & P
@@ -458,7 +458,7 @@ func archetypeDowncasts<S,
   // CHECK-NEXT: [[COPIED:%.*]] = copy_value [[BORROWED]] : $Base<Int> & P
   // CHECK-NEXT: store [[COPIED]] to [init] [[COPY]] : $*Base<Int> & P
   // CHECK-NEXT: [[RESULT:%.*]] = alloc_stack $S
-  // CHECK-NEXT: unconditional_checked_cast_addr take_always Base<Int> & P in [[COPY]] : $*Base<Int> & P to S in [[RESULT]] : $*S
+  // CHECK-NEXT: unconditional_checked_cast_addr Base<Int> & P in [[COPY]] : $*Base<Int> & P to S in [[RESULT]] : $*S
   let _ = baseIntAndP_concrete as! S
 
   // CHECK:      [[BORROWED:%.*]] = begin_borrow %10 : $Base<Int> & P

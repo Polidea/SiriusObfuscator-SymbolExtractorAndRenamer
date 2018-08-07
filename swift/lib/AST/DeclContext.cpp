@@ -17,6 +17,7 @@
 #include "swift/AST/Expr.h"
 #include "swift/AST/GenericEnvironment.h"
 #include "swift/AST/Initializer.h"
+#include "swift/AST/LazyResolver.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/Types.h"
 #include "swift/Basic/SourceManager.h"
@@ -91,6 +92,10 @@ EnumDecl *DeclContext::getAsEnumOrEnumExtensionContext() const {
   return dyn_cast_or_null<EnumDecl>(getAsTypeOrTypeExtensionContext());
 }
 
+StructDecl *DeclContext::getAsStructOrStructExtensionContext() const {
+  return dyn_cast_or_null<StructDecl>(getAsTypeOrTypeExtensionContext());
+}
+
 ProtocolDecl *DeclContext::getAsProtocolOrProtocolExtensionContext() const {
   return dyn_cast_or_null<ProtocolDecl>(getAsTypeOrTypeExtensionContext());
 }
@@ -145,14 +150,6 @@ static Type computeExtensionType(const ExtensionDecl *ED, DeclTypeKind kind) {
   }
 
   llvm_unreachable("Unhandled DeclTypeKind in switch.");
-}
-
-Type DeclContext::getDeclaredTypeOfContext() const {
-  if (auto *ED = dyn_cast<ExtensionDecl>(this))
-    return computeExtensionType(ED, DeclTypeKind::DeclaredType);
-  if (auto *NTD = dyn_cast<NominalTypeDecl>(this))
-    return NTD->getDeclaredType();
-  return Type();
 }
 
 Type DeclContext::getDeclaredTypeInContext() const {
@@ -308,11 +305,6 @@ Type DeclContext::mapTypeIntoContext(Type type) const {
       getGenericEnvironmentOfContext(), type);
 }
 
-Type DeclContext::mapTypeOutOfContext(Type type) const {
-  return GenericEnvironment::mapTypeOutOfContext(
-      getGenericEnvironmentOfContext(), type);
-}
-
 DeclContext *DeclContext::getLocalContext() {
   if (isLocalContext())
     return this;
@@ -430,7 +422,30 @@ DeclContext *DeclContext::getParentForLookup() const {
     // outer types.
     return getModuleScopeContext();
   }
+  if (isa<NominalTypeDecl>(this)) {
+    // If we are inside a nominal type that is inside a protocol,
+    // skip the protocol.
+    if (isa<ProtocolDecl>(getParent()))
+      return getModuleScopeContext();
+  }
   return getParent();
+}
+
+DeclContext *DeclContext::getCommonParentContext(DeclContext *A,
+                                                 DeclContext *B) {
+  if (A == B)
+    return A;
+
+  if (A->isChildContextOf(B))
+    return B;
+
+  // Peel away layers of A until we reach a common parent
+  for (DeclContext *CurDC = A; CurDC; CurDC = CurDC->getParent()) {
+    if (B->isChildContextOf(CurDC))
+      return CurDC;
+  }
+
+  return nullptr;
 }
 
 ModuleDecl *DeclContext::getParentModule() const {
@@ -513,8 +528,10 @@ ResilienceExpansion DeclContext::getResilienceExpansion() const {
   for (const auto *dc = this; dc->isLocalContext(); dc = dc->getParent()) {
     // Default argument initializer contexts have their resilience expansion
     // set when they're type checked.
-    if (auto *DAI = dyn_cast<DefaultArgumentInitializer>(dc))
-      return DAI->getResilienceExpansion();
+    if (isa<DefaultArgumentInitializer>(dc)) {
+      return cast<AbstractFunctionDecl>(dc->getParent())
+          ->getDefaultArgumentResilienceExpansion();
+    }
 
     if (auto *AFD = dyn_cast<AbstractFunctionDecl>(dc)) {
       // If the function is a nested function, we will serialize its body if
@@ -524,7 +541,7 @@ ResilienceExpansion DeclContext::getResilienceExpansion() const {
 
       // FIXME: Make sure this method is never called on decls that have not
       // been fully validated.
-      if (!AFD->hasAccessibility())
+      if (!AFD->hasAccess())
         break;
 
       // If the function is not externally visible, we will not be serializing
@@ -577,7 +594,7 @@ bool DeclContext::isInnermostContextGeneric() const {
 bool
 DeclContext::isCascadingContextForLookup(bool functionsAreNonCascading) const {
   // FIXME: This is explicitly checking for attributes in some cases because
-  // it can be called before accessibility is computed.
+  // it can be called before access control is computed.
   switch (getContextKind()) {
   case DeclContextKind::AbstractClosureExpr:
     break;
@@ -595,48 +612,23 @@ DeclContext::isCascadingContextForLookup(bool functionsAreNonCascading) const {
     // FIXME: Pattern initializers at top-level scope end up here.
     return true;
 
-  case DeclContextKind::AbstractFunctionDecl: {
+  case DeclContextKind::AbstractFunctionDecl:
     if (functionsAreNonCascading)
       return false;
-    auto *AFD = cast<AbstractFunctionDecl>(this);
-    if (AFD->hasAccessibility())
-      return AFD->getFormalAccess() > Accessibility::FilePrivate;
     break;
-  }
 
-  case DeclContextKind::SubscriptDecl: {
-    auto *SD = cast<SubscriptDecl>(this);
-    if (SD->hasAccessibility())
-      return SD->getFormalAccess() > Accessibility::FilePrivate;
+  case DeclContextKind::SubscriptDecl:
     break;
-  }
-      
+
   case DeclContextKind::Module:
   case DeclContextKind::FileUnit:
     return true;
 
-  case DeclContextKind::GenericTypeDecl: {
-    auto *nominal = cast<GenericTypeDecl>(this);
-    if (nominal->hasAccessibility())
-      return nominal->getFormalAccess() > Accessibility::FilePrivate;
+  case DeclContextKind::GenericTypeDecl:
     break;
-  }
 
-  case DeclContextKind::ExtensionDecl: {
-    auto *extension = cast<ExtensionDecl>(this);
-    if (extension->hasDefaultAccessibility())
-      return extension->getDefaultAccessibility() > Accessibility::FilePrivate;
-    // FIXME: duplicated from computeDefaultAccessibility in TypeCheckDecl.cpp.
-    if (auto *AA = extension->getAttrs().getAttribute<AccessibilityAttr>())
-      return AA->getAccess() > Accessibility::FilePrivate;
-    if (Type extendedTy = extension->getExtendedType()) {
-
-      // Need to check if extendedTy is ErrorType
-      if (extendedTy->getAnyNominal())
-        return extendedTy->getAnyNominal()->isCascadingContextForLookup(true);
-    }
-    break;
-  }
+  case DeclContextKind::ExtensionDecl:
+    return true;
   }
 
   return getParent()->isCascadingContextForLookup(true);
@@ -652,7 +644,7 @@ unsigned DeclContext::getSyntacticDepth() const {
 
 unsigned DeclContext::getSemanticDepth() const {
   // For extensions, count the depth of the nominal type being extended.
-  if (auto ext = dyn_cast<ExtensionDecl>(this)) {
+  if (isa<ExtensionDecl>(this)) {
     if (auto nominal = getAsNominalTypeOrNominalTypeExtensionContext())
       return nominal->getSemanticDepth();
 
@@ -761,7 +753,7 @@ unsigned DeclContext::printContext(raw_ostream &OS, unsigned indent) const {
     break;
   case DeclContextKind::SubscriptDecl:    Kind = "SubscriptDecl"; break;
   }
-  OS.indent(Depth*2 + indent) << "0x" << (void*)this << " " << Kind;
+  OS.indent(Depth*2 + indent) << (void*)this << " " << Kind;
 
   switch (getContextKind()) {
   case DeclContextKind::Module:
@@ -800,7 +792,7 @@ unsigned DeclContext::printContext(raw_ostream &OS, unsigned indent) const {
     break;
   case DeclContextKind::AbstractFunctionDecl: {
     auto *AFD = cast<AbstractFunctionDecl>(this);
-    OS << " name=" << AFD->getName();
+    OS << " name=" << AFD->getFullName();
     if (AFD->hasInterfaceType())
       OS << " : " << AFD->getInterfaceType();
     else
@@ -862,22 +854,32 @@ unsigned DeclContext::printContext(raw_ostream &OS, unsigned indent) const {
   return Depth + 1;
 }
 
-ASTContext &IterableDeclContext::getASTContext() const {
+const Decl *
+IterableDeclContext::getDecl() const {
   switch (getIterableContextKind()) {
   case IterableDeclContextKind::NominalTypeDecl:
-    return cast<NominalTypeDecl>(this)->getASTContext();
+    return cast<NominalTypeDecl>(this);
+    break;
 
   case IterableDeclContextKind::ExtensionDecl:
-    return cast<ExtensionDecl>(this)->getASTContext();
+    return cast<ExtensionDecl>(this);
+    break;
   }
-
   llvm_unreachable("Unhandled IterableDeclContextKind in switch.");
+}
+
+ASTContext &IterableDeclContext::getASTContext() const {
+  return getDecl()->getASTContext();
+}
+
+DeclRange IterableDeclContext::getCurrentMembersWithoutLoading() const {
+  return DeclRange(FirstDeclAndLazyMembers.getPointer(), nullptr);
 }
 
 DeclRange IterableDeclContext::getMembers() const {
   loadAllMembers();
 
-  return DeclRange(FirstDeclAndLazyMembers.getPointer(), nullptr);
+  return getCurrentMembersWithoutLoading();
 }
 
 /// Add a member to this context.
@@ -942,9 +944,9 @@ void IterableDeclContext::setMemberLoader(LazyMemberLoader *loader,
   ++NumLazyIterableDeclContexts;
   ++NumUnloadedLazyIterableDeclContexts;
   // FIXME: (transitional) increment the redundant "always-on" counter.
-  if (ctx.Stats) {
-    ++ctx.Stats->getFrontendCounters().NumLazyIterableDeclContexts;
-    ++ctx.Stats->getFrontendCounters().NumUnloadedLazyIterableDeclContexts;
+  if (auto s = ctx.Stats) {
+    ++s->getFrontendCounters().NumLazyIterableDeclContexts;
+    ++s->getFrontendCounters().NumUnloadedLazyIterableDeclContexts;
   }
 }
 
@@ -958,24 +960,22 @@ void IterableDeclContext::loadAllMembers() const {
     /*lazyLoader=*/nullptr);
   FirstDeclAndLazyMembers.setInt(false);
 
-  const Decl *container = nullptr;
-  switch (getIterableContextKind()) {
-  case IterableDeclContextKind::NominalTypeDecl:
-    container = cast<NominalTypeDecl>(this);
-    break;
-
-  case IterableDeclContextKind::ExtensionDecl:
-    container = cast<ExtensionDecl>(this);
-    break;
-  }
-
+  const Decl *container = getDecl();
   contextInfo->loader->loadAllMembers(const_cast<Decl *>(container),
                                       contextInfo->memberData);
 
   --NumUnloadedLazyIterableDeclContexts;
   // FIXME: (transitional) decrement the redundant "always-on" counter.
-  if (ctx.Stats)
-    ctx.Stats->getFrontendCounters().NumUnloadedLazyIterableDeclContexts--;
+  if (auto s = ctx.Stats)
+    s->getFrontendCounters().NumUnloadedLazyIterableDeclContexts--;
+}
+
+bool IterableDeclContext::wasDeserialized() const {
+  const DeclContext *DC = cast<DeclContext>(getDecl());
+  if (auto F = dyn_cast<FileUnit>(DC->getModuleScopeContext())) {
+    return F->getKind() == FileUnitKind::SerializedAST;
+  }
+  return false;
 }
 
 bool IterableDeclContext::classof(const Decl *D) {
@@ -1049,16 +1049,16 @@ bool AccessScope::isFileScope() const {
   return DC && isa<FileUnit>(DC);
 }
 
-Accessibility AccessScope::accessibilityForDiagnostics() const {
+AccessLevel AccessScope::accessLevelForDiagnostics() const {
   if (isPublic())
-    return Accessibility::Public;
+    return AccessLevel::Public;
   if (isa<ModuleDecl>(getDeclContext()))
-    return Accessibility::Internal;
+    return AccessLevel::Internal;
   if (getDeclContext()->isModuleScopeContext()) {
-    return isPrivate() ? Accessibility::Private : Accessibility::FilePrivate;
+    return isPrivate() ? AccessLevel::Private : AccessLevel::FilePrivate;
   }
 
-  return Accessibility::Private;
+  return AccessLevel::Private;
 }
 
 bool AccessScope::allowsPrivateAccess(const DeclContext *useDC, const DeclContext *sourceDC) {

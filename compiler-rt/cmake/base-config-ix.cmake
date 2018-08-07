@@ -4,6 +4,8 @@
 # runtime libraries.
 
 include(CheckIncludeFile)
+include(CheckCXXSourceCompiles)
+
 check_include_file(unwind.h HAVE_UNWIND_H)
 
 # Top level target used to build all compiler-rt libraries.
@@ -63,7 +65,9 @@ else()
   set(COMPILER_RT_TEST_COMPILER_ID GNU)
 endif()
 
-string(TOLOWER ${CMAKE_SYSTEM_NAME} COMPILER_RT_OS_DIR)
+if(NOT DEFINED COMPILER_RT_OS_DIR)
+  string(TOLOWER ${CMAKE_SYSTEM_NAME} COMPILER_RT_OS_DIR)
+endif()
 set(COMPILER_RT_LIBRARY_OUTPUT_DIR
   ${COMPILER_RT_OUTPUT_DIR}/lib/${COMPILER_RT_OS_DIR})
 set(COMPILER_RT_LIBRARY_INSTALL_DIR
@@ -84,6 +88,7 @@ if(APPLE)
   option(COMPILER_RT_ENABLE_IOS "Enable building for iOS" On)
   option(COMPILER_RT_ENABLE_WATCHOS "Enable building for watchOS - Experimental" Off)
   option(COMPILER_RT_ENABLE_TVOS "Enable building for tvOS - Experimental" Off)
+
 else()
   option(COMPILER_RT_DEFAULT_TARGET_ONLY "Build builtins only for the default target" Off)
 endif()
@@ -172,6 +177,7 @@ macro(test_targets)
       else()
         test_target_arch(arm "" "-march=armv7-a" "-mfloat-abi=soft")
         test_target_arch(armhf "" "-march=armv7-a" "-mfloat-abi=hard")
+        test_target_arch(armv6m "" "-march=armv6m" "-mfloat-abi=soft")
       endif()
     elseif("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "aarch32")
       test_target_arch(aarch32 "" "-march=armv8-a")

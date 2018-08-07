@@ -136,10 +136,6 @@ function(add_lldb_executable name)
     endif()
   endif()
 
-  # Might need the following in an else clause for above to cover non-Apple
-  # set(rpath_prefix "$ORIGIN")
-  # set_target_properties(${name} PROPERTIES INSTALL_RPATH "${rpath_prefix}/../lib")
-
   if(ARG_INCLUDE_IN_FRAMEWORK AND LLDB_BUILD_FRAMEWORK)
     add_llvm_tool_symlink(${name} ${name} ALWAYS_GENERATE SKIP_INSTALL
                             OUTPUT_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})

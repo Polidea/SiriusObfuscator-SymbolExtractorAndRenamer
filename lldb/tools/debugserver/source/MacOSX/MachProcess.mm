@@ -45,6 +45,26 @@
 #include "CFBundle.h"
 #include "CFString.h"
 
+static void SplitEventData(const char *data, std::vector<std::string> &elements)
+{
+  elements.clear();
+  if (!data)
+    return;
+
+  const char *start = data;
+
+  while (*start != '\0') {
+    const char *token = strchr(start, ':');
+    if (!token) {
+      elements.push_back(std::string(start));
+      return;
+    }
+    if (token != start)
+      elements.push_back(std::string(start, token - start));
+    start = ++token;
+  }
+}
+
 #ifdef WITH_SPRINGBOARD
 
 #include <CoreFoundation/CoreFoundation.h>
@@ -112,7 +132,9 @@ static bool CallBoardSystemServiceOpenApplication(NSString *bundleIDNSStr,
   if (!cstr)
     cstr = "<Unknown Bundle ID>";
 
-  DNBLog("About to launch process for bundle ID: %s", cstr);
+  NSString *description = [options description];
+  DNBLog("About to launch process for bundle ID: %s - options:\n%s", cstr,
+    [description UTF8String]);
   [system_service
       openApplication:bundleIDNSStr
               options:options
@@ -222,21 +244,31 @@ static void SetBKSError(NSInteger error_code, DNBError &error) {
 static bool BKSAddEventDataToOptions(NSMutableDictionary *options,
                                      const char *event_data,
                                      DNBError &option_error) {
-  if (strcmp(event_data, "BackgroundContentFetching") == 0) {
-    DNBLog("Setting ActivateForEvent key in options dictionary.");
-    NSDictionary *event_details = [NSDictionary dictionary];
-    NSDictionary *event_dictionary = [NSDictionary
-        dictionaryWithObject:event_details
-                      forKey:
-                          BKSActivateForEventOptionTypeBackgroundContentFetching];
-    [options setObject:event_dictionary
-                forKey:BKSOpenApplicationOptionKeyActivateForEvent];
-    return true;
-  } else {
-    DNBLogError("Unrecognized event type: %s.  Ignoring.", event_data);
-    option_error.SetErrorString("Unrecognized event data.");
-    return false;
+  std::vector<std::string> values;
+  SplitEventData(event_data, values);
+  bool found_one = false;
+  for (std::string value : values)
+  {
+      if (value.compare("BackgroundContentFetching") == 0) {
+        DNBLog("Setting ActivateForEvent key in options dictionary.");
+        NSDictionary *event_details = [NSDictionary dictionary];
+        NSDictionary *event_dictionary = [NSDictionary
+            dictionaryWithObject:event_details
+                          forKey:
+                              BKSActivateForEventOptionTypeBackgroundContentFetching];
+        [options setObject:event_dictionary
+                    forKey:BKSOpenApplicationOptionKeyActivateForEvent];
+        found_one = true;
+      } else if (value.compare("ActivateSuspended") == 0) {
+        DNBLog("Setting ActivateSuspended key in options dictionary.");
+        [options setObject:@YES forKey: BKSOpenApplicationOptionKeyActivateSuspended];
+        found_one = true;
+      } else {
+        DNBLogError("Unrecognized event type: %s.  Ignoring.", value.c_str());
+        option_error.SetErrorString("Unrecognized event data");
+      }
   }
+  return found_one;
 }
 
 static NSMutableDictionary *BKSCreateOptionsDictionary(
@@ -322,21 +354,31 @@ static void SetFBSError(NSInteger error_code, DNBError &error) {
 static bool FBSAddEventDataToOptions(NSMutableDictionary *options,
                                      const char *event_data,
                                      DNBError &option_error) {
-  if (strcmp(event_data, "BackgroundContentFetching") == 0) {
-    DNBLog("Setting ActivateForEvent key in options dictionary.");
-    NSDictionary *event_details = [NSDictionary dictionary];
-    NSDictionary *event_dictionary = [NSDictionary
-        dictionaryWithObject:event_details
-                      forKey:
-                          FBSActivateForEventOptionTypeBackgroundContentFetching];
-    [options setObject:event_dictionary
-                forKey:FBSOpenApplicationOptionKeyActivateForEvent];
-    return true;
-  } else {
-    DNBLogError("Unrecognized event type: %s.  Ignoring.", event_data);
-    option_error.SetErrorString("Unrecognized event data.");
-    return false;
+  std::vector<std::string> values;
+  SplitEventData(event_data, values);
+  bool found_one = false;
+  for (std::string value : values)
+  {
+      if (value.compare("BackgroundContentFetching") == 0) {
+        DNBLog("Setting ActivateForEvent key in options dictionary.");
+        NSDictionary *event_details = [NSDictionary dictionary];
+        NSDictionary *event_dictionary = [NSDictionary
+            dictionaryWithObject:event_details
+                          forKey:
+                              FBSActivateForEventOptionTypeBackgroundContentFetching];
+        [options setObject:event_dictionary
+                    forKey:FBSOpenApplicationOptionKeyActivateForEvent];
+        found_one = true;
+      } else if (value.compare("ActivateSuspended") == 0) {
+        DNBLog("Setting ActivateSuspended key in options dictionary.");
+        [options setObject:@YES forKey: FBSOpenApplicationOptionKeyActivateSuspended];
+        found_one = true;
+      } else {
+        DNBLogError("Unrecognized event type: %s.  Ignoring.", value.c_str());
+        option_error.SetErrorString("Unrecognized event data.");
+      }
   }
+  return found_one;
 }
 
 static NSMutableDictionary *
@@ -1212,7 +1254,7 @@ bool MachProcess::Kill(const struct timespec *timeout_abstime) {
   err.SetErrorToErrno();
   DNBLogThreadedIf(LOG_PROCESS, "MachProcess::Kill() DoSIGSTOP() ::ptrace "
                                 "(PT_KILL, pid=%u, 0, 0) => 0x%8.8x (%s)",
-                   m_pid, err.Error(), err.AsString());
+                   m_pid, err.Status(), err.AsString());
   m_thread_actions = DNBThreadResumeActions(eStateRunning, 0);
   PrivateResume();
 
@@ -1266,7 +1308,7 @@ bool MachProcess::Interrupt() {
 bool MachProcess::Signal(int signal, const struct timespec *timeout_abstime) {
   DNBLogThreadedIf(LOG_PROCESS,
                    "MachProcess::Signal (signal = %d, timeout = %p)", signal,
-                   timeout_abstime);
+                   reinterpret_cast<const void *>(timeout_abstime));
   nub_state_t state = GetState();
   if (::kill(ProcessID(), signal) == 0) {
     // If we were running and we have a timeout, wait for the signal to stop
@@ -1274,20 +1316,21 @@ bool MachProcess::Signal(int signal, const struct timespec *timeout_abstime) {
       DNBLogThreadedIf(LOG_PROCESS, "MachProcess::Signal (signal = %d, timeout "
                                     "= %p) waiting for signal to stop "
                                     "process...",
-                       signal, timeout_abstime);
+                       signal, reinterpret_cast<const void *>(timeout_abstime));
       m_private_events.WaitForSetEvents(eEventProcessStoppedStateChanged,
                                         timeout_abstime);
       state = GetState();
       DNBLogThreadedIf(
           LOG_PROCESS,
           "MachProcess::Signal (signal = %d, timeout = %p) state = %s", signal,
-          timeout_abstime, DNBStateAsString(state));
+          reinterpret_cast<const void *>(timeout_abstime),
+          DNBStateAsString(state));
       return !IsRunning(state);
     }
     DNBLogThreadedIf(
         LOG_PROCESS,
         "MachProcess::Signal (signal = %d, timeout = %p) not waiting...",
-        signal, timeout_abstime);
+        signal, reinterpret_cast<const void *>(timeout_abstime));
     return true;
   }
   DNBError err(errno, DNBError::POSIX);
@@ -1593,7 +1636,8 @@ DNBBreakpoint *MachProcess::CreateBreakpoint(nub_addr_t addr, nub_size_t length,
   if (EnableBreakpoint(addr)) {
     DNBLogThreadedIf(LOG_BREAKPOINTS, "MachProcess::CreateBreakpoint ( addr = "
                                       "0x%8.8llx, length = %llu) => %p",
-                     (uint64_t)addr, (uint64_t)length, bp);
+                     (uint64_t)addr, (uint64_t)length,
+                     reinterpret_cast<void *>(bp));
     return bp;
   } else if (bp->Release() == 0) {
     m_breakpoints.Remove(addr);
@@ -1624,7 +1668,8 @@ DNBBreakpoint *MachProcess::CreateWatchpoint(nub_addr_t addr, nub_size_t length,
   if (EnableWatchpoint(addr)) {
     DNBLogThreadedIf(LOG_WATCHPOINTS, "MachProcess::CreateWatchpoint ( addr = "
                                       "0x%8.8llx, length = %llu) => %p",
-                     (uint64_t)addr, (uint64_t)length, wp);
+                     (uint64_t)addr, (uint64_t)length,
+                     reinterpret_cast<void *>(wp));
     return wp;
   } else {
     DNBLogThreadedIf(LOG_WATCHPOINTS, "MachProcess::CreateWatchpoint ( addr = "
@@ -2153,7 +2198,7 @@ void MachProcess::AppendSTDOUT(char *s, size_t len) {
 
 size_t MachProcess::GetAvailableSTDOUT(char *buf, size_t buf_size) {
   DNBLogThreadedIf(LOG_PROCESS, "MachProcess::%s (&%p[%llu]) ...", __FUNCTION__,
-                   buf, (uint64_t)buf_size);
+                   reinterpret_cast<void *>(buf), (uint64_t)buf_size);
   PTHREAD_MUTEX_LOCKER(locker, m_stdio_mutex);
   size_t bytes_available = m_stdout_data.size();
   if (bytes_available > 0) {
@@ -2313,7 +2358,7 @@ void MachProcess::SignalAsyncProfileData(const char *info) {
 
 size_t MachProcess::GetAsyncProfileData(char *buf, size_t buf_size) {
   DNBLogThreadedIf(LOG_PROCESS, "MachProcess::%s (&%p[%llu]) ...", __FUNCTION__,
-                   buf, (uint64_t)buf_size);
+                   reinterpret_cast<void *>(buf), (uint64_t)buf_size);
   PTHREAD_MUTEX_LOCKER(locker, m_profile_data_mutex);
   if (m_profile_data.empty())
     return 0;
@@ -2836,9 +2881,12 @@ pid_t MachProcess::LaunchForDebug(
   // Clear out and clean up from any current state
   Clear();
 
-  DNBLogThreadedIf(LOG_PROCESS, "%s( path = '%s', argv = %p, envp = %p, "
-                                "launch_flavor = %u, disable_aslr = %d )",
-                   __FUNCTION__, path, argv, envp, launch_flavor, disable_aslr);
+  DNBLogThreadedIf(LOG_PROCESS,
+                   "%s( path = '%s', argv = %p, envp = %p, "
+                   "launch_flavor = %u, disable_aslr = %d )",
+                   __FUNCTION__, path, reinterpret_cast<const void *>(argv),
+                   reinterpret_cast<const void *>(envp), launch_flavor,
+                   disable_aslr);
 
   // Fork a child process for debugging
   SetState(eStateLaunching);
@@ -2961,7 +3009,8 @@ pid_t MachProcess::LaunchForDebug(
         DNBError ptrace_err(errno, DNBError::POSIX);
         DNBLogThreadedIf(LOG_PROCESS, "error: failed to attach to spawned pid "
                                       "%d (err = %i, errno = %i (%s))",
-                         m_pid, err, ptrace_err.Error(), ptrace_err.AsString());
+                         m_pid, err, ptrace_err.Status(),
+                         ptrace_err.AsString());
         launch_err.SetError(NUB_GENERIC_ERROR, DNBError::Generic);
       }
     } else {
@@ -2981,7 +3030,8 @@ pid_t MachProcess::PosixSpawnChildForPTraceDebugging(
   DNBLogThreadedIf(LOG_PROCESS, "%s ( path='%s', argv=%p, envp=%p, "
                                 "working_dir=%s, stdin=%s, stdout=%s "
                                 "stderr=%s, no-stdio=%i)",
-                   __FUNCTION__, path, argv, envp, working_directory,
+                   __FUNCTION__, path, reinterpret_cast<const void *>(argv),
+                   reinterpret_cast<const void *>(envp), working_directory,
                    stdin_path, stdout_path, stderr_path, no_stdio);
 
   err.SetError(::posix_spawnattr_init(&attr), DNBError::POSIX);
@@ -3171,7 +3221,7 @@ pid_t MachProcess::ForkChildForPTraceDebugging(const char *path,
                                                char const *envp[],
                                                MachProcess *process,
                                                DNBError &launch_err) {
-  PseudoTerminal::Error pty_error = PseudoTerminal::success;
+  PseudoTerminal::Status pty_error = PseudoTerminal::success;
 
   // Use a fork that ties the child process's stdin/out/err to a pseudo
   // terminal so we can read it in our MachProcess::STDIOThread
@@ -3181,7 +3231,7 @@ pid_t MachProcess::ForkChildForPTraceDebugging(const char *path,
 
   if (pid < 0) {
     //--------------------------------------------------------------
-    // Error during fork.
+    // Status during fork.
     //--------------------------------------------------------------
     return pid;
   } else if (pid == 0) {
@@ -3396,7 +3446,7 @@ pid_t MachProcess::SBForkChildForPTraceDebugging(
 
   PseudoTerminal pty;
   if (!no_stdio) {
-    PseudoTerminal::Error pty_err =
+    PseudoTerminal::Status pty_err =
         pty.OpenFirstAvailableMaster(O_RDWR | O_NOCTTY);
     if (pty_err == PseudoTerminal::success) {
       const char *slave_name = pty.SlaveName();
@@ -3597,7 +3647,7 @@ pid_t MachProcess::BoardServiceForkChildForPTraceDebugging(
 
   PseudoTerminal pty;
   if (!no_stdio) {
-    PseudoTerminal::Error pty_err =
+    PseudoTerminal::Status pty_err =
         pty.OpenFirstAvailableMaster(O_RDWR | O_NOCTTY);
     if (pty_err == PseudoTerminal::success) {
       const char *slave_name = pty.SlaveName();

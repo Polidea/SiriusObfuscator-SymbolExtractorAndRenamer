@@ -234,7 +234,7 @@ public:
                        bool use_inline_block_range, AddressRange &range) const;
 
   bool GetAddressRangeFromHereToEndLine(uint32_t end_line, AddressRange &range,
-                                        Error &error);
+                                        Status &error);
   
   //------------------------------------------------------------------
   /// Find the best global data symbol visible from this context.
@@ -257,7 +257,7 @@ public:
   /// @return
   ///     The symbol that was found, or \b nullptr if none was found.
   //------------------------------------------------------------------
-  const Symbol *FindBestGlobalDataSymbol(const ConstString &name, Error &error);
+  const Symbol *FindBestGlobalDataSymbol(const ConstString &name, Status &error);
 
   void GetDescription(Stream *s, lldb::DescriptionLevel level,
                       Target *target) const;

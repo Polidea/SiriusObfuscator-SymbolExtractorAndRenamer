@@ -185,7 +185,7 @@ public protocol WorkingCheckout {
 
     /// This check for any modified state of the repository and returns true
     /// if there are uncommited changes.
-    func hasUncommitedChanges() -> Bool
+    func hasUncommittedChanges() -> Bool
 
     /// Check out the given tag.
     func checkout(tag: String) throws
@@ -200,6 +200,9 @@ public protocol WorkingCheckout {
     ///
     /// Note: It is an error to provide a branch name which already exists.
     func checkout(newBranch: String) throws
+
+    /// Returns true if there is an alternative store in the checkout and it is valid.
+    func isAlternateObjectStoreValid() -> Bool
 }
 
 /// A single repository revision.

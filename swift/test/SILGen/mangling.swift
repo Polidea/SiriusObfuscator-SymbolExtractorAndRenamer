@@ -1,4 +1,4 @@
-// RUN: %target-swift-frontend -Xllvm -sil-full-demangle -sdk %S/Inputs -I %S/Inputs -enable-source-import %s -emit-silgen | %FileCheck %s
+// RUN: %target-swift-frontend -Xllvm -sil-full-demangle -sdk %S/Inputs -I %S/Inputs -enable-source-import %s -emit-silgen -enable-sil-ownership | %FileCheck %s
 
 // REQUIRES: objc_interop
 
@@ -22,7 +22,7 @@ func Pročprostěnemluvíčesky() { }
 
 // CHECK-LABEL: sil hidden @_T08mangling9r13757744ySaySiG1x_tF
 func r13757744(x: [Int]) {}
-// CHECK-LABEL: sil hidden @_T08mangling9r13757744ySaySiG1xd_tF
+// CHECK-LABEL: sil hidden @_T08mangling9r13757744ySi1xd_tF
 func r13757744(x: Int...) {}
 
 // <rdar://problem/13757750> Prefix, postfix, and infix operators need
@@ -102,14 +102,14 @@ struct HasVarInit {
   static var state = true && false
 }
 // CHECK-LABEL: // function_ref implicit closure #1 : @autoclosure () throws -> Swift.Bool in variable initialization expression of static mangling.HasVarInit.state : Swift.Bool
-// CHECK-NEXT:  function_ref @_T08mangling10HasVarInitV5stateSbvZfiSbyKXKfu_
+// CHECK-NEXT:  function_ref @_T08mangling10HasVarInitV5stateSbvpZfiSbyKXKfu_
 
 // auto_closures should not collide with the equivalent non-auto_closure
 // function type.
 
-// CHECK-LABEL: sil hidden @_T08mangling19autoClosureOverloadySiyXK1f_tF : $@convention(thin) (@owned @callee_owned () -> Int) -> () {
+// CHECK-LABEL: sil hidden @_T08mangling19autoClosureOverloadySiyXK1f_tF : $@convention(thin) (@owned @noescape @callee_guaranteed () -> Int) -> () {
 func autoClosureOverload(f: @autoclosure () -> Int) {}
-// CHECK-LABEL: sil hidden @_T08mangling19autoClosureOverloadySiyc1f_tF : $@convention(thin) (@owned @callee_owned () -> Int) -> () {
+// CHECK-LABEL: sil hidden @_T08mangling19autoClosureOverloadySiyc1f_tF : $@convention(thin) (@owned @noescape @callee_guaranteed () -> Int) -> () {
 func autoClosureOverload(f: () -> Int) {}
 
 // CHECK-LABEL: sil hidden @_T08mangling24autoClosureOverloadCallsyyF : $@convention(thin) () -> () {
@@ -139,15 +139,15 @@ func ??(x: Int, y: Int) {}
 
 struct InstanceAndClassProperty {
   var property: Int {
-    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySifg
+    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySivg
     get { return 0 }
-    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySifs
+    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySivs
     set {}
   }
   static var property: Int {
-    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySifgZ
+    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySivgZ
     get { return 0 }
-    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySifsZ
+    // CHECK-LABEL: sil hidden @_T08mangling24InstanceAndClassPropertyV8propertySivsZ
     set {}
   }
 }
@@ -165,23 +165,26 @@ func curry1Throws() throws {
 
 }
 
-// CHECK-LABEL: sil hidden @_T08mangling12curry2ThrowsyycyKF : $@convention(thin) () -> (@owned @callee_owned () -> (), @error Error)
+// CHECK-LABEL: sil hidden @_T08mangling12curry2ThrowsyycyKF : $@convention(thin) () -> (@owned @callee_guaranteed () -> (), @error Error)
 func curry2Throws() throws -> () -> () {
   return curry1
 }
 
-// CHECK-LABEL: sil hidden @_T08mangling6curry3yyKcyF : $@convention(thin) () -> @owned @callee_owned () -> @error Error
+// CHECK-LABEL: sil hidden @_T08mangling6curry3yyKcyF : $@convention(thin) () -> @owned @callee_guaranteed () -> @error Error
 func curry3() -> () throws -> () {
   return curry1Throws
 }
 
-// CHECK-LABEL: sil hidden @_T08mangling12curry3ThrowsyyKcyKF : $@convention(thin) () -> (@owned @callee_owned () -> @error Error, @error Error)
+// CHECK-LABEL: sil hidden @_T08mangling12curry3ThrowsyyKcyKF : $@convention(thin) () -> (@owned @callee_guaranteed () -> @error Error, @error Error)
 func curry3Throws() throws -> () throws -> () {
   return curry1Throws
 }
 
-// CHECK-LABEL: sil hidden @_T08mangling14varargsVsArrayySaySiG3arrd_SS1ntF : $@convention(thin) (@owned Array<Int>, @owned String) -> ()
+// CHECK-LABEL: sil hidden @_T08mangling14varargsVsArrayySi3arrd_SS1ntF : $@convention(thin) (@owned Array<Int>, @owned String) -> ()
 func varargsVsArray(arr: Int..., n: String) { }
 
 // CHECK-LABEL: sil hidden @_T08mangling14varargsVsArrayySaySiG3arr_SS1ntF : $@convention(thin) (@owned Array<Int>, @owned String) -> ()
 func varargsVsArray(arr: [Int], n: String) { }
+
+// CHECK-LABEL: sil hidden @_T08mangling14varargsVsArrayySaySiG3arrd_SS1ntF : $@convention(thin) (@owned Array<Array<Int>>, @owned String) -> ()
+func varargsVsArray(arr: [Int]..., n: String) { }

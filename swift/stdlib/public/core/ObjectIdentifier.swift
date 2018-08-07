@@ -14,18 +14,10 @@
 ///
 /// In Swift, only class instances and metatypes have unique identities. There
 /// is no notion of identity for structs, enums, functions, or tuples.
-public struct ObjectIdentifier : Hashable {
+@_fixed_layout // FIXME(sil-serialize-all)
+public struct ObjectIdentifier {
+  @_versioned // FIXME(sil-serialize-all)
   internal let _value: Builtin.RawPointer
-
-  // FIXME: Better hashing algorithm
-  /// The identifier's hash value.
-  ///
-  /// The hash value is not guaranteed to be stable across different
-  /// invocations of the same program.  Do not persist the hash value across
-  /// program runs.
-  public var hashValue: Int {
-    return Int(Builtin.ptrtoint_Word(_value))
-  }
 
   /// Creates an instance that uniquely identifies the given class instance.
   ///
@@ -55,6 +47,7 @@ public struct ObjectIdentifier : Hashable {
   ///     // Prints "false"
   ///
   /// - Parameter x: An instance of a class.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(_ x: AnyObject) {
     self._value = Builtin.bridgeToRawPointer(x)
   }
@@ -62,6 +55,7 @@ public struct ObjectIdentifier : Hashable {
   /// Creates an instance that uniquely identifies the given metatype.
   ///
   /// - Parameter: A metatype.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(_ x: Any.Type) {
     self._value = unsafeBitCast(x, to: Builtin.RawPointer.self)
   }
@@ -69,24 +63,43 @@ public struct ObjectIdentifier : Hashable {
 
 extension ObjectIdentifier : CustomDebugStringConvertible {
   /// A textual representation of the identifier, suitable for debugging.
+  @_inlineable // FIXME(sil-serialize-all)
   public var debugDescription: String {
     return "ObjectIdentifier(\(_rawPointerToString(_value)))"
   }
 }
 
-extension ObjectIdentifier : Comparable {
+extension ObjectIdentifier: Equatable {
+  @_inlineable // FIXME(sil-serialize-all)
+  public static func == (x: ObjectIdentifier, y: ObjectIdentifier) -> Bool {
+    return Bool(Builtin.cmp_eq_RawPointer(x._value, y._value))
+  }
+}
+
+extension ObjectIdentifier: Comparable {
+  @_inlineable // FIXME(sil-serialize-all)
   public static func < (lhs: ObjectIdentifier, rhs: ObjectIdentifier) -> Bool {
     return UInt(bitPattern: lhs) < UInt(bitPattern: rhs)
   }
+}
 
-  public static func == (x: ObjectIdentifier, y: ObjectIdentifier) -> Bool {
-    return Bool(Builtin.cmp_eq_RawPointer(x._value, y._value))
+extension ObjectIdentifier: Hashable {
+  // FIXME: Better hashing algorithm
+  /// The identifier's hash value.
+  ///
+  /// The hash value is not guaranteed to be stable across different
+  /// invocations of the same program.  Do not persist the hash value across
+  /// program runs.
+  @_inlineable // FIXME(sil-serialize-all)
+  public var hashValue: Int {
+    return Int(Builtin.ptrtoint_Word(_value))
   }
 }
 
 extension UInt {
   /// Creates an integer that captures the full value of the given object
   /// identifier.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(bitPattern objectID: ObjectIdentifier) {
     self.init(Builtin.ptrtoint_Word(objectID._value))
   }
@@ -95,29 +108,8 @@ extension UInt {
 extension Int {
   /// Creates an integer that captures the full value of the given object
   /// identifier.
+  @_inlineable // FIXME(sil-serialize-all)
   public init(bitPattern objectID: ObjectIdentifier) {
     self.init(bitPattern: UInt(bitPattern: objectID))
   }
 }
-
-extension ObjectIdentifier {
-  @available(*, unavailable, message: "use the 'UInt(_:)' initializer")
-  public var uintValue: UInt {
-    Builtin.unreachable()
-  }
-}
-
-extension UInt {
-  @available(*, unavailable, renamed: "init(bitPattern:)")
-  public init(_ objectID: ObjectIdentifier) {
-    Builtin.unreachable()
-  }
-}
-
-extension Int {
-  @available(*, unavailable, renamed: "init(bitPattern:)")
-  public init(_ objectID: ObjectIdentifier) {
-    Builtin.unreachable()
-  }
-}
-

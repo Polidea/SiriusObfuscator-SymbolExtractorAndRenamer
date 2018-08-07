@@ -88,7 +88,7 @@ WARNING(warning_unnecessary_repl_mode,none,
         "unnecessary option '%0'; this is the default for '%1' "
         "with no input files", (StringRef, StringRef))
 ERROR(error_unsupported_option,none,
-      "unsupported option '%0' for '%1'; did you mean '%2 %0'?",
+      "option '%0' is not supported by '%1'; did you mean to use '%2'?",
       (StringRef, StringRef, StringRef))
 
 WARNING(incremental_requires_output_file_map,none,
@@ -132,6 +132,14 @@ WARNING(warn_ignore_embed_bitcode, none,
 
 WARNING(verify_debug_info_requires_debug_option,none,
         "ignoring '-verify-debug-info'; no debug info is being generated", ())
+
+ERROR(error_profile_missing,none,
+      "no profdata file exists at '%0'", (StringRef))
+
+WARNING(warn_opt_remark_disabled, none,
+        "Emission of optimization records has been disabled, because it "
+        "requires a single compiler invocation: consider enabling the "
+        "-whole-module-optimization flag", ())
 
 #ifndef DIAG_NO_UNDEF
 # if defined(DIAG)

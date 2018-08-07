@@ -31,6 +31,7 @@
 #include "llvm/ADT/ArrayRef.h"
 
 namespace swift {
+
 /// A pair representing results of devirtualization.
 ///  - The first element is the value representing the result of the
 ///    devirtualized call.
@@ -41,7 +42,24 @@ namespace swift {
 /// Two elements are required, because a result of the new devirtualized
 /// apply/try_apply instruction (second element) eventually needs to be
 /// casted to produce a properly typed value (first element).
+///
+/// *NOTE* The reason why we use a ValueBase here instead of a SILInstruction is
+/// that a devirtualization result may be a BB arg if there was a cast in
+/// between optional types.
 typedef std::pair<ValueBase *, ApplySite> DevirtualizationResult;
+
+/// Compute all subclasses of a given class.
+///
+/// \p CHA class hierarchy analysis
+/// \p CD class declaration
+/// \p ClassType type of the instance
+/// \p M SILModule
+/// \p Subs a container to be used for storing the set of subclasses
+void getAllSubclasses(ClassHierarchyAnalysis *CHA,
+                      ClassDecl *CD,
+                      SILType ClassType,
+                      SILModule &M,
+                      ClassHierarchyAnalysis::ClassList &Subs);
 
 DevirtualizationResult tryDevirtualizeApply(ApplySite AI,
                                             ClassHierarchyAnalysis *CHA);

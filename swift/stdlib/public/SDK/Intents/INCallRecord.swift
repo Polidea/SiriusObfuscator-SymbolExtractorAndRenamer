@@ -23,7 +23,7 @@ extension INCallRecord {
       caller: INPerson? = nil,
       callRecordType: INCallRecordType,
       callCapability: INCallCapability,
-      callDuration: Double? = nil,
+      callDuration: Double?  = nil,
       unseen: Bool? = nil
   ) {
     self.init(__identifier: identifier,

@@ -2,9 +2,6 @@
 
 // REQUIRES: objc_interop
 
-// FIXME: https://bugs.swift.org/browse/SR-2808
-// XFAIL: resilient_stdlib
-
 // Check that casts between bridged types are replaced by more 
 // efficient code sequences.
 // 
@@ -907,9 +904,43 @@ var anyHashable: AnyHashable = 0
 // CHECK-LABEL: _T021bridged_casts_folding29testUncondCastSwiftToSubclassAA08NSObjectI0CyF
 // CHECK: [[GLOBAL:%[0-9]+]] = global_addr @_T021bridged_casts_folding11anyHashables03AnyE0Vv
 // CHECK: function_ref @_T0s11AnyHashableV10FoundationE19_bridgeToObjectiveCSo8NSObjectCyF
-// CHECK-NEXT: apply
+// CHECK-NEXT: apply %3(%1)
+// CHECK-NEXT: destroy_addr %1
 // CHECK-NEXT: unconditional_checked_cast {{%.*}} : $NSObject to $NSObjectSubclass
 @inline(never)
 public func testUncondCastSwiftToSubclass() -> NSObjectSubclass {
   return anyHashable as! NSObjectSubclass
+}
+
+class MyThing: Hashable {
+    let name: String
+    
+    init(name: String) {
+        self.name = name
+    }
+    
+    deinit {
+        Swift.print("Deinit \(name)")
+    }
+    
+    var hashValue: Int {
+        return 0
+    }
+    
+    static func ==(lhs: MyThing, rhs: MyThing) -> Bool {
+        return false
+    }
+}
+
+// CHECK-LABEL: sil hidden [noinline] @_T021bridged_casts_folding26doSomethingWithAnyHashableys0gH0VF : $@convention(thin) (@in AnyHashable) -> ()
+// CHECK: checked_cast_addr_br take_always AnyHashable in %0 : $*AnyHashable to MyThing
+@inline(never)
+func doSomethingWithAnyHashable(_ item: AnyHashable) {
+  _ = item as? MyThing
+}
+
+@inline(never)
+public func testMyThing() {
+  let x = MyThing(name: "B")
+  doSomethingWithAnyHashable(x)
 }

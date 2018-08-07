@@ -16,76 +16,31 @@
 #include "LLVMContextImpl.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/ADT/iterator_range.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticPrinter.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+#include "llvm/IR/Value.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Regex.h"
+#include "llvm/Support/raw_ostream.h"
 #include <atomic>
+#include <cassert>
+#include <memory>
 #include <string>
 
 using namespace llvm;
-
-namespace {
-
-/// \brief Regular expression corresponding to the value given in one of the
-/// -pass-remarks* command line flags. Passes whose name matches this regexp
-/// will emit a diagnostic when calling the associated diagnostic function
-/// (emitOptimizationRemark, emitOptimizationRemarkMissed or
-/// emitOptimizationRemarkAnalysis).
-struct PassRemarksOpt {
-  std::shared_ptr<Regex> Pattern;
-
-  void operator=(const std::string &Val) {
-    // Create a regexp object to match pass names for emitOptimizationRemark.
-    if (!Val.empty()) {
-      Pattern = std::make_shared<Regex>(Val);
-      std::string RegexError;
-      if (!Pattern->isValid(RegexError))
-        report_fatal_error("Invalid regular expression '" + Val +
-                               "' in -pass-remarks: " + RegexError,
-                           false);
-    }
-  }
-};
-
-static PassRemarksOpt PassRemarksOptLoc;
-static PassRemarksOpt PassRemarksMissedOptLoc;
-static PassRemarksOpt PassRemarksAnalysisOptLoc;
-
-// -pass-remarks
-//    Command line flag to enable emitOptimizationRemark()
-static cl::opt<PassRemarksOpt, true, cl::parser<std::string>>
-PassRemarks("pass-remarks", cl::value_desc("pattern"),
-            cl::desc("Enable optimization remarks from passes whose name match "
-                     "the given regular expression"),
-            cl::Hidden, cl::location(PassRemarksOptLoc), cl::ValueRequired,
-            cl::ZeroOrMore);
-
-// -pass-remarks-missed
-//    Command line flag to enable emitOptimizationRemarkMissed()
-static cl::opt<PassRemarksOpt, true, cl::parser<std::string>> PassRemarksMissed(
-    "pass-remarks-missed", cl::value_desc("pattern"),
-    cl::desc("Enable missed optimization remarks from passes whose name match "
-             "the given regular expression"),
-    cl::Hidden, cl::location(PassRemarksMissedOptLoc), cl::ValueRequired,
-    cl::ZeroOrMore);
-
-// -pass-remarks-analysis
-//    Command line flag to enable emitOptimizationRemarkAnalysis()
-static cl::opt<PassRemarksOpt, true, cl::parser<std::string>>
-PassRemarksAnalysis(
-    "pass-remarks-analysis", cl::value_desc("pattern"),
-    cl::desc(
-        "Enable optimization analysis remarks from passes whose name match "
-        "the given regular expression"),
-    cl::Hidden, cl::location(PassRemarksAnalysisOptLoc), cl::ValueRequired,
-    cl::ZeroOrMore);
-}
 
 int llvm::getNextAvailablePluginDiagnosticKind() {
   static std::atomic<int> PluginKindID(DK_FirstPluginKind);
@@ -97,8 +52,7 @@ const char *OptimizationRemarkAnalysis::AlwaysPrint = "";
 DiagnosticInfoInlineAsm::DiagnosticInfoInlineAsm(const Instruction &I,
                                                  const Twine &MsgStr,
                                                  DiagnosticSeverity Severity)
-    : DiagnosticInfo(DK_InlineAsm, Severity), LocCookie(0), MsgStr(MsgStr),
-      Instr(&I) {
+    : DiagnosticInfo(DK_InlineAsm, Severity), MsgStr(MsgStr), Instr(&I) {
   if (const MDNode *SrcLoc = I.getMetadata("srcloc")) {
     if (SrcLoc->getNumOperands() != 0)
       if (const auto *CI =
@@ -193,7 +147,7 @@ DiagnosticInfoOptimizationBase::Argument::Argument(StringRef Key, const Value *V
   // Only include names that correspond to user variables.  FIXME: we should use
   // debug info if available to get the name of the user variable.
   if (isa<llvm::Argument>(V) || isa<GlobalValue>(V))
-    Val = GlobalValue::getRealLinkageName(V->getName());
+    Val = GlobalValue::dropLLVMManglingEscape(V->getName());
   else if (isa<Constant>(V)) {
     raw_string_ostream OS(Val);
     V->printAsOperand(OS, /*PrintType=*/false);
@@ -228,14 +182,30 @@ OptimizationRemark::OptimizationRemark(const char *PassName,
           *cast<BasicBlock>(CodeRegion)->getParent(), Loc, CodeRegion) {}
 
 OptimizationRemark::OptimizationRemark(const char *PassName,
-                                       StringRef RemarkName, Instruction *Inst)
+                                       StringRef RemarkName,
+                                       const Instruction *Inst)
     : DiagnosticInfoIROptimization(DK_OptimizationRemark, DS_Remark, PassName,
                                    RemarkName, *Inst->getParent()->getParent(),
                                    Inst->getDebugLoc(), Inst->getParent()) {}
 
-bool OptimizationRemark::isEnabled(StringRef PassName) {
-  return PassRemarksOptLoc.Pattern &&
-         PassRemarksOptLoc.Pattern->match(PassName);
+// Helper to allow for an assert before attempting to return an invalid
+// reference.
+static const BasicBlock &getFirstFunctionBlock(const Function *Func) {
+  assert(!Func->empty() && "Function does not have a body");
+  return Func->front();
+}
+
+OptimizationRemark::OptimizationRemark(const char *PassName,
+                                       StringRef RemarkName,
+                                       const Function *Func)
+    : DiagnosticInfoIROptimization(DK_OptimizationRemark, DS_Remark, PassName,
+                                   RemarkName, *Func, Func->getSubprogram(),
+                                   &getFirstFunctionBlock(Func)) {}
+
+bool OptimizationRemark::isEnabled() const {
+  const Function &Fn = getFunction();
+  LLVMContext &Ctx = Fn.getContext();
+  return Ctx.getDiagHandlerPtr()->isPassedOptRemarkEnabled(getPassName());
 }
 
 OptimizationRemarkMissed::OptimizationRemarkMissed(
@@ -253,9 +223,10 @@ OptimizationRemarkMissed::OptimizationRemarkMissed(const char *PassName,
                                    *Inst->getParent()->getParent(),
                                    Inst->getDebugLoc(), Inst->getParent()) {}
 
-bool OptimizationRemarkMissed::isEnabled(StringRef PassName) {
-  return PassRemarksMissedOptLoc.Pattern &&
-         PassRemarksMissedOptLoc.Pattern->match(PassName);
+bool OptimizationRemarkMissed::isEnabled() const {
+  const Function &Fn = getFunction();
+  LLVMContext &Ctx = Fn.getContext();
+  return Ctx.getDiagHandlerPtr()->isMissedOptRemarkEnabled(getPassName());
 }
 
 OptimizationRemarkAnalysis::OptimizationRemarkAnalysis(
@@ -280,9 +251,11 @@ OptimizationRemarkAnalysis::OptimizationRemarkAnalysis(
                                    *cast<BasicBlock>(CodeRegion)->getParent(),
                                    Loc, CodeRegion) {}
 
-bool OptimizationRemarkAnalysis::isEnabled(StringRef PassName) {
-  return PassRemarksAnalysisOptLoc.Pattern &&
-         PassRemarksAnalysisOptLoc.Pattern->match(PassName);
+bool OptimizationRemarkAnalysis::isEnabled() const {
+  const Function &Fn = getFunction();
+  LLVMContext &Ctx = Fn.getContext();
+  return Ctx.getDiagHandlerPtr()->isAnalysisRemarkEnabled(getPassName()) ||
+         shouldAlwaysPrint();
 }
 
 void DiagnosticInfoMIRParser::print(DiagnosticPrinter &DP) const {
@@ -351,28 +324,20 @@ void DiagnosticInfoISelFallback::print(DiagnosticPrinter &DP) const {
   DP << "Instruction selection used fallback path for " << getFunction();
 }
 
-DiagnosticInfoOptimizationBase &DiagnosticInfoOptimizationBase::
-operator<<(StringRef S) {
+void DiagnosticInfoOptimizationBase::insert(StringRef S) {
   Args.emplace_back(S);
-  return *this;
 }
 
-DiagnosticInfoOptimizationBase &DiagnosticInfoOptimizationBase::
-operator<<(Argument A) {
+void DiagnosticInfoOptimizationBase::insert(Argument A) {
   Args.push_back(std::move(A));
-  return *this;
 }
 
-DiagnosticInfoOptimizationBase &DiagnosticInfoOptimizationBase::
-operator<<(setIsVerbose V) {
+void DiagnosticInfoOptimizationBase::insert(setIsVerbose V) {
   IsVerbose = true;
-  return *this;
 }
 
-DiagnosticInfoOptimizationBase &DiagnosticInfoOptimizationBase::
-operator<<(setExtraArgs EA) {
+void DiagnosticInfoOptimizationBase::insert(setExtraArgs EA) {
   FirstExtraArgIndex = Args.size();
-  return *this;
 }
 
 std::string DiagnosticInfoOptimizationBase::getMsg() const {

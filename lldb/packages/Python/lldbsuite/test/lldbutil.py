@@ -17,6 +17,7 @@ import time
 # Third-party modules
 from six import StringIO as SixStringIO
 import six
+from lldbsuite.support import seven
 
 # LLDB modules
 import lldb
@@ -725,6 +726,47 @@ def get_crashed_threads(test, process):
             threads.append(thread)
     return threads
 
+def run_to_source_breakpoint(test, bkpt_pattern, source_spec, launch_info = None, exe_name = "a.out", in_cwd = True):
+    """Start up a target, using exe_name as the executable, and run it to 
+       a breakpoint set by source regex bkpt_pattern.
+       If you want to pass in launch arguments or environment variables, you can optionally pass in 
+       an SBLaunchInfo.  If you do that, remember to set the working directory as well.
+       If your executable isn't called a.out, you can pass that in.  And if your executable isn't
+       in the CWD, pass in the absolute path to the executable in exe_name, and set in_cwd to False.
+       If the target isn't valid, the breakpoint isn't found, or hit, the
+       function will cause a testsuite failure.
+       If successful it returns a tuple with the target process and thread that hit the breakpoint."""
+
+    if in_cwd:
+        exe = os.path.join(os.getcwd(), exe_name)
+    
+    # Create the target
+    target = test.dbg.CreateTarget(exe)
+    test.assertTrue(target, "Target: %s is not valid."%(exe_name))
+
+    # Set the breakpoints
+    breakpoint = target.BreakpointCreateBySourceRegex(
+            bkpt_pattern, source_spec)
+    test.assertTrue(breakpoint.GetNumLocations() > 0, 
+                    'No locations found for source breakpoint: "%s"'%(bkpt_pattern))
+
+    # Launch the process, and do not stop at the entry point.
+    if not launch_info:
+        launch_info = lldb.SBLaunchInfo(None)
+        launch_info.SetWorkingDirectory(test.get_process_working_directory())
+
+    error = lldb.SBError()
+    process = target.Launch(launch_info, error)
+
+    test.assertTrue(process, "Could not create a valid process for %s: %s"%(exe_name, error.GetCString()))
+
+    # Frame #0 should be at our breakpoint.
+    threads = get_threads_stopped_at_breakpoint(
+                process, breakpoint)
+
+    test.assertTrue(len(threads) == 1, "Expected 1 thread to stop at breakpoint, %d did."%(len(threads)))
+    thread = threads[0]
+    return (target, process, thread, breakpoint)
 
 def continue_to_breakpoint(process, bkpt):
     """ Continues the process, if it stops, returns the threads stopped at bkpt; otherwise, returns None"""
@@ -1311,3 +1353,11 @@ def wait_for_file_on_target(testcase, file_path, max_attempts=6):
         err.Success() and retcode == 0, "Failed to read file %s: %s, retcode: %d" %
         (file_path, err.GetCString(), retcode))
     return data
+
+def execute_command(command):
+    #print('%% %s' % (command))
+    (exit_status, output) = seven.get_command_status_output(command)
+    # if output:
+    #    print(output)
+    #print('status = %u' % (exit_status))
+    return exit_status

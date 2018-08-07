@@ -10,7 +10,7 @@
 ; critical to check the encoding as well as the textual assembly. An ADDXrs with
 ; SP as an operand will still print with SP, but will actually mean XZR.
 
-; CHECK-ERRORS: FastISel missed call
+; CHECK-ERRORS: LLVM ERROR: FastISel missed call
 
 ; CHECK-LABEL: foo:
 ; CHECK-DAG: mov x[[SP:[0-9]+]], sp

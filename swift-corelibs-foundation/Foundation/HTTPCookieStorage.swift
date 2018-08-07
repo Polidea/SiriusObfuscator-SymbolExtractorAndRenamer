@@ -69,7 +69,7 @@ open class HTTPCookieStorage: NSObject {
         let bundlePath = Bundle.main.bundlePath
         var bundleName = bundlePath.components(separatedBy: "/").last!
         if let range = bundleName.range(of: ".", options: String.CompareOptions.backwards, range: nil, locale: nil) {
-            bundleName = bundleName.substring(to: range.lowerBound)
+            bundleName = String(bundleName[..<range.lowerBound])
         }
         let cookieFolderPath = _CFXDGCreateDataHomePath()._swiftObject + "/" + bundleName
         cookieFilePath = filePath(path: cookieFolderPath, fileName: "/.cookies." + cookieStorageName, bundleName: bundleName)
@@ -77,8 +77,9 @@ open class HTTPCookieStorage: NSObject {
     }
 
     private func loadPersistedCookies() {
-        guard let cookies = NSMutableDictionary(contentsOfFile: cookieFilePath) else { return }
-        var cookies0 = _SwiftValue.fetch(cookies) as? [String: [String: Any]] ?? [:]
+        guard let cookiesData = try? Data(contentsOf: URL(fileURLWithPath: cookieFilePath)) else { return }
+        guard let cookies = try? PropertyListSerialization.propertyList(from: cookiesData, format: nil) else { return }
+        var cookies0 = cookies as? [String: [String: Any]] ?? [:]
         self.syncQ.sync {
             for key in cookies0.keys {
                 if let cookie = createCookie(cookies0[key]!) {
@@ -181,6 +182,10 @@ open class HTTPCookieStorage: NSObject {
         }
     }
     
+    open override var description: String {
+        return "<NSHTTPCookieStorage cookies count:\(cookies?.count ?? 0)>"
+    }
+
     private func createCookie(_ properties: [String: Any]) -> HTTPCookie? {
         var cookieProperties: [HTTPCookiePropertyKey: Any] = [:]
         for (key, value) in properties {

@@ -269,6 +269,7 @@ class TargetArch<list<string> arches> {
   list<string> CXXABIs;
 }
 def TargetARM : TargetArch<["arm", "thumb", "armeb", "thumbeb"]>;
+def TargetAVR : TargetArch<["avr"]>;
 def TargetMips : TargetArch<["mips", "mipsel"]>;
 def TargetMSP430 : TargetArch<["msp430"]>;
 def TargetX86 : TargetArch<["x86"]>;
@@ -468,7 +469,7 @@ class TargetSpecificAttr<TargetArch target> {
   // should contain a shared value between the attributes.
   //
   // Target-specific attributes which use this feature should ensure that the
-  // spellings match exactly betweeen the attributes, and if the arguments or
+  // spellings match exactly between the attributes, and if the arguments or
   // subjects differ, should specify HasCustomParsing = 1 and implement their
   // own parsing and semantic handling requirements as-needed.
   string ParseKind;
@@ -578,6 +579,15 @@ def XRayInstrument : InheritableAttr {
   let Documentation = [XRayDocs];
 }
 
+def XRayLogArgs : InheritableAttr {
+  let Spellings = [GNU<"xray_log_args">, CXX11<"clang", "xray_log_args">];
+  let Subjects = SubjectList<
+      [CXXMethod, ObjCMethod, Function], WarnDiag, "ExpectedFunctionOrMethod"
+  >;
+  let Args = [UnsignedArgument<"ArgumentCount">];
+  let Documentation = [XRayDocs];
+}
+
 def TLSModel : InheritableAttr {
   let Spellings = [GCC<"tls_model">];
   let Subjects = SubjectList<[TLSVar], ErrorDiag, "ExpectedTLSVar">;
@@ -610,6 +620,19 @@ def ARMInterrupt : InheritableAttr, TargetSpecificAttr<TargetARM> {
   let ParseKind = "Interrupt";
   let HasCustomParsing = 1;
   let Documentation = [ARMInterruptDocs];
+}
+
+def AVRInterrupt : InheritableAttr, TargetSpecificAttr<TargetAVR> {
+  let Spellings = [GNU<"interrupt">];
+  let Subjects = SubjectList<[Function]>;
+  let ParseKind = "Interrupt";
+  let Documentation = [AVRInterruptDocs];
+}
+
+def AVRSignal : InheritableAttr, TargetSpecificAttr<TargetAVR> {
+  let Spellings = [GNU<"signal">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [AVRSignalDocs];
 }
 
 def AsmLabel : InheritableAttr {
@@ -873,6 +896,13 @@ def OpenCLUnrollHint : InheritableAttr {
   let Spellings = [GNU<"opencl_unroll_hint">];
   let Args = [UnsignedArgument<"UnrollHint">];
   let Documentation = [OpenCLUnrollHintDocs];
+}
+
+def OpenCLIntelReqdSubGroupSize: InheritableAttr {
+  let Spellings = [GNU<"intel_reqd_sub_group_size">];
+  let Args = [UnsignedArgument<"SubGroupSize">];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+  let Documentation = [OpenCLIntelReqdSubGroupSizeDocs];
 }
 
 // This attribute is both a type attribute, and a declaration attribute (for
@@ -1159,6 +1189,12 @@ def MipsInterrupt : InheritableAttr, TargetSpecificAttr<TargetMips> {
   let Documentation = [MipsInterruptDocs];
 }
 
+def MicroMips : InheritableAttr, TargetSpecificAttr<TargetMips> {
+  let Spellings = [GCC<"micromips">];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+  let Documentation = [MicroMipsDocs];
+}
+
 def Mode : Attr {
   let Spellings = [GCC<"mode">];
   let Subjects = SubjectList<[Var, Enum, TypedefName, Field], ErrorDiag,
@@ -1241,6 +1277,12 @@ def NoMips16 : InheritableAttr, TargetSpecificAttr<TargetMips> {
   let Documentation = [Undocumented];
 }
 
+def NoMicroMips : InheritableAttr, TargetSpecificAttr<TargetMips> {
+  let Spellings = [GCC<"nomicromips">];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
+  let Documentation = [MicroMipsDocs];
+}
+
 // This is not a TargetSpecificAttr so that is silently accepted and
 // ignored on other targets as encouraged by the OpenCL spec.
 //
@@ -1292,7 +1334,7 @@ def NoSplitStack : InheritableAttr {
   let Documentation = [NoSplitStackDocs];
 }
 
-def NonNull : InheritableAttr {
+def NonNull : InheritableParamAttr {
   let Spellings = [GCC<"nonnull">];
   let Subjects = SubjectList<[ObjCMethod, HasFunctionProto, ParmVar], WarnDiag,
                              "ExpectedFunctionMethodOrParameter">;
@@ -1359,6 +1401,14 @@ def AssumeAligned : InheritableAttr {
   let Subjects = SubjectList<[ObjCMethod, Function]>;
   let Args = [ExprArgument<"Alignment">, ExprArgument<"Offset", 1>];
   let Documentation = [AssumeAlignedDocs];
+}
+
+def AllocAlign : InheritableAttr {
+  let Spellings = [GCC<"alloc_align">];
+  let Subjects = SubjectList<[HasFunctionProto], WarnDiag,
+                             "ExpectedFunctionWithProtoType">;
+  let Args = [IntArgument<"ParamIndex">];
+  let Documentation = [AllocAlignDocs];
 }
 
 def NoReturn : InheritableAttr {
@@ -1683,7 +1733,8 @@ def SwiftVersioned : Attr {
   // This attribute has no spellings as it is only ever created implicitly
   // from API notes.
   let Spellings = [];
-  let Args = [VersionArgument<"Version">, AttrArgument<"AttrToAdd">];
+  let Args = [VersionArgument<"Version">, AttrArgument<"AttrToAdd">,
+              BoolArgument<"IsReplacedByActive">];
   let SemaHandler = 0;
   let Documentation = [Undocumented];
 }
@@ -1692,7 +1743,8 @@ def SwiftVersionedRemoval : Attr {
   // This attribute has no spellings as it is only ever created implicitly
   // from API notes.
   let Spellings = [];
-  let Args = [VersionArgument<"Version">, UnsignedArgument<"RawKind">];
+  let Args = [VersionArgument<"Version">, UnsignedArgument<"RawKind">,
+              BoolArgument<"IsReplacedByActive">];
   let SemaHandler = 0;
   let Documentation = [Undocumented];
   let AdditionalMembers = [{
@@ -1744,6 +1796,42 @@ def Section : InheritableAttr {
   let Documentation = [SectionDocs];
 }
 
+def PragmaClangBSSSection : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let Args = [StringArgument<"Name">];
+  let Subjects = SubjectList<[GlobalVar], ErrorDiag,
+                             "ExpectedFunctionMethodOrGlobalVar">;
+  let Documentation = [Undocumented];
+}
+
+def PragmaClangDataSection : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let Args = [StringArgument<"Name">];
+  let Subjects = SubjectList<[GlobalVar], ErrorDiag,
+                             "ExpectedFunctionMethodOrGlobalVar">;
+  let Documentation = [Undocumented];
+}
+
+def PragmaClangRodataSection : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let Args = [StringArgument<"Name">];
+  let Subjects = SubjectList<[GlobalVar], ErrorDiag,
+                             "ExpectedFunctionMethodOrGlobalVar">;
+  let Documentation = [Undocumented];
+}
+
+def PragmaClangTextSection : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let Args = [StringArgument<"Name">];
+  let Subjects = SubjectList<[Function], ErrorDiag,
+                             "ExpectedFunctionMethodOrGlobalVar">;
+  let Documentation = [Undocumented];
+}
+
 def Sentinel : InheritableAttr {
   let Spellings = [GCC<"sentinel">];
   let Args = [DefaultIntArgument<"Sentinel", 0>,
@@ -1777,6 +1865,12 @@ def SwiftErrorResult : ParameterABIAttr {
 def SwiftIndirectResult : ParameterABIAttr {
   let Spellings = [GCC<"swift_indirect_result">];
   let Documentation = [SwiftIndirectResultDocs];
+}
+
+def Suppress : StmtAttr {
+  let Spellings = [CXX11<"gsl", "suppress">];
+  let Args = [VariadicStringArgument<"DiagnosticIdentifiers">];
+  let Documentation = [SuppressDocs];
 }
 
 def SysVABI : InheritableAttr {
@@ -1821,11 +1915,18 @@ def Target : InheritableAttr {
   let Subjects = SubjectList<[Function], ErrorDiag>;
   let Documentation = [TargetDocs];
   let AdditionalMembers = [{
-    typedef std::pair<std::vector<std::string>, StringRef> ParsedTargetAttr;
+    struct ParsedTargetAttr {
+      std::vector<std::string> Features;
+      StringRef Architecture;
+      bool DuplicateArchitecture = false;
+    };
     ParsedTargetAttr parse() const {
+      return parse(getFeaturesStr());
+    }
+    static ParsedTargetAttr parse(StringRef Features) {
       ParsedTargetAttr Ret;
       SmallVector<StringRef, 1> AttrFeatures;
-      getFeaturesStr().split(AttrFeatures, ",");
+      Features.split(AttrFeatures, ",");
 
       // Grab the various features and prepend a "+" to turn on the feature to
       // the backend and add them to our existing set of features.
@@ -1842,12 +1943,15 @@ def Target : InheritableAttr {
 	  continue;
 
         // While we're here iterating check for a different target cpu.
-        if (Feature.startswith("arch="))
-          Ret.second = Feature.split("=").second.trim();
-        else if (Feature.startswith("no-"))
-          Ret.first.push_back("-" + Feature.split("-").second.str());
+        if (Feature.startswith("arch=")) {
+          if (!Ret.Architecture.empty())
+            Ret.DuplicateArchitecture = true;
+          else
+            Ret.Architecture = Feature.split("=").second.trim();
+        } else if (Feature.startswith("no-"))
+          Ret.Features.push_back("-" + Feature.split("-").second.str());
         else
-          Ret.first.push_back("+" + Feature.str());
+          Ret.Features.push_back("+" + Feature.str());
       }
       return Ret;
     }
@@ -2032,6 +2136,12 @@ def AnyX86Interrupt : InheritableAttr, TargetSpecificAttr<TargetAnyX86> {
   let Documentation = [AnyX86InterruptDocs];
 }
 
+def AnyX86NoCallerSavedRegisters : InheritableAttr,
+                                   TargetSpecificAttr<TargetAnyX86> {
+  let Spellings = [GCC<"no_caller_saved_registers">];
+  let Documentation = [AnyX86NoCallerSavedRegistersDocs];
+}
+
 def X86ForceAlignArgPointer : InheritableAttr, TargetSpecificAttr<TargetX86> {
   let Spellings = [GNU<"force_align_arg_pointer">];
   // Technically, this appertains to a FunctionDecl, but the target-specific
@@ -2129,7 +2239,7 @@ def AssertCapability : InheritableAttr {
   let TemplateDependent = 1;
   let ParseArgumentsAsUnevaluated = 1;
   let DuplicatesAllowedWhileMerging = 1;
-  let Args = [ExprArgument<"Expr">];
+  let Args = [VariadicExprArgument<"Args">];
   let Accessors = [Accessor<"isShared",
                     [GNU<"assert_shared_capability">,
                      CXX11<"clang", "assert_shared_capability">]>];
@@ -2463,9 +2573,8 @@ def DLLImport : InheritableAttr, TargetSpecificAttr<TargetWindows> {
 }
 
 def SelectAny : InheritableAttr {
-  let Spellings = [Declspec<"selectany">];
-  let LangOpts = [MicrosoftExt];
-  let Documentation = [Undocumented];
+  let Spellings = [Declspec<"selectany">, GCC<"selectany">];
+  let Documentation = [SelectAnyDocs];
 }
 
 def Thread : Attr {
@@ -2674,6 +2783,14 @@ def OMPCaptureNoInit : InheritableAttr {
   // This attribute has no spellings as it is only ever created implicitly.
   let Spellings = [];
   let SemaHandler = 0;
+  let Documentation = [Undocumented];
+}
+
+def OMPCaptureKind : Attr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let SemaHandler = 0;
+  let Args = [UnsignedArgument<"CaptureKind">];
   let Documentation = [Undocumented];
 }
 

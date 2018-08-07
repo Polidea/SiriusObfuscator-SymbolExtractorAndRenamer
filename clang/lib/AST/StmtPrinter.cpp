@@ -24,6 +24,7 @@
 #include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/Basic/CharInfo.h"
+#include "clang/Lex/Lexer.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Format.h"
 using namespace clang;
@@ -38,12 +39,14 @@ namespace  {
     unsigned IndentLevel;
     clang::PrinterHelper* Helper;
     PrintingPolicy Policy;
+    const ASTContext *Context;
 
   public:
-    StmtPrinter(raw_ostream &os, PrinterHelper* helper,
-                const PrintingPolicy &Policy,
-                unsigned Indentation = 0)
-      : OS(os), IndentLevel(Indentation), Helper(helper), Policy(Policy) {}
+    StmtPrinter(raw_ostream &os, PrinterHelper *helper,
+                const PrintingPolicy &Policy, unsigned Indentation = 0,
+                const ASTContext *Context = nullptr)
+        : OS(os), IndentLevel(Indentation), Helper(helper), Policy(Policy),
+          Context(Context) {}
 
     void PrintStmt(Stmt *S) {
       PrintStmt(S, Policy.Indentation);
@@ -836,6 +839,29 @@ void OMPClausePrinter::VisitOMPReductionClause(OMPReductionClause *Node) {
   }
 }
 
+void OMPClausePrinter::VisitOMPTaskReductionClause(
+    OMPTaskReductionClause *Node) {
+  if (!Node->varlist_empty()) {
+    OS << "task_reduction(";
+    NestedNameSpecifier *QualifierLoc =
+        Node->getQualifierLoc().getNestedNameSpecifier();
+    OverloadedOperatorKind OOK =
+        Node->getNameInfo().getName().getCXXOverloadedOperator();
+    if (QualifierLoc == nullptr && OOK != OO_None) {
+      // Print reduction identifier in C format
+      OS << getOperatorSpelling(OOK);
+    } else {
+      // Use C++ format
+      if (QualifierLoc != nullptr)
+        QualifierLoc->print(OS, Policy);
+      OS << Node->getNameInfo();
+    }
+    OS << ":";
+    VisitOMPClauseList(Node, ' ');
+    OS << ")";
+  }
+}
+
 void OMPClausePrinter::VisitOMPLinearClause(OMPLinearClause *Node) {
   if (!Node->varlist_empty()) {
     OS << "linear";
@@ -1081,7 +1107,7 @@ void StmtPrinter::VisitOMPTaskwaitDirective(OMPTaskwaitDirective *Node) {
 }
 
 void StmtPrinter::VisitOMPTaskgroupDirective(OMPTaskgroupDirective *Node) {
-  Indent() << "#pragma omp taskgroup";
+  Indent() << "#pragma omp taskgroup ";
   PrintOMPExecutableDirective(Node);
 }
 
@@ -1298,10 +1324,25 @@ void StmtPrinter::VisitUnresolvedLookupExpr(UnresolvedLookupExpr *Node) {
         OS, Node->template_arguments(), Policy);
 }
 
+static bool isImplicitSelf(const Expr *E) {
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+    if (const ImplicitParamDecl *PD =
+            dyn_cast<ImplicitParamDecl>(DRE->getDecl())) {
+      if (PD->getParameterKind() == ImplicitParamDecl::ObjCSelf &&
+          DRE->getLocStart().isInvalid())
+        return true;
+    }
+  }
+  return false;
+}
+
 void StmtPrinter::VisitObjCIvarRefExpr(ObjCIvarRefExpr *Node) {
   if (Node->getBase()) {
-    PrintExpr(Node->getBase());
-    OS << (Node->isArrow() ? "->" : ".");
+    if (!Policy.SuppressImplicitBase ||
+        !isImplicitSelf(Node->getBase()->IgnoreImpCasts())) {
+      PrintExpr(Node->getBase());
+      OS << (Node->isArrow() ? "->" : ".");
+    }
   }
   OS << *Node->getDecl();
 }
@@ -1396,7 +1437,26 @@ void StmtPrinter::VisitCharacterLiteral(CharacterLiteral *Node) {
   }
 }
 
+/// Prints the given expression using the original source text. Returns true on
+/// success, false otherwise.
+static bool printExprAsWritten(raw_ostream &OS, Expr *E,
+                               const ASTContext *Context) {
+  if (!Context)
+    return false;
+  bool Invalid = false;
+  StringRef Source = Lexer::getSourceText(
+      CharSourceRange::getTokenRange(E->getSourceRange()),
+      Context->getSourceManager(), Context->getLangOpts(), &Invalid);
+  if (!Invalid) {
+    OS << Source;
+    return true;
+  }
+  return false;
+}
+
 void StmtPrinter::VisitIntegerLiteral(IntegerLiteral *Node) {
+  if (Policy.ConstantsAsWritten && printExprAsWritten(OS, Node, Context))
+    return;
   bool isSigned = Node->getType()->isSignedIntegerType();
   OS << Node->getValue().toString(10, isSigned);
 
@@ -1440,6 +1500,8 @@ static void PrintFloatingLiteral(raw_ostream &OS, FloatingLiteral *Node,
 }
 
 void StmtPrinter::VisitFloatingLiteral(FloatingLiteral *Node) {
+  if (Policy.ConstantsAsWritten && printExprAsWritten(OS, Node, Context))
+    return;
   PrintFloatingLiteral(OS, Node, /*PrintSuffix=*/true);
 }
 
@@ -1600,16 +1662,25 @@ void StmtPrinter::VisitCallExpr(CallExpr *Call) {
   PrintCallArgs(Call);
   OS << ")";
 }
+
+static bool isImplicitThis(const Expr *E) {
+  if (const auto *TE = dyn_cast<CXXThisExpr>(E))
+    return TE->isImplicit();
+  return false;
+}
+
 void StmtPrinter::VisitMemberExpr(MemberExpr *Node) {
-  // FIXME: Suppress printing implicit bases (like "this")
-  PrintExpr(Node->getBase());
+  if (!Policy.SuppressImplicitBase || !isImplicitThis(Node->getBase())) {
+    PrintExpr(Node->getBase());
 
-  MemberExpr *ParentMember = dyn_cast<MemberExpr>(Node->getBase());
-  FieldDecl  *ParentDecl   = ParentMember
-    ? dyn_cast<FieldDecl>(ParentMember->getMemberDecl()) : nullptr;
+    MemberExpr *ParentMember = dyn_cast<MemberExpr>(Node->getBase());
+    FieldDecl *ParentDecl =
+        ParentMember ? dyn_cast<FieldDecl>(ParentMember->getMemberDecl())
+                     : nullptr;
 
-  if (!ParentDecl || !ParentDecl->isAnonymousStructOrUnion())
-    OS << (Node->isArrow() ? "->" : ".");
+    if (!ParentDecl || !ParentDecl->isAnonymousStructOrUnion())
+      OS << (Node->isArrow() ? "->" : ".");
+  }
 
   if (FieldDecl *FD = dyn_cast<FieldDecl>(Node->getMemberDecl()))
     if (FD->isAnonymousStructOrUnion())
@@ -2475,6 +2546,13 @@ void StmtPrinter::VisitCoawaitExpr(CoawaitExpr *S) {
   PrintExpr(S->getOperand());
 }
 
+
+void StmtPrinter::VisitDependentCoawaitExpr(DependentCoawaitExpr *S) {
+  OS << "co_await ";
+  PrintExpr(S->getOperand());
+}
+
+
 void StmtPrinter::VisitCoyieldExpr(CoyieldExpr *S) {
   OS << "co_yield ";
   PrintExpr(S->getOperand());
@@ -2642,11 +2720,10 @@ void Stmt::dumpPretty(const ASTContext &Context) const {
   printPretty(llvm::errs(), nullptr, PrintingPolicy(Context.getLangOpts()));
 }
 
-void Stmt::printPretty(raw_ostream &OS,
-                       PrinterHelper *Helper,
-                       const PrintingPolicy &Policy,
-                       unsigned Indentation) const {
-  StmtPrinter P(OS, Helper, Policy, Indentation);
+void Stmt::printPretty(raw_ostream &OS, PrinterHelper *Helper,
+                       const PrintingPolicy &Policy, unsigned Indentation,
+                       const ASTContext *Context) const {
+  StmtPrinter P(OS, Helper, Policy, Indentation, Context);
   P.Visit(const_cast<Stmt*>(this));
 }
 

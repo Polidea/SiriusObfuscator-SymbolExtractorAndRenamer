@@ -78,8 +78,6 @@ class Outer {
   let a: Int = E.a // expected-error {{cannot convert value of type 'Outer.E' to specified type 'Int'}}
 
   enum E : Array<Int> { // expected-error {{raw type 'Array<Int>' is not expressible by any literal}}
-  // expected-error@-1 {{'Outer.E' declares raw type 'Array<Int>', but does not conform to RawRepresentable and conformance could not be synthesized}}
-  // expected-error@-2 {{RawRepresentable conformance cannot be synthesized because raw type 'Array<Int>' is not Equatable}}
     case a
   }
 }
@@ -118,8 +116,8 @@ func rdar32431165_1(_: Int, _: E_32431165) {}
 rdar32431165_1(E_32431165.baz)
 // expected-error@-1 {{type 'E_32431165' has no member 'baz'}}
 
-rdar32431165_1(.baz) // FIXME: the error should be {{reference to member 'baz' cannot be resolved without a contextual type}}
-// expected-error@-1 {{expression type '()' is ambiguous without more context}}
+rdar32431165_1(.baz)
+// expected-error@-1 {{reference to member 'baz' cannot be resolved without a contextual type}}
 
 rdar32431165_1("")
 // expected-error@-1 {{cannot convert value of type 'String' to expected argument type 'E_32431165'}} {{15-15=E_32431165(rawValue: }} {{19-19=)}}
@@ -146,3 +144,11 @@ func rdar32432253(_ condition: Bool = false) {
   let _ = choice == "bar"
   // expected-error@-1 {{cannot convert value of type 'E_32431165' to expected argument type 'String'}} {{11-11=}} {{17-17=.rawValue}}
 }
+
+
+struct NotEquatable { }
+
+enum ArrayOfNewEquatable : Array<NotEquatable> { }
+// expected-error@-1{{raw type 'Array<NotEquatable>' is not expressible by any literal}}
+// expected-error@-2{{'ArrayOfNewEquatable' declares raw type 'Array<NotEquatable>', but does not conform to RawRepresentable and conformance could not be synthesized}}
+// expected-error@-3{{RawRepresentable conformance cannot be synthesized because raw type 'Array<NotEquatable>' is not Equatable}}

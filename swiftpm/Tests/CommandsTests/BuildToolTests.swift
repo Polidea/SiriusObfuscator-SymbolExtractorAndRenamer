@@ -15,12 +15,26 @@ import Basic
 import Commands
 
 final class BuildToolTests: XCTestCase {
+    @discardableResult
     private func execute(_ args: [String], packagePath: AbsolutePath? = nil) throws -> String {
-        return try SwiftPMProduct.SwiftBuild.execute(args, packagePath: packagePath, printIfError: true)
+        return try SwiftPMProduct.SwiftBuild.execute(args, packagePath: packagePath, printIfError: false)
+    }
+
+    func buildBinContents(_ args: [String], packagePath: AbsolutePath? = nil) throws -> [String] {
+        try execute(args, packagePath: packagePath)
+        defer { try! SwiftPMProduct.SwiftPackage.execute(["clean"], packagePath: packagePath, printIfError: false) }
+        let binPathOutput = try execute(["--show-bin-path"], packagePath: packagePath)
+        let binPath = AbsolutePath(binPathOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+        let binContents = try localFileSystem.getDirectoryContents(binPath)
+        return binContents
     }
     
     func testUsage() throws {
         XCTAssert(try execute(["-help"]).contains("USAGE: swift build"))
+    }
+
+    func testSeeAlso() throws {
+        XCTAssert(try execute(["--help"]).contains("SEE ALSO: swift run, swift package, swift test"))
     }
 
     func testVersion() throws {
@@ -55,17 +69,29 @@ final class BuildToolTests: XCTestCase {
 
     func testProductAndTarget() throws {
         fixture(name: "Miscellaneous/MultipleExecutables") { path in
-            let productOutput = try execute(["--product", "exec1"], packagePath: path)
-            XCTAssert(productOutput.contains("Compile"))
-            XCTAssert(productOutput.contains("Linking"))
-            XCTAssert(productOutput.contains("exec1"))
-            XCTAssert(!productOutput.contains("exec2"))
+            let fullPath = resolveSymlinks(path)
 
-            let targetOutput = try execute(["--target", "exec2"], packagePath: path)
-            XCTAssert(targetOutput.contains("Compile"))
-            XCTAssert(targetOutput.contains("exec2"))
-            XCTAssert(!targetOutput.contains("Linking"))
-            XCTAssert(!targetOutput.contains("exec1"))
+            do {
+                let productBinContents = try buildBinContents(["--product", "exec1"], packagePath: fullPath)
+                XCTAssert(productBinContents.contains("exec1"))
+                XCTAssert(!productBinContents.contains("exec2.build"))
+            } catch SwiftPMProductError.executionFailure(_, _, let stderr) {
+                XCTFail(stderr)
+            }
+
+            do {
+                let output = try execute(["--product", "lib1"], packagePath: fullPath)
+                try SwiftPMProduct.SwiftPackage.execute(["clean"], packagePath: fullPath, printIfError: true)
+                XCTAssertTrue(output.contains("'--product' cannot be used with the automatic product 'lib1'. Building the default target instead"), output)
+            }
+
+            do {
+                let targetBinContents = try buildBinContents(["--target", "exec2"], packagePath: fullPath)
+                XCTAssert(targetBinContents.contains("exec2.build"))
+                XCTAssert(!targetBinContents.contains("exec1"))
+            } catch SwiftPMProductError.executionFailure(_, _, let stderr) {
+                XCTFail(stderr)
+            }
 
             do {
                 _ = try execute(["--product", "exec1", "--target", "exec2"], packagePath: path)
@@ -111,11 +137,87 @@ final class BuildToolTests: XCTestCase {
         }
     }
 
+    func testNonReachableProductsAndTargetsFunctional() {
+        fixture(name: "Miscellaneous/UnreachableTargets") { path in
+            let aPath = path.appending(component: "A")
+
+            do {
+                let binContents = try buildBinContents([], packagePath: aPath)
+                XCTAssert(!binContents.contains("bexec"))
+                XCTAssert(!binContents.contains("BTarget2.build"))
+                XCTAssert(!binContents.contains("cexec"))
+                XCTAssert(!binContents.contains("CTarget.build"))
+            } catch SwiftPMProductError.executionFailure(_, _, let stderr) {
+                XCTFail(stderr)
+            }
+
+            // Dependency contains a dependent product
+
+            do {
+                let binContents = try buildBinContents(["--product", "bexec"], packagePath: aPath)
+                XCTAssert(binContents.contains("BTarget2.build"))
+                XCTAssert(binContents.contains("bexec"))
+                XCTAssert(!binContents.contains("aexec"))
+                XCTAssert(!binContents.contains("ATarget.build"))
+                XCTAssert(!binContents.contains("BLibrary.a"))
+                XCTAssert(!binContents.contains("BTarget1.build"))
+                XCTAssert(!binContents.contains("cexec"))
+                XCTAssert(!binContents.contains("CTarget.build"))
+            } catch SwiftPMProductError.executionFailure(_, _, let stderr) {
+                XCTFail(stderr)
+            }
+
+            // Dependency does not contain a dependent product
+
+            do {
+                let binContents = try buildBinContents(["--target", "CTarget"], packagePath: aPath)
+                XCTAssert(binContents.contains("CTarget.build"))
+                XCTAssert(!binContents.contains("aexec"))
+                XCTAssert(!binContents.contains("ATarget.build"))
+                XCTAssert(!binContents.contains("BLibrary.a"))
+                XCTAssert(!binContents.contains("bexec"))
+                XCTAssert(!binContents.contains("BTarget1.build"))
+                XCTAssert(!binContents.contains("BTarget2.build"))
+                XCTAssert(!binContents.contains("cexec"))
+            } catch SwiftPMProductError.executionFailure(_, _, let stderr) {
+                XCTFail(stderr)
+            }
+        }
+    }
+
+    func testLLBuildManifestCachingBasics() {
+        fixture(name: "ValidLayouts/SingleModule/ExecutableNew") { path in
+            let fs = localFileSystem
+
+            // First run should produce output.
+            var output = try execute(["--enable-build-manifest-caching"], packagePath: path)
+            XCTAssert(!output.isEmpty, output)
+
+            // Null builds.
+            output = try execute(["--enable-build-manifest-caching"], packagePath: path)
+            XCTAssert(output.isEmpty, output)
+
+            output = try execute(["--enable-build-manifest-caching"], packagePath: path)
+            XCTAssert(output.isEmpty, output)
+
+            // Adding a new file should reset the token.
+            try fs.writeFileContents(path.appending(components: "Sources", "ExecutableNew", "bar.swift"), bytes: "")
+            output = try execute(["--enable-build-manifest-caching"], packagePath: path)
+            XCTAssert(!output.isEmpty, output)
+
+            // This should be another null build.
+            output = try execute(["--enable-build-manifest-caching"], packagePath: path)
+            XCTAssert(output.isEmpty, output)
+        }
+    }
+
     static var allTests = [
         ("testUsage", testUsage),
         ("testVersion", testVersion),
         ("testBinPath", testBinPath),
         ("testBackwardsCompatibilitySymlink", testBackwardsCompatibilitySymlink),
-        ("testProductAndTarget", testProductAndTarget)
+        ("testProductAndTarget", testProductAndTarget),
+        ("testNonReachableProductsAndTargetsFunctional", testNonReachableProductsAndTargetsFunctional),
+        ("testLLBuildManifestCachingBasics", testLLBuildManifestCachingBasics),
     ]
 }

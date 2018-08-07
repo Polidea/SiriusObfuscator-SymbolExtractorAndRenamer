@@ -55,7 +55,7 @@ public enum DependencyResolverError: Error, Equatable, CustomStringConvertible {
 }
 
 /// An abstract definition for a set of versions.
-public enum VersionSetSpecifier: Equatable, CustomStringConvertible {
+public enum VersionSetSpecifier: Hashable, CustomStringConvertible {
     /// The universal set.
     case any
 
@@ -97,9 +97,22 @@ public enum VersionSetSpecifier: Equatable, CustomStringConvertible {
                 return rhs
             }
             return .empty
-        default:
-            // FIXME: Compiler should be able to prove this? https://bugs.swift.org/browse/SR-2221
-            fatalError("not reachable: \(self), \(rhs)")
+        }
+    }
+
+    public var hashValue: Int {
+        switch (self) {
+        case .any:
+            return 0xB58D
+
+        case .empty:
+            return 0x7121
+
+        case .range(let range):
+            return 0x4CF3 ^ (range.lowerBound.hashValue &* 31) ^ range.upperBound.hashValue
+
+        case .exact(let version):
+            return 0xD04F ^ version.hashValue
         }
     }
 
@@ -241,6 +254,18 @@ public protocol PackageContainer {
     /// - Throws: If the revision could not be resolved; this will abort
     ///   dependency resolution completely.
     func getDependencies(at revision: String) throws -> [PackageContainerConstraint<Identifier>]
+
+    /// Fetch the dependencies of an unversioned package container.
+    ///
+    /// NOTE: This method should not be called on a versioned container.
+    func getUnversionedDependencies() throws -> [PackageContainerConstraint<Identifier>]
+
+    /// Get the updated identifier at a bound version.
+    ///
+    /// This can be used by the containers to fill in the missing information that is obtained
+    /// after the container is available. The updated identifier is returned in result of the
+    /// dependency resolution.
+    func getUpdatedIdentifier(at boundVersion: BoundVersion) throws -> Identifier
 }
 
 /// An interface for resolving package containers.
@@ -260,7 +285,7 @@ public struct PackageContainerConstraint<T: PackageContainerIdentifier>: CustomS
     public typealias Identifier = T
 
     /// The requirement of this constraint.
-    public enum Requirement: Equatable {
+    public enum Requirement: Hashable {
 
         /// The requirement is specified by the version set.
         case versionSet(VersionSetSpecifier)
@@ -276,12 +301,12 @@ public struct PackageContainerConstraint<T: PackageContainerIdentifier>: CustomS
         case revision(String)
 
         /// Un-versioned requirement i.e. a version should not resolved.
-        case unversioned([PackageContainerConstraint<Identifier>])
+        case unversioned
 
         public static func == (lhs: Requirement, rhs: Requirement) -> Bool {
             switch (lhs, rhs) {
-            case (.unversioned(let lhs), .unversioned(let rhs)):
-                return lhs == rhs
+            case (.unversioned, .unversioned):
+                return true
             case (.unversioned, _):
                 return false
             case (.revision(let lhs), .revision(let rhs)):
@@ -292,6 +317,19 @@ public struct PackageContainerConstraint<T: PackageContainerIdentifier>: CustomS
                 return lhs == rhs
             case (.versionSet, _):
                 return false
+            }
+        }
+
+        public var hashValue: Int {
+            switch self {
+            case .versionSet(let set):
+                return 0x11FB ^ set.hashValue
+
+            case .revision(let str):
+                return 0xE2F3 ^ str.hashValue
+
+            case .unversioned:
+                return 0x8E7F
             }
         }
     }
@@ -394,7 +432,7 @@ public enum BoundVersion: Equatable, CustomStringConvertible {
 // `PackageContainerConstraint`s. That won't work if we decide this should
 // eventually map based on the `Container` rather than the `Identifier`, though,
 // so they are separate for now.
-public struct PackageContainerConstraintSet<C: PackageContainer>: Collection {
+public struct PackageContainerConstraintSet<C: PackageContainer>: Collection, Hashable {
     public typealias Container = C
     public typealias Identifier = Container.Identifier
     public typealias Requirement = PackageContainerConstraint<Identifier>.Requirement
@@ -428,6 +466,14 @@ public struct PackageContainerConstraintSet<C: PackageContainer>: Collection {
         return constraints[identifier] ?? .versionSet(.any)
     }
 
+    public var hashValue: Int {
+        var result = 0
+        for c in self.constraints {
+            result = result &* 31 ^ c.key.hashValue &* 0x62F ^ c.value.hashValue
+        }
+        return result
+    }
+
     /// Create a constraint set by merging the `requirement` for container `identifier`.
     ///
     /// - Returns: The new set, or nil the resulting set is unsatisfiable.
@@ -444,12 +490,8 @@ public struct PackageContainerConstraintSet<C: PackageContainer>: Collection {
             var result = self
             result.constraints[identifier] = .versionSet(intersection)
             return result
-        case (.unversioned(let newConstraints), .unversioned(let currentConstraints)):
-            // Two unversioned requirements can only merge if they both impose the same constraints.
-            if newConstraints == currentConstraints {
-                return self
-            }
-            return nil
+        case (.unversioned, .unversioned):
+            return self
         case (.unversioned, _):
             // Unversioned requirements always *wins*.
             var result = self
@@ -475,9 +517,6 @@ public struct PackageContainerConstraintSet<C: PackageContainer>: Collection {
         case (_, .revision):
             // The revision requirement *wins*.
             return self
-
-        default:
-            fatalError("Unreachable \(requirement) \(self[identifier])")
         }
     }
 
@@ -832,6 +871,23 @@ public class DependencyResolver<
     // FIXME: @testable private
     var error: Swift.Error?
 
+    /// Key used to cache a resolved subtree.
+    private struct ResolveSubtreeCacheKey: Hashable {
+        let container: Container
+        let allConstraints: ConstraintSet
+
+        var hashValue: Int {
+            return container.identifier.hashValue ^ allConstraints.hashValue
+        }
+
+        static func ==(lhs: ResolveSubtreeCacheKey, rhs: ResolveSubtreeCacheKey) -> Bool {
+            return lhs.container.identifier == rhs.container.identifier && lhs.allConstraints == rhs.allConstraints
+        }
+    }
+
+    /// Cache for subtree resolutions.
+    private var _resolveSubtreeCache: [ResolveSubtreeCacheKey: AnySequence<AssignmentSet>] = [:]
+    
     /// Puts the resolver in incomplete mode.
     ///
     /// In this mode, no new containers will be requested from the provider.
@@ -877,8 +933,8 @@ public class DependencyResolver<
         do {
             // Reset the incomplete mode and run the resolver.
             self.isInIncompleteMode = false
-            let constraints = dependencies + pins
-            return try .success(resolve(constraints: constraints))
+            let constraints = dependencies
+            return try .success(resolve(constraints: constraints, pins: pins))
         } catch DependencyResolverError.unsatisfiable {
             // FIXME: can we avoid this do..catch nesting?
             do {
@@ -901,8 +957,13 @@ public class DependencyResolver<
     ///                  constraints for the same container identifier.
     /// - Returns: A satisfying assignment of containers and their version binding.
     /// - Throws: DependencyResolverError, or errors from the underlying package provider.
-    public func resolve(constraints: [Constraint]) throws -> [(container: Identifier, binding: BoundVersion)] {
-        return try resolveAssignment(constraints: constraints).map({ ($0.0.identifier, $0.1) })
+    public func resolve(constraints: [Constraint], pins: [Constraint] = []) throws -> [(container: Identifier, binding: BoundVersion)] {
+        return try resolveAssignment(constraints: constraints, pins: pins).map({ assignment in
+            let (container, binding) = assignment
+            let identifier = try self.isInIncompleteMode ? container.identifier : container.getUpdatedIdentifier(at: binding)
+            // Get the updated identifier from the container.
+            return (identifier, binding)
+        })
     }
 
     /// Execute the resolution algorithm to find a valid assignment of versions.
@@ -912,13 +973,30 @@ public class DependencyResolver<
     ///                  constraints for the same container identifier.
     /// - Returns: A satisfying assignment of containers and versions.
     /// - Throws: DependencyResolverError, or errors from the underlying package provider.
-    func resolveAssignment(constraints: [Constraint]) throws -> AssignmentSet {
+    func resolveAssignment(constraints: [Constraint], pins: [Constraint] = []) throws -> AssignmentSet {
+
+        // Create a constraint set with the input pins.
+        var allConstraints = ConstraintSet()
+        for constraint in pins {
+            if let merged = allConstraints.merging(constraint) {
+                allConstraints = merged
+            } else {
+                // FIXME: We should issue a warning if the pins can't be merged
+                // for some reason.
+            }
+        }
+
         // Create an assignment for the input constraints.
         let mergedConstraints = merge(
             constraints: constraints,
             into: AssignmentSet(),
-            subjectTo: ConstraintSet(),
+            subjectTo: allConstraints,
             excluding: [:])
+
+        // Prefetch the pins.
+        if !isInIncompleteMode && isPrefetchingEnabled {
+            prefetch(containers: pins.map({ $0.identifier }))
+        }
 
         guard let assignment = mergedConstraints.first(where: { _ in true }) else {
             // Throw any error encountered during resolution.
@@ -956,6 +1034,21 @@ public class DependencyResolver<
         subjectTo allConstraints: ConstraintSet,
         excluding allExclusions: [Identifier: Set<Version>]
     ) -> AnySequence<AssignmentSet> {
+        // The key that is used to cache this assignement set.
+        let cacheKey = ResolveSubtreeCacheKey(container: container, allConstraints: allConstraints)
+
+        // Check if we have a cache hit for this subtree resolution.
+        //
+        // Note: We don't include allExclusions in the cache key so we ignore
+        // the cache if its non-empty.
+        //
+        // FIXME: We can improve the cache miss rate here if we have a cached
+        // entry with a broader constraint set. The cached sequence can be
+        // filtered according to the new narrower constraint set.
+        if allExclusions.isEmpty, let assignments = _resolveSubtreeCache[cacheKey] {
+            return assignments
+        }
+        
         func validVersions(_ container: Container, in versionSet: VersionSetSpecifier) -> AnySequence<Version> {
             let exclusions = allExclusions[container.identifier] ?? Set()
             return AnySequence(container.versions(filter: {
@@ -982,23 +1075,27 @@ public class DependencyResolver<
             }))
         }
 
+        var result: AnySequence<AssignmentSet>
         switch allConstraints[container.identifier] {
-        case .unversioned(let constraints):
+        case .unversioned:
+            guard let constraints = self.safely({ try container.getUnversionedDependencies() }) else {
+                return AnySequence([])
+            }
             // Merge the dependencies of unversioned constraint into the assignment.
-            return merge(constraints: constraints, binding: .unversioned)
+            result = merge(constraints: constraints, binding: .unversioned)
 
         case .revision(let identifier):
             guard let constraints = self.safely({ try container.getDependencies(at: identifier) }) else {
                 return AnySequence([])
             }
-            return merge(constraints: constraints, binding: .revision(identifier))
+            result = merge(constraints: constraints, binding: .revision(identifier))
 
         case .versionSet(let versionSet):
             // The previous valid version that was picked.
             var previousVersion: Version? = nil
 
             // Attempt to select each valid version in the preferred order.
-            return AnySequence(validVersions(container, in: versionSet).lazy
+            result = AnySequence(validVersions(container, in: versionSet).lazy
                 .flatMap({ version -> AnySequence<AssignmentSet> in
                     assert(previousVersion != nil ? previousVersion! > version : true,
                            "container versions are improperly ordered")
@@ -1022,7 +1119,7 @@ public class DependencyResolver<
                     // Since this is a versioned container, none of its
                     // dependencies can have a revision constraints.
                     let revisionConstraints: [(AnyPackageContainerIdentifier, String)]
-                    revisionConstraints = constraints.flatMap({
+                    revisionConstraints = constraints.compactMap({
                         if case .revision(let revision) = $0.requirement {
                             return (AnyPackageContainerIdentifier($0.identifier), revision)
                         }
@@ -1039,6 +1136,13 @@ public class DependencyResolver<
                     return merge(constraints: constraints, binding: .version(version))
                 }))
         }
+
+        if allExclusions.isEmpty {
+            // Ensure we can cache this sequence.
+            result = AnySequence(CacheableSequence(result))
+            _resolveSubtreeCache[cacheKey] = result
+        }
+        return result
     }
 
     /// Find all solutions for `constraints` with the results merged into the `assignment`.
@@ -1108,7 +1212,7 @@ public class DependencyResolver<
                 return AnySequence(possibleAssignments.lazy.flatMap({ value -> AnySequence<(AssignmentSet, ConstraintSet)> in
                     let (assignment, allConstraints) = value
                     let subtree = self.resolveSubtree(container, subjectTo: allConstraints, excluding: allExclusions)
-                    return AnySequence(subtree.lazy.flatMap({ subtreeAssignment -> (AssignmentSet, ConstraintSet)? in
+                    return AnySequence(subtree.lazy.compactMap({ subtreeAssignment -> (AssignmentSet, ConstraintSet)? in
                             // We found a valid subtree assignment, attempt to merge it with the
                             // current solution.
                             guard let newAssignment = assignment.merging(subtreeAssignment) else {
@@ -1172,7 +1276,7 @@ public class DependencyResolver<
     private var _prefetchingContainers: Set<Identifier> = []
 
     /// Get the container for the given identifier, loading it if necessary.
-    private func getContainer(for identifier: Identifier) throws -> Container {
+    fileprivate func getContainer(for identifier: Identifier) throws -> Container {
         return try fetchCondition.whileLocked {
             // Return the cached container, if available.
             if let container = _fetchedContainers[identifier] {
@@ -1260,9 +1364,33 @@ private struct ResolverDebugger<
     ///
     /// This algorithm can be exponential, so we abort after the predefined time limit.
     func debug(
-        dependencies: [Constraint],
+        dependencies inputDependencies: [Constraint],
         pins: [Constraint]
     ) throws -> (dependencies: [Constraint], pins: [Constraint]) {
+
+        // Form the dependencies array.
+        //
+		// We iterate over the inputs and fetch all the dependencies for
+		// unversioned requirements as the unversioned requirements are not
+		// relevant to the dependency resolution.
+        var dependencies = [Constraint]()
+        for constraint in inputDependencies {
+            if constraint.requirement == .unversioned {
+                // Ignore the errors here.
+                do {
+                    let container = try resolver.getContainer(for: constraint.identifier)
+                    dependencies += try container.getUnversionedDependencies()
+                } catch {}
+            } else {
+                dependencies.append(constraint)
+            }
+        }
+
+        // Remove the unversioned constraints which may be added as result of the above loop.
+        dependencies = dependencies.filter({ dep in
+            return !inputDependencies.contains(where: { $0.identifier == dep.identifier && $0.requirement == .unversioned })
+        })
+
         // Put the resolver in incomplete mode to avoid cloning new repositories.
         resolver.isInIncompleteMode = true
 
@@ -1295,7 +1423,7 @@ private struct ResolverDebugger<
 
             // Find the packages which are allowed and disallowed to participate
             // in this changeset.
-            let allowedPackages = Set(allowedChanges.flatMap({ $0.allowedPackage }))
+            let allowedPackages = Set(allowedChanges.compactMap({ $0.allowedPackage }))
             let disallowedPackages = allPackages.subtracting(allowedPackages)
 
             // Start creating constraints.
@@ -1305,10 +1433,10 @@ private struct ResolverDebugger<
 
             // Set all disallowed packages to unversioned, so they stay out of resolution.
             constraints += disallowedPackages.map({
-                Constraint(container: $0, requirement: .unversioned([]))
+                Constraint(container: $0, requirement: .unversioned)
             })
 
-            let allowedPins = Set(allowedChanges.flatMap({ $0.allowedPin }))
+            let allowedPins = Set(allowedChanges.compactMap({ $0.allowedPin }))
 
             // It is always a failure if this changeset contains a pin of
             // a disallowed package.
@@ -1323,8 +1451,8 @@ private struct ResolverDebugger<
         }
 
         // Filter the input with found result and return.
-        let badDependencies = Set(badChanges.flatMap({ $0.allowedPackage }))
-        let badPins = Set(badChanges.flatMap({ $0.allowedPin }))
+        let badDependencies = Set(badChanges.compactMap({ $0.allowedPackage }))
+        let badPins = Set(badChanges.compactMap({ $0.allowedPin }))
         return (
             dependencies: dependencies.filter({ badDependencies.contains($0.identifier) }),
             pins: pins.filter({ badPins.contains($0.identifier) })
@@ -1334,7 +1462,7 @@ private struct ResolverDebugger<
     /// Returns true if the constraints are satisfiable.
     func satisfies(_ constraints: [Constraint]) throws -> Bool {
         do {
-            _ = try resolver.resolve(constraints: constraints)
+            _ = try resolver.resolve(constraints: constraints, pins: [])
             return true
         } catch DependencyResolverError.unsatisfiable {
             return false

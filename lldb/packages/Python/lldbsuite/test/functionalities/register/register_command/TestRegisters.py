@@ -18,6 +18,7 @@ from lldbsuite.test import lldbutil
 class RegisterCommandsTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
+    NO_DEBUG_INFO_TESTCASE = True
 
     def setUp(self):
         TestBase.setUp(self)
@@ -45,7 +46,7 @@ class RegisterCommandsTestCase(TestBase):
             self.runCmd("register read xmm0")
             self.runCmd("register read ymm15")  # may be available
             self.runCmd("register read bnd0")  # may be available
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm', 'armv7', 'armv7k', 'arm64']:
             self.runCmd("register read s0")
             self.runCmd("register read q15")  # may be available
 
@@ -71,6 +72,7 @@ class RegisterCommandsTestCase(TestBase):
     @skipIfFreeBSD  # llvm.org/pr25057
     @skipIf(archs=no_match(['amd64', 'i386', 'x86_64']))
     @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @expectedFailureDarwin(bugnumber="<rdar://problem/34092153>")  # CI bots need to use updated debugserver to match ftag size change in r311579.
     def test_fp_special_purpose_register_read(self):
         """Test commands that read fpu special purpose registers."""
         self.build()
@@ -87,7 +89,10 @@ class RegisterCommandsTestCase(TestBase):
         if self.getArchitecture() in ['amd64', 'i386', 'x86_64']:
             gpr = "eax"
             vector = "xmm0"
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm64', 'aarch64']:
+            gpr = "w0"
+            vector = "v0"
+        elif self.getArchitecture() in ['arm', 'armv7', 'armv7k']:
             gpr = "r0"
             vector = "q0"
 
@@ -143,17 +148,10 @@ class RegisterCommandsTestCase(TestBase):
         # This intentionally checks the host platform rather than the target
         # platform as logging is host side.
         self.platform = ""
-        if sys.platform.startswith("darwin"):
-            self.platform = ""  # TODO: add support for "log enable darwin registers"
-
-        if sys.platform.startswith("freebsd"):
-            self.platform = "freebsd"
-
-        if sys.platform.startswith("linux"):
-            self.platform = "linux"
-
-        if sys.platform.startswith("netbsd"):
-            self.platform = "netbsd"
+        if (sys.platform.startswith("freebsd") or
+                sys.platform.startswith("linux") or
+                sys.platform.startswith("netbsd")):
+            self.platform = "posix"
 
         if self.platform != "":
             self.log_file = os.path.join(os.getcwd(), 'TestRegisters.log')
@@ -266,7 +264,7 @@ class RegisterCommandsTestCase(TestBase):
             self.expect(
                 "register read ftag", substrs=[
                     'ftag' + ' = ', str(
-                        "0x%0.2x" %
+                        "0x%0.4x" %
                         (reg_value_ftag_initial | (
                             1 << fstat_top_pointer_initial)))])
             reg_value_ftag_initial = reg_value_ftag_initial | (
@@ -327,7 +325,35 @@ class RegisterCommandsTestCase(TestBase):
                     ("xmm15",
                      "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
                      False))
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm64', 'aarch64']:
+            reg_list = [
+                # reg      value
+                # must-have
+                ("fpsr", "0xfbf79f9f", True),
+                ("s0", "1.25", True),
+                ("s31", "0.75", True),
+                ("d1", "123", True),
+                ("d17", "987", False),
+                ("v1", "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x2f 0x2f}", True),
+                ("v14",
+                 "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
+                 False),
+            ]
+        elif self.getArchitecture() in ['armv7'] and self.platformIsDarwin():
+            reg_list = [
+                # reg      value
+                # must-have
+                ("fpsr", "0xfbf79f9f", True),
+                ("s0", "1.25", True),
+                ("s31", "0.75", True),
+                ("d1", "123", True),
+                ("d17", "987", False),
+                ("q1", "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x2f 0x2f}", True),
+                ("q14",
+                 "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
+                 False),
+            ]
+        elif self.getArchitecture() in ['arm', 'armv7k']:
             reg_list = [
                 # reg      value
                 # must-have

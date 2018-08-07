@@ -144,7 +144,7 @@ internal func _CFSwiftStringGetCharacterAtIndex(_ str: AnyObject, index: CFIndex
 }
 
 internal func _CFSwiftStringGetCharacters(_ str: AnyObject, range: CFRange, buffer: UnsafeMutablePointer<UniChar>) {
-    (str as! NSString).getCharacters(buffer, range: NSMakeRange(range.location, range.length))
+    (str as! NSString).getCharacters(buffer, range: NSRange(location: range.location, length: range.length))
 }
 
 internal func _CFSwiftStringGetBytes(_ str: AnyObject, encoding: CFStringEncoding, range: CFRange, buffer: UnsafeMutablePointer<UInt8>?, maxBufLen: CFIndex, usedBufLen: UnsafeMutablePointer<CFIndex>?) -> CFIndex {
@@ -168,8 +168,13 @@ internal func _CFSwiftStringGetBytes(_ str: AnyObject, encoding: CFStringEncodin
             for idx in 0..<range.length {
                 // Since character is 2 bytes but the buffer is in term of 1 byte values, we have to split it up
                 let character = encodingView[start.advanced(by: idx + range.location)]
+#if _endian(big)
+                let byte0 = UInt8((character >> 8) & 0x00ff)
+                let byte1 = UInt8(character & 0x00ff)
+#else
                 let byte0 = UInt8(character & 0x00ff)
                 let byte1 = UInt8((character >> 8) & 0x00ff)
+#endif
                 buffer.advanced(by: idx * 2).initialize(to: byte0)
                 buffer.advanced(by: (idx * 2) + 1).initialize(to: byte1)
             }
@@ -186,7 +191,7 @@ internal func _CFSwiftStringGetBytes(_ str: AnyObject, encoding: CFStringEncodin
 }
 
 internal func _CFSwiftStringCreateWithSubstring(_ str: AnyObject, range: CFRange) -> Unmanaged<AnyObject> {
-    return Unmanaged<AnyObject>.passRetained((str as! NSString).substring(with: NSMakeRange(range.location, range.length))._nsObject)
+    return Unmanaged<AnyObject>.passRetained((str as! NSString).substring(with: NSRange(location: range.location, length: range.length))._nsObject)
 }
 
 
@@ -219,11 +224,11 @@ internal func _CFSwiftStringInsert(_ str: AnyObject, index: CFIndex, inserted: A
 }
 
 internal func _CFSwiftStringDelete(_ str: AnyObject, range: CFRange) {
-    (str as! NSMutableString).deleteCharacters(in: NSMakeRange(range.location, range.length))
+    (str as! NSMutableString).deleteCharacters(in: NSRange(location: range.location, length: range.length))
 }
 
 internal func _CFSwiftStringReplace(_ str: AnyObject, range: CFRange, replacement: AnyObject) {
-    (str as! NSMutableString).replaceCharacters(in: NSMakeRange(range.location, range.length), with: (replacement as! NSString)._swiftObject)
+    (str as! NSMutableString).replaceCharacters(in: NSRange(location: range.location, length: range.length), with: (replacement as! NSString)._swiftObject)
 }
 
 internal func _CFSwiftStringReplaceAll(_ str: AnyObject, replacement: AnyObject) {

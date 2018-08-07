@@ -18,25 +18,26 @@
 #ifndef SWIFT_FRONTEND_H
 #define SWIFT_FRONTEND_H
 
-#include "swift/Basic/DiagnosticOptions.h"
-#include "swift/Basic/LangOptions.h"
-#include "swift/Basic/SourceManager.h"
 #include "swift/AST/DiagnosticConsumer.h"
 #include "swift/AST/DiagnosticEngine.h"
 #include "swift/AST/IRGenOptions.h"
 #include "swift/AST/LinkLibrary.h"
 #include "swift/AST/Module.h"
-#include "swift/AST/SearchPathOptions.h"
 #include "swift/AST/SILOptions.h"
-#include "swift/Parse/CodeCompletionCallbacks.h"
-#include "swift/Parse/Parser.h"
+#include "swift/AST/SearchPathOptions.h"
+#include "swift/Basic/DiagnosticOptions.h"
+#include "swift/Basic/LangOptions.h"
+#include "swift/Basic/SourceManager.h"
 #include "swift/ClangImporter/ClangImporter.h"
 #include "swift/ClangImporter/ClangImporterOptions.h"
 #include "swift/Frontend/FrontendOptions.h"
 #include "swift/Migrator/MigratorOptions.h"
+#include "swift/Parse/CodeCompletionCallbacks.h"
+#include "swift/Parse/Parser.h"
+#include "swift/SIL/SILModule.h"
 #include "swift/Sema/SourceLoader.h"
 #include "swift/Serialization/Validation.h"
-#include "swift/SIL/SILModule.h"
+#include "swift/Subsystems.h"
 #include "llvm/ADT/IntrusiveRefCntPtr.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/Host.h"
@@ -242,25 +243,19 @@ public:
   }
 
   void addInputFilename(StringRef Filename) {
-    FrontendOpts.InputFilenames.push_back(Filename);
+    FrontendOpts.Inputs.addInputFilename(Filename);
   }
 
   /// Does not take ownership of \p Buf.
   void addInputBuffer(llvm::MemoryBuffer *Buf) {
-    FrontendOpts.InputBuffers.push_back(Buf);
+    FrontendOpts.Inputs.addInputBuffer(Buf);
   }
 
-  void clearInputs() {
-    FrontendOpts.InputFilenames.clear();
-    FrontendOpts.InputBuffers.clear();
+  void setPrimaryInput(SelectedInput pi) {
+    FrontendOpts.Inputs.setPrimaryInput(pi);
   }
 
-  ArrayRef<std::string> getInputFilenames() const {
-    return FrontendOpts.InputFilenames;
-  }
-  ArrayRef<llvm::MemoryBuffer*> getInputBuffers() const {
-    return FrontendOpts.InputBuffers;
-  }
+  void clearInputs() { FrontendOpts.Inputs.clearInputs(); }
 
   StringRef getOutputFilename() const {
     return FrontendOpts.getSingleOutputFilename();
@@ -292,18 +287,31 @@ public:
     return CodeCompletionFactory;
   }
 
-  void setDelayedFunctionBodyParsing(bool Val) {
-    FrontendOpts.DelayedFunctionBodyParsing = Val;
-  }
-
-  bool isDelayedFunctionBodyParsing() const {
-    return FrontendOpts.DelayedFunctionBodyParsing;
-  }
-
   /// Retrieve a module hash string that is suitable for uniquely
   /// identifying the conditions under which the module was built, for use
   /// in generating a cached PCH file for the bridging header.
   std::string getPCHHash() const;
+
+  SourceFile::ImplicitModuleImportKind getImplicitModuleImportKind() {
+    if (getInputKind() == InputFileKind::IFK_SIL) {
+      return SourceFile::ImplicitModuleImportKind::None;
+    }
+    if (getParseStdlib()) {
+      return SourceFile::ImplicitModuleImportKind::Builtin;
+    }
+    return SourceFile::ImplicitModuleImportKind::Stdlib;
+  }
+
+  /// Performs input setup common to these tools:
+  /// sil-opt, sil-func-extractor, sil-llvm-gen, and sil-nm.
+  /// Return value includes the buffer so caller can keep it alive.
+  llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>>
+  setUpInputForSILTool(StringRef InputFilename, StringRef ModuleNameArg,
+                       bool alwaysSetModuleToMain,
+                       serialization::ExtendedValidationInfo &extendedInfo);
+  bool hasSerializedAST() {
+    return FrontendOpts.InputKind == InputFileKind::IFK_Swift_Library;
+  }
 };
 
 /// A class which manages the state and execution of the compiler.
@@ -328,7 +336,7 @@ class CompilerInstance {
   SerializedModuleLoader *SML = nullptr;
 
   /// Contains buffer IDs for input source code files.
-  std::vector<unsigned> BufferIDs;
+  std::vector<unsigned> InputSourceCodeBufferIDs;
 
   struct PartialModuleInputs {
     std::unique_ptr<llvm::MemoryBuffer> ModuleBuffer;
@@ -341,12 +349,17 @@ class CompilerInstance {
 
   enum : unsigned { NO_SUCH_BUFFER = ~0U };
   unsigned MainBufferID = NO_SUCH_BUFFER;
+
+  /// PrimaryBufferID corresponds to PrimaryInput.
   unsigned PrimaryBufferID = NO_SUCH_BUFFER;
+  bool isWholeModuleCompilation() { return PrimaryBufferID == NO_SUCH_BUFFER; }
 
   SourceFile *PrimarySourceFile = nullptr;
 
-  void createSILModule(bool WholeModule = false);
+  void createSILModule();
   void setPrimarySourceFile(SourceFile *SF);
+
+  bool setUpForFileAt(unsigned i);
 
 public:
   SourceManager &getSourceMgr() { return SourceMgr; }
@@ -404,7 +417,9 @@ public:
 
   SerializedModuleLoader *getSerializedModuleLoader() const { return SML; }
 
-  ArrayRef<unsigned> getInputBufferIDs() const { return BufferIDs; }
+  ArrayRef<unsigned> getInputBufferIDs() const {
+    return InputSourceCodeBufferIDs;
+  }
 
   ArrayRef<LinkLibrary> getLinkLibraries() const {
     return Invocation.getLinkLibraries();
@@ -426,11 +441,64 @@ public:
 
   /// Parses the input file but does no type-checking or module imports.
   /// Note that this only supports parsing an invocation with a single file.
-  void performParseOnly();
+  ///
+  ///
+  void performParseOnly(bool EvaluateConditionals = false);
 
   /// Frees up the ASTContext and SILModule objects that this instance is
   /// holding on.
   void freeContextAndSIL();
+
+private:
+  /// Load stdlib & return true if should continue, i.e. no error
+  bool loadStdlib();
+  ModuleDecl *importUnderlyingModule();
+  ModuleDecl *importBridgingHeader();
+
+  void
+  getImplicitlyImportedModules(SmallVectorImpl<ModuleDecl *> &importModules);
+
+public: // for static functions in Frontend.cpp
+  struct ImplicitImports {
+    SourceFile::ImplicitModuleImportKind kind;
+    ModuleDecl *objCModuleUnderlyingMixedFramework;
+    ModuleDecl *headerModule;
+    SmallVector<ModuleDecl *, 4> modules;
+
+    explicit ImplicitImports(CompilerInstance &compiler);
+  };
+
+private:
+  void createREPLFile(const ImplicitImports &implicitImports) const;
+  std::unique_ptr<DelayedParsingCallbacks>
+  computeDelayedParsingCallback(bool isPrimary);
+
+  void addMainFileToModule(const ImplicitImports &implicitImports);
+
+  void parseAndCheckTypes(const ImplicitImports &implicitImports);
+
+  void parseLibraryFile(unsigned BufferID,
+                        const ImplicitImports &implicitImports,
+                        PersistentParserState &PersistentState,
+                        DelayedParsingCallbacks *PrimaryDelayedCB,
+                        DelayedParsingCallbacks *SecondaryDelayedCB);
+
+  /// Return true if had load error
+  bool
+  parsePartialModulesAndLibraryFiles(const ImplicitImports &implicitImports,
+                                     PersistentParserState &PersistentState,
+                                     DelayedParsingCallbacks *PrimaryDelayedCB,
+                                     DelayedParsingCallbacks *SecondaryDelayedCB);
+
+  OptionSet<TypeCheckingFlags> computeTypeCheckingOptions();
+
+  void forEachFileToTypeCheck(llvm::function_ref<void(SourceFile &)> fn);
+
+  void parseAndTypeCheckMainFile(PersistentParserState &PersistentState,
+                                 DelayedParsingCallbacks *DelayedParseCB,
+                                 OptionSet<TypeCheckingFlags> TypeCheckOptions);
+
+  void finishTypeChecking(OptionSet<TypeCheckingFlags> TypeCheckOptions);
 };
 
 } // namespace swift

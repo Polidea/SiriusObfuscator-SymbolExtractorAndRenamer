@@ -1,13 +1,11 @@
-// RUN: %target-swift-frontend -O -emit-sil -sil-serialize-witness-tables %s | %FileCheck %s
+// RUN: %target-swift-frontend -O -emit-sil %s | %FileCheck %s
 
 // Check that compiler does not crash on the devirtualization of materializeForSet methods
 // and produces a correct code.
+//
+// Note: now we no longer speculatively devirtualize inside thunks, so this test does nothing.
 
-// CHECK-LABEL: sil shared [transparent] [serialized] [thunk] @_T024devirt_materializeForSet7BaseFooCAA0F0A2aDP3barSSfmTW
-// CHECK: checked_cast_br [exact] %{{.*}} : $BaseFoo to $ChildFoo
-// CHECK: thin_function_to_pointer %{{.*}} : $@convention(method) (Builtin.RawPointer, @inout Builtin.UnsafeValueBuffer, @inout ChildFoo, @thick ChildFoo.Type) -> () to $Builtin.RawPointer
-// CHECK: enum $Optional<Builtin.RawPointer>, #Optional.some!enumelt.1, %{{.*}} : $Builtin.RawPointer
-// CHECK: tuple (%{{.*}} : $Builtin.RawPointer, %{{.*}} : $Optional<Builtin.RawPointer>)
+// CHECK-LABEL: sil shared [transparent] [thunk] @_T024devirt_materializeForSet7BaseFooCAA0F0A2aDP3barSSvmTW
 
 public protocol Foo {
     var bar: String { get set }

@@ -56,6 +56,7 @@ internal struct _SliceBuffer<Element>
       hasNativeBuffer: true)
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal func _invariantCheck() {
     let isNative = _hasNativeBuffer
@@ -66,11 +67,13 @@ internal struct _SliceBuffer<Element>
     }
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var _hasNativeBuffer: Bool {
     return (endIndexAndFlags & 1) != 0
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var nativeBuffer: NativeBuffer {
     _sanityCheck(_hasNativeBuffer)
@@ -78,6 +81,7 @@ internal struct _SliceBuffer<Element>
       owner as? _ContiguousArrayStorageBase ?? _emptyArrayStorage)
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var nativeOwner: AnyObject {
     _sanityCheck(_hasNativeBuffer, "Expect a native array")
@@ -90,6 +94,7 @@ internal struct _SliceBuffer<Element>
   /// - Precondition: This buffer is backed by a uniquely-referenced
   ///   `_ContiguousArrayBuffer` and
   ///   `insertCount <= numericCast(newValues.count)`.
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal mutating func replaceSubrange<C>(
     _ subrange: Range<Int>,
@@ -100,7 +105,8 @@ internal struct _SliceBuffer<Element>
     _invariantCheck()
     _sanityCheck(insertCount <= numericCast(newValues.count))
 
-    _sanityCheck(_hasNativeBuffer && isUniquelyReferenced())
+    _sanityCheck(_hasNativeBuffer)
+    _sanityCheck(isUniquelyReferenced())
 
     let eraseCount = subrange.count
     let growth = insertCount - eraseCount
@@ -126,6 +132,7 @@ internal struct _SliceBuffer<Element>
   /// A value that identifies the storage used by the buffer.  Two
   /// buffers address the same elements when they have the same
   /// identity and count.
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var identity: UnsafeRawPointer {
     return UnsafeRawPointer(firstElementAddress)
@@ -137,11 +144,13 @@ internal struct _SliceBuffer<Element>
   @_versioned
   internal let subscriptBaseAddress: UnsafeMutablePointer<Element>
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var firstElementAddress: UnsafeMutablePointer<Element> {
     return subscriptBaseAddress + startIndex
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var firstElementAddressIfContiguous: UnsafeMutablePointer<Element>? {
     return firstElementAddress
@@ -153,12 +162,23 @@ internal struct _SliceBuffer<Element>
 
   //===--- Non-essential bits ---------------------------------------------===//
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal mutating func requestUniqueMutableBackingBuffer(
     minimumCapacity: Int
   ) -> NativeBuffer? {
     _invariantCheck()
-    if _fastPath(_hasNativeBuffer && isUniquelyReferenced()) {
+    // This is a performance optimization that was put in to ensure that at
+    // -Onone, copy of self we make to call _hasNativeBuffer is destroyed before
+    // we call isUniquelyReferenced. Otherwise, isUniquelyReferenced will always
+    // fail causing us to always copy.
+    //
+    // if _fastPath(_hasNativeBuffer && isUniquelyReferenced) {
+    //
+    // SR-6437
+    let native = _hasNativeBuffer
+    let unique = isUniquelyReferenced()
+    if _fastPath(native && unique) {
       if capacity >= minimumCapacity {
         // Since we have the last reference, drop any inaccessible
         // trailing elements in the underlying storage.  That will
@@ -186,18 +206,39 @@ internal struct _SliceBuffer<Element>
   @_inlineable
   @_versioned
   internal mutating func isMutableAndUniquelyReferenced() -> Bool {
-    return _hasNativeBuffer && isUniquelyReferenced()
+    // This is a performance optimization that ensures that the copy of self
+    // that occurs at -Onone is destroyed before we call
+    // isUniquelyReferencedOrPinned. This code used to be:
+    //
+    //   return _hasNativeBuffer && isUniquelyReferenced()
+    //
+    // SR-6437
+    if !_hasNativeBuffer {
+      return false
+    }
+    return isUniquelyReferenced()
   }
 
   @_inlineable
   @_versioned
   internal mutating func isMutableAndUniquelyReferencedOrPinned() -> Bool {
-    return _hasNativeBuffer && isUniquelyReferencedOrPinned()
+    // This is a performance optimization that ensures that the copy of self
+    // that occurs at -Onone is destroyed before we call
+    // isUniquelyReferencedOrPinned. This code used to be:
+    //
+    //   return _hasNativeBuffer && isUniquelyReferencedOrPinned()
+    //
+    // SR-6437
+    if !_hasNativeBuffer {
+      return false
+    }
+    return isUniquelyReferencedOrPinned()
   }
 
   /// If this buffer is backed by a `_ContiguousArrayBuffer`
   /// containing the same number of elements as `self`, return it.
   /// Otherwise, return `nil`.
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal func requestNativeBuffer() -> _ContiguousArrayBuffer<Element>? {
     _invariantCheck()
@@ -207,6 +248,7 @@ internal struct _SliceBuffer<Element>
     return nil
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   @discardableResult
   internal func _copyContents(
@@ -223,11 +265,13 @@ internal struct _SliceBuffer<Element>
   }
 
   /// True, if the array is native and does not need a deferred type check.
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var arrayPropertyIsNativeTypeChecked: Bool {
     return _hasNativeBuffer
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var count: Int {
     get {
@@ -245,12 +289,14 @@ internal struct _SliceBuffer<Element>
 
   /// Traps unless the given `index` is valid for subscripting, i.e.
   /// `startIndex ≤ index < endIndex`
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal func _checkValidSubscript(_ index : Int) {
     _precondition(
       index >= startIndex && index < endIndex, "Index out of bounds")
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var capacity: Int {
     let count = self.count
@@ -265,16 +311,19 @@ internal struct _SliceBuffer<Element>
     return count
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal mutating func isUniquelyReferenced() -> Bool {
     return isKnownUniquelyReferenced(&owner)
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal mutating func isUniquelyReferencedOrPinned() -> Bool {
     return _isKnownUniquelyReferencedOrPinned(&owner)
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal func getElement(_ i: Int) -> Element {
     _sanityCheck(i >= startIndex, "slice index is out of range (before startIndex)")
@@ -286,6 +335,8 @@ internal struct _SliceBuffer<Element>
   ///
   /// - Precondition: `position` is a valid position in `self` and
   ///   `position != endIndex`.
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
   internal subscript(position: Int) -> Element {
     get {
       return getElement(position)
@@ -297,6 +348,7 @@ internal struct _SliceBuffer<Element>
     }
   }
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal subscript(bounds: Range<Int>) -> _SliceBuffer {
     get {
@@ -326,6 +378,7 @@ internal struct _SliceBuffer<Element>
   ///
   /// `endIndex` is always reachable from `startIndex` by zero or more
   /// applications of `index(after:)`.
+  @_inlineable // FIXME(sil-serialize-all)
   @_versioned
   internal var endIndex: Int {
     get {
@@ -365,6 +418,8 @@ internal struct _SliceBuffer<Element>
 }
 
 extension _SliceBuffer {
+  @_inlineable // FIXME(sil-serialize-all)
+  @_versioned // FIXME(sil-serialize-all)
   internal func _copyToContiguousArray() -> ContiguousArray<Element> {
     if _hasNativeBuffer {
       let n = nativeBuffer

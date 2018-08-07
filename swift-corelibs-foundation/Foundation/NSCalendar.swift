@@ -386,25 +386,25 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     open func minimumRange(of unit: Unit) -> NSRange {
         let r = CFCalendarGetMinimumRangeOfUnit(self._cfObject, unit._cfValue)
         if (r.location == kCFNotFound) {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func maximumRange(of unit: Unit) -> NSRange {
         let r = CFCalendarGetMaximumRangeOfUnit(_cfObject, unit._cfValue)
         if r.location == kCFNotFound {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func range(of smaller: Unit, in larger: Unit, for date: Date) -> NSRange {
         let r = CFCalendarGetRangeOfUnit(_cfObject, smaller._cfValue, larger._cfValue, date.timeIntervalSinceReferenceDate)
         if r.location == kCFNotFound {
-            return NSMakeRange(NSNotFound, NSNotFound)
+            return NSRange(location: NSNotFound, length: NSNotFound)
         }
-        return NSMakeRange(r.location, r.length)
+        return NSRange(location: r.location, length: r.length)
     }
     
     open func ordinality(of smaller: Unit, in larger: Unit, for date: Date) -> Int {
@@ -449,7 +449,7 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     private func _convert(_ comps: DateComponents) -> (Array<Int32>, Array<Int8>) {
         var vector = [Int32]()
         var compDesc = [Int8]()
-        _convert(comps.era, type: "E", vector: &vector, compDesc: &compDesc)
+        _convert(comps.era, type: "G", vector: &vector, compDesc: &compDesc)
         _convert(comps.year, type: "y", vector: &vector, compDesc: &compDesc)
         _convert(comps.quarter, type: "Q", vector: &vector, compDesc: &compDesc)
         if comps.weekOfYear != NSDateComponentUndefined {
@@ -520,7 +520,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
     
     private func _setComp(_ unitFlags: Unit, field: Unit, vector: [Int32], compIndex: inout Int, setter: (Int32) -> Void) {
         if unitFlags.contains(field) {
-            setter(vector[compIndex])
+            if vector[compIndex] != -1 {
+                setter(vector[compIndex])
+            }
             compIndex += 1
         }
     }
@@ -583,8 +585,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
         var at: CFAbsoluteTime = date.timeIntervalSinceReferenceDate
         
         let res: Bool = withUnsafeMutablePointer(to: &at) { t in
+            let count = Int32(vector.count)
             return vector.withUnsafeMutableBufferPointer { (vectorBuffer: inout UnsafeMutableBufferPointer<Int32>) in
-                return _CFCalendarAddComponentsV(_cfObject, t, CFOptionFlags(opts.rawValue), compDesc, vectorBuffer.baseAddress!, Int32(vector.count))
+                return _CFCalendarAddComponentsV(_cfObject, t, CFOptionFlags(opts.rawValue), compDesc, vectorBuffer.baseAddress!, count)
             }
         }
         
@@ -603,8 +606,9 @@ open class NSCalendar : NSObject, NSCopying, NSSecureCoding {
                 return intArrayBuffer.baseAddress!.advanced(by: idx)
             }
 
+            let count = Int32(vector.count)
             return vector.withUnsafeMutableBufferPointer { (vecBuffer: inout UnsafeMutableBufferPointer<UnsafeMutablePointer<Int32>>) in
-                return _CFCalendarGetComponentDifferenceV(_cfObject, startingDate.timeIntervalSinceReferenceDate, resultDate.timeIntervalSinceReferenceDate, CFOptionFlags(opts.rawValue), compDesc, vecBuffer.baseAddress!, Int32(vector.count))
+                return _CFCalendarGetComponentDifferenceV(_cfObject, startingDate.timeIntervalSinceReferenceDate, resultDate.timeIntervalSinceReferenceDate, CFOptionFlags(opts.rawValue), compDesc, vecBuffer.baseAddress!, count)
             }
         }
         if res {

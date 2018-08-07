@@ -374,6 +374,11 @@ void Preprocessor::RegisterBuiltinMacros() {
   Ident__has_include_next = RegisterBuiltinMacro(*this, "__has_include_next");
   Ident__has_warning      = RegisterBuiltinMacro(*this, "__has_warning");
   Ident__is_identifier    = RegisterBuiltinMacro(*this, "__is_identifier");
+  Ident__is_target_arch   = RegisterBuiltinMacro(*this, "__is_target_arch");
+  Ident__is_target_vendor = RegisterBuiltinMacro(*this, "__is_target_vendor");
+  Ident__is_target_os     = RegisterBuiltinMacro(*this, "__is_target_os");
+  Ident__is_target_environment =
+      RegisterBuiltinMacro(*this, "__is_target_environment");
 
   // Modules.
   Ident__building_module  = RegisterBuiltinMacro(*this, "__building_module");
@@ -412,7 +417,7 @@ static bool isTrivialSingleTokenExpansion(const MacroInfo *MI,
 
   // If this is a function-like macro invocation, it's safe to trivially expand
   // as long as the identifier is not a macro argument.
-  return std::find(MI->arg_begin(), MI->arg_end(), II) == MI->arg_end();
+  return std::find(MI->param_begin(), MI->param_end(), II) == MI->param_end();
 }
 
 /// isNextPPTokenLParen - Determine whether the next preprocessor token to be
@@ -492,7 +497,7 @@ bool Preprocessor::HandleMacroExpandedIdentifier(Token &Identifier,
     // Preprocessor directives used inside macro arguments are not portable, and
     // this enables the warning.
     InMacroArgs = true;
-    Args = ReadFunctionLikeMacroArgs(Identifier, MI, ExpansionEnd);
+    Args = ReadMacroCallArgumentList(Identifier, MI, ExpansionEnd);
 
     // Finished parsing args.
     InMacroArgs = false;
@@ -745,11 +750,11 @@ static bool GenerateNewArgTokens(Preprocessor &PP,
 /// token is the '(' of the macro, this method is invoked to read all of the
 /// actual arguments specified for the macro invocation.  This returns null on
 /// error.
-MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
+MacroArgs *Preprocessor::ReadMacroCallArgumentList(Token &MacroName,
                                                    MacroInfo *MI,
                                                    SourceLocation &MacroEnd) {
   // The number of fixed arguments to parse.
-  unsigned NumFixedArgsLeft = MI->getNumArgs();
+  unsigned NumFixedArgsLeft = MI->getNumParams();
   bool isVariadic = MI->isVariadic();
 
   // Outer loop, while there are more arguments, keep reading them.
@@ -889,7 +894,7 @@ MacroArgs *Preprocessor::ReadFunctionLikeMacroArgs(Token &MacroName,
 
   // Okay, we either found the r_paren.  Check to see if we parsed too few
   // arguments.
-  unsigned MinArgsExpected = MI->getNumArgs();
+  unsigned MinArgsExpected = MI->getNumParams();
 
   // If this is not a variadic macro, and too many args were specified, emit
   // an error.
@@ -1317,6 +1322,8 @@ static bool HasExtension(const Preprocessor &PP, StringRef Extension) {
            .Case("cxx_binary_literals", true)
            .Case("cxx_init_captures", LangOpts.CPlusPlus11)
            .Case("cxx_variable_templates", LangOpts.CPlusPlus)
+           // Miscellaneous language extensions
+           .Case("overloadable_unmarked", true)
            .Default(false);
 }
 
@@ -1456,7 +1463,7 @@ static bool EvaluateHasIncludeNext(Token &Tok,
   } else if (PP.isInPrimaryFile()) {
     Lookup = nullptr;
     PP.Diag(Tok, diag::pp_include_next_in_primary);
-  } else if (PP.getCurrentSubmodule()) {
+  } else if (PP.getCurrentLexerSubmodule()) {
     // Start looking up in the directory *after* the one in which the current
     // file would be found, if any.
     assert(PP.getCurrentLexer() && "#include_next directive in macro?");
@@ -1586,6 +1593,57 @@ static IdentifierInfo *ExpectFeatureIdentifierInfo(Token &Tok,
 
   PP.Diag(Tok.getLocation(), DiagID);
   return nullptr;
+}
+
+/// Implements the __is_target_arch builtin macro.
+static bool isTargetArch(const TargetInfo &TI, const IdentifierInfo *II) {
+  std::string ArchName = II->getName().lower() + "--";
+  llvm::Triple Arch(ArchName);
+  const llvm::Triple &TT = TI.getTriple();
+  if (TT.getArch() == llvm::Triple::thumb ||
+      TT.getArch() == llvm::Triple::thumbeb) {
+    // arm matches thumb or thumbv7. armv7 matches thumbv7.
+    if ((Arch.getSubArch() == llvm::Triple::NoSubArch ||
+         Arch.getSubArch() == TT.getSubArch()) &&
+        ((TT.getArch() == llvm::Triple::thumb &&
+          Arch.getArch() == llvm::Triple::arm) ||
+         (TT.getArch() == llvm::Triple::thumbeb &&
+          Arch.getArch() == llvm::Triple::armeb)))
+      return true;
+  }
+  // Check the parsed arch when it has no sub arch to allow Clang to
+  // match thumb to thumbv7 but to prohibit matching thumbv6 to thumbv7.
+  return (Arch.getSubArch() == llvm::Triple::NoSubArch ||
+          Arch.getSubArch() == TT.getSubArch()) &&
+         Arch.getArch() == TT.getArch();
+}
+
+/// Implements the __is_target_vendor builtin macro.
+static bool isTargetVendor(const TargetInfo &TI, const IdentifierInfo *II) {
+  StringRef VendorName = TI.getTriple().getVendorName();
+  if (VendorName.empty())
+    VendorName = "unknown";
+  return VendorName.equals_lower(II->getName());
+}
+
+/// Implements the __is_target_os builtin macro.
+static bool isTargetOS(const TargetInfo &TI, const IdentifierInfo *II) {
+  std::string OSName =
+      (llvm::Twine("unknown-unknown-") + II->getName().lower()).str();
+  llvm::Triple OS(OSName);
+  if (OS.getOS() == llvm::Triple::Darwin) {
+    // Darwin matches macos, ios, etc.
+    return TI.getTriple().isOSDarwin();
+  }
+  return TI.getTriple().getOS() == OS.getOS();
+}
+
+/// Implements the __is_target_environment builtin macro.
+static bool isTargetEnvironment(const TargetInfo &TI,
+                                const IdentifierInfo *II) {
+  std::string EnvName = (llvm::Twine("---") + II->getName().lower()).str();
+  llvm::Triple Env(EnvName);
+  return TI.getTriple().getEnvironment() == Env.getEnvironment();
 }
 
 /// ExpandBuiltinMacro - If an identifier token is read that is to be expanded
@@ -1750,6 +1808,10 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
                       .Case("__make_integer_seq", LangOpts.CPlusPlus)
                       .Case("__type_pack_element", LangOpts.CPlusPlus)
                       .Case("__builtin_available", true)
+                      .Case("__is_target_arch", true)
+                      .Case("__is_target_vendor", true)
+                      .Case("__is_target_os", true)
+                      .Case("__is_target_environment", true)
                       .Default(false);
         }
       });
@@ -1897,6 +1959,34 @@ void Preprocessor::ExpandBuiltinMacro(Token &Tok) {
       Diag(LParenLoc, diag::note_matching) << tok::l_paren;
     }
     return;
+  } else if (II == Ident__is_target_arch) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetArch(getTargetInfo(), II);
+        });
+  } else if (II == Ident__is_target_vendor) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetVendor(getTargetInfo(), II);
+        });
+  } else if (II == Ident__is_target_os) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetOS(getTargetInfo(), II);
+        });
+  } else if (II == Ident__is_target_environment) {
+    EvaluateFeatureLikeBuiltinMacro(
+        OS, Tok, II, *this, [this](Token &Tok, bool &HasLexedNextToken) -> int {
+          IdentifierInfo *II = ExpectFeatureIdentifierInfo(
+              Tok, *this, diag::err_feature_check_malformed);
+          return II && isTargetEnvironment(getTargetInfo(), II);
+        });
   } else {
     llvm_unreachable("Unknown identifier!");
   }

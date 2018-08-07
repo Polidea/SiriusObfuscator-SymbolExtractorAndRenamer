@@ -79,6 +79,7 @@ _swift_shims_UniChar _swift_stdlib_CFStringGetCharacterAtIndex(
     _swift_shims_CFStringRef _Nonnull theString, _swift_shims_CFIndex idx);
 
 SWIFT_RUNTIME_STDLIB_INTERFACE
+__attribute__((ns_returns_retained))
 _swift_shims_CFStringRef _Nonnull _swift_stdlib_CFStringCreateCopy(
     _swift_shims_CFAllocatorRef _Nullable alloc,
     _swift_shims_CFStringRef _Nonnull theString);

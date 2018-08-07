@@ -20,7 +20,8 @@
 #include "swift/AST/Identifier.h"
 #include "swift/Basic/LangOptions.h"
 #include "swift/Basic/SourceManager.h"
-#include "swift/Syntax/TokenSyntax.h"
+#include "swift/Syntax/SyntaxParsingContext.h"
+#include "swift/Syntax/RawTokenSyntax.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -33,6 +34,7 @@
 #include <limits>
 
 using namespace swift;
+using namespace swift::syntax;
 
 // clang::isIdentifierHead and clang::isIdentifierBody are deliberately not in
 // this list as a reminder that they are using C rules for identifiers.
@@ -241,7 +243,7 @@ Token Lexer::getTokenAt(SourceLoc Loc) {
 
   Lexer L(LangOpts, SourceMgr, BufferID, Diags, InSILMode,
           CommentRetentionMode::None, TriviaRetentionMode::WithoutTrivia);
-  L.restoreState(State(Loc, {}, {}));
+  L.restoreState(State(Loc));
   Token Result;
   L.lex(Result);
   return Result;
@@ -263,14 +265,26 @@ void Lexer::formToken(tok Kind, const char *TokStart, bool MultilineString) {
 
   StringRef TokenText { TokStart, static_cast<size_t>(CurPtr - TokStart) };
 
-  if (!MultilineString)
-    lexTrivia(TrailingTrivia, /* StopAtFirstNewline */ true);
+  lexTrivia(TrailingTrivia, /* StopAtFirstNewline */ true);
 
   NextToken.setToken(Kind, TokenText, CommentLength, MultilineString);
-  if (!MultilineString)
-    if (!TrailingTrivia.empty() &&
-        TrailingTrivia.front().Kind == syntax::TriviaKind::Backtick)
-      ++CurPtr;
+}
+
+void Lexer::formEscapedIdentifierToken(const char *TokStart) {
+  assert(CurPtr - TokStart >= 3 && "escaped identifier must be longer than or equal 3 bytes");
+  assert(TokStart[0] == '`' && "escaped identifier starts with backtick");
+  assert(CurPtr[-1] == '`' && "escaped identifier ends with backtick");
+  if (TriviaRetention == TriviaRetentionMode::WithTrivia) {
+    LeadingTrivia.push_back(TriviaPiece::backtick());
+    assert(TrailingTrivia.size() == 0 && "TrailingTrivia is empty here");
+    TrailingTrivia.push_back(TriviaPiece::backtick());
+  }
+  formToken(tok::identifier, TokStart);
+  // If this token is at ArtificialEOF, it's forced to be tok::eof. Don't mark
+  // this as escaped-identifier in this case.
+  if (NextToken.is(tok::eof))
+    return;
+  NextToken.setEscapedIdentifier(true);
 }
 
 Lexer::State Lexer::getStateForBeginningOfTokenLoc(SourceLoc Loc) const {
@@ -297,7 +311,7 @@ Lexer::State Lexer::getStateForBeginningOfTokenLoc(SourceLoc Loc) const {
     }
     break;
   }
-  return State(SourceLoc(llvm::SMLoc::getFromPointer(Ptr)), {}, {});
+  return State(SourceLoc(llvm::SMLoc::getFromPointer(Ptr)));
 }
 
 //===----------------------------------------------------------------------===//
@@ -325,7 +339,7 @@ void Lexer::skipUpToEndOfLine() {
         return;
       default:
         // If this is a "high" UTF-8 character, validate it.
-        if (*((signed char *)CurPtr) < 0) {
+        if (*reinterpret_cast<const signed char *>(CurPtr) < 0) {
           const char *CharStart = CurPtr;
           if (validateUTF8CharacterAndAdvance(CurPtr, BufferEnd) == ~0U)
             diagnose(CharStart, diag::lex_invalid_utf8);
@@ -737,23 +751,6 @@ static bool rangeContainsPlaceholderEnd(const char *CurPtr,
   return false;
 }
 
-RC<syntax::TokenSyntax> Lexer::fullLex() {
-  if (NextToken.isEscapedIdentifier()) {
-    LeadingTrivia.push_back(syntax::TriviaPiece::backtick());
-    TrailingTrivia.push_front(syntax::TriviaPiece::backtick());
-  }
-  auto Result = syntax::TokenSyntax::make(NextToken.getKind(),
-                                        OwnedString(NextToken.getText()).copy(),
-                                        syntax::SourcePresence::Present,
-                                        {LeadingTrivia}, {TrailingTrivia});
-  LeadingTrivia.clear();
-  TrailingTrivia.clear();
-  if (NextToken.isNot(tok::eof)) {
-    lexImpl();
-  }
-  return Result;
-}
-
 /// lexOperatorIdentifier - Match identifiers formed out of punctuation.
 void Lexer::lexOperatorIdentifier() {
   const char *TokStart = CurPtr-1;
@@ -926,26 +923,41 @@ void Lexer::lexDollarIdent() {
   }
 }
 
+enum class ExpectedDigitKind : unsigned { Binary, Octal, Decimal, Hex };
+
 void Lexer::lexHexNumber() {
   // We assume we're starting from the 'x' in a '0x...' floating-point literal.
   assert(*CurPtr == 'x' && "not a hex literal");
   const char *TokStart = CurPtr-1;
   assert(*TokStart == '0' && "not a hex literal");
 
-  // 0x[0-9a-fA-F][0-9a-fA-F_]*
-  ++CurPtr;
-  if (!isHexDigit(*CurPtr)) {
-    diagnose(CurPtr, diag::lex_expected_digit_in_int_literal);
+  auto expected_digit = [&]() {
     while (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd));
     return formToken(tok::unknown, TokStart);
-  }
-    
+  };
+
+  auto expected_hex_digit = [&](const char *loc) {
+    diagnose(loc, diag::lex_invalid_digit_in_int_literal, StringRef(loc, 1),
+             (unsigned)ExpectedDigitKind::Hex);
+    return expected_digit();
+  };
+
+  // 0x[0-9a-fA-F][0-9a-fA-F_]*
+  ++CurPtr;
+  if (!isHexDigit(*CurPtr))
+    return expected_hex_digit(CurPtr);
+
   while (isHexDigit(*CurPtr) || *CurPtr == '_')
     ++CurPtr;
-  
-  if (*CurPtr != '.' && *CurPtr != 'p' && *CurPtr != 'P')
-    return formToken(tok::integer_literal, TokStart);
-  
+
+  if (*CurPtr != '.' && *CurPtr != 'p' && *CurPtr != 'P') {
+    auto tmp = CurPtr;
+    if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
+      return expected_hex_digit(tmp);
+    else
+      return formToken(tok::integer_literal, TokStart);
+  }
+
   const char *PtrOnDot = nullptr;
 
   // (\.[0-9A-Fa-f][0-9A-Fa-f_]*)?
@@ -962,6 +974,7 @@ void Lexer::lexHexNumber() {
     
     while (isHexDigit(*CurPtr) || *CurPtr == '_')
       ++CurPtr;
+
     if (*CurPtr != 'p' && *CurPtr != 'P') {
       if (!isDigit(PtrOnDot[1])) {
         // e.g: 0xff.description
@@ -990,12 +1003,29 @@ void Lexer::lexHexNumber() {
       return formToken(tok::integer_literal, TokStart);
     }
     // Note: 0xff.fp+otherExpr can be valid expression. But we don't accept it.
-    diagnose(CurPtr, diag::lex_expected_digit_in_fp_exponent);
-    return formToken(tok::unknown, TokStart);
+
+    // There are 3 cases to diagnose if the exponent starts with a non-digit:
+    // identifier (invalid character), underscore (invalid first character),
+    // non-identifier (empty exponent)
+    auto tmp = CurPtr;
+    if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
+      diagnose(tmp, diag::lex_invalid_digit_in_fp_exponent, StringRef(tmp, 1),
+               *tmp == '_');
+    else
+      diagnose(CurPtr, diag::lex_expected_digit_in_fp_exponent);
+
+    return expected_digit();
   }
   
   while (isDigit(*CurPtr) || *CurPtr == '_')
     ++CurPtr;
+
+  auto tmp = CurPtr;
+  if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd)) {
+    diagnose(tmp, diag::lex_invalid_digit_in_fp_exponent, StringRef(tmp, 1),
+             false);
+    return expected_digit();
+  }
 
   return formToken(tok::floating_literal, TokStart);
 }
@@ -1013,11 +1043,16 @@ void Lexer::lexHexNumber() {
 void Lexer::lexNumber() {
   const char *TokStart = CurPtr-1;
   assert((isDigit(*TokStart) || *TokStart == '.') && "Unexpected start");
-  
-  auto expected_digit = [&](const char *loc, Diag<> msg) {
-    diagnose(loc, msg);
+
+  auto expected_digit = [&]() {
     while (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd));
     return formToken(tok::unknown, TokStart);
+  };
+
+  auto expected_int_digit = [&](const char *loc, ExpectedDigitKind kind) {
+    diagnose(loc, diag::lex_invalid_digit_in_int_literal, StringRef(loc, 1),
+             (unsigned)kind);
+    return expected_digit();
   };
 
   if (*TokStart == '0' && *CurPtr == 'x')
@@ -1027,10 +1062,15 @@ void Lexer::lexNumber() {
     // 0o[0-7][0-7_]*
     ++CurPtr;
     if (*CurPtr < '0' || *CurPtr > '7')
-      return expected_digit(CurPtr, diag::lex_expected_digit_in_int_literal);
-      
+      return expected_int_digit(CurPtr, ExpectedDigitKind::Octal);
+
     while ((*CurPtr >= '0' && *CurPtr <= '7') || *CurPtr == '_')
       ++CurPtr;
+
+    auto tmp = CurPtr;
+    if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
+      return expected_int_digit(tmp, ExpectedDigitKind::Octal);
+
     return formToken(tok::integer_literal, TokStart);
   }
   
@@ -1038,9 +1078,15 @@ void Lexer::lexNumber() {
     // 0b[01][01_]*
     ++CurPtr;
     if (*CurPtr != '0' && *CurPtr != '1')
-      return expected_digit(CurPtr, diag::lex_expected_digit_in_int_literal);
+      return expected_int_digit(CurPtr, ExpectedDigitKind::Binary);
+
     while (*CurPtr == '0' || *CurPtr == '1' || *CurPtr == '_')
       ++CurPtr;
+
+    auto tmp = CurPtr;
+    if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
+      return expected_int_digit(tmp, ExpectedDigitKind::Binary);
+
     return formToken(tok::integer_literal, TokStart);
   }
 
@@ -1059,9 +1105,9 @@ void Lexer::lexNumber() {
     // Floating literals must have '.', 'e', or 'E' after digits.  If it is
     // something else, then this is the end of the token.
     if (*CurPtr != 'e' && *CurPtr != 'E') {
-      char const *tmp = CurPtr;
+      auto tmp = CurPtr;
       if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
-        return expected_digit(tmp, diag::lex_expected_digit_in_int_literal);
+        return expected_int_digit(tmp, ExpectedDigitKind::Decimal);
 
       return formToken(tok::integer_literal, TokStart);
     }
@@ -1081,12 +1127,30 @@ void Lexer::lexNumber() {
     ++CurPtr;  // Eat the 'e'
     if (*CurPtr == '+' || *CurPtr == '-')
       ++CurPtr;  // Eat the sign.
-      
-    if (!isDigit(*CurPtr))
-      return expected_digit(CurPtr, diag::lex_expected_digit_in_fp_exponent);
-    
+
+    if (!isDigit(*CurPtr)) {
+      // There are 3 cases to diagnose if the exponent starts with a non-digit:
+      // identifier (invalid character), underscore (invalid first character),
+      // non-identifier (empty exponent)
+      auto tmp = CurPtr;
+      if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd))
+        diagnose(tmp, diag::lex_invalid_digit_in_fp_exponent, StringRef(tmp, 1),
+                 *tmp == '_');
+      else
+        diagnose(CurPtr, diag::lex_expected_digit_in_fp_exponent);
+
+      return expected_digit();
+    }
+
     while (isDigit(*CurPtr) || *CurPtr == '_')
       ++CurPtr;
+
+    auto tmp = CurPtr;
+    if (advanceIfValidContinuationOfIdentifier(CurPtr, BufferEnd)) {
+      diagnose(tmp, diag::lex_invalid_digit_in_fp_exponent, StringRef(tmp, 1),
+               false);
+      return expected_digit();
+    }
   }
   
   return formToken(tok::floating_literal, TokStart);
@@ -1749,8 +1813,7 @@ void Lexer::lexEscapedIdentifier() {
     // If we have the terminating "`", it's an escaped identifier.
     if (*CurPtr == '`') {
       ++CurPtr;
-      formToken(tok::identifier, Quote);
-      NextToken.setEscapedIdentifier(true);
+      formEscapedIdentifierToken(Quote);
       return;
     }
   }
@@ -1758,8 +1821,7 @@ void Lexer::lexEscapedIdentifier() {
   // Special case; allow '`$`'.
   if (Quote[1] == '$' && Quote[2] == '`') {
     CurPtr = Quote + 3;
-    formToken(tok::identifier, Quote);
-    NextToken.setEscapedIdentifier(true);
+    formEscapedIdentifierToken(Quote);
     return;
   }
 
@@ -2258,7 +2320,7 @@ Token Lexer::getTokenAtLocation(const SourceManager &SM, SourceLoc Loc) {
   // we need to lex just the comment token.
   Lexer L(FakeLangOpts, SM, BufferID, nullptr, /*InSILMode=*/ false,
           CommentRetentionMode::ReturnAsTokens);
-  L.restoreState(State(Loc, {}, {}));
+  L.restoreState(State(Loc));
   return L.peekNextToken();
 }
 
@@ -2296,23 +2358,12 @@ Optional<syntax::TriviaPiece> Lexer::lexWhitespace(bool StopAtFirstNewline) {
   switch (Last) {
     case '\n':
     case '\r':
-      return syntax::TriviaPiece {
-        syntax::TriviaKind::Newline,
-        Length,
-        OwnedString(Start, Length),
-      };
+      NextToken.setAtStartOfLine(true);
+      return syntax::TriviaPiece{syntax::TriviaKind::Newline, Length, {}};
     case ' ':
-      return syntax::TriviaPiece {
-        syntax::TriviaKind::Space,
-        Length,
-        OwnedString(Start, Length),
-      };
+      return syntax::TriviaPiece{syntax::TriviaKind::Space, Length, {}};
     case '\t':
-      return syntax::TriviaPiece {
-        syntax::TriviaKind::Tab,
-        Length,
-        OwnedString(Start, Length),
-      };
+      return syntax::TriviaPiece{syntax::TriviaKind::Tab, Length, {}};
     default:
       return None;
   }
@@ -2327,11 +2378,7 @@ Optional<syntax::TriviaPiece> Lexer::lexSingleLineComment(syntax::TriviaKind Kin
   if (Length == 0)
     return None;
 
-  return Optional<syntax::TriviaPiece>({
-    Kind,
-    Length,
-    OwnedString(Start, Length)
-  });
+  return Optional<syntax::TriviaPiece>({Kind, 1, OwnedString(Start, Length)});
 }
 
 Optional<syntax::TriviaPiece>
@@ -2342,11 +2389,7 @@ Lexer::lexBlockComment(syntax::TriviaKind Kind) {
   if (Length == 0)
     return None;
 
-  return Optional<syntax::TriviaPiece>({
-    Kind,
-    Length,
-    OwnedString(Start, Length)
-  });
+  return Optional<syntax::TriviaPiece>({Kind, 1, OwnedString(Start, Length)});
 }
 
 Optional<syntax::TriviaPiece> Lexer::lexComment() {
@@ -2393,10 +2436,18 @@ void Lexer::lexTrivia(syntax::TriviaList &Pieces,
   while (CurPtr != BufferEnd) {
     if (auto Whitespace = lexWhitespace(StopAtFirstNewline)) {
       Pieces.push_back(Whitespace.getValue());
+    } else if (isKeepingComments()) {
+      // Don't try to lex comments as trivias.
+      return;
+    } else if (StopAtFirstNewline && *CurPtr == '/') {
+      // Don't lex comments as trailing trivias (for now).
+      return;
     } else if (auto DocComment = lexDocComment()) {
       Pieces.push_back(DocComment.getValue());
+      SeenComment = true;
     } else if (auto Comment = lexComment()) {
       Pieces.push_back(Comment.getValue());
+      SeenComment = true;
     } else {
       return;
     }
@@ -2548,7 +2599,7 @@ SourceLoc Lexer::getLocForEndOfLine(SourceManager &SM, SourceLoc Loc) {
   // we need to lex just the comment token.
   Lexer L(FakeLangOpts, SM, BufferID, nullptr, /*InSILMode=*/ false,
           CommentRetentionMode::ReturnAsTokens);
-  L.restoreState(State(Loc, {}, {}));
+  L.restoreState(State(Loc));
   L.skipToEndOfLine();
   return getSourceLoc(L.CurPtr);
 }
@@ -2575,4 +2626,14 @@ StringRef Lexer::getIndentationForLine(SourceManager &SM, SourceLoc Loc) {
     ++EndOfIndentation;
 
   return StringRef(StartOfLine, EndOfIndentation - StartOfLine);
+}
+
+ArrayRef<Token> swift::
+slice_token_array(ArrayRef<Token> AllTokens, SourceLoc StartLoc,
+                  SourceLoc EndLoc) {
+  assert(StartLoc.isValid() && EndLoc.isValid());
+  auto StartIt = token_lower_bound(AllTokens, StartLoc);
+  auto EndIt = token_lower_bound(AllTokens, EndLoc);
+  assert(StartIt->getLoc() == StartLoc && EndIt->getLoc() == EndLoc);
+  return AllTokens.slice(StartIt - AllTokens.begin(), EndIt - StartIt + 1);
 }

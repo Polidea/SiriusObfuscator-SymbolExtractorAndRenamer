@@ -9,8 +9,8 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-// RUN: %target-build-swift %s -swift-version 3 -g -Onone -o %T/UnicodeDecoders
-// RUN: %target-run %T/UnicodeDecoders
+// RUN: %target-build-swift %s -swift-version 3 -g -Onone -o %t
+// RUN: %target-run %t
 // REQUIRES: executable_test
 
 // Benchmarking: use the following script with your swift-4-enabled swiftc.
@@ -158,13 +158,13 @@ extension Unicode.DefaultScalarView : BidirectionalCollection {
     
     switch parser.parseScalar(from: &more) {
     case .valid(let scalarContent):
-      let d: CodeUnits.IndexDistance = -numericCast(scalarContent.count)
+      let d: Int = -scalarContent.count
       return Index(
         codeUnitIndex: codeUnits.index(i.codeUnitIndex, offsetBy: d),
         scalar: Encoding.decode(scalarContent),
         stride: numericCast(scalarContent.count))
     case .error(let stride):
-      let d: CodeUnits.IndexDistance = -numericCast(stride)
+      let d: Int = -stride
       return Index(
         codeUnitIndex: codeUnits.index(i.codeUnitIndex, offsetBy: d) ,
         scalar: Unicode.Scalar(_unchecked: 0xfffd),

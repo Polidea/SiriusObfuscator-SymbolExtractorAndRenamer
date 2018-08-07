@@ -7,20 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if defined(_MSC_VER) && (_HAS_EXCEPTIONS == 0)
-// Workaround for MSVC standard library bug, which fails to include <thread>
-// when
-// exceptions are disabled.
-#include <eh.h>
-#endif
-
 #include "gtest/gtest.h"
 
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/Scalar.h"
-#include "lldb/Core/StreamString.h"
-#include "lldb/Host/Endian.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Endian.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/StreamString.h"
 
 using namespace lldb_private;
 
@@ -51,11 +44,11 @@ TEST(ScalarTest, GetBytes) {
   Scalar f_scalar;
   DataExtractor e_data(e, sizeof(e), endian::InlHostByteOrder(),
                        sizeof(void *));
-  Error e_error =
+  Status e_error =
       e_scalar.SetValueFromData(e_data, lldb::eEncodingUint, sizeof(e));
   DataExtractor f_data(f, sizeof(f), endian::InlHostByteOrder(),
                        sizeof(void *));
-  Error f_error =
+  Status f_error =
       f_scalar.SetValueFromData(f_data, lldb::eEncodingUint, sizeof(f));
   ASSERT_EQ(0, memcmp(&a, a_scalar.GetBytes(), sizeof(a)));
   ASSERT_EQ(0, memcmp(&b, b_scalar.GetBytes(), sizeof(b)));

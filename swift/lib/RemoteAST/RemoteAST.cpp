@@ -19,8 +19,10 @@
 #include "swift/Subsystems.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/GenericSignature.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/NameLookup.h"
+#include "swift/AST/SubstitutionMap.h"
 #include "swift/AST/Types.h"
 #include "swift/AST/TypeRepr.h"
 #include "swift/Basic/Mangler.h"
@@ -133,6 +135,14 @@ public:
 
   NominalTypeDecl *createNominalTypeDecl(const Demangle::NodePointer &node);
 
+  Type createNominalType(NominalTypeDecl *decl) {
+    // If the declaration is generic, fail.
+    if (decl->isGenericContext())
+      return Type();
+
+    return decl->getDeclaredType();
+  }
+
   Type createNominalType(NominalTypeDecl *decl, Type parent) {
     // If the declaration is generic, fail.
     if (decl->getGenericParams())
@@ -143,6 +153,36 @@ public:
       return Type();
 
     return NominalType::get(decl, parent, Ctx);
+  }
+
+  Type createBoundGenericType(NominalTypeDecl *decl, ArrayRef<Type> args) {
+    // If the declaration isn't generic, fail.
+    if (!decl->isGenericContext())
+      return Type();
+
+    // Build a SubstitutionMap.
+    auto *genericSig = decl->getGenericSignature();
+    auto genericParams = genericSig->getSubstitutableParams();
+    if (genericParams.size() != args.size())
+      return Type();
+
+    auto subMap = genericSig->getSubstitutionMap(
+        [&](SubstitutableType *t) -> Type {
+          for (unsigned i = 0, e = genericParams.size(); i < e; ++i) {
+            if (t->isEqual(genericParams[i]))
+              return args[i];
+          }
+          return Type();
+        },
+        // FIXME: Wrong module
+        LookUpConformanceInModule(decl->getParentModule()));
+
+    auto origType = decl->getDeclaredInterfaceType();
+
+    // FIXME: We're not checking that the type satisfies the generic
+    // requirements of the signature here.
+    auto substType = origType.subst(subMap);
+    return substType;
   }
 
   Type createBoundGenericType(NominalTypeDecl *decl, ArrayRef<Type> args,
@@ -159,7 +199,8 @@ public:
     TypeReprList genericArgReprs(args);
     GenericIdentTypeRepr genericRepr(SourceLoc(), decl->getName(),
                                      genericArgReprs.getList(), SourceRange());
-    genericRepr.setValue(decl);
+    // FIXME
+    genericRepr.setValue(decl, nullptr);
 
     Type genericType;
 
@@ -182,7 +223,8 @@ public:
           : GenericArgs(type->getGenericArgs()),
             Ident(SourceLoc(), type->getDecl()->getName(),
                   GenericArgs.getList(), SourceRange()) {
-          Ident.setValue(type->getDecl());
+          // FIXME
+          Ident.setValue(type->getDecl(), nullptr);
         }
 
         // SmallVector::emplace_back will never need to call this because
@@ -212,7 +254,8 @@ public:
           auto nominal = p->castTo<NominalType>();
           simpleComponents.emplace_back(SourceLoc(),
                                         nominal->getDecl()->getName());
-          simpleComponents.back().setValue(nominal->getDecl());
+          // FIXME
+          simpleComponents.back().setValue(nominal->getDecl(), nullptr);
           componentReprs.push_back(&simpleComponents.back());
         }
       }
@@ -257,11 +300,8 @@ public:
     return TupleType::get(elements, Ctx);
   }
 
-  Type createFunctionType(ArrayRef<Type> args,
-                          const std::vector<bool> &inOutArgs,
+  Type createFunctionType(ArrayRef<remote::FunctionParam<Type>> params,
                           Type output, FunctionTypeFlags flags) {
-    assert(args.size() == inOutArgs.size());
-
     FunctionTypeRepresentation representation;
     switch (flags.getConvention()) {
     case FunctionMetadataConvention::Swift:
@@ -284,25 +324,25 @@ public:
     // The result type must be materializable.
     if (!output->isMaterializable()) return Type();
 
-    // All the argument types must be materializable (before inout is applied).
-    for (auto arg : args) {
-      if (!arg->isMaterializable()) return Type();
+    llvm::SmallVector<AnyFunctionType::Param, 8> funcParams;
+    for (const auto &param : params) {
+      auto type = param.getType();
+
+      // All the argument types must be materializable.
+      if (!type->isMaterializable())
+        return Type();
+
+      auto label = Ctx.getIdentifier(param.getLabel());
+      auto flags = param.getFlags();
+      auto parameterFlags = ParameterTypeFlags()
+                                .withInOut(flags.isInOut())
+                                .withShared(flags.isShared())
+                                .withVariadic(flags.isVariadic());
+
+      funcParams.push_back(AnyFunctionType::Param(type, label, parameterFlags));
     }
 
-    Type input;
-    if (args.size() == 1) {
-      input = args[0];
-    } else {
-      SmallVector<TupleTypeElt, 4> elts;
-      elts.reserve(args.size());
-      for (auto i : indices(args)) {
-        Type arg = args[i];
-        if (inOutArgs[i]) arg = InOutType::get(arg);
-        elts.push_back(arg);
-      }
-    }
-
-    return FunctionType::get(input, output, einfo);
+    return FunctionType::get(funcParams, output, einfo);
   }
 
   Type createProtocolType(StringRef mangledName,

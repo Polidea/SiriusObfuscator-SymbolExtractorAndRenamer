@@ -11,6 +11,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "Cleanup.h"
+#include "ManagedValue.h"
+#include "RValue.h"
+#include "SILGenBuilder.h"
 #include "SILGenFunction.h"
 
 using namespace swift;
@@ -135,7 +138,7 @@ SILBasicBlock *CleanupManager::emitBlockForCleanups(JumpDest dest,
 
   // Otherwise, create and emit a new block.
   auto *newBlock = SGF.createBasicBlock();
-  SavedInsertionPoint IPRAII(SGF, newBlock);
+  SILGenSavedInsertionPoint IPRAII(SGF, newBlock);
   emitBranchAndCleanups(dest, branchLoc, args);
   return newBlock;
 }
@@ -281,4 +284,36 @@ void CleanupManager::checkIterator(CleanupHandle handle) const {
 #ifndef NDEBUG
   stack.checkIterator(handle);
 #endif
+}
+
+//===----------------------------------------------------------------------===//
+//                               Cleanup Cloner
+//===----------------------------------------------------------------------===//
+
+CleanupCloner::CleanupCloner(SILGenFunction &SGF, const ManagedValue &mv)
+    : SGF(SGF), hasCleanup(mv.hasCleanup()), isLValue(mv.isLValue()) {}
+
+CleanupCloner::CleanupCloner(SILGenBuilder &builder, const ManagedValue &mv)
+    : CleanupCloner(builder.getSILGenFunction(), mv) {}
+
+CleanupCloner::CleanupCloner(SILGenFunction &SGF, const RValue &rv)
+    : SGF(SGF), hasCleanup(rv.isPlusOne(SGF)), isLValue(false) {}
+
+CleanupCloner::CleanupCloner(SILGenBuilder &builder, const RValue &rv)
+    : CleanupCloner(builder.getSILGenFunction(), rv) {}
+
+ManagedValue CleanupCloner::clone(SILValue value) const {
+  if (isLValue) {
+    return ManagedValue::forLValue(value);
+  }
+
+  if (!hasCleanup) {
+    return ManagedValue::forUnmanaged(value);
+  }
+
+  if (value->getType().isAddress()) {
+    return SGF.emitManagedBufferWithCleanup(value);
+  }
+
+  return SGF.emitManagedRValueWithCleanup(value);
 }

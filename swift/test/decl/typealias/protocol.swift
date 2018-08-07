@@ -3,7 +3,7 @@
 // Tests for typealias inside protocols
 
 protocol Bad {
-  associatedtype X<T>  // expected-error {{associated types may not have a generic parameter list}}
+  associatedtype X<T>  // expected-error {{associated types must not have a generic parameter list}}
   typealias Y<T>       // expected-error {{expected '=' in type alias declaration}}
 }
 
@@ -122,7 +122,8 @@ extension MySeq {
   }
 }
 
-// Specific diagnosis for trying to use complex typealiases in generic constraints
+// Typealiases whose underlying type is a structural type written in terms of
+// associated types
 protocol P1 {
     associatedtype A
     typealias F = (A) -> ()
@@ -186,7 +187,7 @@ struct T5 : P5 {
   var v9 = P6.B.self // expected-error {{type alias 'B' can only be used with a concrete type or generic parameter base}}
 }
 
-// Unqualified lookup finds typealiases in protocol extensions, though
+// Unqualified lookup finds typealiases in protocol extensions
 protocol P7 {
   associatedtype A
   typealias Z = A
@@ -217,3 +218,75 @@ protocol P8 {
 }
 
 func testP8<T: P8>(_: T) where T.A == Int { } // expected-error{{'A' has been renamed to 'B'}}{{34-35=B}}
+
+// Associated type resolution via lookup should find typealiases in protocol extensions
+protocol Edible {
+  associatedtype Snack
+}
+
+protocol CandyWrapper {
+  associatedtype Wrapped
+}
+
+extension CandyWrapper where Wrapped : Edible {
+  typealias Snack = Wrapped.Snack
+}
+
+struct Candy {}
+
+struct CandyBar : CandyWrapper {
+  typealias Wrapped = CandyEdible
+}
+
+struct CandyEdible : Edible {
+  typealias Snack = Candy
+}
+
+// Edible.Snack is witnessed by 'typealias Snack' inside the
+// constrained extension of CandyWrapper above
+extension CandyBar : Edible {}
+
+protocol P9 {
+  typealias A = Int
+}
+
+func testT9a<T: P9, U>(_: T, _: U) where T.A == U { }
+func testT9b<T: P9>(_: T) where T.A == Float { } // expected-error{{'T.A' cannot be equal to both 'Float' and 'P9.A' (aka 'Int')}}
+
+
+struct X<T> { }
+
+protocol P10 {
+  associatedtype A
+  typealias T = Int
+
+  @available(*, deprecated, message: "just use Int, silly")
+  typealias V = Int
+}
+
+extension P10 {
+  typealias U = Float
+}
+
+extension P10 where T == Int { } // expected-warning{{neither type in same-type constraint ('P10.T' (aka 'Int') or 'Int') refers to a generic parameter or associated type}}
+
+extension P10 where A == X<T> { }
+
+extension P10 where A == X<U> { } // expected-error{{use of undeclared type 'U'}}
+
+extension P10 where A == X<Self.U> { }
+
+extension P10 where V == Int { } // expected-warning 3{{'V' is deprecated: just use Int, silly}}
+// expected-warning@-1{{neither type in same-type constraint ('P10.V' (aka 'Int') or 'Int') refers to a generic parameter or associated type}}
+
+// rdar://problem/36003312
+protocol P11 {
+  typealias A = Y11
+}
+
+struct X11<T: P11> { }
+struct Y11: P11 { }
+
+extension P11 {
+  func foo(_: X11<Self.A>) { }
+}

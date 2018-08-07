@@ -21,6 +21,18 @@
 #ifndef __BSD_TEST_H__
 #define __BSD_TEST_H__
 
+
+#if !HAVE_PRINTFLIKE
+#ifndef __printflike
+#if __has_attribute(format)
+#define __printflike(a,b) __attribute__((format(printf, a, b)))
+#else
+#define __printflike(a,b)
+#endif // __has_attribute(format)
+#endif // !defined(__printflike)
+#endif // !HAVE_PRINTFLIKE
+
+
 #include <errno.h>
 #ifdef __APPLE__
 #include <mach/error.h>
@@ -29,7 +41,9 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
+#include <unistd.h>
 #include <string.h>
+#include <stdint.h>
 
 static inline const char*
 __BASENAME__(const char *_str_)
@@ -139,7 +153,7 @@ void _test_errno(const char* file, long line, const char* desc, int actual, int 
 #define test_errno(a,b,c) _test_errno(__SOURCE_FILE__, __LINE__, a, b, c)
 void test_errno_format(int actual, int expected, const char *format, ...) __printflike(3,4);
 
-#ifndef __linux__
+#if defined(__APPLE__)
 void _test_mach_error(const char* file, long line, const char* desc, mach_error_t actual, mach_error_t expected);
 #define test_mach_error(a,b,c) _test_mach_error(__SOURCE_FILE__, __LINE__, a, b, c)
 void test_mach_error_format(mach_error_t actual, mach_error_t expected, const char *format, ...) __printflike(3,4);

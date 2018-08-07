@@ -67,7 +67,7 @@ std::unique_ptr<Job>
 ToolChain::constructJob(const JobAction &JA,
                         Compilation &C,
                         SmallVectorImpl<const Job *> &&inputs,
-                        const ActionList &inputActions,
+                        ArrayRef<const Action *> inputActions,
                         std::unique_ptr<CommandOutput> output,
                         const OutputInfo &OI) const {
   JobContext context{C, inputs, inputActions, *output, OI};
@@ -148,4 +148,12 @@ ToolChain::findProgramRelativeToSwiftImpl(StringRef executableName) const {
 
 types::ID ToolChain::lookupTypeForExtension(StringRef Ext) const {
   return types::lookupTypeForExtension(Ext);
+}
+
+bool
+ToolChain::sanitizerRuntimeLibExists(const ArgList &args,
+                                     StringRef sanitizerName) const {
+  // Assume no sanitizers are supported by default.
+  // This method should be overriden by a platform-specific subclass.
+  return false;
 }

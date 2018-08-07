@@ -23,10 +23,11 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "sil-ownership-model-eliminator"
-#include "swift/SILOptimizer/PassManager/Transforms.h"
+#include "swift/SIL/Projection.h"
 #include "swift/SIL/SILBuilder.h"
 #include "swift/SIL/SILFunction.h"
 #include "swift/SIL/SILVisitor.h"
+#include "swift/SILOptimizer/PassManager/Transforms.h"
 
 using namespace swift;
 
@@ -42,17 +43,16 @@ struct OwnershipModelEliminatorVisitor
   SILOpenedArchetypesTracker OpenedArchetypesTracker;
 
   OwnershipModelEliminatorVisitor(SILBuilder &B)
-      : B(B), OpenedArchetypesTracker(B.getFunction()) {
+      : B(B), OpenedArchetypesTracker(&B.getFunction()) {
     B.setOpenedArchetypesTracker(&OpenedArchetypesTracker);
   }
 
-  void beforeVisit(ValueBase *V) {
-    auto *I = cast<SILInstruction>(V);
+  void beforeVisit(SILInstruction *I) {
     B.setInsertionPoint(I);
     B.setCurrentDebugScope(I->getDebugScope());
   }
 
-  bool visitValueBase(ValueBase *V) { return false; }
+  bool visitSILInstruction(SILInstruction *I) { return false; }
   bool visitLoadInst(LoadInst *LI);
   bool visitStoreInst(StoreInst *SI);
   bool visitStoreBorrowInst(StoreBorrowInst *SI);
@@ -84,6 +84,8 @@ struct OwnershipModelEliminatorVisitor
   bool visitUnmanagedAutoreleaseValueInst(UnmanagedAutoreleaseValueInst *UAVI);
   bool visitCheckedCastBranchInst(CheckedCastBranchInst *CBI);
   bool visitSwitchEnumInst(SwitchEnumInst *SWI);
+  bool visitDestructureStructInst(DestructureStructInst *DSI);
+  bool visitDestructureTupleInst(DestructureTupleInst *DTI);
 };
 
 } // end anonymous namespace
@@ -176,7 +178,6 @@ bool OwnershipModelEliminatorVisitor::visitUnmanagedRetainValueInst(
   // Now that we have set the unqualified ownership flag, destroy value
   // operation will delegate to the appropriate strong_release, etc.
   B.emitCopyValueOperation(URVI->getLoc(), URVI->getOperand());
-  URVI->replaceAllUsesWith(URVI->getOperand());
   URVI->eraseFromParent();
   return true;
 }
@@ -251,6 +252,42 @@ bool OwnershipModelEliminatorVisitor::visitSwitchEnumInst(
   return true;
 }
 
+static void splitDestructure(SILBuilder &B, SILInstruction *I, SILValue Op) {
+  assert((isa<DestructureStructInst>(I) || isa<DestructureTupleInst>(I)) &&
+         "Only destructure operations can be passed to splitDestructure");
+
+  SILModule &M = I->getModule();
+  SILLocation Loc = I->getLoc();
+  SILType OpType = Op->getType();
+
+  llvm::SmallVector<Projection, 8> Projections;
+  Projection::getFirstLevelProjections(OpType, M, Projections);
+  assert(Projections.size() == I->getNumResults());
+
+  llvm::SmallVector<SILValue, 8> NewValues;
+  for (unsigned i : indices(Projections)) {
+    const auto &Proj = Projections[i];
+    NewValues.push_back(Proj.createObjectProjection(B, Loc, Op).get());
+    assert(NewValues.back()->getType() == I->getResults()[i]->getType() &&
+           "Expected created projections and results to be the same types");
+  }
+
+  I->replaceAllUsesPairwiseWith(NewValues);
+  I->eraseFromParent();
+}
+
+bool OwnershipModelEliminatorVisitor::visitDestructureStructInst(
+    DestructureStructInst *DSI) {
+  splitDestructure(B, DSI, DSI->getOperand());
+  return true;
+}
+
+bool OwnershipModelEliminatorVisitor::visitDestructureTupleInst(
+    DestructureTupleInst *DTI) {
+  splitDestructure(B, DTI, DTI->getOperand());
+  return true;
+}
+
 //===----------------------------------------------------------------------===//
 //                           Top Level Entry Point
 //===----------------------------------------------------------------------===//
@@ -268,6 +305,11 @@ struct OwnershipModelEliminator : SILModuleTransform {
       OwnershipModelEliminatorVisitor Visitor(B);
 
       for (auto &BB : F) {
+        // Change all arguments to have ValueOwnershipKind::Any.
+        for (auto *Arg : BB.getArguments()) {
+          Arg->setOwnershipKind(ValueOwnershipKind::Any);
+        }
+
         for (auto II = BB.begin(), IE = BB.end(); II != IE;) {
           // Since we are going to be potentially removing instructions, we need
           // to make sure to increment our iterator before we perform any

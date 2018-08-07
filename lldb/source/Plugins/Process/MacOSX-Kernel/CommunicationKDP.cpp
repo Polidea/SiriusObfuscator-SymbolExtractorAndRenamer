@@ -17,14 +17,15 @@
 // C++ Includes
 
 // Other libraries and framework includes
-#include "lldb/Core/DataBufferHeap.h"
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Log.h"
+#include "lldb/Core/DumpDataExtractor.h"
 #include "lldb/Core/State.h"
-#include "lldb/Core/UUID.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/UUID.h"
 
 // Project includes
 #include "ProcessKDPLog.h"
@@ -198,10 +199,9 @@ CommunicationKDP::WaitForPacketWithTimeoutMicroSeconds(DataExtractor &packet,
 size_t CommunicationKDP::WaitForPacketWithTimeoutMicroSecondsNoLock(
     DataExtractor &packet, uint32_t timeout_usec) {
   uint8_t buffer[8192];
-  Error error;
+  Status error;
 
-  Log *log(ProcessKDPLog::GetLogIfAllCategoriesSet(KDP_LOG_PACKETS |
-                                                   KDP_LOG_VERBOSE));
+  Log *log(ProcessKDPLog::GetLogIfAllCategoriesSet(KDP_LOG_PACKETS));
 
   // Check for a packet from our cache first without trying any reading...
   if (CheckForPacket(NULL, 0, packet))
@@ -216,12 +216,12 @@ size_t CommunicationKDP::WaitForPacketWithTimeoutMicroSecondsNoLock(
                                  : std::chrono::microseconds(timeout_usec),
                              status, &error);
 
-    if (log)
-      log->Printf("%s: Read (buffer, (sizeof(buffer), timeout_usec = 0x%x, "
-                  "status = %s, error = %s) => bytes_read = %" PRIu64,
-                  LLVM_PRETTY_FUNCTION, timeout_usec,
+    LLDB_LOGV(log, 
+      "Read (buffer, sizeof(buffer), timeout_usec = 0x{0:x}, "
+                  "status = {1}, error = {2}) => bytes_read = {4}",
+                  timeout_usec,
                   Communication::ConnectionStatusAsCString(status),
-                  error.AsCString(), (uint64_t)bytes_read);
+                  error, bytes_read);
 
     if (bytes_read > 0) {
       if (CheckForPacket(buffer, bytes_read, packet))
@@ -260,8 +260,7 @@ bool CommunicationKDP::CheckForPacket(const uint8_t *src, size_t src_len,
   if (src && src_len > 0) {
     if (log && log->GetVerbose()) {
       PacketStreamType log_strm;
-      DataExtractor::DumpHexBytes(&log_strm, src, src_len, UINT32_MAX,
-                                  LLDB_INVALID_ADDRESS);
+      DumpHexBytes(&log_strm, src, src_len, UINT32_MAX, LLDB_INVALID_ADDRESS);
       log->Printf("CommunicationKDP::%s adding %u bytes: %s", __FUNCTION__,
                   (uint32_t)src_len, log_strm.GetData());
     }
@@ -603,7 +602,7 @@ bool CommunicationKDP::SendRequestDisconnect() {
 
 uint32_t CommunicationKDP::SendRequestReadMemory(lldb::addr_t addr, void *dst,
                                                  uint32_t dst_len,
-                                                 Error &error) {
+                                                 Status &error) {
   PacketStreamType request_packet(Stream::eBinary, m_addr_byte_size,
                                   m_byte_order);
   bool use_64 = (GetVersion() >= 11);
@@ -642,7 +641,7 @@ uint32_t CommunicationKDP::SendRequestReadMemory(lldb::addr_t addr, void *dst,
 uint32_t CommunicationKDP::SendRequestWriteMemory(lldb::addr_t addr,
                                                   const void *src,
                                                   uint32_t src_len,
-                                                  Error &error) {
+                                                  Status &error) {
   PacketStreamType request_packet(Stream::eBinary, m_addr_byte_size,
                                   m_byte_order);
   bool use_64 = (GetVersion() >= 11);
@@ -676,7 +675,7 @@ bool CommunicationKDP::SendRawRequest(
     uint8_t command_byte,
     const void *src,  // Raw packet payload bytes
     uint32_t src_len, // Raw packet payload length
-    DataExtractor &reply_packet, Error &error) {
+    DataExtractor &reply_packet, Status &error) {
   PacketStreamType request_packet(Stream::eBinary, m_addr_byte_size,
                                   m_byte_order);
   // Size is header + address size + uint32_t length
@@ -860,15 +859,17 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           const uint32_t count = packet.GetByteSize() - offset;
           s.Printf(" (error = 0x%8.8x:\n", error);
           if (count > 0)
-            packet.Dump(&s,                      // Stream to dump to
-                        offset,                  // Offset within "packet"
-                        eFormatBytesWithASCII,   // Format to use
-                        1,                       // Size of each item in bytes
-                        count,                   // Number of items
-                        16,                      // Number per line
-                        m_last_read_memory_addr, // Don't show addresses before
-                                                 // each line
-                        0, 0);                   // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                      // Stream to dump to
+                              offset,                  // Offset within "packet"
+                              eFormatBytesWithASCII,   // Format to use
+                              1,                       // Size of each item 
+                                                       // in bytes
+                              count,                   // Number of items
+                              16,                      // Number per line
+                              m_last_read_memory_addr, // Don't show addresses
+                                                       // before each line
+                              0, 0);                   // No bitfields
         } break;
 
         case KDP_READREGS: {
@@ -876,15 +877,19 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           const uint32_t count = packet.GetByteSize() - offset;
           s.Printf(" (error = 0x%8.8x regs:\n", error);
           if (count > 0)
-            packet.Dump(
-                &s,                       // Stream to dump to
-                offset,                   // Offset within "packet"
-                eFormatHex,               // Format to use
-                m_addr_byte_size,         // Size of each item in bytes
-                count / m_addr_byte_size, // Number of items
-                16 / m_addr_byte_size,    // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                       // Stream to dump to
+                              offset,                   // Offset within "packet"
+                              eFormatHex,               // Format to use
+                              m_addr_byte_size,         // Size of each item 
+                                                        // in bytes
+                              count / m_addr_byte_size, // Number of items
+                              16 / m_addr_byte_size,    // Number per line
+                              LLDB_INVALID_ADDRESS, 
+                                                        // Don't 
+                                                        // show addresses before
+                                                        // each line
+                              0, 0);                    // No bitfields
         } break;
 
         case KDP_KERNELVERSION: {
@@ -907,29 +912,32 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           const uint32_t count = packet.GetByteSize() - offset;
           s.Printf(" (error = 0x%8.8x io:\n", error);
           if (count > 0)
-            packet.Dump(
-                &s,                   // Stream to dump to
-                offset,               // Offset within "packet"
-                eFormatHex,           // Format to use
-                1,                    // Size of each item in bytes
-                count,                // Number of items
-                16,                   // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                   // Stream to dump to
+                              offset,               // Offset within "packet"
+                              eFormatHex,           // Format to use
+                              1,                    // Size of each item in bytes
+                              count,                // Number of items
+                              16,                   // Number per line
+                              LLDB_INVALID_ADDRESS, // Don't show addresses 
+                                                    // before each line
+                              0, 0);                // No bitfields
         } break;
         case KDP_DUMPINFO: {
           const uint32_t count = packet.GetByteSize() - offset;
           s.Printf(" (count = %u, bytes = \n", count);
           if (count > 0)
-            packet.Dump(
-                &s,                   // Stream to dump to
-                offset,               // Offset within "packet"
-                eFormatHex,           // Format to use
-                1,                    // Size of each item in bytes
-                count,                // Number of items
-                16,                   // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                   // Stream to dump to
+                              offset,               // Offset within "packet"
+                              eFormatHex,           // Format to use
+                              1,                    // Size of each item in 
+                                                    // bytes
+                              count,                // Number of items
+                              16,                   // Number per line
+                              LLDB_INVALID_ADDRESS, // Don't show addresses 
+                                                    // before each line
+                              0, 0);                // No bitfields
 
         } break;
 
@@ -977,8 +985,7 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           const uint32_t size = packet.GetU32(&offset);
           s.Printf(" (addr = 0x%8.8x, size = %u, bytes = \n", addr, size);
           if (size > 0)
-            DataExtractor::DumpHexBytes(&s, packet.GetData(&offset, size), size,
-                                        32, addr);
+            DumpHexBytes(&s, packet.GetData(&offset, size), size, 32, addr);
         } break;
 
         case KDP_READMEM64: {
@@ -1003,8 +1010,7 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           s.Printf(" (addr = 0x%16.16" PRIx64 ", size = %u, bytes = \n", addr,
                    size);
           if (size > 0)
-            DataExtractor::DumpHexBytes(&s, packet.GetData(&offset, size), size,
-                                        32, addr);
+            DumpHexBytes(&s, packet.GetData(&offset, size), size, 32, addr);
         } break;
 
         case KDP_WRITEPHYSMEM64: {
@@ -1014,8 +1020,7 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           s.Printf(" (addr = 0x%16.16llx, size = %u, lcpu = %u, bytes = \n",
                    addr, size, lcpu);
           if (size > 0)
-            DataExtractor::DumpHexBytes(&s, packet.GetData(&offset, size), size,
-                                        32, addr);
+            DumpHexBytes(&s, packet.GetData(&offset, size), size, 32, addr);
         } break;
 
         case KDP_READREGS: {
@@ -1030,15 +1035,18 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           const uint32_t nbytes = packet.GetByteSize() - offset;
           s.Printf(" (cpu = %u, flavor = %u, regs = \n", cpu, flavor);
           if (nbytes > 0)
-            packet.Dump(
-                &s,                        // Stream to dump to
-                offset,                    // Offset within "packet"
-                eFormatHex,                // Format to use
-                m_addr_byte_size,          // Size of each item in bytes
-                nbytes / m_addr_byte_size, // Number of items
-                16 / m_addr_byte_size,     // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                        // Stream to dump to
+                              offset,                    // Offset within 
+                                                         // "packet"
+                              eFormatHex,                // Format to use
+                              m_addr_byte_size,          // Size of each item in 
+                                                         // bytes
+                              nbytes / m_addr_byte_size, // Number of items
+                              16 / m_addr_byte_size,     // Number per line
+                              LLDB_INVALID_ADDRESS,      // Don't show addresses
+                                                         // before each line
+                              0, 0);                // No bitfields
         } break;
 
         case KDP_BREAKPOINT_SET:
@@ -1133,15 +1141,17 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           s.Printf(" (address=0x%8.8x, lcpu=0x%4.4x, nbytes=0x%8.8x)", lcpu,
                    address, nbytes);
           if (nbytes > 0)
-            packet.Dump(
-                &s,                   // Stream to dump to
-                offset,               // Offset within "packet"
-                eFormatHex,           // Format to use
-                1,                    // Size of each item in bytes
-                nbytes,               // Number of items
-                16,                   // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                   // Stream to dump to
+                              offset,               // Offset within "packet"
+                              eFormatHex,           // Format to use
+                              1,                    // Size of each item in 
+                                                    // bytes
+                              nbytes,               // Number of items
+                              16,                   // Number per line
+                              LLDB_INVALID_ADDRESS, // Don't show addresses 
+                                                    // before each line
+                              0, 0);                // No bitfields
         } break;
 
         case KDP_READIOPORT: {
@@ -1159,22 +1169,24 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
           s.Printf(" (lcpu = %u, addr = 0x%4.4x, nbytes = %u, bytes = \n", lcpu,
                    address, nbytes);
           if (nbytes > 0)
-            packet.Dump(
-                &s,                   // Stream to dump to
-                offset,               // Offset within "packet"
-                eFormatHex,           // Format to use
-                1,                    // Size of each item in bytes
-                nbytes,               // Number of items
-                16,                   // Number per line
-                LLDB_INVALID_ADDRESS, // Don't show addresses before each line
-                0, 0);                // No bitfields
+            DumpDataExtractor(packet, 
+                              &s,                   // Stream to dump to
+                              offset,               // Offset within "packet"
+                              eFormatHex,           // Format to use
+                              1,                    // Size of each item in 
+                                                    // bytes
+                              nbytes,               // Number of items
+                              16,                   // Number per line
+                              LLDB_INVALID_ADDRESS, // Don't show addresses 
+                                                    // before each line
+                              0, 0);                // No bitfields
         } break;
 
         case KDP_DUMPINFO: {
           const uint32_t count = packet.GetByteSize() - offset;
           s.Printf(" (count = %u, bytes = \n", count);
           if (count > 0)
-            packet.Dump(
+            DumpDataExtractor(packet, 
                 &s,                   // Stream to dump to
                 offset,               // Offset within "packet"
                 eFormatHex,           // Format to use
@@ -1195,21 +1207,24 @@ void CommunicationKDP::DumpPacket(Stream &s, const DataExtractor &packet) {
   if (error_desc) {
     s.PutCString(error_desc);
 
-    packet.Dump(&s,                   // Stream to dump to
-                0,                    // Offset into "packet"
-                eFormatBytes,         // Dump as hex bytes
-                1,                    // Size of each item is 1 for single bytes
-                packet.GetByteSize(), // Number of bytes
-                UINT32_MAX,           // Num bytes per line
-                LLDB_INVALID_ADDRESS, // Base address
-                0, 0); // Bitfield info set to not do anything bitfield related
+    DumpDataExtractor(packet,
+                      &s,                   // Stream to dump to
+                      0,                    // Offset into "packet"
+                      eFormatBytes,         // Dump as hex bytes
+                      1,                    // Size of each item is 1 for 
+                                            // single bytes
+                      packet.GetByteSize(), // Number of bytes
+                      UINT32_MAX,           // Num bytes per line
+                      LLDB_INVALID_ADDRESS, // Base address
+                      0, 0);                // Bitfield info set to not do  
+                                            // anything bitfield related
   }
 }
 
 uint32_t CommunicationKDP::SendRequestReadRegisters(uint32_t cpu,
                                                     uint32_t flavor, void *dst,
                                                     uint32_t dst_len,
-                                                    Error &error) {
+                                                    Status &error) {
   PacketStreamType request_packet(Stream::eBinary, m_addr_byte_size,
                                   m_byte_order);
   const CommandType command = KDP_READREGS;
@@ -1252,7 +1267,7 @@ uint32_t CommunicationKDP::SendRequestWriteRegisters(uint32_t cpu,
                                                      uint32_t flavor,
                                                      const void *src,
                                                      uint32_t src_len,
-                                                     Error &error) {
+                                                     Status &error) {
   PacketStreamType request_packet(Stream::eBinary, m_addr_byte_size,
                                   m_byte_order);
   const CommandType command = KDP_WRITEREGS;

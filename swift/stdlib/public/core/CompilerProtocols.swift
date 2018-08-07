@@ -148,6 +148,7 @@ public protocol RawRepresentable {
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@_inlineable // FIXME(sil-serialize-all)
 public func == <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
   where T.RawValue : Equatable {
   return lhs.rawValue == rhs.rawValue
@@ -158,6 +159,7 @@ public func == <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@_inlineable // FIXME(sil-serialize-all)
 public func != <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
   where T.RawValue : Equatable {
   return lhs.rawValue != rhs.rawValue
@@ -170,6 +172,7 @@ public func != <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@_inlineable // FIXME(sil-serialize-all)
 public func != <T : Equatable>(lhs: T, rhs: T) -> Bool
   where T : RawRepresentable, T.RawValue : Equatable {
   return lhs.rawValue != rhs.rawValue
@@ -363,15 +366,15 @@ public protocol _ExpressibleByBuiltinExtendedGraphemeClusterLiteral
 /// A type that can be initialized with a string literal containing a single
 /// extended grapheme cluster.
 ///
-/// An *extended grapheme cluster* is a group of one or more Unicode code
-/// points that approximates a single user-perceived character.  Many
+/// An *extended grapheme cluster* is a group of one or more Unicode scalar
+/// values that approximates a single user-perceived character.  Many
 /// individual characters, such as "é", "김", and "🇮🇳", can be made up of
-/// multiple Unicode code points. These code points are combined by Unicode's
-/// boundary algorithms into extended grapheme clusters.
+/// multiple Unicode scalar values. These code points are combined by
+/// Unicode's boundary algorithms into extended grapheme clusters.
 ///
 /// The `String`, `StaticString`, and `Character` types conform to the
-/// `ExpressibleByExtendedGraphemeClusterLiteral` protocol. You can initialize a
-/// variable or constant of any of these types using a string literal that
+/// `ExpressibleByExtendedGraphemeClusterLiteral` protocol. You can initialize
+/// a variable or constant of any of these types using a string literal that
 /// holds a single character.
 ///
 ///     let snowflake: Character = "❄︎"
@@ -402,6 +405,7 @@ public protocol ExpressibleByExtendedGraphemeClusterLiteral
 extension ExpressibleByExtendedGraphemeClusterLiteral
   where ExtendedGraphemeClusterLiteralType == UnicodeScalarLiteralType {
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_transparent
   public init(unicodeScalarLiteral value: ExtendedGraphemeClusterLiteralType) {
     self.init(extendedGraphemeClusterLiteral: value)
@@ -467,6 +471,7 @@ public protocol ExpressibleByStringLiteral
 extension ExpressibleByStringLiteral
   where StringLiteralType == ExtendedGraphemeClusterLiteralType {
 
+  @_inlineable // FIXME(sil-serialize-all)
   @_transparent
   public init(extendedGraphemeClusterLiteral value: StringLiteralType) {
     self.init(stringLiteral: value)
@@ -505,8 +510,8 @@ extension ExpressibleByStringLiteral
 ///   initialize a type that conforms to `ExpressibleByArrayLiteral` simply by
 ///   assigning an existing array.
 ///
-///         let anotherSet: Set = employeesArray
-///         // error: cannot convert value of type '[String]' to specified type 'Set'
+///       let anotherSet: Set = employeesArray
+///       // error: cannot convert value of type '[String]' to specified type 'Set'
 ///
 /// Type Inference of Array Literals
 /// ================================
@@ -726,6 +731,7 @@ public protocol _ExpressibleByColorLiteral {
 }
 
 extension _ExpressibleByColorLiteral {
+  @_inlineable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2, obsoleted: 4.0,
     message: "This initializer is only meant to be used by color literals")
   public init(
@@ -770,9 +776,6 @@ public protocol _ExpressibleByFileReferenceLiteral {
 /// then Array would no longer be a _DestructorSafeContainer.
 public protocol _DestructorSafeContainer {
 }
-
-@available(*, unavailable, renamed: "Bool")
-public typealias BooleanType = Bool
 
 // Deprecated by SE-0115.
 

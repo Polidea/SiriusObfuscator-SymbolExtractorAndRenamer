@@ -340,22 +340,31 @@ class ReleaseTracker {
   llvm::SmallSetVector<SILInstruction *, 4> TrackedUsers;
   llvm::SmallSetVector<SILInstruction *, 4> FinalReleases;
   std::function<bool(SILInstruction *)> AcceptableUserQuery;
+  std::function<bool(SILInstruction *)> TransitiveUserQuery;
 
 public:
-  ReleaseTracker(std::function<bool(SILInstruction *)> AcceptableUserQuery)
+  ReleaseTracker(std::function<bool(SILInstruction *)> AcceptableUserQuery,
+                 std::function<bool(SILInstruction *)> TransitiveUserQuery)
       : TrackedUsers(), FinalReleases(),
-        AcceptableUserQuery(AcceptableUserQuery) {}
+        AcceptableUserQuery(AcceptableUserQuery),
+        TransitiveUserQuery(TransitiveUserQuery) {}
 
   void trackLastRelease(SILInstruction *Inst) { FinalReleases.insert(Inst); }
 
   bool isUserAcceptable(SILInstruction *User) const {
     return AcceptableUserQuery(User);
   }
+  bool isUserTransitive(SILInstruction *User) const {
+    return TransitiveUserQuery(User);
+  }
+
+  bool isUser(SILInstruction *User) { return TrackedUsers.count(User); }
 
   void trackUser(SILInstruction *User) { TrackedUsers.insert(User); }
 
   using range = iterator_range<llvm::SmallSetVector<SILInstruction *, 4>::iterator>;
 
+  // An ordered list of users, with "casts" before their transitive uses.
   range getTrackedUsers() { return {TrackedUsers.begin(), TrackedUsers.end()}; }
 
   range getFinalReleases() {
@@ -376,12 +385,12 @@ bool isARCInertTrapBB(const SILBasicBlock *BB);
 /// Gets the (GuaranteedValue, Token) tuple from a call to "unsafeGuaranteed"
 /// if the tuple elements are identified by a single tuple_extract use.
 /// Otherwise, returns a (nullptr, nullptr) tuple.
-std::pair<SILInstruction *, SILInstruction *>
+std::pair<SingleValueInstruction *, SingleValueInstruction *>
 getSingleUnsafeGuaranteedValueResult(BuiltinInst *UnsafeGuaranteedInst);
 
 /// Get the single builtin "unsafeGuaranteedEnd" user of a builtin
 /// "unsafeGuaranteed"'s token.
-BuiltinInst *getUnsafeGuaranteedEndUser(SILInstruction *UnsafeGuaranteedToken);
+BuiltinInst *getUnsafeGuaranteedEndUser(SILValue UnsafeGuaranteedToken);
 
 /// Walk forwards from an unsafeGuaranteedEnd builtin instruction looking for a
 /// release on the reference returned by the matching unsafeGuaranteed builtin

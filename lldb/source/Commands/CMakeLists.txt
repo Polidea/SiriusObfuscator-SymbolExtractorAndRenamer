@@ -33,6 +33,7 @@ add_lldb_library(lldbCommands
   LINK_LIBS
     swiftAST
     swiftIDE
+    lldbBase
     lldbBreakpoint
     lldbCore
     lldbDataFormatters

@@ -17,12 +17,13 @@
 #ifndef SWIFT_IRGEN_GENDECL_H
 #define SWIFT_IRGEN_GENDECL_H
 
+#include "swift/Basic/OptimizationMode.h"
 #include "llvm/IR/CallingConv.h"
 #include "DebugTypeInfo.h"
 #include "IRGen.h"
 
 namespace llvm {
-  class AttributeSet;
+  class AttributeList;
   class Function;
   class FunctionType;
 }
@@ -30,14 +31,14 @@ namespace swift {
 namespace irgen {
   class IRGenModule;
   class LinkInfo;
+  class Signature;
 
   llvm::Function *createFunction(IRGenModule &IGM,
                                  LinkInfo &linkInfo,
-                                 llvm::FunctionType *fnType,
-                                 llvm::CallingConv::ID cc,
-                                 const llvm::AttributeSet &attrs,
-                                 llvm::Function *insertBefore = nullptr);
-
+                                 const Signature &signature,
+                                 llvm::Function *insertBefore = nullptr,
+                                 OptimizationMode FuncOptMode =
+                                   OptimizationMode::NotSet);
 
   llvm::GlobalVariable *createVariable(IRGenModule &IGM,
                                        LinkInfo &linkInfo,

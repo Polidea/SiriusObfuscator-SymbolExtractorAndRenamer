@@ -471,16 +471,9 @@ internal enum _SubSequenceSubscriptOnRangeMode {
 %{
   from gyb_stdlib_support import collectionForTraversal
   def testConstraints(protocol):
-    if protocol == 'Collection':
-      subseq_as_collection = 'CollectionWithEquatableElement.SubSequence : Collection,'
-    else:
-      subseq_as_collection=''
     return '''
     C : %(protocol)s,
     CollectionWithEquatableElement : %(protocol)s,
-    %(subseq_as_collection)s
-    C.SubSequence : %(protocol)s,
-    C.Indices : %(protocol)s,
     CollectionWithEquatableElement.Iterator.Element : Equatable
   ''' % locals()
 
@@ -1205,10 +1198,10 @@ extension TestSuite {
 
     // FIXME: swift-3-indexing-model -
     //   enhance the following for negative direction?
-    //          advance(i: Index, by n: IndexDistance) -> Index
+    //          advance(i: Index, by n: Int) -> Index
     //          advance(
-    //             i: Index, by n: IndexDistance, limitedBy: Index) -> Index
-    //          distance(from start: Index, to end: Index) -> IndexDistance
+    //             i: Index, by n: Int, limitedBy: Index) -> Index
+    //          distance(from start: Index, to end: Index) -> Int
 
     //===------------------------------------------------------------------===//
     // last

@@ -60,6 +60,11 @@ public final class InMemoryGitRepository {
         return Array(tagsMap.keys)
     }
 
+    /// The list of revisions in the repository.
+    public var revisions: [RevisionIdentifier] {
+        return Array(history.keys)
+    }
+
     /// Indicates whether there are any uncommited changes in the repository.
     fileprivate var isDirty = false
 
@@ -78,7 +83,9 @@ public final class InMemoryGitRepository {
     }
 
     /// Copy/clone this repository.
-    fileprivate func copy() -> InMemoryGitRepository {
+    fileprivate func copy(at newPath: AbsolutePath? = nil) -> InMemoryGitRepository {
+        let path = newPath ?? self.path
+        try! fs.createDirectory(path, recursive: true)
         let repo = InMemoryGitRepository(path: path, fs: fs)
         for (revision, state) in history {
             repo.history[revision] = state.copy()
@@ -92,7 +99,7 @@ public final class InMemoryGitRepository {
     @discardableResult
     public func commit() -> String {
         // Create a fake hash for thie commit.
-        let hash = NSUUID().uuidString
+        let hash = String((NSUUID().uuidString + NSUUID().uuidString).prefix(40))
         head.hash = hash
         // Store the commit in history.
         history[hash] = head.copy()
@@ -129,7 +136,7 @@ public final class InMemoryGitRepository {
     }
 
     /// Installs (or checks out) current head on the filesystem on which this repository exists.
-    private func installHead() throws {
+    fileprivate func installHead() throws {
         // Remove the old state.
         try fs.removeFileTree(path)
         // Create the repository directory.
@@ -139,6 +146,7 @@ public final class InMemoryGitRepository {
 
         /// Recursively copies the content at HEAD to fs.
         func install(at path: AbsolutePath) throws {
+            guard headFs.isDirectory(path) else { return }
             for entry in try headFs.getDirectoryContents(path) {
                 // The full path of the entry.
                 let entryPath = path.appending(component: entry)
@@ -164,7 +172,7 @@ public final class InMemoryGitRepository {
         tagsMap[name] = head.hash
     }
 
-    public func hasUncommitedChanges() -> Bool {
+    public func hasUncommittedChanges() -> Bool {
         return isDirty
     }
 
@@ -175,8 +183,8 @@ public final class InMemoryGitRepository {
 
 extension InMemoryGitRepository: FileSystem {
 
-    public func exists(_ path: AbsolutePath) -> Bool {
-        return head.fileSystem.exists(path)
+    public func exists(_ path: AbsolutePath, followSymlink: Bool) -> Bool {
+        return head.fileSystem.exists(path, followSymlink: followSymlink)
     }
 
     public func isDirectory(_ path: AbsolutePath) -> Bool {
@@ -227,7 +235,7 @@ extension InMemoryGitRepository: Repository {
     }
 
     public func resolveRevision(identifier: String) throws -> Revision {
-        fatalError("unimplemented")
+        return Revision(identifier: tagsMap[identifier] ?? identifier)
     }
 
     public func exists(revision: Revision) -> Bool {
@@ -235,8 +243,8 @@ extension InMemoryGitRepository: Repository {
     }
 
     public func openFileView(revision: Revision) throws -> FileSystem {
-        var fs: FileSystem = history[revision.identifier]!.fileSystem
-        return RerootedFileSystemView(&fs, rootedAt: path)
+        let fs: FileSystem = history[revision.identifier]!.fileSystem
+        return RerootedFileSystemView(fs, rootedAt: path)
     }
 }
 
@@ -250,11 +258,15 @@ extension InMemoryGitRepository: WorkingCheckout {
     }
 
     public func hasUnpushedCommits() throws -> Bool {
-        fatalError("Unimplemented")
+        return false
     }
 
     public func checkout(newBranch: String) throws {
-        fatalError("Unimplemented")
+        history[newBranch] = head
+    }
+
+    public func isAlternateObjectStoreValid() -> Bool {
+        return true
     }
 }
 
@@ -302,7 +314,9 @@ public final class InMemoryGitRepositoryProvider: RepositoryProvider {
         to destinationPath: AbsolutePath,
         editable: Bool
     ) throws {
-        checkoutsMap[destinationPath] = fetchedMap[sourcePath]!.copy()
+        let checkout = fetchedMap[sourcePath]!.copy(at: destinationPath)
+        checkoutsMap[destinationPath] = checkout
+        try checkout.installHead()
     }
 
     public func openCheckout(at path: AbsolutePath) throws -> WorkingCheckout {

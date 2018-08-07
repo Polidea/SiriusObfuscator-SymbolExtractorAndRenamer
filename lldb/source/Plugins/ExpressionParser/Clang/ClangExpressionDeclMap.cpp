@@ -15,15 +15,12 @@
 #include "ClangPersistentVariables.h"
 
 #include "lldb/Core/Address.h"
-#include "lldb/Core/Error.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/RegisterValue.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Core/ValueObjectVariable.h"
 #include "lldb/Expression/Materializer.h"
-#include "lldb/Host/Endian.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/CompilerDecl.h"
@@ -45,6 +42,9 @@
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/Endian.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Status.h"
 #include "lldb/lldb-private.h"
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
@@ -191,7 +191,7 @@ bool ClangExpressionDeclMap::AddPersistentVariable(const NamedDecl *decl,
     return false;
 
   if (m_parser_vars->m_materializer && is_result) {
-    Error err;
+    Status err;
 
     ExecutionContext &exe_ctx = m_parser_vars->m_exe_ctx;
     Target *target = exe_ctx.GetTargetPtr();
@@ -364,7 +364,7 @@ bool ClangExpressionDeclMap::AddValueToStruct(const NamedDecl *decl,
   if (m_parser_vars->m_materializer) {
     uint32_t offset = 0;
 
-    Error err;
+    Status err;
 
     if (is_persistent_variable) {
       ExpressionVariableSP var_sp(var->shared_from_this());
@@ -743,16 +743,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
   SymbolContextList sc_list;
 
   const ConstString name(context.m_decl_name.getAsString().c_str());
-
-  const char *name_unique_cstr = name.GetCString();
-
-  if (name_unique_cstr == NULL)
-    return;
-
-  static ConstString id_name("id");
-  static ConstString Class_name("Class");
-
-  if (name == id_name || name == Class_name)
+  if (IgnoreName(name, false))
     return;
 
   // Only look for functions by name out in our symbols if the function
@@ -813,7 +804,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
     } while (0);
   }
 
-  if (name_unique_cstr[0] == '$' && !namespace_decl) {
+  if (name.GetCString()[0] == '$' && !namespace_decl) {
     static ConstString g_lldb_class_name("$__lldb_class");
 
     if (name == g_lldb_class_name) {
@@ -1045,7 +1036,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
         if (ast) {
           clang::NamespaceDecl *namespace_decl =
               ClangASTContext::GetUniqueNamespaceDeclaration(
-                  m_ast_context, name_unique_cstr, nullptr);
+                  m_ast_context, name.GetCString(), nullptr);
           if (namespace_decl) {
             context.AddNamedDecl(namespace_decl);
             clang::DeclContext *clang_decl_ctx =
@@ -1060,7 +1051,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
     }
 
     // any other $__lldb names should be weeded out now
-    if (!::strncmp(name_unique_cstr, "$__lldb", sizeof("$__lldb") - 1))
+    if (name.GetStringRef().startswith("$__lldb"))
       return;
 
     ExpressionVariableSP pvar_sp(
@@ -1438,7 +1429,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
         // We couldn't find a non-symbol variable for this.  Now we'll hunt for
         // a generic
         // data symbol, and -- if it is found -- treat it as a variable.
-        Error error;
+        Status error;
 
         const Symbol *data_symbol =
             m_parser_vars->m_sym_ctx.FindBestGlobalDataSymbol(name, error);
@@ -1568,7 +1559,7 @@ void ClangExpressionDeclMap::FindExternalVisibleDecls(
   DWARFExpression &var_location_expr = var->LocationExpression();
 
   Target *target = m_parser_vars->m_exe_ctx.GetTargetPtr();
-  Error err;
+  Status err;
 
   if (var->GetLocationIsConstantValueData()) {
     DataExtractor const_value_extractor;

@@ -2,6 +2,7 @@ add_custom_target(LLDBUnitTests)
 set_target_properties(LLDBUnitTests PROPERTIES FOLDER "LLDB tests")
 
 include_directories(${LLDB_SOURCE_ROOT})
+include_directories(${LLDB_PROJECT_ROOT})
 
 set(LLDB_GTEST_COMMON_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/gtest_common.h)
 if (MSVC)
@@ -17,6 +18,12 @@ if (LLDB_BUILT_STANDALONE)
   # handy.
   if (EXISTS ${LLVM_MAIN_SRC_DIR}/utils/unittest AND NOT TARGET gtest)
     add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/unittest utils/unittest)
+  endif()
+  # LLVMTestingSupport library is needed for Process/gdb-remote.
+  if (EXISTS ${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
+      AND NOT TARGET LLVMTestingSupport)
+    add_subdirectory(${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
+      lib/Testing/Support)
   endif()
 endif()
 
@@ -39,7 +46,7 @@ function(add_lldb_unittest test_name)
     POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/Inputs)
 
-  target_link_libraries(${test_name} ${ARG_LINK_LIBS} ${SWIFT_ALL_LIBS} ${CLANG_USED_LIBS} ${LLDB_SYSTEM_LIBS})
+  target_link_libraries(${test_name} ${ARG_LINK_LIBS} ${LLDB_SYSTEM_LIBS})
 endfunction()
 
 function(add_unittest_inputs test_name inputs)
@@ -59,10 +66,18 @@ add_subdirectory(Expression)
 add_subdirectory(Host)
 add_subdirectory(Interpreter)
 add_subdirectory(Language)
+add_subdirectory(ObjectFile)
 add_subdirectory(Platform)
 add_subdirectory(Process)
 add_subdirectory(ScriptInterpreter)
+add_subdirectory(Signals)
 add_subdirectory(Symbol)
 add_subdirectory(SymbolFile)
+add_subdirectory(Target)
+add_subdirectory(tools)
 add_subdirectory(UnwindAssembly)
 add_subdirectory(Utility)
+
+if(LLDB_CAN_USE_DEBUGSERVER)
+  add_subdirectory(debugserver)
+endif()

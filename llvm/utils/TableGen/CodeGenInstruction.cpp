@@ -77,6 +77,7 @@ CGIOperandList::CGIOperandList(Record *R) : TheDef(R) {
       PrintMethod = Rec->getValueAsString("PrintMethod");
       OperandType = Rec->getValueAsString("OperandType");
       OperandNamespace = Rec->getValueAsString("OperandNamespace");
+      EncoderMethod = Rec->getValueAsString("EncoderMethod");
     } else if (Rec->isSubClassOf("Operand")) {
       PrintMethod = Rec->getValueAsString("PrintMethod");
       OperandType = Rec->getValueAsString("OperandType");
@@ -429,6 +430,17 @@ FlattenAsmStringVariants(StringRef Cur, unsigned Variant) {
   return Res;
 }
 
+bool CodeGenInstruction::isOperandAPointer(unsigned i) const {
+  if (DagInit *ConstraintList = TheDef->getValueAsDag("InOperandList")) {
+    if (i < ConstraintList->getNumArgs()) {
+      if (DefInit *Constraint = dyn_cast<DefInit>(ConstraintList->getArg(i))) {
+        return Constraint->getDef()->isSubClassOf("TypedOperand") &&
+               Constraint->getDef()->getValueAsBit("IsPointer");
+      }
+    }
+  }
+  return false;
+}
 
 //===----------------------------------------------------------------------===//
 /// CodeGenInstAlias Implementation

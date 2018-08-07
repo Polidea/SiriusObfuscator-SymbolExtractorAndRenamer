@@ -32,7 +32,7 @@ struct SingleRawComment {
   unsigned Kind : 8;
   unsigned StartColumn : 16;
   unsigned StartLine;
-  const unsigned EndLine;
+  unsigned EndLine;
 
   SingleRawComment(CharSourceRange Range, const SourceManager &SourceMgr);
   SingleRawComment(StringRef RawText, unsigned StartColumn);
@@ -67,6 +67,8 @@ struct RawComment {
   bool isEmpty() const {
     return Comments.empty();
   }
+
+  CharSourceRange getCharSourceRange();
 };
 
 struct CommentInfo {

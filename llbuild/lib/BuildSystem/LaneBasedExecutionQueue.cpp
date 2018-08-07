@@ -11,10 +11,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "llbuild/BuildSystem/BuildExecutionQueue.h"
-#include "llbuild/BuildSystem/CommandResult.h"
+
+#include "POSIXEnvironment.h"
 
 #include "llbuild/Basic/LLVM.h"
 #include "llbuild/Basic/PlatformUtility.h"
+#include "llbuild/Basic/Tracing.h"
+
+#include "llbuild/BuildSystem/BuildDescription.h"
+#include "llbuild/BuildSystem/CommandResult.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Hashing.h"
@@ -39,22 +44,17 @@
 #include <unistd.h>
 #include <signal.h>
 #include <spawn.h>
+#include <sys/resource.h>
 #include <sys/wait.h>
 
 using namespace llbuild;
 using namespace llbuild::buildsystem;
 
-namespace std {
-  template<> struct hash<llvm::StringRef> {
-    size_t operator()(const StringRef& value) const {
-      return size_t(hash_value(value));
-    }
-  };
-}
-
 namespace {
 
 struct LaneBasedExecutionQueueJobContext {
+  uint32_t laneNumber;
+  
   QueueJob& job;
 };
 
@@ -110,6 +110,7 @@ class LaneBasedExecutionQueue : public BuildExecutionQueue {
     while (true) {
       // Take a job from the ready queue.
       QueueJob job{};
+      uint64_t readyJobsCount;
       {
         std::unique_lock<std::mutex> lock(readyJobsMutex);
 
@@ -123,6 +124,7 @@ class LaneBasedExecutionQueue : public BuildExecutionQueue {
         // Take an item according to the chosen policy.
         job = readyJobs.front();
         readyJobs.pop_front();
+        readyJobsCount = readyJobs.size();
       }
 
       // If we got an empty job, the queue is shutting down.
@@ -130,10 +132,18 @@ class LaneBasedExecutionQueue : public BuildExecutionQueue {
         break;
 
       // Process the job.
-      LaneBasedExecutionQueueJobContext context{ job };
-      getDelegate().commandJobStarted(job.getForCommand());
-      job.execute(reinterpret_cast<QueueJobContext*>(&context));
-      getDelegate().commandJobFinished(job.getForCommand());
+      LaneBasedExecutionQueueJobContext context{ laneNumber, job };
+      {
+        TracingPoint(TraceEventKind::ExecutionQueueDepth, readyJobsCount);
+        TracingString commandNameID(
+            TraceEventKind::ExecutionQueueJob,
+            job.getForCommand()->getName());
+        TracingInterval i(TraceEventKind::ExecutionQueueJob,
+                          context.laneNumber, commandNameID);
+        getDelegate().commandJobStarted(job.getForCommand());
+        job.execute(reinterpret_cast<QueueJobContext*>(&context));
+        getDelegate().commandJobFinished(job.getForCommand());
+      }
     }
   }
 
@@ -199,9 +209,14 @@ public:
   }
 
   virtual void addJob(QueueJob job) override {
-    std::lock_guard<std::mutex> guard(readyJobsMutex);
-    readyJobs.push_back(job);
-    readyJobsCondition.notify_one();
+    uint64_t readyJobsCount;
+    {
+      std::lock_guard<std::mutex> guard(readyJobsMutex);
+      readyJobs.push_back(job);
+      readyJobsCondition.notify_one();
+      readyJobsCount = readyJobs.size();
+    }
+    TracingPoint(TraceEventKind::ExecutionQueueDepth, readyJobsCount);
   }
 
   virtual void cancelAllJobs() override {
@@ -224,6 +239,11 @@ public:
                  ArrayRef<std::pair<StringRef,
                                     StringRef>> environment,
                  bool inheritEnvironment) override {
+    LaneBasedExecutionQueueJobContext& context =
+      *reinterpret_cast<LaneBasedExecutionQueueJobContext*>(opaqueContext);
+    TracingInterval subprocessInterval(TraceEventKind::ExecutionQueueSubprocess,
+                                       context.laneNumber);
+
     {
       std::unique_lock<std::mutex> lock(readyJobsMutex);
       // Do not execute new processes anymore after cancellation.
@@ -240,8 +260,6 @@ public:
     // Whether or not we are capturing output.
     const bool shouldCaptureOutput = true;
 
-    LaneBasedExecutionQueueJobContext& context =
-      *reinterpret_cast<LaneBasedExecutionQueueJobContext*>(opaqueContext);
     getDelegate().commandProcessStarted(context.job.getForCommand(), handle);
     
     // Initialize the spawn attributes.
@@ -260,7 +278,7 @@ public:
 #if defined(__linux__)
     sigset_t mostSignals;
     sigemptyset(&mostSignals);
-    for (int i = 1; i < SIGUNUSED; ++i) {
+    for (int i = 1; i < SIGSYS; ++i) {
       if (i == SIGKILL || i == SIGSTOP) continue;
       sigaddset(&mostSignals, i);
     }
@@ -334,50 +352,31 @@ public:
     args[argsStorage.size()] = nullptr;
 
     // Form the complete environment.
-    std::vector<std::string> envStorage;
-    std::vector<const char*> env;
-    const char* const* envp = nullptr;
+    //
+    // NOTE: We construct the environment in order of precedence, so
+    // overridden keys should be defined first.
+    POSIXEnvironment posixEnv;
 
-    // If no additional environment is supplied, use the base environment.
-    if (environment.empty()) {
-      envp = this->environment;
-    } else {
-      // Inherit the base environment, if desired.
-      if (inheritEnvironment) {
-        std::unordered_set<StringRef> overriddenKeys{};
-        // Compute the set of strings which are overridden in the process
-        // environment.
-        for (const auto& entry: environment) {
-          overriddenKeys.insert(entry.first);
-        }
-
-        // Form the complete environment by adding the base key value pairs
-        // which are not overridden, then adding all of the overridden ones.
-        for (const char* const* p = this->environment; *p != nullptr; ++p) {
-          // Find the key.
-          auto key = StringRef(*p).split('=').first;
-          if (!overriddenKeys.count(key)) {
-            env.emplace_back(*p);
-          }
-        }
+    // Export a task ID to subprocesses.
+    //
+    // We currently only export the lane ID, but eventually will export a unique
+    // task ID for SR-6053.
+    posixEnv.setIfMissing("LLBUILD_TASK_ID", Twine(context.laneNumber).str());
+                          
+    // Add the requested environment.
+    for (const auto& entry: environment) {
+      posixEnv.setIfMissing(entry.first, entry.second);
+    }
+      
+    // Inherit the base environment, if desired.
+    //
+    // FIXME: This involves a lot of redundant allocation, currently. We could
+    // cache this for the common case of a directly inherited environment.
+    if (inheritEnvironment) {
+      for (const char* const* p = this->environment; *p != nullptr; ++p) {
+        auto pair = StringRef(*p).split('=');
+        posixEnv.setIfMissing(pair.first, pair.second);
       }
-
-      // Add the requested environment.
-      for (const auto& entry: environment) {
-        SmallString<256> assignment;
-        assignment += entry.first;
-        assignment += '=';
-        assignment += entry.second;
-        assignment += '\0';
-        envStorage.emplace_back(assignment.str());
-      }
-      // We must do this in a second pass, once the entries are guaranteed not
-      // to move.
-      for (const auto& entry: envStorage) {
-        env.emplace_back(entry.c_str());
-      }
-      env.emplace_back(nullptr);
-      envp = env.data();
     }
 
     // Resolve the executable path, if necessary.
@@ -402,12 +401,13 @@ public:
       
       // If we have been cancelled since we started, do nothing.
       if (!wasCancelled) {
-        if (posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
-                        /*attrp=*/&attributes, const_cast<char**>(args.data()),
-                        const_cast<char* const*>(envp)) != 0) {
+        int result = posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
+                                 /*attrp=*/&attributes, const_cast<char**>(args.data()),
+                                 const_cast<char* const*>(posixEnv.getEnvp()));
+        if (result != 0) {
           getDelegate().commandProcessHadError(
               context.job.getForCommand(), handle,
-              Twine("unable to spawn process (") + strerror(errno) + ")");
+              Twine("unable to spawn process (") + strerror(result) + ")");
           getDelegate().commandProcessFinished(context.job.getForCommand(), handle,
                                                CommandResult::Failed, -1);
           pid = -1;
@@ -459,9 +459,10 @@ public:
     }
     
     // Wait for the command to complete.
-    int status, result = waitpid(pid, &status, 0);
+    struct rusage usage;
+    int status, result = wait4(pid, &status, 0, &usage);
     while (result == -1 && errno == EINTR)
-      result = waitpid(pid, &status, 0);
+      result = wait4(pid, &status, 0, &usage);
 
     // Update the set of spawned processes.
     {
@@ -477,6 +478,19 @@ public:
                                            CommandResult::Failed, -1);
       return CommandResult::Failed;
     }
+
+    // We report additional info in the tracing interval
+    //   arg2: user time, in us
+    //   arg3: sys time, in us
+    //   arg4: memory usage, in bytes
+    subprocessInterval.arg2 = (uint64_t(usage.ru_utime.tv_sec) * 1000000000 +
+                               uint64_t(usage.ru_utime.tv_usec) * 1000);
+    subprocessInterval.arg3 = (uint64_t(usage.ru_stime.tv_sec) * 1000000000 +
+                               uint64_t(usage.ru_stime.tv_usec) * 1000);
+    subprocessInterval.arg4 = usage.ru_maxrss;
+    
+    // FIXME: We should report a statistic for how much output we read from the
+    // subprocess (probably as a new point sample).
     
     // Notify of the process completion.
     bool cancelled = WIFSIGNALED(status) && (WTERMSIG(status) == SIGINT || WTERMSIG(status) == SIGKILL);

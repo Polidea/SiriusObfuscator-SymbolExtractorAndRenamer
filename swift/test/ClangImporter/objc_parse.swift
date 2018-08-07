@@ -8,6 +8,7 @@ import AVFoundation
 import Newtype
 import objc_ext
 import TestProtocols
+import TypeAndValue
 
 import ObjCParseExtras
 import ObjCParseExtrasToo
@@ -174,7 +175,7 @@ func keyedSubscripting(_ b: B, idx: A, a: A) {
   dict[NSString()] = a
   let value = dict[NSString()]
 
-  dict[nil] = a // expected-error {{ambiguous reference}}
+  dict[nil] = a // expected-error {{cannot assign value of type 'A' to type 'Any?'}}
   let q = dict[nil]  // expected-error {{ambiguous subscript}}
   _ = q
 }
@@ -377,7 +378,7 @@ func testPreferClassMethodToCurriedInstanceMethod(_ obj: NSObject) {
   // FIXME: We shouldn't need the ": Bool" type annotation here.
   // <rdar://problem/18006008>
   let _: Bool = NSObject.isEqual(obj)
-  _ = NSObject.isEqual(obj) as (NSObject!) -> Bool // no-warning
+  _ = NSObject.isEqual(obj) as (NSObject?) -> Bool // no-warning
 }
 
 
@@ -628,4 +629,23 @@ class NewtypeUser {
   @objc func stringNewtypeOptional(a: SNTErrorDomain?) {} // expected-error {{'SNTErrorDomain' has been renamed to 'ErrorDomain'}}{{39-53=ErrorDomain}}
   @objc func intNewtype(a: MyInt) {}
   @objc func intNewtypeOptional(a: MyInt?) {} // expected-error {{method cannot be marked @objc because the type of the parameter cannot be represented in Objective-C}}
+}
+
+func testTypeAndValue() {
+  _ = testStruct()
+  _ = testStruct(value: 0)
+  let _: (testStruct) -> Void = testStruct
+  let _: () -> testStruct = testStruct.init
+  let _: (CInt) -> testStruct = testStruct.init
+}
+
+// rdar://problem/34913507
+func testBridgedTypedef(bt: BridgedTypedefs) {
+  let _: Int = bt.arrayOfArrayOfStrings // expected-error{{'[[String]]'}}
+}
+
+func testBridgeFunctionPointerTypedefs(fptrTypedef: FPTypedef) {
+  // See also print_clang_bool_bridging.swift.
+  let _: Int = fptrTypedef // expected-error{{'@convention(c) (String) -> String'}}
+  let _: Int = getFP() // expected-error{{'@convention(c) (String) -> String'}}
 }

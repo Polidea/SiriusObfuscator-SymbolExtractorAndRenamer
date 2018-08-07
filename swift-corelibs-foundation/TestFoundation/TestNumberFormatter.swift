@@ -14,7 +14,6 @@
     import SwiftFoundation
     import SwiftXCTest
 #endif
-import CoreFoundation
 
 class TestNumberFormatter: XCTestCase {
 
@@ -163,15 +162,18 @@ class TestNumberFormatter: XCTestCase {
         numberFormatter.plusSign = sign
         XCTAssertEqual(numberFormatter.plusSign, sign)
 
+#if !os(Android)
         let formattedString = numberFormatter.string(from: 420000000000000000)
         XCTAssertNotNil(formattedString)
         XCTAssertEqual(formattedString, "4.2E👍17")
+#endif
 
         // Verify a negative exponent does not have the 👍
         let noPlusString = numberFormatter.string(from: -0.420)
         XCTAssertNotNil(noPlusString)
         if let fmt = noPlusString {
-            XCTAssertFalse(fmt.contains(sign), "Expected format of -0.420 (-4.2E-1) shouldn't have a plus sign which was set as \(sign)")
+            let contains: Bool = fmt.contains(sign)
+            XCTAssertFalse(contains, "Expected format of -0.420 (-4.2E-1) shouldn't have a plus sign which was set as \(sign)")
         }
     }
 

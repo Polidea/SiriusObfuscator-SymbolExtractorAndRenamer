@@ -29,6 +29,8 @@ add_lldb_library(liblldb SHARED
   SBBlock.cpp
   SBBreakpoint.cpp
   SBBreakpointLocation.cpp
+  SBBreakpointName.cpp
+  SBBreakpointOptionCommon.cpp
   SBBroadcaster.cpp
   SBCommandInterpreter.cpp
   SBCommandReturnObject.cpp
@@ -72,6 +74,8 @@ add_lldb_library(liblldb SHARED
   SBThread.cpp
   SBThreadCollection.cpp
   SBThreadPlan.cpp
+  SBTrace.cpp
+  SBTraceOptions.cpp
   SBType.cpp
   SBTypeCategory.cpp
   SBTypeEnumMember.cpp
@@ -99,6 +103,7 @@ add_lldb_library(liblldb SHARED
     lldbInterpreter
     lldbSymbol
     lldbTarget
+    lldbUtility
     ${LLDB_ALL_PLUGINS}
     ${SWIFT_ALL_LIBS}
   LINK_COMPONENTS

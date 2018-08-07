@@ -29,9 +29,8 @@ extension String : _ObjectTypeBridgeable {
             result = source._storage
         } else if type(of: source) == _NSCFString.self {
             let cf = unsafeBitCast(source, to: CFString.self)
-            let str = CFStringGetCStringPtr(cf, CFStringEncoding(kCFStringEncodingUTF8))
-            if str != nil {
-                result = String(cString: str!)
+            if let str = CFStringGetCStringPtr(cf, CFStringEncoding(kCFStringEncodingUTF8)) {
+                result = String(cString: str)
             } else {
                 let length = CFStringGetLength(cf)
                 let buffer = UnsafeMutablePointer<UniChar>.allocate(capacity: length)
@@ -50,7 +49,7 @@ extension String : _ObjectTypeBridgeable {
             let len = source.length
             var characters = [unichar](repeating: 0, count: len)
             result = characters.withUnsafeMutableBufferPointer() { (buffer: inout UnsafeMutableBufferPointer<unichar>) -> String? in
-                source.getCharacters(buffer.baseAddress!, range: NSMakeRange(0, len))
+                source.getCharacters(buffer.baseAddress!, range: NSRange(location: 0, length: len))
                 return String._fromCodeUnitSequence(UTF16.self, input: buffer)
             }
         }

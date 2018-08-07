@@ -10,25 +10,27 @@
 #include "ObjectFilePECOFF.h"
 #include "WindowsMiniDump.h"
 
-#include "llvm/Support/COFF.h"
+#include "llvm/BinaryFormat/COFF.h"
 
 #include "lldb/Core/ArchSpec.h"
-#include "lldb/Core/DataBuffer.h"
-#include "lldb/Core/DataBufferHeap.h"
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
-#include "lldb/Core/StreamString.h"
-#include "lldb/Core/Timer.h"
-#include "lldb/Core/UUID.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/DataBufferLLVM.h"
+#include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/StreamString.h"
+#include "lldb/Utility/Timer.h"
+#include "lldb/Utility/UUID.h"
+
+#include "llvm/Support/MemoryBuffer.h"
 
 #define IMAGE_DOS_SIGNATURE 0x5A4D    // MZ
 #define IMAGE_NT_SIGNATURE 0x00004550 // PE00
@@ -65,20 +67,30 @@ ObjectFile *ObjectFilePECOFF::CreateInstance(const lldb::ModuleSP &module_sp,
                                              lldb::offset_t file_offset,
                                              lldb::offset_t length) {
   if (!data_sp) {
-    data_sp = file->MemoryMapFileContentsIfLocal(file_offset, length);
+    data_sp =
+        DataBufferLLVM::CreateSliceFromPath(file->GetPath(), length, file_offset);
+    if (!data_sp)
+      return nullptr;
     data_offset = 0;
   }
 
-  if (ObjectFilePECOFF::MagicBytesMatch(data_sp)) {
-    // Update the data to contain the entire file if it doesn't already
-    if (data_sp->GetByteSize() < length)
-      data_sp = file->MemoryMapFileContentsIfLocal(file_offset, length);
-    std::unique_ptr<ObjectFile> objfile_ap(new ObjectFilePECOFF(
-        module_sp, data_sp, data_offset, file, file_offset, length));
-    if (objfile_ap.get() && objfile_ap->ParseHeader())
-      return objfile_ap.release();
+  if (!ObjectFilePECOFF::MagicBytesMatch(data_sp))
+    return nullptr;
+
+  // Update the data to contain the entire file if it doesn't already
+  if (data_sp->GetByteSize() < length) {
+    data_sp =
+        DataBufferLLVM::CreateSliceFromPath(file->GetPath(), length, file_offset);
+    if (!data_sp)
+      return nullptr;
   }
-  return NULL;
+
+  auto objfile_ap = llvm::make_unique<ObjectFilePECOFF>(
+      module_sp, data_sp, data_offset, file, file_offset, length);
+  if (!objfile_ap || !objfile_ap->ParseHeader())
+    return nullptr;
+
+  return objfile_ap.release();
 }
 
 ObjectFile *ObjectFilePECOFF::CreateMemoryInstance(
@@ -133,7 +145,7 @@ size_t ObjectFilePECOFF::GetModuleSpecifications(
 
 bool ObjectFilePECOFF::SaveCore(const lldb::ProcessSP &process_sp,
                                 const lldb_private::FileSpec &outfile,
-                                lldb_private::Error &error) {
+                                lldb_private::Status &error) {
   return SaveMiniDump(process_sp, outfile, error);
 }
 
@@ -418,14 +430,17 @@ bool ObjectFilePECOFF::ParseCOFFOptionalHeader(lldb::offset_t *offset_ptr) {
 
 DataExtractor ObjectFilePECOFF::ReadImageData(uint32_t offset, size_t size) {
   if (m_file) {
-    DataBufferSP buffer_sp(m_file.ReadFileContents(offset, size));
+    // A bit of a hack, but we intend to write to this buffer, so we can't 
+    // mmap it.
+    auto buffer_sp =
+        DataBufferLLVM::CreateSliceFromPath(m_file.GetPath(), size, offset, true);
     return DataExtractor(buffer_sp, GetByteOrder(), GetAddressByteSize());
   }
   ProcessSP process_sp(m_process_wp.lock());
   DataExtractor data;
   if (process_sp) {
     auto data_ap = llvm::make_unique<DataBufferHeap>(size, 0);
-    Error readmem_error;
+    Status readmem_error;
     size_t bytes_read =
         process_sp->ReadMemory(m_image_base + offset, data_ap->GetBytes(),
                                data_ap->GetByteSize(), readmem_error);
@@ -522,7 +537,8 @@ Symtab *ObjectFilePECOFF::GetSymtab() {
 
           // First 4 bytes should be zeroed after strtab_size has been read,
           // because it is used as offset 0 to encode a NULL string.
-          uint32_t *strtab_data_start = (uint32_t *)strtab_data.GetDataStart();
+          uint32_t *strtab_data_start = const_cast<uint32_t *>(
+              reinterpret_cast<const uint32_t *>(strtab_data.GetDataStart()));
           strtab_data_start[0] = 0;
 
           offset = 0;

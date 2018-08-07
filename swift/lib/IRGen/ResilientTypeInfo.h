@@ -47,36 +47,37 @@ protected:
                                  IsNotPOD, IsNotBitwiseTakable) {}
 
 public:
-  void assignWithCopy(IRGenFunction &IGF, Address dest, Address src,
-                      SILType T) const override {
+  void assignWithCopy(IRGenFunction &IGF, Address dest, Address src, SILType T,
+                      bool isOutlined) const override {
     emitAssignWithCopyCall(IGF, T, dest, src);
   }
 
-  void assignWithTake(IRGenFunction &IGF, Address dest, Address src,
-                      SILType T) const override {
+  void assignArrayWithCopyNoAlias(IRGenFunction &IGF, Address dest, Address src,
+                                  llvm::Value *count,
+                                  SILType T) const override {
+    emitAssignArrayWithCopyNoAliasCall(IGF, T, dest, src, count);
+  }
+
+  void assignArrayWithCopyFrontToBack(IRGenFunction &IGF, Address dest,
+                                      Address src, llvm::Value *count,
+                                      SILType T) const override {
+    emitAssignArrayWithCopyFrontToBackCall(IGF, T, dest, src, count);
+  }
+
+  void assignArrayWithCopyBackToFront(IRGenFunction &IGF, Address dest,
+                                      Address src, llvm::Value *count,
+                                      SILType T) const override {
+    emitAssignArrayWithCopyBackToFrontCall(IGF, T, dest, src, count);
+  }
+
+  void assignWithTake(IRGenFunction &IGF, Address dest, Address src, SILType T,
+                      bool isOutlined) const override {
     emitAssignWithTakeCall(IGF, T, dest, src);
   }
 
-  Address allocateBuffer(IRGenFunction &IGF, Address buffer,
-                         SILType T) const override {
-    auto addr = emitAllocateBufferCall(IGF, T, buffer);
-    return this->getAddressForPointer(addr);
-  }
-
-  Address projectBuffer(IRGenFunction &IGF, Address buffer,
-                        SILType T) const override {
-    auto addr = emitProjectBufferCall(IGF, T, buffer);
-    return this->getAddressForPointer(addr);
-  }
-
-  void destroyBuffer(IRGenFunction &IGF, Address buffer,
-                     SILType T) const override {
-    emitDestroyBufferCall(IGF, T, buffer);
-  }
-
-  void deallocateBuffer(IRGenFunction &IGF, Address buffer,
-                        SILType T) const override {
-    emitDeallocateBufferCall(IGF, T, buffer);
+  void assignArrayWithTake(IRGenFunction &IGF, Address dest, Address src,
+                           llvm::Value *count, SILType T) const override {
+    emitAssignArrayWithTakeCall(IGF, T, dest, src, count);
   }
 
   Address initializeBufferWithCopyOfBuffer(IRGenFunction &IGF,
@@ -93,22 +94,8 @@ public:
     return this->getAddressForPointer(addr);
   }
 
-  Address initializeBufferWithCopy(IRGenFunction &IGF,
-                                   Address dest, Address src,
-                                   SILType T) const override {
-    auto addr = emitInitializeBufferWithCopyCall(IGF, T, dest, src);
-    return this->getAddressForPointer(addr);
-  }
-
-  Address initializeBufferWithTake(IRGenFunction &IGF,
-                                   Address dest, Address src,
-                                   SILType T) const override {
-    auto addr = emitInitializeBufferWithTakeCall(IGF, T, dest, src);
-    return this->getAddressForPointer(addr);
-  }
-
-  void initializeWithCopy(IRGenFunction &IGF,
-                        Address dest, Address src, SILType T) const override {
+  void initializeWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                          SILType T, bool isOutlined) const override {
     emitInitializeWithCopyCall(IGF, T, dest, src);
   }
 
@@ -118,9 +105,15 @@ public:
     emitInitializeArrayWithCopyCall(IGF, T, dest, src, count);
   }
 
-  void initializeWithTake(IRGenFunction &IGF,
-                        Address dest, Address src, SILType T) const override {
+  void initializeWithTake(IRGenFunction &IGF, Address dest, Address src,
+                          SILType T, bool isOutlined) const override {
     emitInitializeWithTakeCall(IGF, T, dest, src);
+  }
+
+  void initializeArrayWithTakeNoAlias(IRGenFunction &IGF, Address dest,
+                                      Address src, llvm::Value *count,
+                                      SILType T) const override {
+    emitInitializeArrayWithTakeNoAliasCall(IGF, T, dest, src, count);
   }
 
   void initializeArrayWithTakeFrontToBack(IRGenFunction &IGF,
@@ -137,7 +130,8 @@ public:
     emitInitializeArrayWithTakeBackToFrontCall(IGF, T, dest, src, count);
   }
 
-  void destroy(IRGenFunction &IGF, Address addr, SILType T) const override {
+  void destroy(IRGenFunction &IGF, Address addr, SILType T,
+               bool isOutlined) const override {
     emitDestroyCall(IGF, T, addr);
   }
 
@@ -170,6 +164,31 @@ public:
     llvm_unreachable("initializing value witness table for opaque type?!");
   }
 
+  llvm::Value *getEnumTagSinglePayload(IRGenFunction &IGF,
+                                       llvm::Value *numEmptyCases,
+                                       Address enumAddr,
+                                       SILType T) const override {
+    return emitGetEnumTagSinglePayloadCall(IGF, T, numEmptyCases, enumAddr);
+  }
+
+  void storeEnumTagSinglePayload(IRGenFunction &IGF, llvm::Value *whichCase,
+                                 llvm::Value *numEmptyCases, Address enumAddr,
+                                 SILType T) const override {
+    emitStoreEnumTagSinglePayloadCall(IGF, T, whichCase, numEmptyCases, enumAddr);
+  }
+
+  void collectArchetypeMetadata(
+      IRGenFunction &IGF,
+      llvm::MapVector<CanType, llvm::Value *> &typeToMetadataVec,
+      SILType T) const override {
+    if (!T.hasArchetype()) {
+      return;
+    }
+    auto canType = T.getSwiftRValueType();
+    auto *metadata = IGF.emitTypeMetadataRefForLayout(T);
+    assert(metadata && "Expected Type Metadata Ref");
+    typeToMetadataVec.insert(std::make_pair(canType, metadata));
+  }
 };
 
 }

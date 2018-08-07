@@ -66,7 +66,7 @@ bool EmulationStateARM::LoadPseudoRegistersFromFrame(StackFrame &frame) {
 
 bool EmulationStateARM::StorePseudoRegisterValue(uint32_t reg_num,
                                                  uint64_t value) {
-  if ((dwarf_r0 <= reg_num) && (reg_num <= dwarf_cpsr))
+  if (reg_num <= dwarf_cpsr)
     m_gpr[reg_num - dwarf_r0] = (uint32_t)value;
   else if ((dwarf_s0 <= reg_num) && (reg_num <= dwarf_s31)) {
     uint32_t idx = reg_num - dwarf_s0;
@@ -89,7 +89,7 @@ uint64_t EmulationStateARM::ReadPseudoRegisterValue(uint32_t reg_num,
   uint64_t value = 0;
   success = true;
 
-  if ((dwarf_r0 <= reg_num) && (reg_num <= dwarf_cpsr))
+  if (reg_num <= dwarf_cpsr)
     value = m_gpr[reg_num - dwarf_r0];
   else if ((dwarf_s0 <= reg_num) && (reg_num <= dwarf_s31)) {
     uint32_t idx = reg_num - dwarf_s0;
@@ -203,7 +203,8 @@ size_t EmulationStateARM::WritePseudoMemory(
     uint32_t value1;
     uint32_t value2;
     memcpy (&value1, dst, sizeof (uint32_t));
-    memcpy (&value2, (uint8_t *) dst + sizeof (uint32_t), sizeof (uint32_t));
+    memcpy(&value2, static_cast<const uint8_t *>(dst) + sizeof(uint32_t),
+           sizeof(uint32_t));
     if (endian::InlHostByteOrder() == lldb::eByteOrderBig) {
       value1 = llvm::ByteSwap_32(value1);
       value2 = llvm::ByteSwap_32(value2);

@@ -28,8 +28,8 @@
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
-#include "lldb/Core/RegularExpression.h"
-#include "lldb/Core/Stream.h"
+#include "lldb/Utility/RegularExpression.h"
+#include "lldb/Utility/Stream.h"
 #include <ctype.h>
 
 using namespace lldb;
@@ -104,7 +104,7 @@ static std::string RetrieveString(ValueObjectSP return_value_sp,
                                   const std::string &expression_path) {
   addr_t ptr = RetrieveUnsigned(return_value_sp, process_sp, expression_path);
   std::string str;
-  Error error;
+  Status error;
   process_sp->ReadCStringFromMemory(ptr, str, error);
   return str;
 }
@@ -137,7 +137,7 @@ StructuredData::ObjectSP UndefinedBehaviorSanitizerRuntime::RetrieveReportData(
 
   ValueObjectSP main_value;
   ExecutionContext exe_ctx;
-  Error eval_error;
+  Status eval_error;
   frame_sp->CalculateExecutionContext(exe_ctx);
   ExpressionResults result = UserExpression::Evaluate(
       exe_ctx, options, ub_sanitizer_retrieve_report_data_command, "",
@@ -185,9 +185,10 @@ StructuredData::ObjectSP UndefinedBehaviorSanitizerRuntime::RetrieveReportData(
 }
 
 static std::string GetStopReasonDescription(StructuredData::ObjectSP report) {
-  std::string stop_reason_description;
+  llvm::StringRef stop_reason_description_ref;
   report->GetAsDictionary()->GetValueForKeyAsString("description",
-                                                    stop_reason_description);
+                                                    stop_reason_description_ref);
+  std::string stop_reason_description = stop_reason_description_ref;
 
   if (!stop_reason_description.size()) {
     stop_reason_description = "Undefined behavior detected";

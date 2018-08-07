@@ -29,7 +29,7 @@ and architecture.
 
 Platform  | Path
 :------------- | :-------------
-  OSX | `$SWIFT_EXEC/lib/swift/macosx/`
+  macOS | `$SWIFT_EXEC/lib/swift/macosx/`
   iOS (32-bit) | `$SWIFT_EXEC/lib/swift/iphoneos/32`
   iOS (64-bit) | `$SWIFT_EXEC/lib/swift/iphoneos`
   iOS Simulator (32-bit) | `$SWIFT_EXEC/lib/swift/iphonesimulator/32`
@@ -44,7 +44,7 @@ Swift compiler itself need not be recompiled except in rare cases
 where the changes affect how the SDK overlays are built. To recompile
 API notes for a given module `$MODULE` and place them into their
 
-### OS X
+### macOS
 ```
 xcrun swift -apinotes -yaml-to-binary -target x86_64-apple-macosx10.10 -o $SWIFT_EXEC/lib/swift/macosx/$MODULE.apinotesc $MODULE.apinotes
 ```
@@ -66,7 +66,7 @@ xcrun swift -apinotes -yaml-to-binary -target i386-apple-ios7.0 -o $SWIFT_EXEC/l
 
 ### iOS Simulator (64-bit)
 ```
-xcrun swift -apinotes -yaml-to-binary -target x64_64-apple-ios7.0 -o $SWIFT_EXEC/lib/swift/iphonesimulator/$MODULE.apinotesc $MODULE.apinotes
+xcrun swift -apinotes -yaml-to-binary -target x86_64-apple-ios7.0 -o $SWIFT_EXEC/lib/swift/iphonesimulator/$MODULE.apinotesc $MODULE.apinotes
 ```
 
 To add API notes for a system module `$MODULE` that does not have them yet,

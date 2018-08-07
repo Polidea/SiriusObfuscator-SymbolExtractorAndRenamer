@@ -180,13 +180,15 @@ class TestDecimal: XCTestCase {
     }
 
     func test_ExplicitConstruction() {
+        let reserved: UInt32 = (1<<18 as UInt32) + (1<<17 as UInt32) + 1
+        let mantissa: (UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16, UInt16) = (6, 7, 8, 9, 10, 11, 12, 13)
         var explicit = Decimal(
             _exponent: 0x17f,
             _length: 0xff,
             _isNegative: 3,
             _isCompact: 4,
-            _reserved: 1<<18 + 1<<17 + 1,
-            _mantissa: (6, 7, 8, 9, 10, 11, 12, 13)
+            _reserved: reserved,
+            _mantissa: mantissa
         )
         XCTAssertEqual(0x7f, explicit._exponent)
         XCTAssertEqual(0x7f, explicit.exponent)
@@ -195,7 +197,9 @@ class TestDecimal: XCTestCase {
         XCTAssertEqual(FloatingPointSign.minus, explicit.sign)
         XCTAssertTrue(explicit.isSignMinus)
         XCTAssertEqual(0, explicit._isCompact)
-        XCTAssertEqual(UInt32(1<<17 + 1), explicit._reserved)
+        let i = 1 << 17 + 1
+        let expectedReserved: UInt32 = UInt32(i)
+        XCTAssertEqual(expectedReserved, explicit._reserved)
         let (m0, m1, m2, m3, m4, m5, m6, m7) = explicit._mantissa
         XCTAssertEqual(6, m0)
         XCTAssertEqual(7, m1)
@@ -260,7 +264,7 @@ class TestDecimal: XCTestCase {
                     var failed: Bool = false
                     var count = 0
                     let SIG_FIG = 14
-                    for (a, b) in zip(answerDescription.characters, approximationDescription.characters) {
+                    for (a, b) in zip(answerDescription, approximationDescription) {
                         if a != b {
                             failed = true
                             break
@@ -277,7 +281,7 @@ class TestDecimal: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(Decimal(186243*15673), Decimal(186243) * Decimal(15673))
+        XCTAssertEqual(Decimal(186243 * 15673 as Int64), Decimal(186243) * Decimal(15673))
     }
 
     func test_Misc() {
@@ -308,7 +312,9 @@ class TestDecimal: XCTestCase {
         XCTAssertFalse(Decimal.nan.isTotallyOrdered(belowOrEqualTo: Decimal(2.3)))
         XCTAssertTrue(Decimal(2) < Decimal(3))
         XCTAssertTrue(Decimal(3) > Decimal(2))
+#if !arch(arm)
         XCTAssertEqual(3275573729074, Decimal(1234).hashValue)
+#endif
         XCTAssertEqual(Decimal(-9), Decimal(1) - Decimal(10))
         XCTAssertEqual(Decimal(3), Decimal(2).nextUp)
         XCTAssertEqual(Decimal(2), Decimal(3).nextDown)

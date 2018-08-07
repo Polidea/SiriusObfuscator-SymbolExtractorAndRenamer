@@ -59,13 +59,13 @@ static FullApplySite CloneApply(FullApplySite AI, SILBuilder &Builder) {
   FullApplySite NAI;
 
   switch (AI.getInstruction()->getKind()) {
-  case ValueKind::ApplyInst:
+  case SILInstructionKind::ApplyInst:
     NAI = Builder.createApply(AI.getLoc(), AI.getCallee(),
                                    AI.getSubstitutions(),
                                    Ret,
                                    cast<ApplyInst>(AI)->isNonThrowing());
     break;
-  case ValueKind::TryApplyInst: {
+  case SILInstructionKind::TryApplyInst: {
     auto *TryApplyI = cast<TryApplyInst>(AI.getInstruction());
     NAI = Builder.createTryApply(AI.getLoc(), AI.getCallee(),
                                       AI.getSubstitutions(),
@@ -155,25 +155,26 @@ static FullApplySite speculateMonomorphicTarget(FullApplySite AI,
       VirtBuilder.createUnreachable(AI.getLoc());
     } else {
       IdenBuilder.createBranch(AI.getLoc(), Continue,
-                               ArrayRef<SILValue>(IdenAI.getInstruction()));
+                               { cast<ApplyInst>(IdenAI) });
       VirtBuilder.createBranch(AI.getLoc(), Continue,
-                               ArrayRef<SILValue>(VirtAI.getInstruction()));
+                               { cast<ApplyInst>(VirtAI) });
     }
   }
 
   // Remove the old Apply instruction.
   assert(AI.getInstruction() == &Continue->front() &&
          "AI should be the first instruction in the split Continue block");
-  if (!isa<TryApplyInst>(AI)) {
-    AI.getInstruction()->replaceAllUsesWith(Arg);
-    AI.getInstruction()->eraseFromParent();
-    assert(!Continue->empty() &&
-           "There should be at least a terminator after AI");
-  } else {
+  if (isa<TryApplyInst>(AI)) {
     AI.getInstruction()->eraseFromParent();
     assert(Continue->empty() &&
            "There should not be an instruction after try_apply");
     Continue->eraseFromParent();
+  } else {
+    auto apply = cast<ApplyInst>(AI);
+    apply->replaceAllUsesWith(Arg);
+    apply->eraseFromParent();
+    assert(!Continue->empty() &&
+           "There should be at least a terminator after AI");
   }
 
   // Update the stats.
@@ -250,20 +251,20 @@ static bool isDefaultCaseKnown(ClassHierarchyAnalysis *CHA,
   if (!CD->isChildContextOf(DC))
     return false;
 
-  if (!CD->hasAccessibility())
+  if (!CD->hasAccess())
     return false;
 
   // Only consider 'private' members, unless we are in whole-module compilation.
   switch (CD->getEffectiveAccess()) {
-  case Accessibility::Open:
+  case AccessLevel::Open:
     return false;
-  case Accessibility::Public:
-  case Accessibility::Internal:
+  case AccessLevel::Public:
+  case AccessLevel::Internal:
     if (!AI.getModule().isWholeModule())
       return false;
     break;
-  case Accessibility::FilePrivate:
-  case Accessibility::Private:
+  case AccessLevel::FilePrivate:
+  case AccessLevel::Private:
     break;
   }
 
@@ -325,11 +326,6 @@ static bool tryToSpeculateTarget(FullApplySite AI,
                                  ClassHierarchyAnalysis *CHA) {
   ClassMethodInst *CMI = cast<ClassMethodInst>(AI.getCallee());
 
-  // We cannot devirtualize in cases where dynamic calls are
-  // semantically required.
-  if (CMI->isVolatile())
-    return false;
-
   // Don't devirtualize withUnsafeGuaranteed 'self' as this would prevent
   // retain/release removal.
   //   unmanged._withUnsafeGuaranteedRef { $0.method() }
@@ -382,38 +378,8 @@ static bool tryToSpeculateTarget(FullApplySite AI,
   // True if any instructions were changed or generated.
   bool Changed = false;
 
-  // Collect the direct and indirect subclasses for the class.
-  // Sort these subclasses in the order they should be tested by the
-  // speculative devirtualization. Different strategies could be used,
-  // E.g. breadth-first, depth-first, etc.
-  // Currently, let's use the breadth-first strategy.
-  // The exact static type of the instance should be tested first.
-  auto &DirectSubs = CHA->getDirectSubClasses(CD);
-  auto &IndirectSubs = CHA->getIndirectSubClasses(CD);
-
-  SmallVector<ClassDecl *, 8> Subs(DirectSubs);
-  Subs.append(IndirectSubs.begin(), IndirectSubs.end());
-
-  if (ClassType.is<BoundGenericClassType>()) {
-    // Filter out any subclasses that do not inherit from this
-    // specific bound class.
-    auto RemovedIt = std::remove_if(Subs.begin(),
-        Subs.end(),
-        [&ClassType](ClassDecl *Sub){
-          auto SubCanTy = Sub->getDeclaredType()->getCanonicalType();
-          // Unbound generic type can override a method from
-          // a bound generic class, but this unbound generic
-          // class is not considered to be a subclass of a
-          // bound generic class in a general case.
-          if (isa<UnboundGenericType>(SubCanTy))
-            return false;
-          // Handle the usual case here: the class in question
-          // should be a real subclass of a bound generic class.
-          return !ClassType.isBindableToSuperclassOf(
-              SILType::getPrimitiveObjectType(SubCanTy));
-        });
-    Subs.erase(RemovedIt, Subs.end());
-  }
+  SmallVector<ClassDecl *, 8> Subs;
+  getAllSubclasses(CHA, CD, ClassType, M, Subs);
 
   // Number of subclasses which cannot be handled by checked_cast_br checks.
   int NotHandledSubsNum = 0;
@@ -488,14 +454,14 @@ static bool tryToSpeculateTarget(FullApplySite AI,
     DEBUG(llvm::dbgs() << "Inserting a speculative call for class "
           << CD->getName() << " and subclass " << S->getName() << "\n");
 
-    CanType CanClassType = S->getDeclaredType()->getCanonicalType();
-    SILType ClassType = SILType::getPrimitiveObjectType(CanClassType);
-    if (!ClassType.getClassOrBoundGenericClass()) {
-      // This subclass cannot be handled. This happens e.g. if it is
-      // a generic class.
+    // FIXME: Add support for generic subclasses.
+    if (S->isGenericContext()) {
       NotHandledSubsNum++;
       continue;
     }
+
+    CanType CanClassType = S->getDeclaredInterfaceType()->getCanonicalType();
+    SILType ClassType = SILType::getPrimitiveObjectType(CanClassType);
 
     auto ClassOrMetatypeType = ClassType;
     if (auto EMT = SubType.getAs<AnyMetatypeType>()) {
@@ -559,8 +525,11 @@ namespace {
 
       auto &CurFn = *getFunction();
       // Don't perform speculative devirtualization at -Os.
-      if (CurFn.getModule().getOptions().Optimization ==
-          SILOptions::SILOptMode::OptimizeForSize)
+      if (CurFn.optimizeForSize())
+        return;
+
+      // Don't speculatively devirtualize calls inside thunks.
+      if (CurFn.isThunk())
         return;
 
       ClassHierarchyAnalysis *CHA = PM->getAnalysis<ClassHierarchyAnalysis>();

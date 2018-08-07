@@ -15,7 +15,6 @@
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "Plugins/ExpressionParser/Clang/ClangUserExpression.h"
 #include "Plugins/ExpressionParser/Swift/SwiftASTManipulator.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/Block.h"
@@ -28,6 +27,7 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/StreamString.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
@@ -245,7 +245,7 @@ bool ExpressionSourceCode::SaveExpressionTextToTempFile(
       }
     }
     if (!success)
-      FileSystem::Unlink(FileSpec(buffer.c_str(), true));
+      llvm::sys::fs::remove(expr_source_path);
   }
   if (!success)
     expr_source_path.clear();

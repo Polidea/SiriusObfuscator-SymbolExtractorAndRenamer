@@ -175,7 +175,7 @@ public:
   void run();
 
 private:
-  void analyzeUsesOfBox(SILInstruction *source);
+  void analyzeUsesOfBox(SingleValueInstruction *source);
   void analyzeProjection(ProjectBoxInst *projection);
 
   /// Note that the given instruction is a use of the box (or a use of
@@ -214,7 +214,7 @@ void SelectEnforcement::run() {
 
 // FIXME: This should cover a superset of AllocBoxToStack's findUnexpectedBoxUse
 // to avoid perturbing codegen. They should be sharing the same analysis.
-void SelectEnforcement::analyzeUsesOfBox(SILInstruction *source) {
+void SelectEnforcement::analyzeUsesOfBox(SingleValueInstruction *source) {
   // Collect accesses rooted off of projections.
   for (auto use : source->getUses()) {
     auto user = use->getUser();
@@ -236,7 +236,8 @@ void SelectEnforcement::analyzeUsesOfBox(SILInstruction *source) {
         isa<DeallocBoxInst>(user))
       continue;
 
-    // Treat everything else as an escape:
+    // Treat everything else as an escape.
+    // A Box typically escapes via copy_value.
     noteEscapingUse(user);
   }
   // Accesses may still be empty if the user of the Box is a partial apply
@@ -254,7 +255,7 @@ void SelectEnforcement::analyzeProjection(ProjectBoxInst *projection) {
 
       continue;
     }
-    if (auto *PAI = dyn_cast<PartialApplyInst>(user))
+    if (isa<PartialApplyInst>(user))
       Captures.emplace_back(AddressCapture(*use));
   }
 }
@@ -441,30 +442,64 @@ void SelectEnforcement::updateAccess(BeginAccessInst *access) {
 }
 
 void SelectEnforcement::updateCapture(AddressCapture capture) {
-  llvm::SmallSetVector<PartialApplyInst *, 8> worklist;
+  auto captureIfEscaped = [&](SILInstruction *user) {
+    if (hasPotentiallyEscapedAt(user))
+      dynamicCaptures.recordCapture(capture);
+  };
+  llvm::SmallSetVector<SingleValueInstruction *, 8> worklist;
   auto visitUse = [&](Operand *oper) {
-    if (FullApplySite::isa(oper->getUser())) {
+    auto *user = oper->getUser();
+    if (FullApplySite::isa(user)) {
       // A call is considered a closure access regardless of whether it calls
       // the closure or accepts the closure as an argument.
-      if (hasPotentiallyEscapedAt(oper->getUser())) {
-        dynamicCaptures.recordCapture(capture);
-        return;
-      }
+      captureIfEscaped(user);
+      return;
     }
-    if (auto *PAI = dyn_cast<PartialApplyInst>(oper->getUser())) {
-      assert(oper->get() != PAI->getCallee() && "cannot re-partially apply");
-      // The closure is capture by another closure. Transitively consider any
-      // calls to the parent closure as an access.
-      worklist.insert(PAI);
+    switch (user->getKind()) {
+    case SILInstructionKind::ConvertFunctionInst:
+    case SILInstructionKind::BeginBorrowInst:
+    case SILInstructionKind::CopyValueInst:
+    case SILInstructionKind::EnumInst:
+    case SILInstructionKind::StructInst:
+    case SILInstructionKind::TupleInst:
+    case SILInstructionKind::PartialApplyInst:
+      // Propagate the closure.
+      worklist.insert(cast<SingleValueInstruction>(user));
+      return;
+    case SILInstructionKind::StrongRetainInst:
+    case SILInstructionKind::StrongReleaseInst:
+    case SILInstructionKind::DebugValueInst:
+    case SILInstructionKind::DestroyValueInst:
+    case SILInstructionKind::RetainValueInst:
+    case SILInstructionKind::ReleaseValueInst:
+    case SILInstructionKind::EndBorrowInst:
+      // Benign use.
+      return;
+    case SILInstructionKind::TupleExtractInst:
+    case SILInstructionKind::StructExtractInst:
+    case SILInstructionKind::AssignInst:
+    case SILInstructionKind::BranchInst:
+    case SILInstructionKind::CondBranchInst:
+    case SILInstructionKind::ReturnInst:
+    case SILInstructionKind::StoreInst:
+      // These are all valid partial_apply users, however we don't expect them
+      // to occur with non-escaping closures. Handle them conservatively just in
+      // case they occur.
+      LLVM_FALLTHROUGH;
+    default:
+      DEBUG(llvm::dbgs() << "    Unrecognized partial_apply user: " << *user);
+
+      // Handle unknown uses conservatively by assuming a capture.
+      captureIfEscaped(user);
     }
   };
-  auto *PAI = dyn_cast<PartialApplyInst>(capture.site);
+  SingleValueInstruction *PAIUser = dyn_cast<PartialApplyInst>(capture.site);
   while (true) {
-    for (auto *oper : PAI->getUses())
+    for (auto *oper : PAIUser->getUses())
       visitUse(oper);
     if (worklist.empty())
       break;
-    PAI = worklist.pop_back_val();
+    PAIUser = worklist.pop_back_val();
   }
 }
 

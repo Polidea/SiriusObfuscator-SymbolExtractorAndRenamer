@@ -27,6 +27,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Support/Regex.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
 #include <vector>
@@ -43,8 +44,11 @@ namespace swift {
     Endianness,
     /// Runtime support (_ObjC or _Native)
     Runtime,
+    /// Conditional import of module
+    CanImport,
+    /// Target Environment (currently just 'simulator' or absent)
+    TargetEnvironment,
   };
-  enum { NumPlatformConditionKind = 4 };
 
   /// Describes which Swift 3 Objective-C inference warnings should be
   /// emitted.
@@ -112,6 +116,10 @@ namespace swift {
     /// expression.
     bool CodeCompleteInitsInPostfixExpr = false;
 
+    /// Whether to use heuristics to decide whether to show call-pattern
+    /// completions.
+    bool CodeCompleteCallPatternHeuristics = false;
+
     ///
     /// Flags for use by tests
     ///
@@ -144,12 +152,11 @@ namespace swift {
     /// solver should be debugged.
     unsigned DebugConstraintSolverAttempt = 0;
 
-    /// \brief Enable the experimental constraint propagation in the
-    /// type checker.
-    bool EnableConstraintPropagation = false;
-
     /// \brief Enable the iterative type checker.
     bool IterativeTypeChecker = false;
+
+    /// \brief Enable named lazy member loading.
+    bool NamedLazyMemberLoading = true;
 
     /// Debug the generic signatures computed by the generic signature builder.
     bool DebugGenericSignatures = false;
@@ -158,12 +165,6 @@ namespace swift {
     /// identifier reference with the provided prefix name.
     /// This is for testing purposes.
     std::string DebugForbidTypecheckPrefix;
-
-    /// Number of parallel processes performing AST verification.
-    unsigned ASTVerifierProcessCount = 1U;
-
-    /// ID of the current process for the purposes of AST verification.
-    unsigned ASTVerifierProcessId = 1U;
 
     /// \brief The upper bound, in bytes, of temporary data that can be
     /// allocated by the constraint solver.
@@ -188,9 +189,6 @@ namespace swift {
     /// \brief Staging flag for treating inout parameters as Thread Sanitizer
     /// accesses.
     bool DisableTsanInoutInstrumentation = false;
-
-    /// \brief Staging flag for reporting runtime issues to the debugger.
-    bool ReportErrorsToDebugger = false;
 
     /// \brief Staging flag for class resilience, which we do not want to enable
     /// fully until more code is in place, to allow the standard library to be
@@ -237,12 +235,24 @@ namespace swift {
 
     /// Diagnose uses of NSCoding with classes that have unstable mangled names.
     bool EnableNSKeyedArchiverDiagnostics = true;
-    
+
+    /// Regex for the passes that should report passed and missed optimizations.
+    ///
+    /// These are shared_ptrs so that this class remains copyable.
+    std::shared_ptr<llvm::Regex> OptimizationRemarkPassedPattern;
+    std::shared_ptr<llvm::Regex> OptimizationRemarkMissedPattern;
+
     /// When a conversion from String to Substring fails, emit a fix-it to append
     /// the void subscript '[]'.
     /// FIXME: Remove this flag when void subscripts are implemented.
     /// This is used to guard preemptive testing for the fix-it.
     bool FixStringToSubstringConversions = false;
+
+    /// Whether collect tokens during parsing for syntax coloring.
+    bool CollectParsedToken = false;
+
+    /// Whether to parse syntax tree.
+    bool BuildSyntaxTree = false;
 
     /// Sets the target we are building for and updates platform conditions
     /// to match.
@@ -265,7 +275,8 @@ namespace swift {
         Target.getOSVersion(major, minor, revision);
       } else if (Target.isOSLinux() || Target.isOSFreeBSD() ||
                  Target.isAndroid() || Target.isOSWindows() ||
-                 Target.isPS4() || Target.getTriple().empty()) {
+                 Target.isPS4() || Target.isOSHaiku() ||
+                 Target.getTriple().empty()) {
         major = minor = revision = 0;
       } else {
         llvm_unreachable("Unsupported target OS");
@@ -286,6 +297,9 @@ namespace swift {
     
     /// Returns the value for the given platform condition or an empty string.
     StringRef getPlatformConditionValue(PlatformConditionKind Kind) const;
+
+    /// Check whether the given platform condition matches the given value.
+    bool checkPlatformCondition(PlatformConditionKind Kind, StringRef Value) const;
 
     /// Explicit conditional compilation flags, initialized via the '-D'
     /// compiler flag.
@@ -311,6 +325,15 @@ namespace swift {
       return EffectiveLanguageVersion.isVersion3();
     }
 
+    /// Whether our effective Swift version is at least 'major'.
+    ///
+    /// This is usually the check you want; for example, when introducing
+    /// a new language feature which is only visible in Swift 5, you would
+    /// check for isSwiftVersionAtLeast(5).
+    bool isSwiftVersionAtLeast(unsigned major) const {
+      return EffectiveLanguageVersion.isVersionAtLeast(major);
+    }
+
     /// Returns true if the given platform condition argument represents
     /// a supported target operating system.
     ///
@@ -332,8 +355,7 @@ namespace swift {
     }
 
   private:
-    llvm::SmallVector<std::pair<PlatformConditionKind, std::string>,
-                      NumPlatformConditionKind>
+    llvm::SmallVector<std::pair<PlatformConditionKind, std::string>, 5>
         PlatformConditionValues;
     llvm::SmallVector<std::string, 2> CustomConditionalCompilationFlags;
   };

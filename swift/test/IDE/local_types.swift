@@ -1,6 +1,6 @@
 // Tests lookup and mangling of local types
 
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-swiftc_driver -swift-version 3 -v -emit-module -module-name LocalTypes -o %t/LocalTypes.swiftmodule %s
 // RUN: %target-swift-ide-test -swift-version 3 -print-local-types -I %t -module-to-print LocalTypes -source-filename %s > %t.dump
 // RUN: %FileCheck %s < %t.dump
@@ -100,18 +100,18 @@ public let singleClosure: () -> () = {
 }
 
 public var singlePattern: Int {
-  // CHECK-DAG: 10LocalTypes13singlePatternSifg06SingleD6StructL_V
+  // CHECK-DAG: 10LocalTypes13singlePatternSivg06SingleD6StructL_V
   struct SinglePatternStruct {
     let spsi: Int
   }
-  // CHECK-DAG: 10LocalTypes13singlePatternSifg06SingleD5ClassL_C
+  // CHECK-DAG: 10LocalTypes13singlePatternSivg06SingleD5ClassL_C
   class SinglePatternClass {
     let spcs: String
     init(s: String) {
       self.spcs = s
     }
   }
-  // CHECK-DAG: 10LocalTypes13singlePatternSifg06SingleD4EnumL_O
+  // CHECK-DAG: 10LocalTypes13singlePatternSivg06SingleD4EnumL_O
   enum SinglePatternEnum {
     case SPEI(Int)
   }

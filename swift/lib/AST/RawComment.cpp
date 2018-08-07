@@ -57,11 +57,11 @@ static SingleRawComment::CommentKind getCommentKind(StringRef Comment) {
 SingleRawComment::SingleRawComment(CharSourceRange Range,
                                    const SourceManager &SourceMgr)
     : Range(Range), RawText(SourceMgr.extractText(Range)),
-      Kind(static_cast<unsigned>(getCommentKind(RawText))),
-      EndLine(SourceMgr.getLineNumber(Range.getEnd())) {
+      Kind(static_cast<unsigned>(getCommentKind(RawText))) {
   auto StartLineAndColumn = SourceMgr.getLineAndColumn(Range.getStart());
   StartLine = StartLineAndColumn.first;
   StartColumn = StartLineAndColumn.second;
+  EndLine = SourceMgr.getLineNumber(Range.getEnd());
 }
 
 SingleRawComment::SingleRawComment(StringRef RawText, unsigned StartColumn)
@@ -246,4 +246,19 @@ StringRef Decl::getBriefComment() const {
 
   Context.setBriefComment(this, Result);
   return Result;
+}
+
+CharSourceRange RawComment::getCharSourceRange() {
+  if (this->isEmpty()) {
+    return CharSourceRange();
+  }
+
+  auto Start = this->Comments.front().Range.getStart();
+  if (Start.isInvalid()) {
+    return CharSourceRange();
+  }
+  auto End = this->Comments.back().Range.getEnd();
+  auto Length = static_cast<const char *>(End.getOpaquePointerValue()) -
+                static_cast<const char *>(Start.getOpaquePointerValue());
+  return CharSourceRange(Start, Length);
 }

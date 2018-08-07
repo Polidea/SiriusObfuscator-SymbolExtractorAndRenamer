@@ -41,24 +41,19 @@ namespace irgen {
   void emitBlockHeader(IRGenFunction &IGF,
                        Address storage,
                        CanSILBlockStorageType blockTy,
-                       llvm::Function *invokeFunction,
+                       llvm::Constant *invokeFunction,
                        CanSILFunctionType invokeTy,
                        ForeignFunctionInfo foreignInfo);
 
   /// Emit a partial application thunk for a function pointer applied to a
   /// partial set of argument values.
-  void emitFunctionPartialApplication(IRGenFunction &IGF,
-                                      SILFunction &SILFn,
-                                      llvm::Value *fnPtr,
-                                      llvm::Value *fnContext,
-                                      Explosion &args,
-                                      ArrayRef<SILParameterInfo> argTypes,
-                                      SubstitutionList subs,
-                                      CanSILFunctionType origType,
-                                      CanSILFunctionType substType,
-                                      CanSILFunctionType outType,
-                                      Explosion &out);
-  
+  void emitFunctionPartialApplication(
+      IRGenFunction &IGF, SILFunction &SILFn, const FunctionPointer &fnPtr,
+      llvm::Value *fnContext, Explosion &args,
+      ArrayRef<SILParameterInfo> argTypes, SubstitutionList subs,
+      CanSILFunctionType origType, CanSILFunctionType substType,
+      CanSILFunctionType outType, Explosion &out, bool isOutlined);
+
 } // end namespace irgen
 } // end namespace swift
 

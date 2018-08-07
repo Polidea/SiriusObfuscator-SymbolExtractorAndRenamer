@@ -1,5 +1,5 @@
-// RUN: %target-swift-frontend -emit-sil -sil-serialize-witness-tables %s | %FileCheck %s
-// RUN: %target-swift-frontend -emit-sil -sil-serialize-witness-tables %s | %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -module-name="SILDeclRef"  - | %FileCheck %s
+// RUN: %target-swift-frontend -emit-sil %s | %FileCheck %s
+// RUN: %target-swift-frontend -emit-sil %s | %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all -module-name="SILDeclRef"  - | %FileCheck %s
 
 // Check that all SILDeclRefs are represented in the text form with a signature.
 // This allows to avoid ambiguities which sometimes arise e.g. when a
@@ -40,7 +40,7 @@ public class Derived2: Base {
 
 // CHECK-LABEL: sil @_T010SILDeclRef5testPs5Int32VAA1P_p1p_tF
 // Check that witness_method contains SILDeclRefs with a signature.
-// CHECK: witness_method $@opened({{.*}}) P, #P.foo!1 : <Self where Self : P> (Self) -> () -> Int32, %{{.*}} : $*@opened({{.*}}) P : $@convention(witness_method) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> Int32
+// CHECK: witness_method $@opened({{.*}}) P, #P.foo!1 : <Self where Self : P> (Self) -> () -> Int32, %{{.*}} : $*@opened({{.*}}) P : $@convention(witness_method: P) <τ_0_0 where τ_0_0 : P> (@in_guaranteed τ_0_0) -> Int32
 public func testP(p: P) -> Int32 {
   return p.foo()
 }
@@ -54,7 +54,7 @@ public func testBase(b: Base) -> Int32 {
 
 // Check that vtables and witness tables contain SILDeclRefs with signatures.
 
-// CHECK: sil_vtable Base {
+// CHECK: sil_vtable [serialized] Base {
 // CHECK-NEXT:  #Base.foo!1: (Base) -> () -> Int32 : _T010SILDeclRef4BaseC3foos5Int32VyF	// Base.foo()
 // CHECK-NEXT:  #Base.foo!1: (Base) -> (Int32) -> () : _T010SILDeclRef4BaseC3fooys5Int32V1n_tF	// Base.foo(n:)
 // CHECK-NEXT:  #Base.foo!1: (Base) -> (Float) -> Int32 : _T010SILDeclRef4BaseC3foos5Int32VSf1f_tF	// Base.foo(f:)

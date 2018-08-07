@@ -151,7 +151,7 @@ struct _Prespecialize {
     _createArrayUserWithoutSorting("a".utf8)
     _createArrayUserWithoutSorting("a".utf16)
     _createArrayUserWithoutSorting("a".unicodeScalars)
-    _createArrayUserWithoutSorting("a".characters)
+    _createArrayUserWithoutSorting("a")
   }
 
   // Force pre-specialization of Range<Int>
@@ -171,9 +171,9 @@ struct _Prespecialize {
   }
 }
 
-// Mark with optimize.sil.never to make sure its not get
+// Mark with optimize(none) to make sure its not get
 // rid of by dead function elimination. 
-@_semantics("optimize.sil.never")
+@_optimize(none)
 internal func _swift_forcePrespecializations() {
   _Prespecialize._specializeArrays()
   _Prespecialize._specializeRanges()

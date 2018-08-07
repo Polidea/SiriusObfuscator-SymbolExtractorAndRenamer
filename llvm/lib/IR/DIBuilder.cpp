@@ -12,17 +12,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/IR/DIBuilder.h"
+#include "LLVMContextImpl.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Dwarf.h"
-#include "LLVMContextImpl.h"
 
 using namespace llvm;
 using namespace llvm::dwarf;
+
+cl::opt<bool>
+    UseDbgAddr("use-dbg-addr",
+                llvm::cl::desc("Use llvm.dbg.addr for all local variables"),
+                cl::init(false));
 
 DIBuilder::DIBuilder(Module &m, bool AllowUnresolvedNodes)
   : M(m), VMContext(M.getContext()), CUNode(nullptr),
@@ -37,6 +42,21 @@ void DIBuilder::trackIfUnresolved(MDNode *N) {
 
   assert(AllowUnresolvedNodes && "Cannot handle unresolved nodes");
   UnresolvedNodes.emplace_back(N);
+}
+
+void DIBuilder::finalizeSubprogram(DISubprogram *SP) {
+  MDTuple *Temp = SP->getVariables().get();
+  if (!Temp || !Temp->isTemporary())
+    return;
+
+  SmallVector<Metadata *, 4> Variables;
+
+  auto PV = PreservedVariables.find(SP);
+  if (PV != PreservedVariables.end())
+    Variables.append(PV->second.begin(), PV->second.end());
+
+  DINodeArray AV = getOrCreateArray(Variables);
+  TempMDTuple(Temp)->replaceAllUsesWith(AV.get());
 }
 
 void DIBuilder::finalize() {
@@ -62,25 +82,11 @@ void DIBuilder::finalize() {
     CUNode->replaceRetainedTypes(MDTuple::get(VMContext, RetainValues));
 
   DISubprogramArray SPs = MDTuple::get(VMContext, AllSubprograms);
-  auto resolveVariables = [&](DISubprogram *SP) {
-    MDTuple *Temp = SP->getVariables().get();
-    if (!Temp)
-      return;
-
-    SmallVector<Metadata *, 4> Variables;
-
-    auto PV = PreservedVariables.find(SP);
-    if (PV != PreservedVariables.end())
-      Variables.append(PV->second.begin(), PV->second.end());
-
-    DINodeArray AV = getOrCreateArray(Variables);
-    TempMDTuple(Temp)->replaceAllUsesWith(AV.get());
-  };
   for (auto *SP : SPs)
-    resolveVariables(SP);
+    finalizeSubprogram(SP);
   for (auto *N : RetainValues)
     if (auto *SP = dyn_cast<DISubprogram>(N))
-      resolveVariables(SP);
+      finalizeSubprogram(SP);
 
   if (!AllGVs.empty())
     CUNode->replaceGlobalVariables(MDTuple::get(VMContext, AllGVs));
@@ -126,7 +132,7 @@ DICompileUnit *DIBuilder::createCompileUnit(
     unsigned Lang, DIFile *File, StringRef Producer, bool isOptimized,
     StringRef Flags, unsigned RunTimeVer, StringRef SplitName,
     DICompileUnit::DebugEmissionKind Kind, uint64_t DWOId,
-    bool SplitDebugInlining, bool DebugInfoForProfiling) {
+    bool SplitDebugInlining, bool DebugInfoForProfiling, bool GnuPubnames) {
 
   assert(((Lang <= dwarf::DW_LANG_Fortran08 && Lang >= dwarf::DW_LANG_C89) ||
           (Lang <= dwarf::DW_LANG_hi_user && Lang >= dwarf::DW_LANG_lo_user)) &&
@@ -136,7 +142,7 @@ DICompileUnit *DIBuilder::createCompileUnit(
   CUNode = DICompileUnit::getDistinct(
       VMContext, Lang, File, Producer, isOptimized, Flags, RunTimeVer,
       SplitName, Kind, nullptr, nullptr, nullptr, nullptr, nullptr, DWOId,
-      SplitDebugInlining, DebugInfoForProfiling);
+      SplitDebugInlining, DebugInfoForProfiling, GnuPubnames);
 
   // Create a named metadata so that it is easier to find cu in a module.
   NamedMDNode *NMD = M.getOrInsertNamedMetadata("llvm.dbg.cu");
@@ -147,10 +153,13 @@ DICompileUnit *DIBuilder::createCompileUnit(
 
 static DIImportedEntity *
 createImportedModule(LLVMContext &C, dwarf::Tag Tag, DIScope *Context,
-                     Metadata *NS, unsigned Line, StringRef Name,
+                     Metadata *NS, DIFile *File, unsigned Line, StringRef Name,
                      SmallVectorImpl<TrackingMDNodeRef> &AllImportedModules) {
+  if (Line)
+    assert(File && "Source location has line number but no file");
   unsigned EntitiesCount = C.pImpl->DIImportedEntitys.size();
-  auto *M = DIImportedEntity::get(C, Tag, Context, DINodeRef(NS), Line, Name);
+  auto *M =
+      DIImportedEntity::get(C, Tag, Context, DINodeRef(NS), File, Line, Name);
   if (EntitiesCount < C.pImpl->DIImportedEntitys.size())
     // A new Imported Entity was just added to the context.
     // Add it to the Imported Modules list.
@@ -159,33 +168,38 @@ createImportedModule(LLVMContext &C, dwarf::Tag Tag, DIScope *Context,
 }
 
 DIImportedEntity *DIBuilder::createImportedModule(DIScope *Context,
-                                                  DINamespace *NS,
+                                                  DINamespace *NS, DIFile *File,
                                                   unsigned Line) {
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_module,
-                                Context, NS, Line, StringRef(), AllImportedModules);
+                                Context, NS, File, Line, StringRef(),
+                                AllImportedModules);
 }
 
 DIImportedEntity *DIBuilder::createImportedModule(DIScope *Context,
                                                   DIImportedEntity *NS,
-                                                  unsigned Line) {
+                                                  DIFile *File, unsigned Line) {
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_module,
-                                Context, NS, Line, StringRef(), AllImportedModules);
+                                Context, NS, File, Line, StringRef(),
+                                AllImportedModules);
 }
 
 DIImportedEntity *DIBuilder::createImportedModule(DIScope *Context, DIModule *M,
-                                                  unsigned Line) {
+                                                  DIFile *File, unsigned Line) {
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_module,
-                                Context, M, Line, StringRef(), AllImportedModules);
+                                Context, M, File, Line, StringRef(),
+                                AllImportedModules);
 }
 
 DIImportedEntity *DIBuilder::createImportedDeclaration(DIScope *Context,
                                                        DINode *Decl,
+                                                       DIFile *File,
                                                        unsigned Line,
                                                        StringRef Name) {
   // Make sure to use the unique identifier based metadata reference for
   // types that have one.
   return ::createImportedModule(VMContext, dwarf::DW_TAG_imported_declaration,
-                                Context, Decl, Line, Name, AllImportedModules);
+                                Context, Decl, File, Line, Name,
+                                AllImportedModules);
 }
 
 DIFile *DIBuilder::createFile(StringRef Filename, StringRef Directory,
@@ -449,14 +463,6 @@ DISubroutineType *DIBuilder::createSubroutineType(DITypeRefArray ParameterTypes,
   return DISubroutineType::get(VMContext, Flags, CC, ParameterTypes);
 }
 
-DICompositeType *DIBuilder::createExternalTypeRef(unsigned Tag, DIFile *File,
-                                                  StringRef UniqueIdentifier) {
-  assert(!UniqueIdentifier.empty() && "external type ref without uid");
-  return DICompositeType::get(VMContext, Tag, "", nullptr, 0, nullptr, nullptr,
-                              0, 0, 0, DINode::FlagExternalTypeRef, nullptr, 0,
-                              nullptr, nullptr, UniqueIdentifier);
-}
-
 DICompositeType *DIBuilder::createEnumerationType(
     DIScope *Scope, StringRef Name, DIFile *File, unsigned LineNumber,
     uint64_t SizeInBits, uint32_t AlignInBits, DINodeArray Elements,
@@ -594,6 +600,8 @@ DIGlobalVariableExpression *DIBuilder::createGlobalVariableExpression(
       VMContext, cast_or_null<DIScope>(Context), Name, LinkageName, F,
       LineNumber, Ty, isLocalToUnit, true, cast_or_null<DIDerivedType>(Decl),
       AlignInBits);
+  if (!Expr)
+    Expr = createExpression();
   auto *N = DIGlobalVariableExpression::get(VMContext, GV, Expr);
   AllGVs.push_back(N);
   return N;
@@ -665,12 +673,6 @@ DIExpression *DIBuilder::createExpression(ArrayRef<int64_t> Signed) {
   // TODO: Remove the callers of this signed version and delete.
   SmallVector<uint64_t, 8> Addr(Signed.begin(), Signed.end());
   return createExpression(Addr);
-}
-
-DIExpression *DIBuilder::createFragmentExpression(unsigned OffsetInBytes,
-                                                  unsigned SizeInBytes) {
-  uint64_t Addr[] = {dwarf::DW_OP_LLVM_fragment, OffsetInBytes, SizeInBytes};
-  return DIExpression::get(VMContext, Addr);
 }
 
 template <class... Ts>
@@ -779,6 +781,11 @@ static Instruction *withDebugLoc(Instruction *I, const DILocation *DL) {
   return I;
 }
 
+static Function *getDeclareIntrin(Module &M) {
+  return Intrinsic::getDeclaration(&M, UseDbgAddr ? Intrinsic::dbg_addr
+                                                  : Intrinsic::dbg_declare);
+}
+
 Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
                                       DIExpression *Expr, const DILocation *DL,
                                       Instruction *InsertBefore) {
@@ -788,7 +795,7 @@ Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
              VarInfo->getScope()->getSubprogram() &&
          "Expected matching subprograms");
   if (!DeclareFn)
-    DeclareFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_declare);
+    DeclareFn = getDeclareIntrin(M);
 
   trackIfUnresolved(VarInfo);
   trackIfUnresolved(Expr);
@@ -807,7 +814,7 @@ Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
              VarInfo->getScope()->getSubprogram() &&
          "Expected matching subprograms");
   if (!DeclareFn)
-    DeclareFn = Intrinsic::getDeclaration(&M, Intrinsic::dbg_declare);
+    DeclareFn = getDeclareIntrin(M);
 
   trackIfUnresolved(VarInfo);
   trackIfUnresolved(Expr);
@@ -822,7 +829,7 @@ Instruction *DIBuilder::insertDeclare(Value *Storage, DILocalVariable *VarInfo,
   return withDebugLoc(CallInst::Create(DeclareFn, Args, "", InsertAtEnd), DL);
 }
 
-Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
+Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V,
                                                 DILocalVariable *VarInfo,
                                                 DIExpression *Expr,
                                                 const DILocation *DL,
@@ -839,13 +846,12 @@ Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
   trackIfUnresolved(VarInfo);
   trackIfUnresolved(Expr);
   Value *Args[] = {getDbgIntrinsicValueImpl(VMContext, V),
-                   ConstantInt::get(Type::getInt64Ty(VMContext), Offset),
                    MetadataAsValue::get(VMContext, VarInfo),
                    MetadataAsValue::get(VMContext, Expr)};
   return withDebugLoc(CallInst::Create(ValueFn, Args, "", InsertBefore), DL);
 }
 
-Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
+Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V,
                                                 DILocalVariable *VarInfo,
                                                 DIExpression *Expr,
                                                 const DILocation *DL,
@@ -862,7 +868,6 @@ Instruction *DIBuilder::insertDbgValueIntrinsic(Value *V, uint64_t Offset,
   trackIfUnresolved(VarInfo);
   trackIfUnresolved(Expr);
   Value *Args[] = {getDbgIntrinsicValueImpl(VMContext, V),
-                   ConstantInt::get(Type::getInt64Ty(VMContext), Offset),
                    MetadataAsValue::get(VMContext, VarInfo),
                    MetadataAsValue::get(VMContext, Expr)};
 

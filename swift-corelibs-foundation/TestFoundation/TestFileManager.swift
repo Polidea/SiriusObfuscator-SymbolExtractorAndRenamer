@@ -24,6 +24,7 @@ class TestFileManager : XCTestCase {
             ("test_moveFile", test_moveFile),
             ("test_fileSystemRepresentation", test_fileSystemRepresentation),
             ("test_fileAttributes", test_fileAttributes),
+            ("test_fileSystemAttributes", test_fileSystemAttributes),
             ("test_setFileAttributes", test_setFileAttributes),
             ("test_directoryEnumerator", test_directoryEnumerator),
             ("test_pathEnumerator",test_pathEnumerator),
@@ -31,6 +32,7 @@ class TestFileManager : XCTestCase {
             ("test_subpathsOfDirectoryAtPath", test_subpathsOfDirectoryAtPath),
             ("test_copyItemAtPathToPath", test_copyItemAtPathToPath),
             ("test_homedirectoryForUser", test_homedirectoryForUser),
+            ("test_temporaryDirectoryForUser", test_temporaryDirectoryForUser),
         ]
     }
     
@@ -53,10 +55,10 @@ class TestFileManager : XCTestCase {
         // Ensure attempting to create the directory again fails gracefully.
         XCTAssertNil(try? fm.createDirectory(atPath: path, withIntermediateDirectories:false, attributes:nil))
 
-        var isDir = false
+        var isDir: ObjCBool = false
         let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
         XCTAssertTrue(exists)
-        XCTAssertTrue(isDir)
+        XCTAssertTrue(isDir.boolValue)
 
         do {
             try fm.removeItem(atPath: path)
@@ -74,10 +76,10 @@ class TestFileManager : XCTestCase {
         
         XCTAssertTrue(fm.createFile(atPath: path, contents: Data(), attributes: nil))
         
-        var isDir = false
+        var isDir: ObjCBool = false
         let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
         XCTAssertTrue(exists)
-        XCTAssertFalse(isDir)
+        XCTAssertFalse(isDir.boolValue)
         
         do {
             try fm.removeItem(atPath: path)
@@ -138,6 +140,7 @@ class TestFileManager : XCTestCase {
         XCTAssertEqual(UInt8(bitPattern: result[0]), 0xE2)
         XCTAssertEqual(UInt8(bitPattern: result[1]), 0x98)
         XCTAssertEqual(UInt8(bitPattern: result[2]), 0x83)
+        result.deallocate()
     }
     
     func test_fileAttributes() {
@@ -202,6 +205,40 @@ class TestFileManager : XCTestCase {
             try fm.removeItem(atPath: path)
         } catch {
             XCTFail("Failed to clean up files")
+        }
+    }
+    
+    func test_fileSystemAttributes() {
+        let fm = FileManager.default
+        let path = NSTemporaryDirectory()
+        
+        do {
+            let attrs = try fm.attributesOfFileSystem(forPath: path)
+            
+            XCTAssertTrue(attrs.count > 0)
+            
+            let systemNumber = attrs[.systemNumber] as? NSNumber
+            XCTAssertNotNil(systemNumber)
+            XCTAssertNotEqual(systemNumber!.uint64Value, 0)
+            
+            let systemFreeSize = attrs[.systemFreeSize] as? NSNumber
+            XCTAssertNotNil(systemFreeSize)
+            XCTAssertNotEqual(systemFreeSize!.uint64Value, 0)
+            
+            let systemSize = attrs[.systemSize] as? NSNumber
+            XCTAssertNotNil(systemSize)
+            XCTAssertGreaterThan(systemSize!.uint64Value, systemFreeSize!.uint64Value)
+            
+            let systemFreeNodes = attrs[.systemFreeNodes] as? NSNumber
+            XCTAssertNotNil(systemFreeNodes)
+            XCTAssertNotEqual(systemFreeNodes!.uint64Value, 0)
+            
+            let systemNodes = attrs[.systemNodes] as? NSNumber
+            XCTAssertNotNil(systemNodes)
+            XCTAssertGreaterThan(systemNodes!.uint64Value, systemFreeNodes!.uint64Value)
+            
+        } catch let err {
+            XCTFail("\(err)")
         }
     }
     
@@ -467,9 +504,9 @@ class TestFileManager : XCTestCase {
         }
         
         func directoryExists(atPath path: String) -> Bool {
-            var isDir = false
+            var isDir: ObjCBool = false
             let exists = fm.fileExists(atPath: path, isDirectory: &isDir)
-            return exists && isDir
+            return exists && isDir.boolValue
         }
         
         func createDirectory(atPath path: String) {
@@ -524,5 +561,26 @@ class TestFileManager : XCTestCase {
         XCTAssertNil(filemanger.homeDirectory(forUser: "someuser"))
         XCTAssertNil(filemanger.homeDirectory(forUser: ""))
         XCTAssertNotNil(filemanger.homeDirectoryForCurrentUser)
+    }
+    
+    func test_temporaryDirectoryForUser() {
+        let filemanger = FileManager.default
+        let tmpDir = filemanger.temporaryDirectory
+        XCTAssertNotNil(tmpDir)
+        let tmpFileUrl = tmpDir.appendingPathComponent("test.bin")
+        let tmpFilePath = tmpFileUrl.path
+        
+        do {
+            if filemanger.fileExists(atPath: tmpFilePath) {
+                try filemanger.removeItem(at: tmpFileUrl)
+            }
+            
+            try "hello world".write(to: tmpFileUrl, atomically: false, encoding: .utf8)
+            XCTAssert(filemanger.fileExists(atPath: tmpFilePath))
+
+            try filemanger.removeItem(at: tmpFileUrl)
+        } catch {
+            XCTFail("Unable to write a file to the temporary directory: \(tmpDir), err: \(error)")
+        }
     }
 }

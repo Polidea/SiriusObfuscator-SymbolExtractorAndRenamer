@@ -16,6 +16,11 @@
 import Foundation
 import TestsUtils
 
+public let BitCount = BenchmarkInfo(
+  name: "BitCount",
+  runFunction: run_BitCount,
+  tags: [.validation, .algorithm])
+
 func countBitSet(_ num: Int) -> Int {
   let bits = MemoryLayout<Int>.size * 8
   var cnt: Int = 0
@@ -31,10 +36,12 @@ func countBitSet(_ num: Int) -> Int {
 
 @inline(never)
 public func run_BitCount(_ N: Int) {
-  for _ in 1...100*N {
+  var sum = 0
+  for _ in 1...1000*N {
     // Check some results.
-    CheckResults(countBitSet(1) == 1)
-    CheckResults(countBitSet(2) == 1)
-    CheckResults(countBitSet(2457) == 6)
+    sum = sum &+ countBitSet(getInt(1))
+              &+ countBitSet(getInt(2))
+              &+ countBitSet(getInt(2457))
   }
+  CheckResults(sum == 8 * 1000 * N)
 }

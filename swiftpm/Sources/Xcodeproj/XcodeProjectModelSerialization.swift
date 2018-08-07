@@ -64,7 +64,9 @@ extension Xcode.Project: PropertyListSerializable {
             dict["productRefGroup"] = .identifier(serializer.id(of: productGroup))
         }
         dict["projectDirPath"] = .string(projectDir)
-        dict["targets"] = .array(targets.map({ target in
+        // Ensure that targets are output in a sorted order.
+        let sortedTargets = targets.sorted(by: { $0.name < $1.name })
+        dict["targets"] = .array(sortedTargets.map({ target in
             .identifier(serializer.serialize(object: target))
         }))
         return dict
@@ -352,7 +354,7 @@ extension Xcode.BuildSettingsTable: PropertyListSerializable {
         // FIXME: What is this, and why are we setting it?
         dict["defaultConfigurationIsVisible"] = .string("0")
         // FIXME: Should we allow this to be set in the model?
-        dict["defaultConfigurationName"] = .string("Debug")
+        dict["defaultConfigurationName"] = .string("Release")
         return dict
     }
 }

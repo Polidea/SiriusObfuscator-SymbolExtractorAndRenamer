@@ -4,6 +4,11 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
   list(APPEND LLDB_PLUGINS lldbPluginProcessLinux)
 endif()
 
+set(LLDB_PLUGINS
+  lldbPluginProcessUtility
+  lldbPluginPlatformMacOSX
+)
+
 add_lldb_library(lldbPluginProcessGDBRemote PLUGIN
   GDBRemoteClientBase.cpp
   GDBRemoteCommunication.cpp
@@ -26,8 +31,6 @@ add_lldb_library(lldbPluginProcessGDBRemote PLUGIN
     lldbSymbol
     lldbTarget
     lldbUtility
-    lldbPluginProcessUtility
-    lldbPluginPlatformMacOSX
     ${LLDB_PLUGINS}
   LINK_COMPONENTS
     Support

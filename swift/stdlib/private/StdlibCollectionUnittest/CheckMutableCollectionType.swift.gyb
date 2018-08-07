@@ -121,8 +121,6 @@ extension TestSuite {
     isFixedLengthCollection: Bool,
     collectionIsBidirectional: Bool = false
   ) where
-    C.SubSequence : MutableCollection,
-    C.Indices : Collection,
     CollectionWithEquatableElement.Iterator.Element : Equatable,
     CollectionWithComparableElement.Iterator.Element : Comparable {
 
@@ -278,7 +276,8 @@ self.test("\(testNamePrefix).subscript(_: Range)/Set/semantics") {
       // Call setter implicitly through an inout mutation.
       var c = makeWrappedCollection(test.collection)
 
-      _mapInPlace(&c[test.bounds(in: c)]) {
+      var s = c[test.bounds(in: c)]
+      _mapInPlace(&s) {
         wrapValue(OpaqueValue(extractValue($0).value + 90000))
       }
 
@@ -446,10 +445,9 @@ self.test("\(testNamePrefix)._withUnsafeMutableBufferPointerIfSupported()/semant
   for test in subscriptRangeTests {
     var c = makeWrappedCollection(test.collection)
     var result = c._withUnsafeMutableBufferPointerIfSupported {
-      (baseAddress, count) -> OpaqueValue<Array<OpaqueValue<Int>>> in
-      let bufferPointer =
-        UnsafeMutableBufferPointer(start: baseAddress, count: count)
-      return OpaqueValue(Array(bufferPointer.map(extractValue)))
+      (bufferPointer) -> OpaqueValue<Array<OpaqueValue<Int>>> in
+      let value = OpaqueValue(bufferPointer.map(extractValue))
+      return value
     }
     expectType(Optional<OpaqueValue<Array<OpaqueValue<Int>>>>.self, &result)
     if withUnsafeMutableBufferPointerIsSupported {
@@ -777,8 +775,6 @@ self.test("\(testNamePrefix).partition/InvalidOrderings") {
     withUnsafeMutableBufferPointerIsSupported: Bool,
     isFixedLengthCollection: Bool
   ) where
-    C.SubSequence : BidirectionalCollection & MutableCollection,
-    C.Indices : BidirectionalCollection,
     CollectionWithEquatableElement.Iterator.Element : Equatable,
     CollectionWithComparableElement.Iterator.Element : Comparable {
 
@@ -923,8 +919,6 @@ self.test("\(testNamePrefix).partition/DispatchesThrough_withUnsafeMutableBuffer
     withUnsafeMutableBufferPointerIsSupported: Bool,
     isFixedLengthCollection: Bool
   ) where
-    C.SubSequence : RandomAccessCollection & MutableCollection,
-    C.Indices : RandomAccessCollection,
     CollectionWithEquatableElement.Iterator.Element : Equatable,
     CollectionWithComparableElement.Iterator.Element : Comparable {
 

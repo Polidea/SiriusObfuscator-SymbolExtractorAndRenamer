@@ -298,22 +298,15 @@ public class GitRepository: Repository, WorkingCheckout {
         }
     }
 
-    public func hasUncommitedChanges() -> Bool {
+    public func hasUncommittedChanges() -> Bool {
         // Only a work tree can have changes.
         guard isWorkingRepo else { return false }
         return queue.sync {
-            // Detect if there is a staged or unstaged diff.
-            // This won't detect new untracked files, but it is
-            // just a safety measure for now.
-            let args = [Git.tool, "-C", path.asString, "diff", "--no-ext-diff", "--quiet", "--exit-code"]
-            var nonZeroExit = false
-
-            for args in [args, args + ["--cached"]] {
-                let result = try? Process.popen(arguments: args)
-                nonZeroExit = nonZeroExit || result?.exitStatus != .terminated(code: 0)
+            // Check nothing has been changed
+            guard let result = try? Process.checkNonZeroExit(args: Git.tool, "-C", path.asString, "status", "-s") else {
+                return false
             }
-
-            return nonZeroExit
+            return !result.chomp().isEmpty
         }
     }
 
@@ -383,6 +376,19 @@ public class GitRepository: Repository, WorkingCheckout {
                 args: Git.tool, "-C", path.asString, "checkout", "-b", newBranch)
             return
         }
+    }
+
+    /// Returns true if there is an alternative object store in the repository and it is valid.
+    public func isAlternateObjectStoreValid() -> Bool {
+        let objectStoreFile = path.appending(components: ".git", "objects", "info", "alternates")
+        guard let bytes = try? localFileSystem.readFileContents(objectStoreFile) else {
+            return false
+        }
+        let split = bytes.contents.split(separator: UInt8(ascii: "\n"), maxSplits: 1, omittingEmptySubsequences: false)
+        guard let firstLine = ByteString(split[0]).asString else {
+            return false
+        }
+        return localFileSystem.isDirectory(AbsolutePath(firstLine))
     }
 
     // MARK: Git Operations
@@ -561,7 +567,7 @@ private class GitFileSystemView: FileSystem {
         return tree
     }
 
-    func exists(_ path: AbsolutePath) -> Bool {
+    func exists(_ path: AbsolutePath, followSymlink: Bool) -> Bool {
         do {
             return try getEntry(path) != nil
         } catch {

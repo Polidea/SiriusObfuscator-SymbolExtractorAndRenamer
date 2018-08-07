@@ -5,14 +5,6 @@
 
 #import "../test.h"
 
-extern "C" {
-void *__tsan_external_register_tag(const char *object_type);
-void *__tsan_external_assign_tag(void *addr, void *tag);
-void __tsan_external_read(void *addr, void *caller_pc, void *tag);
-void __tsan_external_write(void *addr, void *caller_pc, void *tag);
-void __tsan_write8(void *addr);
-}
-
 void *tag;
 
 __attribute__((no_sanitize("thread")))
@@ -36,7 +28,7 @@ int main(int argc, char *argv[]) {
       barrier_wait(&barrier);
       ExternalWrite(opaque_object);
     });
-    // CHECK: WARNING: ThreadSanitizer: race on a library object
+    // CHECK: WARNING: ThreadSanitizer: race on HelloWorld
     t1.join();
     t2.join();
   }
@@ -54,7 +46,7 @@ int main(int argc, char *argv[]) {
       barrier_wait(&barrier);
       ExternalWrite(opaque_object);
     });
-    // CHECK: WARNING: ThreadSanitizer: race on a library object
+    // CHECK: WARNING: ThreadSanitizer: race on HelloWorld
     t1.join();
     t2.join();
   }

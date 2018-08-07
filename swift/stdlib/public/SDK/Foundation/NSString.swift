@@ -22,9 +22,8 @@ public class NSSimpleCString {}
 @available(*, unavailable, message: "Please use String or NSString")
 public class NSConstantString {}
 
-@_silgen_name("swift_convertStringToNSString")
-public // COMPILER_INTRINSIC
-func _convertStringToNSString(_ string: String) -> NSString {
+// Called by the SwiftObject implementation.
+public func _convertStringToNSString(_ string: String) -> NSString {
   return string._bridgeToObjectiveC()
 }
 
@@ -114,6 +113,7 @@ extension NSString {
 }
 
 extension NSString : CustomPlaygroundQuickLookable {
+  @available(*, deprecated, message: "NSString.customPlaygroundQuickLook will be removed in a future Swift version")
   public var customPlaygroundQuickLook: PlaygroundQuickLook {
     return .text(self as String)
   }

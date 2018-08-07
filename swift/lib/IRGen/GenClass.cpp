@@ -50,6 +50,7 @@
 #include "GenHeap.h"
 #include "HeapTypeInfo.h"
 #include "MemberAccessStrategy.h"
+#include "MetadataLayout.h"
 
 
 using namespace swift;
@@ -138,6 +139,10 @@ namespace {
     ArrayRef<ElementLayout> getElements(IRGenModule &IGM, SILType type) const {
       return getLayout(IGM, type).getElements();
     }
+
+    StructLayout *createLayoutWithTailElems(IRGenModule &IGM,
+                                            SILType classType,
+                                            ArrayRef<SILType> tailTypes) const;
   };
 } // end anonymous namespace
 
@@ -189,19 +194,19 @@ namespace {
     {
       // Start by adding a heap header.
       switch (refcounting) {
-      case swift::irgen::ReferenceCounting::Native:
+      case ReferenceCounting::Native:
         // For native classes, place a full object header.
         addHeapHeader();
         break;
-      case swift::irgen::ReferenceCounting::ObjC:
+      case ReferenceCounting::ObjC:
         // For ObjC-inheriting classes, we don't reliably know the size of the
         // base class, but NSObject only has an `isa` pointer at most.
         addNSObjectHeader();
         break;
-      case swift::irgen::ReferenceCounting::Block:
-      case swift::irgen::ReferenceCounting::Unknown:
-      case swift::irgen::ReferenceCounting::Bridge:
-      case swift::irgen::ReferenceCounting::Error:
+      case ReferenceCounting::Block:
+      case ReferenceCounting::Unknown:
+      case ReferenceCounting::Bridge:
+      case ReferenceCounting::Error:
         llvm_unreachable("not a class refcounting kind");
       }
       
@@ -212,6 +217,18 @@ namespace {
       
       // Add these fields to the builder.
       addFields(Elements, LayoutStrategy::Universal);
+    }
+
+    /// Adds a layout of a tail-allocated element.
+    void addTailElement(const ElementLayout &Elt) {
+      Elements.push_back(Elt);
+      if (!addField(Elements.back(), LayoutStrategy::Universal)) {
+        // For empty tail allocated elements we still add 1 padding byte.
+        assert(cast<FixedTypeInfo>(Elt.getType()).getFixedStride() == Size(1) &&
+               "empty elements should have stride 1");
+        StructFields.push_back(llvm::ArrayType::get(IGM.Int8Ty, 1));
+        CurSize += Size(1);
+      }
     }
 
     /// Return the element layouts.
@@ -235,16 +252,6 @@ namespace {
     void addFieldsForClass(ClassDecl *theClass, SILType classType) {
       if (theClass->isGenericContext())
         ClassMetadataRequiresDynamicInitialization = true;
-
-      if (!ClassMetadataRequiresDynamicInitialization) {
-        if (auto parentType =
-              theClass->getDeclContext()->getDeclaredTypeInContext()) {
-          if (!tryEmitConstantTypeMetadataRef(IGM,
-                                              parentType->getCanonicalType(),
-                                              SymbolReferenceKind::Absolute))
-            ClassMetadataRequiresDynamicInitialization = true;
-        }
-      }
 
       if (theClass->hasSuperclass()) {
         SILType superclassType = classType.getSuperclass();
@@ -309,6 +316,14 @@ namespace {
           // Count the fields we got from the superclass.
           NumInherited = Elements.size();
         }
+      }
+      
+      // If this class was imported from another module, assume that we may
+      // not know its exact layout.
+      if (theClass->getModuleContext() != IGM.getSwiftModule()) {
+        ClassHasFixedSize = false;
+        if (classHasIncompleteLayout(IGM, theClass))
+          ClassMetadataRequiresDynamicInitialization = true;
       }
 
       // Access strategies should be set by the abstract class layout,
@@ -422,6 +437,37 @@ void ClassTypeInfo::generateLayout(IRGenModule &IGM, SILType classType) const {
   FieldLayout = builder.getClassLayout();
 }
 
+StructLayout *
+ClassTypeInfo::createLayoutWithTailElems(IRGenModule &IGM,
+                                         SILType classType,
+                                         ArrayRef<SILType> tailTypes) const {
+  // Add the elements for the class properties.
+  ClassLayoutBuilder builder(IGM, classType, Refcount);
+
+  // Add the tail elements.
+  for (SILType TailTy : tailTypes) {
+    const TypeInfo &tailTI = IGM.getTypeInfo(TailTy);
+    builder.addTailElement(ElementLayout::getIncomplete(tailTI));
+  }
+
+  // Create a name for the new llvm type.
+  llvm::StructType *classTy =
+    cast<llvm::StructType>(getStorageType()->getPointerElementType());
+  std::string typeName;
+  llvm::raw_string_ostream os(typeName);
+  os << classTy->getName() << "_tailelems" << IGM.TailElemTypeID++;
+
+  // Create the llvm type.
+  llvm::StructType *ResultTy = llvm::StructType::create(IGM.getLLVMContext(),
+                                                        StringRef(os.str()));
+  builder.setAsBodyOfStruct(ResultTy);
+
+  // Create the StructLayout, which is transfered to the caller (the caller is
+  // responsible for deleting it).
+  return new StructLayout(builder, classType.getSwiftRValueType(), ResultTy,
+                          builder.getElements());
+}
+
 const StructLayout &
 ClassTypeInfo::getLayout(IRGenModule &IGM, SILType classType) const {
   // Return the cached layout if available.
@@ -521,6 +567,13 @@ irgen::getClassFieldAccess(IRGenModule &IGM, SILType baseType, VarDecl *field) {
   return classLayout.AllFieldAccesses[fieldIndex];
 }
 
+StructLayout *
+irgen::getClassLayoutWithTailElems(IRGenModule &IGM, SILType classType,
+                                   ArrayRef<SILType> tailTypes) {
+  auto &ClassTI = IGM.getTypeInfo(classType).as<ClassTypeInfo>();
+  return ClassTI.createLayoutWithTailElems(IGM, classType, tailTypes);
+}
+
 OwnedAddress irgen::projectPhysicalClassMemberAddress(IRGenFunction &IGF,
                                                       llvm::Value *base,
                                                       SILType baseType,
@@ -607,7 +660,7 @@ irgen::getPhysicalClassMemberAccessStrategy(IRGenModule &IGM,
   }
 
   case FieldAccess::ConstantIndirect: {
-    Size indirectOffset = getClassFieldOffset(IGM, baseClass, field);
+    Size indirectOffset = getClassFieldOffsetOffset(IGM, baseClass, field);
     return MemberAccessStrategy::getIndirectFixed(indirectOffset,
                                  MemberAccessStrategy::OffsetKind::Bytes_Word);
   }
@@ -724,9 +777,10 @@ static llvm::Value *stackPromote(IRGenFunction &IGF,
   return Alloca.getAddress();
 }
 
-llvm::Value *irgen::appendSizeForTailAllocatedArrays(IRGenFunction &IGF,
-                                                     llvm::Value *size,
-                                                     TailArraysRef TailArrays) {
+std::pair<llvm::Value *, llvm::Value *>
+irgen::appendSizeForTailAllocatedArrays(IRGenFunction &IGF,
+                                    llvm::Value *size, llvm::Value *alignMask,
+                                    TailArraysRef TailArrays) {
   for (const auto &TailArray : TailArrays) {
     SILType ElemTy = TailArray.first;
     llvm::Value *Count = TailArray.second;
@@ -735,16 +789,17 @@ llvm::Value *irgen::appendSizeForTailAllocatedArrays(IRGenFunction &IGF,
 
     // Align up to the tail-allocated array.
     llvm::Value *ElemStride = ElemTI.getStride(IGF, ElemTy);
-    llvm::Value *AlignMask = ElemTI.getAlignmentMask(IGF, ElemTy);
-    size = IGF.Builder.CreateAdd(size, AlignMask);
-    llvm::Value *InvertedMask = IGF.Builder.CreateNot(AlignMask);
+    llvm::Value *ElemAlignMask = ElemTI.getAlignmentMask(IGF, ElemTy);
+    size = IGF.Builder.CreateAdd(size, ElemAlignMask);
+    llvm::Value *InvertedMask = IGF.Builder.CreateNot(ElemAlignMask);
     size = IGF.Builder.CreateAnd(size, InvertedMask);
 
     // Add the size of the tail allocated array.
     llvm::Value *AllocSize = IGF.Builder.CreateMul(ElemStride, Count);
     size = IGF.Builder.CreateAdd(size, AllocSize);
+    alignMask = IGF.Builder.CreateOr(alignMask, ElemAlignMask);
   }
-  return size;
+  return {size, alignMask};
 }
 
 
@@ -785,7 +840,8 @@ llvm::Value *irgen::emitClassAllocation(IRGenFunction &IGF, SILType selfType,
     val = IGF.emitInitStackObjectCall(metadata, val, "reference.new");
   } else {
     // Allocate the object on the heap.
-    size = appendSizeForTailAllocatedArrays(IGF, size, TailArrays);
+    std::tie(size, alignMask)
+      = appendSizeForTailAllocatedArrays(IGF, size, alignMask, TailArrays);
     val = IGF.emitAllocObjectCall(metadata, size, alignMask, "reference.new");
     StackAllocSize = -1;
   }
@@ -808,7 +864,8 @@ llvm::Value *irgen::emitClassAllocationDynamic(IRGenFunction &IGF,
     = emitClassResilientInstanceSizeAndAlignMask(IGF,
                                    selfType.getClassOrBoundGenericClass(),
                                    metadata);
-  size = appendSizeForTailAllocatedArrays(IGF, size, TailArrays);
+  std::tie(size, alignMask)
+    = appendSizeForTailAllocatedArrays(IGF, size, alignMask, TailArrays);
 
   llvm::Value *val = IGF.emitAllocObjectCall(metadata, size, alignMask,
                                              "reference.new");
@@ -2055,9 +2112,13 @@ namespace {
                                      IGM.getPointerAlignment(),
                                      /*constant*/ true,
                                      llvm::GlobalVariable::PrivateLinkage);
+
       switch (IGM.TargetInfo.OutputObjectFormat) {
       case llvm::Triple::MachO:
         var->setSection("__DATA, __objc_const");
+        break;
+      case llvm::Triple::COFF:
+        var->setSection(".data");
         break;
       case llvm::Triple::ELF:
         var->setSection(".data");
@@ -2203,7 +2264,7 @@ ClassDecl *IRGenModule::getObjCRuntimeBaseClass(Identifier name,
   SwiftRootClass->getAttrs().add(ObjCAttr::createNullary(Context, objcName,
     /*isNameImplicit=*/true));
   SwiftRootClass->setImplicit();
-  SwiftRootClass->setAccessibility(Accessibility::Open);
+  SwiftRootClass->setAccess(AccessLevel::Open);
   
   SwiftRootClasses.insert({name, SwiftRootClass});
   return SwiftRootClass;
@@ -2250,6 +2311,26 @@ ClassDecl *irgen::getRootClassForMetaclass(IRGenModule &IGM, ClassDecl *C) {
 
   return IGM.getObjCRuntimeBaseClass(IGM.Context.Id_SwiftObject,
                                      IGM.Context.Id_SwiftObject);
+}
+
+/// If the superclass came from another module, we may have dropped
+/// stored properties due to the Swift language version availability of
+/// their types. In these cases we can't precisely lay out the ivars in
+/// the class object at compile time so we need to do runtime layout.
+bool irgen::classHasIncompleteLayout(IRGenModule &IGM,
+                                     ClassDecl *theClass) {
+  do {
+    if (theClass->getParentModule() != IGM.getSwiftModule()) {
+      for (auto field :
+          theClass->getStoredPropertiesAndMissingMemberPlaceholders()){
+        if (isa<MissingMemberDecl>(field)) {
+          return true;
+        }
+      }
+      return false;
+    }
+  } while ((theClass = theClass->getSuperclassDecl()));
+  return false;
 }
 
 bool irgen::doesClassMetadataRequireDynamicInitialization(IRGenModule &IGM,

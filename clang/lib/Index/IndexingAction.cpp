@@ -184,6 +184,18 @@ void index::indexASTUnit(ASTUnit &Unit,
   DataConsumer->finish();
 }
 
+void index::indexTopLevelDecls(ASTContext &Ctx, ArrayRef<const Decl *> Decls,
+                               std::shared_ptr<IndexDataConsumer> DataConsumer,
+                               IndexingOptions Opts) {
+  IndexingContext IndexCtx(Opts, *DataConsumer);
+  IndexCtx.setASTContext(Ctx);
+
+  DataConsumer->initialize(Ctx);
+  for (const Decl *D : Decls)
+    IndexCtx.indexTopLevelDecl(D);
+  DataConsumer->finish();
+}
+
 void index::indexModuleFile(serialization::ModuleFile &Mod,
                             ASTReader &Reader,
                             std::shared_ptr<IndexDataConsumer> DataConsumer,
@@ -228,7 +240,8 @@ private:
                            FileID FID, unsigned Offset,
                            ASTNodeInfo ASTNode) override {
     // Ignore the predefines buffer.
-    if (FID == PP->getPredefinesFileID())
+    const FileEntry *FE = PP->getSourceManager().getFileEntryForID(FID);
+    if (!FE)
       return true;
 
     FileIndexRecord &Rec = getFileIndexRecord(FID);

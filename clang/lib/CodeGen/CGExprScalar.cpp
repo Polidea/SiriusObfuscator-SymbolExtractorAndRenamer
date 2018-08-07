@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "CodeGenFunction.h"
+#include "CGCleanup.h"
 #include "CGCXXABI.h"
 #include "CGDebugInfo.h"
 #include "CGObjCRuntime.h"
@@ -103,14 +104,14 @@ struct BinOpInfo {
   }
 
   /// Check if the binop computes a division or a remainder.
-  bool isDivisionLikeOperation() const {
+  bool isDivremOp() const {
     return Opcode == BO_Div || Opcode == BO_Rem || Opcode == BO_DivAssign ||
            Opcode == BO_RemAssign;
   }
 
   /// Check if the binop can result in an integer division by zero.
   bool mayHaveIntegerDivisionByZero() const {
-    if (isDivisionLikeOperation())
+    if (isDivremOp())
       if (auto *CI = dyn_cast<llvm::ConstantInt>(RHS))
         return CI->isZero();
     return true;
@@ -118,7 +119,7 @@ struct BinOpInfo {
 
   /// Check if the binop can result in a float division by zero.
   bool mayHaveFloatDivisionByZero() const {
-    if (isDivisionLikeOperation())
+    if (isDivremOp())
       if (auto *CFP = dyn_cast<llvm::ConstantFP>(RHS))
         return CFP->isZero();
     return true;
@@ -372,6 +373,15 @@ public:
   Value *VisitGenericSelectionExpr(GenericSelectionExpr *GE) {
     return Visit(GE->getResultExpr());
   }
+  Value *VisitCoawaitExpr(CoawaitExpr *S) {
+    return CGF.EmitCoawaitExpr(*S).getScalarVal();
+  }
+  Value *VisitCoyieldExpr(CoyieldExpr *S) {
+    return CGF.EmitCoyieldExpr(*S).getScalarVal();
+  }
+  Value *VisitUnaryCoawait(const UnaryOperator *E) {
+    return Visit(E->getSubExpr());
+  }
 
   // Leaves.
   Value *VisitIntegerLiteral(const IntegerLiteral *E) {
@@ -418,14 +428,19 @@ public:
     return CGF.getOpaqueRValueMapping(E).getScalarVal();
   }
 
+  Value *emitConstant(const CodeGenFunction::ConstantEmission &Constant,
+                      Expr *E) {
+    assert(Constant && "not a constant");
+    if (Constant.isReference())
+      return EmitLoadOfLValue(Constant.getReferenceLValue(CGF, E),
+                              E->getExprLoc());
+    return Constant.getValue();
+  }
+
   // l-values.
   Value *VisitDeclRefExpr(DeclRefExpr *E) {
-    if (CodeGenFunction::ConstantEmission result = CGF.tryEmitAsConstant(E)) {
-      if (result.isReference())
-        return EmitLoadOfLValue(result.getReferenceLValue(CGF, E),
-                                E->getExprLoc());
-      return result.getValue();
-    }
+    if (CodeGenFunction::ConstantEmission Constant = CGF.tryEmitAsConstant(E))
+      return emitConstant(Constant, E);
     return EmitLoadOfLValue(E);
   }
 
@@ -574,11 +589,7 @@ public:
     return CGF.LoadCXXThis();
   }
 
-  Value *VisitExprWithCleanups(ExprWithCleanups *E) {
-    CGF.enterFullExpression(E);
-    CodeGenFunction::RunCleanupsScope Scope(CGF);
-    return Visit(E->getSubExpr());
-  }
+  Value *VisitExprWithCleanups(ExprWithCleanups *E);
   Value *VisitCXXNewExpr(const CXXNewExpr *E) {
     return CGF.EmitCXXNewExpr(E);
   }
@@ -1003,10 +1014,41 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
     return Builder.CreateVectorSplat(NumElements, Src, "splat");
   }
 
-  // Allow bitcast from vector to integer/fp of the same size.
-  if (isa<llvm::VectorType>(SrcTy) ||
-      isa<llvm::VectorType>(DstTy))
-    return Builder.CreateBitCast(Src, DstTy, "conv");
+  if (isa<llvm::VectorType>(SrcTy) || isa<llvm::VectorType>(DstTy)) {
+    // Allow bitcast from vector to integer/fp of the same size.
+    unsigned SrcSize = SrcTy->getPrimitiveSizeInBits();
+    unsigned DstSize = DstTy->getPrimitiveSizeInBits();
+    if (SrcSize == DstSize)
+      return Builder.CreateBitCast(Src, DstTy, "conv");
+
+    // Conversions between vectors of different sizes are not allowed except
+    // when vectors of half are involved. Operations on storage-only half
+    // vectors require promoting half vector operands to float vectors and
+    // truncating the result, which is either an int or float vector, to a
+    // short or half vector.
+
+    // Source and destination are both expected to be vectors.
+    llvm::Type *SrcElementTy = SrcTy->getVectorElementType();
+    llvm::Type *DstElementTy = DstTy->getVectorElementType();
+
+    assert(((SrcElementTy->isIntegerTy() &&
+             DstElementTy->isIntegerTy()) ||
+            (SrcElementTy->isFloatingPointTy() &&
+             DstElementTy->isFloatingPointTy())) &&
+           "unexpected conversion between a floating-point vector and an "
+           "integer vector");
+
+    // Truncate an i32 vector to an i16 vector.
+    if (SrcElementTy->isIntegerTy())
+      return Builder.CreateIntCast(Src, DstTy, false, "conv");
+
+    // Truncate a float vector to a half vector.
+    if (SrcSize > DstSize)
+      return Builder.CreateFPTrunc(Src, DstTy, "conv");
+
+    // Promote a half vector to a float vector.
+    return Builder.CreateFPExt(Src, DstTy, "conv");
+  }
 
   // Finally, we have the arithmetic types: real int/float.
   Value *Res = nullptr;
@@ -1293,13 +1335,15 @@ Value *ScalarExprEmitter::VisitConvertVectorExpr(ConvertVectorExpr *E) {
 }
 
 Value *ScalarExprEmitter::VisitMemberExpr(MemberExpr *E) {
-  llvm::APSInt Value;
-  if (E->EvaluateAsInt(Value, CGF.getContext(), Expr::SE_AllowSideEffects)) {
-    if (E->isArrow())
-      CGF.EmitScalarExpr(E->getBase());
-    else
-      EmitLValue(E->getBase());
-    return Builder.getInt(Value);
+  if (CodeGenFunction::ConstantEmission Constant = CGF.tryEmitAsConstant(E)) {
+    CGF.EmitIgnoredExpr(E->getBase());
+    return emitConstant(Constant, E);
+  } else {
+    llvm::APSInt Value;
+    if (E->EvaluateAsInt(Value, CGF.getContext(), Expr::SE_AllowSideEffects)) {
+      CGF.EmitIgnoredExpr(E->getBase());
+      return Builder.getInt(Value);
+    }
   }
 
   return EmitLoadOfLValue(E);
@@ -1588,10 +1632,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     }
     // Since target may map different address spaces in AST to the same address
     // space, an address space conversion may end up as a bitcast.
-    auto *Src = Visit(E);
-    return CGF.CGM.getTargetCodeGenInfo().performAddrSpaceCast(CGF, Src,
-                                                               E->getType(),
-                                                               DestTy);
+    return CGF.CGM.getTargetCodeGenInfo().performAddrSpaceCast(
+        CGF, Visit(E), E->getType()->getPointeeType().getAddressSpace(),
+        DestTy->getPointeeType().getAddressSpace(), ConvertType(DestTy));
   }
   case CK_AtomicToNonAtomic:
   case CK_NonAtomicToAtomic:
@@ -1788,6 +1831,16 @@ Value *ScalarExprEmitter::VisitStmtExpr(const StmtExpr *E) {
     return nullptr;
   return CGF.EmitLoadOfScalar(CGF.MakeAddrLValue(RetAlloca, E->getType()),
                               E->getExprLoc());
+}
+
+Value *ScalarExprEmitter::VisitExprWithCleanups(ExprWithCleanups *E) {
+  CGF.enterFullExpression(E);
+  CodeGenFunction::RunCleanupsScope Scope(CGF);
+  Value *V = Visit(E->getSubExpr());
+  // Defend against dominance problems caused by jumps out of expression
+  // evaluation through the shared cleanup block.
+  Scope.ForceCleanup({&V});
+  return V;
 }
 
 //===----------------------------------------------------------------------===//
@@ -3695,8 +3748,12 @@ Value *ScalarExprEmitter::VisitAsTypeExpr(AsTypeExpr *E) {
   // vector to get a vec4, then a bitcast if the target type is different.
   if (NumElementsSrc == 3 && NumElementsDst != 3) {
     Src = ConvertVec3AndVec4(Builder, CGF, Src, 4);
-    Src = createCastsForTypeOfSameSize(Builder, CGF.CGM.getDataLayout(), Src,
-                                       DstTy);
+
+    if (!CGF.CGM.getCodeGenOpts().PreserveVec3Type) {
+      Src = createCastsForTypeOfSameSize(Builder, CGF.CGM.getDataLayout(), Src,
+                                         DstTy);
+    }
+
     Src->setName("astype");
     return Src;
   }
@@ -3705,9 +3762,12 @@ Value *ScalarExprEmitter::VisitAsTypeExpr(AsTypeExpr *E) {
   // to vec4 if the original type is not vec4, then a shuffle vector to
   // get a vec3.
   if (NumElementsSrc != 3 && NumElementsDst == 3) {
-    auto Vec4Ty = llvm::VectorType::get(DstTy->getVectorElementType(), 4);
-    Src = createCastsForTypeOfSameSize(Builder, CGF.CGM.getDataLayout(), Src,
-                                       Vec4Ty);
+    if (!CGF.CGM.getCodeGenOpts().PreserveVec3Type) {
+      auto Vec4Ty = llvm::VectorType::get(DstTy->getVectorElementType(), 4);
+      Src = createCastsForTypeOfSameSize(Builder, CGF.CGM.getDataLayout(), Src,
+                                         Vec4Ty);
+    }
+
     Src = ConvertVec3AndVec4(Builder, CGF, Src, 3);
     Src->setName("astype");
     return Src;
@@ -3874,7 +3934,7 @@ Value *CodeGenFunction::EmitCheckedInBoundsGEP(Value *Ptr,
   /// Return the result of the given binary operation.
   auto eval = [&](BinaryOperator::Opcode Opcode, llvm::Value *LHS,
                   llvm::Value *RHS) -> llvm::Value * {
-    assert(Opcode == BO_Add || Opcode == BO_Mul && "Can't eval binop");
+    assert((Opcode == BO_Add || Opcode == BO_Mul) && "Can't eval binop");
 
     // If the operands are constants, return a constant result.
     if (auto *LHSCI = dyn_cast<llvm::ConstantInt>(LHS)) {
