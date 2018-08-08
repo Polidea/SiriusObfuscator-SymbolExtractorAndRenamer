@@ -45,11 +45,12 @@ swift_4_1_1_tag="swift-4.1.1-RELEASE"
 swift_4_1_2_tag="swift-4.1.2-RELEASE"
 swift_4_1_3_tag="swift-4.1.3-RELEASE"
 
+swift_4_2_branch="swift-4.2-branch"
+
 if [ $# -eq 0 ]
 then
     echo "Using default: Swift 4.1.2"
     tag=$swift_4_1_2_tag # default to swift 4.1.2
-
 else
     tag_parameter="$1"
     case $tag_parameter in
@@ -89,6 +90,9 @@ else
         -4.1.3|--swift-4.1.3)
 	tag=$swift_4_1_3_tag
         ;;
+        -4.2|--swift-4.2)
+        branch=$swift_4_2_branch
+	;;
         -h|--help)
         echo "Available parameters for checing dependencies in given version:"
         echo ""
@@ -104,6 +108,7 @@ else
         echo "-4.1.1 | --swift-4.1.1 -> Swift 4.1.1 (release)"
         echo "-4.1.2 | --swift-4.1.2 -> Swift 4.1.2 (release)"
         echo "-4.1.3 | --swift-4.1.3 -> Swift 4.1.3 (release)"
+        echo "-4.2   | --swift-4.2   -> Swift 4.2   (unreleased)"
         exit 0
         ;;
         *)
@@ -123,17 +128,32 @@ git checkout ${diff_end} && git format-patch ${diff_start} --stdout > obfuscator
 echo "RESET TO START: git reset --hard ${diff_start}"
 git reset --hard ${diff_start}
 
-for i in ${!names[@]}; do
-  echo "DATA: ${names[$i]} -> ${paths[$i]} -> ${tag_parameter}"
-  echo "GIT REMOVE: git rm -r ${names[$i]}"
-  git rm -r ${names[$i]}
-  echo "REMOTE: git remote add ${names[$i]} https://github.com/${paths[$i]}.git"
-  git remote add ${names[$i]} https://github.com/${paths[$i]}.git
-  echo "FETCH: git fetch --tags ${names[$i]} \"+refs/tags/*:refs/rtags/${names[$i]}/*\""
-  git fetch --tags ${names[$i]} "+refs/tags/*:refs/rtags/${names[$i]}/*"
-  echo "READ-TREE: git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}"
-  git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}
-done
+if [ -n "$branch" ]
+then
+    for i in ${!names[@]}; do
+        echo "DATA: ${names[$i]} -> ${paths[$i]} -> ${branch}"
+        echo "GIT REMOVE: git rm -r ${names[$i]}"
+        git rm -r ${names[$i]}
+        echo "REMOTE: git remote add ${names[$i]} https://github.com/${paths[$i]}.git"
+        git remote add ${names[$i]} https://github.com/${paths[$i]}.git
+        echo "FETCH: git fetch ${names[$i]}"
+        git fetch ${names[$i]}
+        echo "READ-TREE: git read-tree --prefix=${names[$i]} -u ${names[$i]}/${branch}"
+        git read-tree --prefix=${names[$i]} -u ${names[$i]}/${branch}
+    done 
+else
+    for i in ${!names[@]}; do
+        echo "DATA: ${names[$i]} -> ${paths[$i]} -> ${tag}"
+        echo "GIT REMOVE: git rm -r ${names[$i]}"
+        git rm -r ${names[$i]}
+        echo "REMOTE: git remote add ${names[$i]} https://github.com/${paths[$i]}.git"
+        git remote add ${names[$i]} https://github.com/${paths[$i]}.git
+        echo "FETCH: git fetch --tags ${names[$i]} \"+refs/tags/*:refs/rtags/${names[$i]}/*\""
+        git fetch --tags ${names[$i]} "+refs/tags/*:refs/rtags/${names[$i]}/*"
+        echo "READ-TREE: git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}"
+        git read-tree refs/rtags/${names[$i]}/${tag} -u --prefix=${names[$i]}
+    done
+fi
 
 git rm -r ninja
 git remote add ninja https://github.com/ninja-build/ninja.git
