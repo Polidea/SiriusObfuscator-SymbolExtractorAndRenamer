@@ -1,5 +1,5 @@
 // REQUIRES: no_asan
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift %S/Inputs/ConcreteTypes.swift %S/Inputs/GenericTypes.swift %S/Inputs/Protocols.swift %S/Inputs/Extensions.swift %S/Inputs/Closures.swift -parse-as-library -emit-module -emit-library -module-name TypesToReflect -o %t/libTypesToReflect.%target-dylib-extension
 // RUN: %target-swift-reflection-dump -binary-filename %t/libTypesToReflect.%target-dylib-extension | %FileCheck %s
 
@@ -40,18 +40,57 @@
 
 // CHECK: aFunction: (TypesToReflect.C, TypesToReflect.S, TypesToReflect.E, Swift.Int) -> Swift.Int
 // CHECK: (function
-// CHECK:   (class TypesToReflect.C)
-// CHECK:   (struct TypesToReflect.S)
-// CHECK:   (enum TypesToReflect.E)
-// CHECK:   (struct Swift.Int)
-// CHECK:   (struct Swift.Int))
+// CHECK:   (parameters
+// CHECK:     (class TypesToReflect.C)
+// CHECK:     (struct TypesToReflect.S)
+// CHECK:     (enum TypesToReflect.E)
+// CHECK:     (struct Swift.Int)
+// CHECK:   (result
+// CHECK:     (struct Swift.Int))
 
 // CHECK: aFunctionWithVarArgs: (TypesToReflect.C, TypesToReflect.S...) -> ()
 // CHECK: (function
-// CHECK:   (class TypesToReflect.C)
-// CHECK:   (bound_generic_struct Swift.Array
-// CHECK:     (struct TypesToReflect.S))
-// CHECK:   (tuple))
+// CHECK:   (parameters
+// CHECK:     (class TypesToReflect.C)
+// CHECK:     (variadic
+// CHECK:       (struct TypesToReflect.S))
+// CHECK:   (result
+// CHECK:     (tuple))
+
+// CHECK: aFunctionWithInout1: (inout TypesToReflect.C) -> ()
+// CHECK: (function
+// CHECK:  (parameters
+// CHECK:    (inout
+// CHECK:      (class TypesToReflect.C))
+// CHECK:  (result
+// CHECK:    (tuple))
+
+// CHECK: aFunctionWithInout2: (TypesToReflect.C, inout Swift.Int) -> ()
+// CHECK: (function
+// CHECK:  (parameters
+// CHECK:    (class TypesToReflect.C)
+// CHECK:    (inout
+// CHECK:      (struct Swift.Int))
+// CHECK:  (result
+// CHECK:    (tuple))
+
+// CHECK: aFunctionWithInout3: (inout TypesToReflect.C, inout Swift.Int) -> ()
+// CHECK: (function
+// CHECK:  (parameters
+// CHECK:    (inout
+// CHECK:      (class TypesToReflect.C))
+// CHECK:    (inout
+// CHECK:      (struct Swift.Int))
+// CHECK:  (result
+// CHECK:    (tuple))
+
+// CHECK: aFunctionWithShared: (__shared TypesToReflect.C) -> ()
+// CHECK: (function
+// CHECK:  (parameters
+// CHECK:    (shared
+// CHECK:      (class TypesToReflect.C))
+// CHECK:  (result
+// CHECK:    (tuple))
 
 // CHECK: TypesToReflect.S.NestedS
 // CHECK: ------------------------
@@ -86,11 +125,13 @@
 
 // CHECK: aFunction: (TypesToReflect.C, TypesToReflect.S, TypesToReflect.E, Swift.Int) -> Swift.Int
 // CHECK: (function
-// CHECK:   (class TypesToReflect.C)
-// CHECK:   (struct TypesToReflect.S)
-// CHECK:   (enum TypesToReflect.E)
-// CHECK:   (struct Swift.Int)
-// CHECK:   (struct Swift.Int))
+// CHECK:   (parameters
+// CHECK:     (class TypesToReflect.C)
+// CHECK:     (struct TypesToReflect.S)
+// CHECK:     (enum TypesToReflect.E)
+// CHECK:     (struct Swift.Int)
+// CHECK:   (result
+// CHECK:     (struct Swift.Int))
 
 // CHECK: aFunctionWithThinRepresentation: @convention(thin) () -> ()
 // CHECK: (function convention=thin
@@ -113,11 +154,13 @@
 
 // CHECK: Function: (TypesToReflect.C, TypesToReflect.S, TypesToReflect.E, Swift.Int) -> ()
 // CHECK: (function
-// CHECK:   (class TypesToReflect.C)
-// CHECK:   (struct TypesToReflect.S)
-// CHECK:   (enum TypesToReflect.E)
-// CHECK:   (struct Swift.Int)
-// CHECK:   (tuple))
+// CHECK:   (parameters
+// CHECK:     (class TypesToReflect.C)
+// CHECK:     (struct TypesToReflect.S)
+// CHECK:     (enum TypesToReflect.E)
+// CHECK:     (struct Swift.Int)
+// CHECK:   (result
+// CHECK:     (tuple))
 
 // CHECK: Tuple: (TypesToReflect.C, TypesToReflect.S, Swift.Int)
 // CHECK: (tuple
@@ -174,15 +217,21 @@
 
 // CHECK: function: (TypesToReflect.C1<A>) -> (TypesToReflect.S1<A>) -> (TypesToReflect.E1<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C1
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S1
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C1
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E1
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S1
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:       (result
+// CHECK:         (function
+// CHECK:           (parameters
+// CHECK:             (bound_generic_enum TypesToReflect.E1
+// CHECK:               (generic_type_parameter depth=0 index=0))
+// CHECK:           (result
+// CHECK:             (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C1<A>, TypesToReflect.S1<A>, TypesToReflect.E1<A>, Swift.Int)
 // CHECK: (tuple
@@ -213,15 +262,21 @@
 
 // CHECK: function: (TypesToReflect.C1<A>) -> (TypesToReflect.S1<A>) -> (TypesToReflect.E1<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C1
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S1
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C1
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E1
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S1
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:       (result
+// CHECK:         (function
+// CHECK:           (parameters
+// CHECK:             (bound_generic_enum TypesToReflect.E1
+// CHECK:               (generic_type_parameter depth=0 index=0))
+// CHECK:           (result
+// CHECK:             (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C2<A>, TypesToReflect.S2<A>, TypesToReflect.E2<A>, Swift.Int)
 // CHECK: (tuple
@@ -237,8 +292,7 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: dependentMember1: A.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Inner)
 
 // CHECK: TypesToReflect.C3
@@ -257,15 +311,21 @@
 
 // CHECK: function: (TypesToReflect.C3<A>) -> (TypesToReflect.S3<A>) -> (TypesToReflect.E3<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C3
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S3
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C3
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E3
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S3
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:       (result
+// CHECK:         (function
+// CHECK:           (parameters
+// CHECK:             (bound_generic_enum TypesToReflect.E3
+// CHECK:               (generic_type_parameter depth=0 index=0))
+// CHECK:           (result
+// CHECK:             (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C3<A>, TypesToReflect.S3<A>, TypesToReflect.E3<A>, Swift.Int)
 // CHECK: (tuple
@@ -281,15 +341,12 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: dependentMember1: A.Outer
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Outer)
 
 // CHECK: dependentMember2: A.Outer.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
-// CHECK:   (dependent_member
-// CHECK:     (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
+// CHECK:   (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:     (generic_type_parameter depth=0 index=0) member=Outer) member=Inner)
 
 // CHECK: TypesToReflect.C4
@@ -312,15 +369,21 @@
 
 // CHECK: function: (TypesToReflect.C1<A>) -> (TypesToReflect.S1<A>) -> (TypesToReflect.E1<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C1
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S1
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C1
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E1
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S1
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:     (result
+// CHECK:       (function
+// CHECK:         (parameters
+// CHECK:           (bound_generic_enum TypesToReflect.E1
+// CHECK:             (generic_type_parameter depth=0 index=0))
+// CHECK:         (result
+// CHECK:           (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C1<A>, TypesToReflect.Box<TypesToReflect.S1<A>>, TypesToReflect.Box<TypesToReflect.E1<A>>, Swift.Int)
 // CHECK: (tuple
@@ -355,15 +418,21 @@
 
 // CHECK: function: (TypesToReflect.C2<A>) -> (TypesToReflect.S2<A>) -> (TypesToReflect.E2<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C2
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S2
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C2
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E2
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S2
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:       (result
+// CHECK:         (function
+// CHECK:           (parameters
+// CHECK:             (bound_generic_enum TypesToReflect.E2
+// CHECK:               (generic_type_parameter depth=0 index=0))
+// CHECK:           (result
+// CHECK:             (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C2<A>, TypesToReflect.Box<TypesToReflect.S2<A>>, TypesToReflect.Box<TypesToReflect.E2<A>>, Swift.Int)
 // CHECK: (tuple
@@ -381,8 +450,7 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: dependentMember1: A.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Inner)
 
 // CHECK: TypesToReflect.S3
@@ -403,15 +471,21 @@
 
 // CHECK: function: (TypesToReflect.C3<A>) -> (TypesToReflect.S3<A>) -> (TypesToReflect.E3<A>) -> Swift.Int
 // CHECK: (function
-// CHECK:   (bound_generic_class TypesToReflect.C3
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (function
-// CHECK:     (bound_generic_struct TypesToReflect.S3
+// CHECK:   (parameters
+// CHECK:     (bound_generic_class TypesToReflect.C3
 // CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
 // CHECK:     (function
-// CHECK:       (bound_generic_enum TypesToReflect.E3
-// CHECK:         (generic_type_parameter depth=0 index=0))
-// CHECK:       (struct Swift.Int))))
+// CHECK:       (parameters
+// CHECK:         (bound_generic_struct TypesToReflect.S3
+// CHECK:           (generic_type_parameter depth=0 index=0))
+// CHECK:       (result
+// CHECK:         (function
+// CHECK:           (parameters
+// CHECK:             (bound_generic_enum TypesToReflect.E3
+// CHECK:               (generic_type_parameter depth=0 index=0))
+// CHECK:           (result
+// CHECK:             (struct Swift.Int))))
 
 // CHECK: tuple: (TypesToReflect.C3<A>, TypesToReflect.Box<TypesToReflect.S3<A>>, TypesToReflect.Box<TypesToReflect.E3<A>>, Swift.Int)
 // CHECK: (tuple
@@ -429,15 +503,12 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: dependentMember1: A.Outer
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Outer)
 
 // CHECK: dependentMember2: A.Outer.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
-// CHECK:   (dependent_member
-// CHECK:     (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
+// CHECK:   (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:     (generic_type_parameter depth=0 index=0) member=Outer) member=Inner)
 
 // CHECK: TypesToReflect.S4
@@ -461,9 +532,11 @@
 
 // CHECK: Function: (A) -> TypesToReflect.E1<A>
 // CHECK: (function
-// CHECK:   (generic_type_parameter depth=0 index=0)
-// CHECK:   (bound_generic_enum TypesToReflect.E1
-// CHECK:     (generic_type_parameter depth=0 index=0)))
+// CHECK:   (parameters
+// CHECK:     (generic_type_parameter depth=0 index=0)
+// CHECK:   (result
+// CHECK:     (bound_generic_enum TypesToReflect.E1
+// CHECK:       (generic_type_parameter depth=0 index=0)))
 
 // CHECK: Tuple: (TypesToReflect.C1<A>, TypesToReflect.S1<A>, Swift.Int)
 // CHECK: (tuple
@@ -496,10 +569,12 @@
 
 // CHECK: Function: (A.Type) -> TypesToReflect.E1<A>
 // CHECK: (function
-// CHECK:   (metatype
-// CHECK:     (generic_type_parameter depth=0 index=0))
-// CHECK:   (bound_generic_enum TypesToReflect.E1
-// CHECK:     (generic_type_parameter depth=0 index=0)))
+// CHECK:   (parameters
+// CHECK:     (metatype
+// CHECK:       (generic_type_parameter depth=0 index=0))
+// CHECK:   (result
+// CHECK:     (bound_generic_enum TypesToReflect.E1
+// CHECK:       (generic_type_parameter depth=0 index=0)))
 
 // CHECK: Tuple: (TypesToReflect.C2<A>, TypesToReflect.S2<A>, Swift.Int)
 // CHECK: (tuple
@@ -513,8 +588,7 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: DependentMemberInner: A.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Inner)
 
 // CHECK: ExistentialMetatype: A.Type
@@ -537,11 +611,13 @@
 
 // CHECK: Function: (A.Type.Type) -> TypesToReflect.E1<A>
 // CHECK: (function
-// CHECK:   (metatype
+// CHECK:   (parameters
 // CHECK:     (metatype
+// CHECK:       (metatype
+// CHECK:         (generic_type_parameter depth=0 index=0)))
+// CHECK:   (result
+// CHECK:     (bound_generic_enum TypesToReflect.E1
 // CHECK:       (generic_type_parameter depth=0 index=0)))
-// CHECK:   (bound_generic_enum TypesToReflect.E1
-// CHECK:     (generic_type_parameter depth=0 index=0)))
 
 // CHECK: Tuple: (TypesToReflect.C3<A>, TypesToReflect.S3<A>, Swift.Int)
 // CHECK: (tuple
@@ -555,15 +631,12 @@
 // CHECK: (generic_type_parameter depth=0 index=0)
 
 // CHECK: DependentMemberOuter: A.Outer
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:   (generic_type_parameter depth=0 index=0) member=Outer)
 
 // CHECK: DependentMemberInner: A.Outer.Inner
-// CHECK: (dependent_member
-// CHECK:   (protocol TypesToReflect.P1)
-// CHECK:   (dependent_member
-// CHECK:     (protocol TypesToReflect.P2)
+// CHECK: (dependent_member protocol=14TypesToReflect2P1P
+// CHECK:   (dependent_member protocol=14TypesToReflect2P2P
 // CHECK:     (generic_type_parameter depth=0 index=0) member=Outer) member=Inner)
 
 // CHECK: TypesToReflect.E4
@@ -585,7 +658,8 @@
 // CHECK: TypesToReflect.HasFileprivateProtocol
 // CHECK: -------------------------------------
 // CHECK: x: TypesToReflect.(FileprivateProtocol in _{{[0-9A-F]+}})
-// CHECK: (protocol TypesToReflect.(FileprivateProtocol in _{{[0-9A-F]+}}))
+// CHECK: (protocol_composition
+// CHECK-NEXT: (protocol TypesToReflect.(FileprivateProtocol in _{{[0-9A-F]+}})))
 
 // CHECK: ASSOCIATED TYPES:
 // CHECK: =================

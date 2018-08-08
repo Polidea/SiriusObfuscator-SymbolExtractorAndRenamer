@@ -7,12 +7,24 @@
 	objects = {
 
 /* Begin PBXAggregateTarget section */
+		40513F172057621500DCA088 /* Generate-version.h */ = {
+			isa = PBXAggregateTarget;
+			buildConfigurationList = 40513F1A2057621500DCA088 /* Build configuration list for PBXAggregateTarget "Generate-version.h" */;
+			buildPhases = (
+				40513F1B2057626A00DCA088 /* Generate version.h */,
+			);
+			dependencies = (
+			);
+			name = "Generate-version.h";
+			productName = "Generate version.h";
+		};
 		E178FCC11A1BF3270039F8B5 /* B&I */ = {
 			isa = PBXAggregateTarget;
 			buildConfigurationList = E178FCC41A1BF3270039F8B5 /* Build configuration list for PBXAggregateTarget "B&I" */;
 			buildPhases = (
 			);
 			dependencies = (
+				4020AD1E20584D4600884842 /* PBXTargetDependency */,
 				E178FCC61A1BF32F0039F8B5 /* PBXTargetDependency */,
 				E1604CB71BB9E07B001153A1 /* PBXTargetDependency */,
 				E1B839631B541CDE00DB876B /* PBXTargetDependency */,
@@ -64,8 +76,16 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		402614272087B10B005BD956 /* Tracing.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 402614262087B10B005BD956 /* Tracing.cpp */; };
+		403B1A492053123B0018A322 /* version.h in Headers */ = {isa = PBXBuildFile; fileRef = 403B1A48205312000018A322 /* version.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		40B3C91020D3AEC9007C5847 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
+		40B3C91120D3AEC9007C5847 /* libgtest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A224DD19F99B0E0059043E /* libgtest.a */; };
+		40B3C91220D3AEC9007C5847 /* libgtest_main.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A224E619F99C580059043E /* libgtest_main.a */; };
+		40B3C91C20D3B075007C5847 /* C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 40B3C91B20D3AF9B007C5847 /* C-API.cpp */; };
+		40B3C92720D3B24D007C5847 /* libllbuild.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1ADC23A1A85936400D5387C /* libllbuild.dylib */; };
+		9ADD8B2320D7009F0066BE9A /* BuildSystem-C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9ADD8B2220D7009A0066BE9A /* BuildSystem-C-API.cpp */; };
 		9D0A6D811E1FFEA800BE636F /* TempDir.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9D0A6D7F1E1FFEA800BE636F /* TempDir.cpp */; };
-		9D2107C61DFADDFA00BE26FF /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
+		9D2107C61DFADDFA00BE26FF /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
 		9D5A5C311EC5FAE600DC84CC /* TempDir.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9D0A6D7F1E1FFEA800BE636F /* TempDir.cpp */; };
 		9DADBBAD1E256C73005B4869 /* PlatformUtility.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9DADBBAC1E256C52005B4869 /* PlatformUtility.cpp */; };
 		9DB047BA1DF9D4A4006CDF52 /* libgtest_main.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A224E619F99C580059043E /* libgtest_main.a */; };
@@ -74,14 +94,16 @@
 		9DB047BD1DF9D4B0006CDF52 /* libllbuildBuildSystem.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B839571B541BFD00DB876B /* libllbuildBuildSystem.a */; };
 		9DB047C01DF9F592006CDF52 /* LaneBasedExecutionQueueTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9DB0478B1DF9D3E2006CDF52 /* LaneBasedExecutionQueueTest.cpp */; };
 		9DDD8BE11DDCAB9A00FB62D2 /* SQLiteBuildDBTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 9DDD8BDF1DDCAB9A00FB62D2 /* SQLiteBuildDBTest.cpp */; };
+		BC669C54205A2C2000942C3B /* BuildSystemBindings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8DEF0620300AAF00E9EF0C /* BuildSystemBindings.swift */; };
+		BC669C55205A2C2000942C3B /* CoreBindings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC8DEF0720300AAF00E9EF0C /* CoreBindings.swift */; };
 		C5740D091E03523100567DD8 /* BuildSystemFrontendTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C5740D081E03523100567DD8 /* BuildSystemFrontendTest.cpp */; };
 		C5740D0A1E03527B00567DD8 /* libllbuildCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243E19F997150059043E /* libllbuildCore.a */; };
 		C5740D0B1E03528600567DD8 /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
-		C5740D0C1E03529300567DD8 /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		C5740D0C1E03529300567DD8 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E104FAF71B655A97005C68A0 /* BuildSystemPerfTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = E104FAF61B655A97005C68A0 /* BuildSystemPerfTests.mm */; };
 		E104FAFA1B655BBA005C68A0 /* libllbuildBuildSystem.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B839571B541BFD00DB876B /* libllbuildBuildSystem.a */; };
 		E104FAFB1B655C33005C68A0 /* libllvmSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B838A21B52E7DE00DB876B /* libllvmSupport.a */; };
-		E104FAFE1B655C5D005C68A0 /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
+		E104FAFE1B655C5D005C68A0 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
 		E104FB001B6568E0005C68A0 /* BuildSystem.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E104FAFF1B6568E0005C68A0 /* BuildSystem.cpp */; };
 		E1066C081BC5ACAB00B892CE /* LaneBasedExecutionQueue.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1066C071BC5ACAB00B892CE /* LaneBasedExecutionQueue.cpp */; };
 		E1075ED71E4EA417007D52C6 /* BuildSystemTaskTests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1075ED61E4EA417007D52C6 /* BuildSystemTaskTests.cpp */; };
@@ -94,41 +116,43 @@
 		E1192CEE1C49DBA600F85890 /* BuildSystem-C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1DD22761C472A3F00555A5D /* BuildSystem-C-API.cpp */; };
 		E1192CEF1C49DBA900F85890 /* Core-C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1DD22741C47259900555A5D /* Core-C-API.cpp */; };
 		E1192CF11C49DC3300F85890 /* libllbuildBuildSystem.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B839571B541BFD00DB876B /* libllbuildBuildSystem.a */; };
-		E1192CF21C49DC4F00F85890 /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
+		E1192CF21C49DC4F00F85890 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
 		E11F2B7F1E4D255B00176BAD /* BuildDescription.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E11F2B7E1E4D255B00176BAD /* BuildDescription.cpp */; };
 		E120B9ED1E4E65EB00B28469 /* BinaryCodingTests.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E120B9EB1E4E65EB00B28469 /* BinaryCodingTests.cpp */; };
 		E120B9EE1E4E65EB00B28469 /* ShellUtilityTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E120B9EC1E4E65EB00B28469 /* ShellUtilityTest.cpp */; };
 		E120B9F11E4E669F00B28469 /* BinaryCodingPerfTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = E120B9F01E4E669F00B28469 /* BinaryCodingPerfTests.mm */; };
-		E12BFF181C4972D900B8D20F /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
-		E12BFF191C4972E000B8D20F /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
+		E124FC922075370E00ECCC50 /* BuildEngineCancellationTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E124FC912075370D00ECCC50 /* BuildEngineCancellationTest.cpp */; };
+		E12BFF181C4972D900B8D20F /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
+		E12BFF191C4972E000B8D20F /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
 		E12BFF1A1C4972F000B8D20F /* libllbuildBuildSystem.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B839571B541BFD00DB876B /* libllbuildBuildSystem.a */; };
 		E12E12A91AD50AE500ACE7B3 /* CommandLineStatusOutput.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E12E12A71AD50AE500ACE7B3 /* CommandLineStatusOutput.cpp */; };
 		E12E12AA1AD50AE600ACE7B3 /* CommandLineStatusOutput.h in Headers */ = {isa = PBXBuildFile; fileRef = E12E12A81AD50AE500ACE7B3 /* CommandLineStatusOutput.h */; };
 		E138129E1C536D0E000092C0 /* FileSystem.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E138129D1C536D0E000092C0 /* FileSystem.cpp */; };
 		E13812A21C53708E000092C0 /* FileSystemTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E13812A11C53708E000092C0 /* FileSystemTest.cpp */; };
 		E13812A31C5370A4000092C0 /* libllvmSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B838A21B52E7DE00DB876B /* libllvmSupport.a */; };
-		E13812A41C5370B3000092C0 /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
+		E13812A41C5370B3000092C0 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
 		E147DEFB1BA81CF70032D08E /* SerialQueue.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E147DEFA1BA81CF70032D08E /* SerialQueue.cpp */; };
 		E147DF0D1BA81D330032D08E /* libgtest.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A224DD19F99B0E0059043E /* libgtest.a */; };
 		E147DF0E1BA81D330032D08E /* libgtest_main.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A224E619F99C580059043E /* libgtest_main.a */; };
 		E147DF0F1BA81D330032D08E /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
 		E147DF1A1BA81D5A0032D08E /* SerialQueueTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E147DF191BA81D4E0032D08E /* SerialQueueTest.cpp */; };
 		E14C2CEF1BDAAD070033CA2A /* libllvmSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B838A21B52E7DE00DB876B /* libllvmSupport.a */; };
-		E14C2CF01BDAAD1E0033CA2A /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
-		E14C2CF11BDAAD210033CA2A /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		E14C2CF01BDAAD1E0033CA2A /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
+		E14C2CF11BDAAD210033CA2A /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E15B6EC41B546A1600643066 /* ConvertUTF.c in Sources */ = {isa = PBXBuildFile; fileRef = E15B6EC21B546A0D00643066 /* ConvertUTF.c */; };
 		E15B6EC51B546A1600643066 /* ConvertUTFWrapper.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E15B6EC31B546A0D00643066 /* ConvertUTFWrapper.cpp */; };
-		E15B6EC71B546A2C00643066 /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
-		E1604CA51BB9E01D001153A1 /* libcurses.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.dylib */; };
-		E1604CA61BB9E01D001153A1 /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		E15B6EC71B546A2C00643066 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
+		E1604CA51BB9E01D001153A1 /* libcurses.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E15B6EC61B546A2C00643066 /* libcurses.tbd */; };
+		E1604CA61BB9E01D001153A1 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E1604CA71BB9E01D001153A1 /* libllvmSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B838A21B52E7DE00DB876B /* libllvmSupport.a */; };
 		E1604CA81BB9E01D001153A1 /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
 		E1604CAA1BB9E01D001153A1 /* libllbuildCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243E19F997150059043E /* libllbuildCore.a */; };
 		E1604CAB1BB9E01D001153A1 /* libllbuildBuildSystem.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1B839571B541BFD00DB876B /* libllbuildBuildSystem.a */; };
-		E1604CB51BB9E03E001153A1 /* swift-build-tool.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1604CB41BB9E032001153A1 /* swift-build-tool.cpp */; };
+		E1604CB51BB9E03E001153A1 /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1604CB41BB9E032001153A1 /* main.cpp */; };
 		E171538D1A0BF702004CD598 /* CorePerfTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = E171538C1A0BF702004CD598 /* CorePerfTests.mm */; };
 		E17440C31CE192FF0070A30C /* ShellUtility.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E17440C21CE192FF0070A30C /* ShellUtility.cpp */; };
 		E192E92F1E30014E00122F17 /* BuildValueTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E192E92E1E30014E00122F17 /* BuildValueTest.cpp */; };
+		E19880EB1FA256FC00E490FF /* POSIXEnvironmentTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19880EA1FA256FB00E490FF /* POSIXEnvironmentTest.cpp */; };
 		E19D79921A15D9E6002604FB /* MakefileDepsParser.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19D79911A15D9E6002604FB /* MakefileDepsParser.cpp */; };
 		E19D79951A15DA06002604FB /* MakefileDepsParserTest.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E19D79941A15DA06002604FB /* MakefileDepsParserTest.cpp */; };
 		E1A0B0FF1C971582006DA08F /* DependencyInfoParser.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A0B0FE1C971581006DA08F /* DependencyInfoParser.cpp */; };
@@ -144,7 +168,7 @@
 		E1A2244D19F9978A0059043E /* ManifestLoader.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A2241D19F991530059043E /* ManifestLoader.cpp */; };
 		E1A2244E19F9978C0059043E /* Parser.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A2241E19F991530059043E /* Parser.cpp */; };
 		E1A224BE19F9995E0059043E /* Version.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A2240719F991530059043E /* Version.cpp */; };
-		E1A224CA19F999CB0059043E /* llbuild.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A2240319F991350059043E /* llbuild.cpp */; };
+		E1A224CA19F999CB0059043E /* main.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1A2240319F991350059043E /* main.cpp */; };
 		E1A224D519F99A2D0059043E /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
 		E1A224D619F99A300059043E /* libllbuildCommands.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242E19F997050059043E /* libllbuildCommands.a */; };
 		E1A224D719F99A320059043E /* libllbuildNinja.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243619F9970D0059043E /* libllbuildNinja.a */; };
@@ -164,7 +188,6 @@
 		E1AAD28A1BC609F600F54680 /* BuildSystemFrontend.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1AAD2891BC609F600F54680 /* BuildSystemFrontend.cpp */; };
 		E1AAD28E1BC65A1900F54680 /* BuildNode.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1AAD28D1BC65A1900F54680 /* BuildNode.cpp */; };
 		E1AAD2901BC65AB200F54680 /* ExternalCommand.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1AAD28F1BC65AB200F54680 /* ExternalCommand.cpp */; };
-		E1AAD2921BC65B5000F54680 /* SwiftTools.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1AAD2911BC65B5000F54680 /* SwiftTools.cpp */; };
 		E1ADC23E1A85938C00D5387C /* C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1ADC2311A85922F00D5387C /* C-API.cpp */; };
 		E1ADC23F1A8593AD00D5387C /* llbuild.h in Headers */ = {isa = PBXBuildFile; fileRef = E1ADC2351A8592AA00D5387C /* llbuild.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		E1B3B9DC1E4D5A7A00DF1FBC /* MockBuildSystemDelegate.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1B3B9DA1E4D5A7A00DF1FBC /* MockBuildSystemDelegate.cpp */; };
@@ -213,18 +236,18 @@
 		E1C404BA1A030A1D003392BA /* libllbuildCommands.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242E19F997050059043E /* libllbuildCommands.a */; };
 		E1C404BB1A030A1D003392BA /* libllbuildCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243E19F997150059043E /* libllbuildCore.a */; };
 		E1C404BC1A030A1D003392BA /* libllbuildNinja.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243619F9970D0059043E /* libllbuildNinja.a */; };
-		E1C404BD1A030A23003392BA /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		E1C404BD1A030A23003392BA /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E1D191C91B472437000C4E95 /* C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1ADC2311A85922F00D5387C /* C-API.cpp */; };
 		E1D191CA1B472440000C4E95 /* llbuild.h in Headers */ = {isa = PBXBuildFile; fileRef = E1ADC2351A8592AA00D5387C /* llbuild.h */; settings = {ATTRIBUTES = (Public, ); }; };
 		E1D191CB1B472554000C4E95 /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
 		E1D191CC1B472554000C4E95 /* libllbuildCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243E19F997150059043E /* libllbuildCore.a */; };
-		E1D191CD1B472560000C4E95 /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		E1D191CD1B472560000C4E95 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E1DB70221A85978100891F4D /* libllbuildBasic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2242519F991B40059043E /* libllbuildBasic.a */; };
 		E1DB70231A85978900891F4D /* libllbuildCore.a in Frameworks */ = {isa = PBXBuildFile; fileRef = E1A2243E19F997150059043E /* libllbuildCore.a */; };
 		E1DD22751C47259900555A5D /* Core-C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1DD22741C47259900555A5D /* Core-C-API.cpp */; };
 		E1DD22771C472A3F00555A5D /* BuildSystem-C-API.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1DD22761C472A3F00555A5D /* BuildSystem-C-API.cpp */; };
 		E1E221071A00689C00957481 /* BuildDB.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1E221051A0067F800957481 /* BuildDB.cpp */; };
-		E1E221091A00B82100957481 /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.dylib */; };
+		E1E221091A00B82100957481 /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = E1E221081A00B82100957481 /* libsqlite3.tbd */; };
 		E1E2210C1A015B9E00957481 /* SQLiteBuildDB.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1E2210B1A015B9E00957481 /* SQLiteBuildDB.cpp */; };
 		E1E4A5B41BFC1394001BFFC4 /* BuildKey.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1E4A5B31BFC1394001BFFC4 /* BuildKey.cpp */; };
 		E1FC67F91BB1F427004EBC54 /* BuildValue.cpp in Sources */ = {isa = PBXBuildFile; fileRef = E1FC67F81BB1F417004EBC54 /* BuildValue.cpp */; };
@@ -232,6 +255,55 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		4020AD1D20584D4600884842 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 40513F172057621500DCA088;
+			remoteInfo = "Generate-version.h";
+		};
+		40513F1C2057629D00DCA088 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 40513F172057621500DCA088;
+			remoteInfo = "Generate version.h";
+		};
+		40513F1E205762CD00DCA088 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 40513F172057621500DCA088;
+			remoteInfo = "Generate-version.h";
+		};
+		40513F20205762DF00DCA088 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 40513F172057621500DCA088;
+			remoteInfo = "Generate-version.h";
+		};
+		40B3C90220D3AEC9007C5847 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1A224DC19F99B0E0059043E;
+			remoteInfo = gtest;
+		};
+		40B3C90420D3AEC9007C5847 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1A224E519F99C580059043E;
+			remoteInfo = gtest_main;
+		};
+		40B3C92520D3B248007C5847 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E1ADC2391A85936400D5387C;
+			remoteInfo = libllbuild;
+		};
 		9D2107C31DF9FBFA00BE26FF /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E1A223E919F98F1C0059043E /* Project object */;
@@ -641,6 +713,15 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		40B3C91520D3AEC9007C5847 /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 		9DB047A61DF9D43D006CDF52 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -698,9 +779,82 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		147018862097909B0079261E /* ui */ = {isa = PBXFileReference; lastKnownFileType = folder; path = ui; sourceTree = "<group>"; };
+		1484D1D620943D2100D3830F /* docs */ = {isa = PBXFileReference; lastKnownFileType = folder; path = docs; sourceTree = "<group>"; };
+		1484D1D720943E6800D3830F /* cmake */ = {isa = PBXFileReference; lastKnownFileType = folder; path = cmake; sourceTree = "<group>"; };
+		1484D1D82094508A00D3830F /* CODEOWNERS */ = {isa = PBXFileReference; lastKnownFileType = text; path = CODEOWNERS; sourceTree = "<group>"; };
+		1484D1D92094509400D3830F /* CONTRIBUTING.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CONTRIBUTING.md; sourceTree = "<group>"; };
+		1484D1DA2094509E00D3830F /* LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE.txt; sourceTree = "<group>"; };
+		1484D1DB209450A600D3830F /* Vagrantfile */ = {isa = PBXFileReference; lastKnownFileType = text; path = Vagrantfile; sourceTree = "<group>"; };
+		1484D1F42094534700D3830F /* module.modulemap */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.module-map"; path = module.modulemap; sourceTree = "<group>"; };
+		1484D1F5209453A500D3830F /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		1484D1F62094540400D3830F /* DependencyInfoParser.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = DependencyInfoParser.h; sourceTree = "<group>"; };
+		1484D1F72094548A00D3830F /* libstdc++14-workaround.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "libstdc++14-workaround.h"; path = "../include/libstdc++14-workaround.h"; sourceTree = "<group>"; };
+		1484D1FA2094566F00D3830F /* llbuild.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = llbuild.py; sourceTree = "<group>"; };
+		1484D1FB2094582C00D3830F /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
+		1484D1FC2094586800D3830F /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		1484D1FD2094589700D3830F /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = CMakeLists.txt; path = perftests/CMakeLists.txt; sourceTree = "<group>"; };
+		1484D1FE2094E7C700D3830F /* gtest-llbuild-config.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "gtest-llbuild-config.h"; sourceTree = "<group>"; };
+		1484D2002094E7D600D3830F /* gtest-port.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "gtest-port.h"; sourceTree = "<group>"; };
+		1484D2012094E7D600D3830F /* gtest.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = gtest.h; sourceTree = "<group>"; };
+		1484D2022094E7D600D3830F /* gtest-printers.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "gtest-printers.h"; sourceTree = "<group>"; };
+		1484D2032094E86600D3830F /* gtest-port-arch.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "gtest-port-arch.h"; sourceTree = "<group>"; };
+		1484D2042094E8B100D3830F /* check-coverage */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "check-coverage"; sourceTree = "<group>"; };
+		1484D2052094E8C300D3830F /* create-dummy-ninja-from-DB.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = "create-dummy-ninja-from-DB.py"; sourceTree = "<group>"; };
+		1484D2062094E8CE00D3830F /* install-sources */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "install-sources"; sourceTree = "<group>"; };
+		1484D2082094E8DE00D3830F /* generate-llbuild-manifest */ = {isa = PBXFileReference; lastKnownFileType = text; path = "generate-llbuild-manifest"; sourceTree = "<group>"; };
+		1484D20B2094E8E700D3830F /* ptreetime.dtrace */ = {isa = PBXFileReference; lastKnownFileType = text; path = ptreetime.dtrace; sourceTree = "<group>"; };
+		1484D20C2094E8E700D3830F /* Makefile */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.make; path = Makefile; sourceTree = "<group>"; };
+		1484D20D2094E8E700D3830F /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
+		1484D20E2094E8E700D3830F /* ptreetime_interpose.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = ptreetime_interpose.c; sourceTree = "<group>"; };
+		1484D20F2094E8E700D3830F /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		1484D2102094E8E700D3830F /* ptreetime.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = ptreetime.py; sourceTree = "<group>"; };
+		1484D2122094E90600D3830F /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		1484D2132094E90600D3830F /* llbuild-project-settings.el */ = {isa = PBXFileReference; lastKnownFileType = text; path = "llbuild-project-settings.el"; sourceTree = "<group>"; };
+		1484D2152094E99900D3830F /* Path.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Path.inc; sourceTree = "<group>"; };
+		1484D2162094E99900D3830F /* Host.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Host.inc; sourceTree = "<group>"; };
+		1484D2172094E99900D3830F /* Signals.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Signals.inc; sourceTree = "<group>"; };
+		1484D2182094E99900D3830F /* TimeValue.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = TimeValue.inc; sourceTree = "<group>"; };
+		1484D2192094E99900D3830F /* Process.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Process.inc; sourceTree = "<group>"; };
+		1484D21A2094E99900D3830F /* WindowsSupport.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = WindowsSupport.h; sourceTree = "<group>"; };
+		1484D21B2094E99900D3830F /* Program.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Program.inc; sourceTree = "<group>"; };
+		1484D21C2094E99900D3830F /* Mutex.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Mutex.inc; sourceTree = "<group>"; };
+		1484D21D2094E99900D3830F /* Memory.inc */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.pascal; path = Memory.inc; sourceTree = "<group>"; };
+		1484D21E2094E9CE00D3830F /* LeanWindows.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = LeanWindows.h; path = ../../../lib/Basic/LeanWindows.h; sourceTree = "<group>"; };
+		402614262087B10B005BD956 /* Tracing.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = Tracing.cpp; sourceTree = "<group>"; };
+		40377C7B2061C44900C0FD4D /* generate-version-h.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "generate-version-h.sh"; sourceTree = "<group>"; };
+		40377C7C2061D24200C0FD4D /* Package.swift */ = {isa = PBXFileReference; indentWidth = 4; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; tabWidth = 4; };
+		403B1A48205312000018A322 /* version.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = version.h; sourceTree = "<group>"; };
+		404C888E20924BF8000C201A /* DenseMapInfo.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = DenseMapInfo.h; sourceTree = "<group>"; };
+		4062058120C7263C00B28281 /* StringList.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = StringList.h; sourceTree = "<group>"; };
+		40B3C8FF20D3AEBC007C5847 /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
+		40B3C91A20D3AEC9007C5847 /* CAPITests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = CAPITests; sourceTree = BUILT_PRODUCTS_DIR; };
+		40B3C91B20D3AF9B007C5847 /* C-API.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "C-API.cpp"; sourceTree = "<group>"; };
+		40F4F4F220531D8A00170EE1 /* version.h.in */ = {isa = PBXFileReference; lastKnownFileType = text; path = version.h.in; sourceTree = "<group>"; };
+		40F638CE2051EDC800A1CFBE /* count-lines-2 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "count-lines-2"; sourceTree = "<group>"; };
+		40F638CF2051EDC800A1CFBE /* count-lines-4 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "count-lines-4"; sourceTree = "<group>"; };
+		40F638D02051EDC800A1CFBE /* count-lines-3 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "count-lines-3"; sourceTree = "<group>"; };
+		40F638D12051EDC800A1CFBE /* simplebuild.py */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.python; path = simplebuild.py; sourceTree = "<group>"; };
+		40F638D22051EDC800A1CFBE /* simple-make */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "simple-make"; sourceTree = "<group>"; };
+		40F638D32051EDC800A1CFBE /* util.py */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.python; path = util.py; sourceTree = "<group>"; };
+		40F638D42051EDC800A1CFBE /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		40F638D52051EDC800A1CFBE /* count-lines-1 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "count-lines-1"; sourceTree = "<group>"; };
+		40F638D82051EDC800A1CFBE /* basic.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = basic.swift; sourceTree = "<group>"; };
+		40F638DA2051EDC800A1CFBE /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		40F638DB2051EDC800A1CFBE /* .gitignore */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
+		40F638DD2051EDC800A1CFBE /* index.html */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.html; path = index.html; sourceTree = "<group>"; };
+		40F638DE2051EDC800A1CFBE /* PlayLife.js */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.javascript; path = PlayLife.js; sourceTree = "<group>"; };
+		40F638DF2051EDC800A1CFBE /* Package.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		40F638E22051EDC800A1CFBE /* LifeBoard.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = LifeBoard.swift; sourceTree = "<group>"; };
+		40F638E32051EDC800A1CFBE /* LifeBoard+Build.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = "LifeBoard+Build.swift"; sourceTree = "<group>"; };
+		40F638E42051EDC800A1CFBE /* BuildLife.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BuildLife.swift; sourceTree = "<group>"; };
+		40F638E62051EDC800A1CFBE /* main.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		40F638E92051EDC800A1CFBE /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		40F638EA2051EDC800A1CFBE /* main.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = main.c; sourceTree = "<group>"; };
+		40F638EC2053043D00A1CFBE /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 		54E187B61CD296EA00F7EC89 /* BuildNode.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BuildNode.h; sourceTree = "<group>"; };
 		54E187B71CD296EA00F7EC89 /* ExternalCommand.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ExternalCommand.h; sourceTree = "<group>"; };
-		54E187B81CD296EA00F7EC89 /* SwiftTools.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SwiftTools.h; sourceTree = "<group>"; };
+		9ADD8B2220D7009A0066BE9A /* BuildSystem-C-API.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "BuildSystem-C-API.cpp"; sourceTree = "<group>"; };
 		9D0A6D7F1E1FFEA800BE636F /* TempDir.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = TempDir.cpp; sourceTree = "<group>"; };
 		9D0A6D801E1FFEA800BE636F /* TempDir.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = TempDir.h; sourceTree = "<group>"; };
 		9D2589301E3820E3006C76F4 /* PlatformUtility.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = PlatformUtility.h; sourceTree = "<group>"; };
@@ -709,6 +863,10 @@
 		9DB0478B1DF9D3E2006CDF52 /* LaneBasedExecutionQueueTest.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = LaneBasedExecutionQueueTest.cpp; sourceTree = "<group>"; };
 		9DB047A81DF9D43D006CDF52 /* BuildSystemTests */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = BuildSystemTests; sourceTree = BUILT_PRODUCTS_DIR; };
 		9DDD8BDF1DDCAB9A00FB62D2 /* SQLiteBuildDBTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = SQLiteBuildDBTest.cpp; sourceTree = "<group>"; };
+		B563CEA620A6252500276198 /* CrossPlatformCompatibility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = CrossPlatformCompatibility.h; sourceTree = "<group>"; };
+		BC8DEF0520300AAF00E9EF0C /* CMakeLists.txt */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 2; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; tabWidth = 2; };
+		BC8DEF0620300AAF00E9EF0C /* BuildSystemBindings.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = BuildSystemBindings.swift; sourceTree = "<group>"; };
+		BC8DEF0720300AAF00E9EF0C /* CoreBindings.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = CoreBindings.swift; sourceTree = "<group>"; };
 		C5740D081E03523100567DD8 /* BuildSystemFrontendTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildSystemFrontendTest.cpp; sourceTree = "<group>"; };
 		C5740D0D1E0352D800567DD8 /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
 		E104FAF61B655A97005C68A0 /* BuildSystemPerfTests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = BuildSystemPerfTests.mm; sourceTree = "<group>"; };
@@ -734,6 +892,7 @@
 		E120B9EC1E4E65EB00B28469 /* ShellUtilityTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = ShellUtilityTest.cpp; sourceTree = "<group>"; };
 		E120B9EF1E4E65FC00B28469 /* BinaryCoding.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BinaryCoding.h; sourceTree = "<group>"; };
 		E120B9F01E4E669F00B28469 /* BinaryCodingPerfTests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = BinaryCodingPerfTests.mm; sourceTree = "<group>"; };
+		E124FC912075370D00ECCC50 /* BuildEngineCancellationTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildEngineCancellationTest.cpp; sourceTree = "<group>"; };
 		E12E12A71AD50AE500ACE7B3 /* CommandLineStatusOutput.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = CommandLineStatusOutput.cpp; sourceTree = "<group>"; };
 		E12E12A81AD50AE500ACE7B3 /* CommandLineStatusOutput.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = CommandLineStatusOutput.h; sourceTree = "<group>"; };
 		E138129C1C536CFC000092C0 /* FileSystem.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = FileSystem.h; sourceTree = "<group>"; };
@@ -750,10 +909,10 @@
 		E147DF191BA81D4E0032D08E /* SerialQueueTest.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = SerialQueueTest.cpp; sourceTree = "<group>"; };
 		E15B6EC21B546A0D00643066 /* ConvertUTF.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; path = ConvertUTF.c; sourceTree = "<group>"; };
 		E15B6EC31B546A0D00643066 /* ConvertUTFWrapper.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = ConvertUTFWrapper.cpp; sourceTree = "<group>"; };
-		E15B6EC61B546A2C00643066 /* libcurses.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libcurses.dylib; path = usr/lib/libcurses.dylib; sourceTree = SDKROOT; };
+		E15B6EC61B546A2C00643066 /* libcurses.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libcurses.tbd; path = usr/lib/libcurses.tbd; sourceTree = SDKROOT; };
 		E1604CB11BB9E01D001153A1 /* swift-build-tool */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "swift-build-tool"; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1604CB31BB9E032001153A1 /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
-		E1604CB41BB9E032001153A1 /* swift-build-tool.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = "swift-build-tool.cpp"; sourceTree = "<group>"; };
+		E1604CB41BB9E032001153A1 /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		E171538C1A0BF702004CD598 /* CorePerfTests.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; path = CorePerfTests.mm; sourceTree = "<group>"; };
 		E17440C11CE192E30070A30C /* ShellUtility.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ShellUtility.h; sourceTree = "<group>"; };
 		E17440C21CE192FF0070A30C /* ShellUtility.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = ShellUtility.cpp; sourceTree = "<group>"; };
@@ -761,8 +920,12 @@
 		E17C29F21B5AC18C00C12DA9 /* install-user-sphinx.sh */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = "install-user-sphinx.sh"; sourceTree = "<group>"; };
 		E17C29F31B5AC2A700C12DA9 /* build-sphinx-docs.sh */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; path = "build-sphinx-docs.sh"; sourceTree = "<group>"; };
 		E18043391A00129400662FE7 /* install-user-lit.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "install-user-lit.sh"; sourceTree = "<group>"; };
+		E181D1441F7D90AC0015286C /* Stat.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Stat.h; sourceTree = "<group>"; };
+		E181D1451F7D90AC0015286C /* Tracing.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = Tracing.h; sourceTree = "<group>"; };
 		E182BE111ABA2B8D001840AD /* Compiler.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Compiler.h; sourceTree = "<group>"; };
 		E192E92E1E30014E00122F17 /* BuildValueTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildValueTest.cpp; sourceTree = "<group>"; };
+		E19880E91FA256D900E490FF /* POSIXEnvironment.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = POSIXEnvironment.h; sourceTree = "<group>"; };
+		E19880EA1FA256FB00E490FF /* POSIXEnvironmentTest.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = POSIXEnvironmentTest.cpp; sourceTree = "<group>"; };
 		E19C3FD51B98C1A70035E1AA /* tests */ = {isa = PBXFileReference; lastKnownFileType = folder; path = tests; sourceTree = "<group>"; };
 		E19D79911A15D9E6002604FB /* MakefileDepsParser.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = MakefileDepsParser.cpp; sourceTree = "<group>"; };
 		E19D79931A15D9F5002604FB /* MakefileDepsParser.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MakefileDepsParser.h; sourceTree = "<group>"; };
@@ -773,7 +936,7 @@
 		E1A223FC19F990E60059043E /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		E1A2240019F991350059043E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
 		E1A2240219F991350059043E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
-		E1A2240319F991350059043E /* llbuild.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = llbuild.cpp; sourceTree = "<group>"; };
+		E1A2240319F991350059043E /* main.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = main.cpp; sourceTree = "<group>"; };
 		E1A2240619F991530059043E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
 		E1A2240719F991530059043E /* Version.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Version.cpp; sourceTree = "<group>"; };
 		E1A2240819F991530059043E /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
@@ -856,7 +1019,6 @@
 		E1AAD28B1BC60A0F00F54680 /* BuildSystemFrontend.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BuildSystemFrontend.h; sourceTree = "<group>"; };
 		E1AAD28D1BC65A1900F54680 /* BuildNode.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildNode.cpp; sourceTree = "<group>"; };
 		E1AAD28F1BC65AB200F54680 /* ExternalCommand.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = ExternalCommand.cpp; sourceTree = "<group>"; };
-		E1AAD2911BC65B5000F54680 /* SwiftTools.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = SwiftTools.cpp; sourceTree = "<group>"; };
 		E1ADC2301A85922F00D5387C /* CMakeLists.txt */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
 		E1ADC2311A85922F00D5387C /* C-API.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "C-API.cpp"; sourceTree = "<group>"; };
 		E1ADC2341A85928100D5387C /* README.md */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
@@ -868,7 +1030,7 @@
 		E1B49EFA1B6BD45D0031AFC2 /* BuildSystem.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BuildSystem.h; sourceTree = "<group>"; };
 		E1B838A21B52E7DE00DB876B /* libllvmSupport.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libllvmSupport.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		E1B838A41B52E85400DB876B /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
-		E1B838A51B52E85400DB876B /* import-llvm */ = {isa = PBXFileReference; lastKnownFileType = text; path = "import-llvm"; sourceTree = "<group>"; };
+		E1B838A51B52E85400DB876B /* import-llvm */ = {isa = PBXFileReference; indentWidth = 4; lastKnownFileType = text; path = "import-llvm"; sourceTree = "<group>"; tabWidth = 4; };
 		E1B838A71B52E85400DB876B /* Allocator.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Allocator.cpp; sourceTree = "<group>"; };
 		E1B838A81B52E85400DB876B /* Atomic.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = Atomic.cpp; sourceTree = "<group>"; };
 		E1B838A91B52E85400DB876B /* CMakeLists.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = CMakeLists.txt; sourceTree = "<group>"; };
@@ -997,7 +1159,7 @@
 		E1DD22761C472A3F00555A5D /* BuildSystem-C-API.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = "BuildSystem-C-API.cpp"; sourceTree = "<group>"; };
 		E1E221041A0067EF00957481 /* BuildDB.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = BuildDB.h; sourceTree = "<group>"; };
 		E1E221051A0067F800957481 /* BuildDB.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildDB.cpp; sourceTree = "<group>"; };
-		E1E221081A00B82100957481 /* libsqlite3.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libsqlite3.dylib; path = usr/lib/libsqlite3.dylib; sourceTree = SDKROOT; };
+		E1E221081A00B82100957481 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
 		E1E2210B1A015B9E00957481 /* SQLiteBuildDB.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = SQLiteBuildDB.cpp; sourceTree = "<group>"; };
 		E1E4A5B31BFC1394001BFFC4 /* BuildKey.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildKey.cpp; sourceTree = "<group>"; };
 		E1FC67F81BB1F417004EBC54 /* BuildValue.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = BuildValue.cpp; sourceTree = "<group>"; };
@@ -1005,12 +1167,23 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		40B3C90F20D3AEC9007C5847 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				40B3C92720D3B24D007C5847 /* libllbuild.dylib in Frameworks */,
+				40B3C91020D3AEC9007C5847 /* libcurses.tbd in Frameworks */,
+				40B3C91120D3AEC9007C5847 /* libgtest.a in Frameworks */,
+				40B3C91220D3AEC9007C5847 /* libgtest_main.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9DB047A51DF9D43D006CDF52 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9D2107C61DFADDFA00BE26FF /* libcurses.dylib in Frameworks */,
-				C5740D0C1E03529300567DD8 /* libsqlite3.dylib in Frameworks */,
+				9D2107C61DFADDFA00BE26FF /* libcurses.tbd in Frameworks */,
+				C5740D0C1E03529300567DD8 /* libsqlite3.tbd in Frameworks */,
 				C5740D0B1E03528600567DD8 /* libllbuildBasic.a in Frameworks */,
 				C5740D0A1E03527B00567DD8 /* libllbuildCore.a in Frameworks */,
 				9DB047BD1DF9D4B0006CDF52 /* libllbuildBuildSystem.a in Frameworks */,
@@ -1032,7 +1205,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E13812A41C5370B3000092C0 /* libcurses.dylib in Frameworks */,
+				E13812A41C5370B3000092C0 /* libcurses.tbd in Frameworks */,
 				E147DF0D1BA81D330032D08E /* libgtest.a in Frameworks */,
 				E147DF0E1BA81D330032D08E /* libgtest_main.a in Frameworks */,
 				E147DF0F1BA81D330032D08E /* libllbuildBasic.a in Frameworks */,
@@ -1044,8 +1217,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E1604CA51BB9E01D001153A1 /* libcurses.dylib in Frameworks */,
-				E1604CA61BB9E01D001153A1 /* libsqlite3.dylib in Frameworks */,
+				E1604CA51BB9E01D001153A1 /* libcurses.tbd in Frameworks */,
+				E1604CA61BB9E01D001153A1 /* libsqlite3.tbd in Frameworks */,
 				E1604CA71BB9E01D001153A1 /* libllvmSupport.a in Frameworks */,
 				E1604CA81BB9E01D001153A1 /* libllbuildBasic.a in Frameworks */,
 				E1604CAA1BB9E01D001153A1 /* libllbuildCore.a in Frameworks */,
@@ -1085,8 +1258,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E15B6EC71B546A2C00643066 /* libcurses.dylib in Frameworks */,
-				E1E221091A00B82100957481 /* libsqlite3.dylib in Frameworks */,
+				E15B6EC71B546A2C00643066 /* libcurses.tbd in Frameworks */,
+				E1E221091A00B82100957481 /* libsqlite3.tbd in Frameworks */,
 				E1B8393B1B52E8CC00DB876B /* libllvmSupport.a in Frameworks */,
 				E1A224D519F99A2D0059043E /* libllbuildBasic.a in Frameworks */,
 				E1A224D619F99A300059043E /* libllbuildCommands.a in Frameworks */,
@@ -1114,8 +1287,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E14C2CF01BDAAD1E0033CA2A /* libcurses.dylib in Frameworks */,
-				E14C2CF11BDAAD210033CA2A /* libsqlite3.dylib in Frameworks */,
+				E14C2CF01BDAAD1E0033CA2A /* libcurses.tbd in Frameworks */,
+				E14C2CF11BDAAD210033CA2A /* libsqlite3.tbd in Frameworks */,
 				E14C2CEF1BDAAD070033CA2A /* libllvmSupport.a in Frameworks */,
 				E1A2250419F99E280059043E /* libgtest.a in Frameworks */,
 				E1A2250319F99E240059043E /* libgtest_main.a in Frameworks */,
@@ -1143,8 +1316,8 @@
 				E1DB70221A85978100891F4D /* libllbuildBasic.a in Frameworks */,
 				E1DB70231A85978900891F4D /* libllbuildCore.a in Frameworks */,
 				E12BFF1A1C4972F000B8D20F /* libllbuildBuildSystem.a in Frameworks */,
-				E12BFF181C4972D900B8D20F /* libsqlite3.dylib in Frameworks */,
-				E12BFF191C4972E000B8D20F /* libcurses.dylib in Frameworks */,
+				E12BFF181C4972D900B8D20F /* libsqlite3.tbd in Frameworks */,
+				E12BFF191C4972E000B8D20F /* libcurses.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1172,8 +1345,8 @@
 				E1C404BC1A030A1D003392BA /* libllbuildNinja.a in Frameworks */,
 				E104FAFA1B655BBA005C68A0 /* libllbuildBuildSystem.a in Frameworks */,
 				E1C404BA1A030A1D003392BA /* libllbuildCommands.a in Frameworks */,
-				E104FAFE1B655C5D005C68A0 /* libcurses.dylib in Frameworks */,
-				E1C404BD1A030A23003392BA /* libsqlite3.dylib in Frameworks */,
+				E104FAFE1B655C5D005C68A0 /* libcurses.tbd in Frameworks */,
+				E1C404BD1A030A23003392BA /* libsqlite3.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1185,14 +1358,217 @@
 				E1D191CB1B472554000C4E95 /* libllbuildBasic.a in Frameworks */,
 				E1D191CC1B472554000C4E95 /* libllbuildCore.a in Frameworks */,
 				E1192CF11C49DC3300F85890 /* libllbuildBuildSystem.a in Frameworks */,
-				E1D191CD1B472560000C4E95 /* libsqlite3.dylib in Frameworks */,
-				E1192CF21C49DC4F00F85890 /* libcurses.dylib in Frameworks */,
+				E1D191CD1B472560000C4E95 /* libsqlite3.tbd in Frameworks */,
+				E1192CF21C49DC4F00F85890 /* libcurses.tbd in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1484D1F82094566F00D3830F /* bindings */ = {
+			isa = PBXGroup;
+			children = (
+				1484D1F92094566F00D3830F /* python */,
+			);
+			path = bindings;
+			sourceTree = "<group>";
+		};
+		1484D1F92094566F00D3830F /* python */ = {
+			isa = PBXGroup;
+			children = (
+				1484D1FA2094566F00D3830F /* llbuild.py */,
+			);
+			indentWidth = 4;
+			path = python;
+			sourceTree = "<group>";
+			tabWidth = 4;
+		};
+		1484D1FF2094E7D600D3830F /* custom */ = {
+			isa = PBXGroup;
+			children = (
+				1484D2002094E7D600D3830F /* gtest-port.h */,
+				1484D2012094E7D600D3830F /* gtest.h */,
+				1484D2022094E7D600D3830F /* gtest-printers.h */,
+			);
+			path = custom;
+			sourceTree = "<group>";
+		};
+		1484D2072094E8DE00D3830F /* manifest-generator */ = {
+			isa = PBXGroup;
+			children = (
+				1484D2082094E8DE00D3830F /* generate-llbuild-manifest */,
+			);
+			path = "manifest-generator";
+			sourceTree = "<group>";
+		};
+		1484D2092094E8E700D3830F /* ptreetime */ = {
+			isa = PBXGroup;
+			children = (
+				1484D20A2094E8E700D3830F /* libptreetime */,
+				1484D20F2094E8E700D3830F /* README.md */,
+				1484D2102094E8E700D3830F /* ptreetime.py */,
+			);
+			path = ptreetime;
+			sourceTree = "<group>";
+		};
+		1484D20A2094E8E700D3830F /* libptreetime */ = {
+			isa = PBXGroup;
+			children = (
+				1484D20B2094E8E700D3830F /* ptreetime.dtrace */,
+				1484D20C2094E8E700D3830F /* Makefile */,
+				1484D20D2094E8E700D3830F /* .gitignore */,
+				1484D20E2094E8E700D3830F /* ptreetime_interpose.c */,
+			);
+			path = libptreetime;
+			sourceTree = "<group>";
+		};
+		1484D2112094E90600D3830F /* emacs */ = {
+			isa = PBXGroup;
+			children = (
+				1484D2122094E90600D3830F /* README.md */,
+				1484D2132094E90600D3830F /* llbuild-project-settings.el */,
+			);
+			path = emacs;
+			sourceTree = "<group>";
+		};
+		1484D2142094E99900D3830F /* Windows */ = {
+			isa = PBXGroup;
+			children = (
+				1484D2152094E99900D3830F /* Path.inc */,
+				1484D2162094E99900D3830F /* Host.inc */,
+				1484D2172094E99900D3830F /* Signals.inc */,
+				1484D2182094E99900D3830F /* TimeValue.inc */,
+				1484D2192094E99900D3830F /* Process.inc */,
+				1484D21A2094E99900D3830F /* WindowsSupport.h */,
+				1484D21B2094E99900D3830F /* Program.inc */,
+				1484D21C2094E99900D3830F /* Mutex.inc */,
+				1484D21D2094E99900D3830F /* Memory.inc */,
+			);
+			path = Windows;
+			sourceTree = "<group>";
+		};
+		40B3C8FE20D3AE80007C5847 /* CAPI */ = {
+			isa = PBXGroup;
+			children = (
+				40B3C8FF20D3AEBC007C5847 /* CMakeLists.txt */,
+				40B3C91B20D3AF9B007C5847 /* C-API.cpp */,
+				9ADD8B2220D7009A0066BE9A /* BuildSystem-C-API.cpp */,
+			);
+			path = CAPI;
+			sourceTree = "<group>";
+		};
+		40F638CC2051EDC800A1CFBE /* examples */ = {
+			isa = PBXGroup;
+			children = (
+				40F638CD2051EDC800A1CFBE /* simple-make */,
+				40F638D62051EDC800A1CFBE /* swift-bindings */,
+				40F638D92051EDC800A1CFBE /* GameOfLife */,
+				40F638E72051EDC800A1CFBE /* c-api */,
+			);
+			indentWidth = 4;
+			path = examples;
+			sourceTree = "<group>";
+			tabWidth = 4;
+		};
+		40F638CD2051EDC800A1CFBE /* simple-make */ = {
+			isa = PBXGroup;
+			children = (
+				40F638CE2051EDC800A1CFBE /* count-lines-2 */,
+				40F638CF2051EDC800A1CFBE /* count-lines-4 */,
+				40F638D02051EDC800A1CFBE /* count-lines-3 */,
+				40F638D12051EDC800A1CFBE /* simplebuild.py */,
+				40F638D22051EDC800A1CFBE /* simple-make */,
+				40F638D32051EDC800A1CFBE /* util.py */,
+				40F638D42051EDC800A1CFBE /* README.md */,
+				40F638D52051EDC800A1CFBE /* count-lines-1 */,
+			);
+			path = "simple-make";
+			sourceTree = "<group>";
+		};
+		40F638D62051EDC800A1CFBE /* swift-bindings */ = {
+			isa = PBXGroup;
+			children = (
+				40F638D72051EDC800A1CFBE /* core */,
+			);
+			path = "swift-bindings";
+			sourceTree = "<group>";
+		};
+		40F638D72051EDC800A1CFBE /* core */ = {
+			isa = PBXGroup;
+			children = (
+				40F638D82051EDC800A1CFBE /* basic.swift */,
+			);
+			path = core;
+			sourceTree = "<group>";
+		};
+		40F638D92051EDC800A1CFBE /* GameOfLife */ = {
+			isa = PBXGroup;
+			children = (
+				40F638DA2051EDC800A1CFBE /* README.md */,
+				40F638DB2051EDC800A1CFBE /* .gitignore */,
+				40F638DC2051EDC800A1CFBE /* Static */,
+				40F638DF2051EDC800A1CFBE /* Package.swift */,
+				40F638E02051EDC800A1CFBE /* Sources */,
+			);
+			path = GameOfLife;
+			sourceTree = "<group>";
+		};
+		40F638DC2051EDC800A1CFBE /* Static */ = {
+			isa = PBXGroup;
+			children = (
+				40F638DD2051EDC800A1CFBE /* index.html */,
+				40F638DE2051EDC800A1CFBE /* PlayLife.js */,
+			);
+			path = Static;
+			sourceTree = "<group>";
+		};
+		40F638E02051EDC800A1CFBE /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				40F638E12051EDC800A1CFBE /* GameOfLife */,
+				40F638E52051EDC800A1CFBE /* LifeServer */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		40F638E12051EDC800A1CFBE /* GameOfLife */ = {
+			isa = PBXGroup;
+			children = (
+				40F638E22051EDC800A1CFBE /* LifeBoard.swift */,
+				40F638E32051EDC800A1CFBE /* LifeBoard+Build.swift */,
+				40F638E42051EDC800A1CFBE /* BuildLife.swift */,
+			);
+			path = GameOfLife;
+			sourceTree = "<group>";
+		};
+		40F638E52051EDC800A1CFBE /* LifeServer */ = {
+			isa = PBXGroup;
+			children = (
+				40F638E62051EDC800A1CFBE /* main.swift */,
+			);
+			path = LifeServer;
+			sourceTree = "<group>";
+		};
+		40F638E72051EDC800A1CFBE /* c-api */ = {
+			isa = PBXGroup;
+			children = (
+				40F638E82051EDC800A1CFBE /* buildsystem */,
+			);
+			indentWidth = 2;
+			path = "c-api";
+			sourceTree = "<group>";
+			tabWidth = 2;
+		};
+		40F638E82051EDC800A1CFBE /* buildsystem */ = {
+			isa = PBXGroup;
+			children = (
+				40F638E92051EDC800A1CFBE /* README.md */,
+				40F638EA2051EDC800A1CFBE /* main.c */,
+			);
+			path = buildsystem;
+			sourceTree = "<group>";
+		};
 		9DB0478A1DF9D39E006CDF52 /* BuildSystem */ = {
 			isa = PBXGroup;
 			children = (
@@ -1200,14 +1576,27 @@
 				C5740D081E03523100567DD8 /* BuildSystemFrontendTest.cpp */,
 				E1075ED61E4EA417007D52C6 /* BuildSystemTaskTests.cpp */,
 				E192E92E1E30014E00122F17 /* BuildValueTest.cpp */,
+				9DB0478B1DF9D3E2006CDF52 /* LaneBasedExecutionQueueTest.cpp */,
 				E1B3B9DA1E4D5A7A00DF1FBC /* MockBuildSystemDelegate.cpp */,
 				E1B3B9DB1E4D5A7A00DF1FBC /* MockBuildSystemDelegate.h */,
-				9DB0478B1DF9D3E2006CDF52 /* LaneBasedExecutionQueueTest.cpp */,
+				E19880EA1FA256FB00E490FF /* POSIXEnvironmentTest.cpp */,
 				9D0A6D7F1E1FFEA800BE636F /* TempDir.cpp */,
 				9D0A6D801E1FFEA800BE636F /* TempDir.h */,
 			);
 			path = BuildSystem;
 			sourceTree = "<group>";
+		};
+		BC8DEF0420300AAF00E9EF0C /* llbuildSwift */ = {
+			isa = PBXGroup;
+			children = (
+				BC8DEF0520300AAF00E9EF0C /* CMakeLists.txt */,
+				BC8DEF0620300AAF00E9EF0C /* BuildSystemBindings.swift */,
+				BC8DEF0720300AAF00E9EF0C /* CoreBindings.swift */,
+			);
+			indentWidth = 4;
+			path = llbuildSwift;
+			sourceTree = "<group>";
+			tabWidth = 4;
 		};
 		E10D5CDB19FEBF6A00211ED4 /* LitXCTestAdaptor */ = {
 			isa = PBXGroup;
@@ -1230,8 +1619,8 @@
 		E13B5E411A00395300EA0405 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
-				E15B6EC61B546A2C00643066 /* libcurses.dylib */,
-				E1E221081A00B82100957481 /* libsqlite3.dylib */,
+				E15B6EC61B546A2C00643066 /* libcurses.tbd */,
+				E1E221081A00B82100957481 /* libsqlite3.tbd */,
 				E10D5CE319FEF3BD00211ED4 /* Python.framework */,
 			);
 			name = Frameworks;
@@ -1242,8 +1631,10 @@
 			children = (
 				E14144911EBDA4A10046F282 /* Configs */,
 			);
+			indentWidth = 4;
 			path = Xcode;
 			sourceTree = "<group>";
+			tabWidth = 4;
 		};
 		E14144911EBDA4A10046F282 /* Configs */ = {
 			isa = PBXGroup;
@@ -1251,6 +1642,7 @@
 				E14144921EBDA4A10046F282 /* Common.xcconfig */,
 				E14144931EBDA4A10046F282 /* Debug.xcconfig */,
 				E14144941EBDA4A10046F282 /* Release.xcconfig */,
+				40F638EC2053043D00A1CFBE /* Version.xcconfig */,
 			);
 			path = Configs;
 			sourceTree = "<group>";
@@ -1271,7 +1663,7 @@
 			isa = PBXGroup;
 			children = (
 				E1604CB31BB9E032001153A1 /* CMakeLists.txt */,
-				E1604CB41BB9E032001153A1 /* swift-build-tool.cpp */,
+				E1604CB41BB9E032001153A1 /* main.cpp */,
 			);
 			path = "swift-build-tool";
 			sourceTree = "<group>";
@@ -1279,19 +1671,31 @@
 		E1A223E819F98F1C0059043E = {
 			isa = PBXGroup;
 			children = (
+				40377C7C2061D24200C0FD4D /* Package.swift */,
 				E14144901EBDA4A10046F282 /* Xcode */,
 				E1A223FD19F990F10059043E /* products */,
 				E1A2240419F991530059043E /* lib */,
+				1484D1F82094566F00D3830F /* bindings */,
+				40F638CC2051EDC800A1CFBE /* examples */,
+				1484D1D620943D2100D3830F /* docs */,
 				E19C3FD51B98C1A70035E1AA /* tests */,
 				E1C404B51A03090D003392BA /* perftests */,
+				1484D1FD2094589700D3830F /* CMakeLists.txt */,
 				E1A224B219F998D40059043E /* unittests */,
 				E1A2246A19F998C30059043E /* utils */,
+				1484D1D720943E6800D3830F /* cmake */,
 				E1A223FB19F990E60059043E /* CMakeLists.txt */,
+				1484D1D82094508A00D3830F /* CODEOWNERS */,
+				1484D1D92094509400D3830F /* CONTRIBUTING.md */,
+				1484D1DA2094509E00D3830F /* LICENSE.txt */,
 				E1A223FC19F990E60059043E /* README.md */,
+				1484D1DB209450A600D3830F /* Vagrantfile */,
 				E1A223F219F98F1C0059043E /* Products */,
 				E13B5E411A00395300EA0405 /* Frameworks */,
 			);
+			indentWidth = 2;
 			sourceTree = "<group>";
+			tabWidth = 2;
 		};
 		E1A223F219F98F1C0059043E /* Products */ = {
 			isa = PBXGroup;
@@ -1314,6 +1718,7 @@
 				E147DF161BA81D330032D08E /* BasicTests */,
 				E1604CB11BB9E01D001153A1 /* swift-build-tool */,
 				9DB047A81DF9D43D006CDF52 /* BuildSystemTests */,
+				40B3C91A20D3AEC9007C5847 /* CAPITests */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1324,7 +1729,9 @@
 				E1A2240119F991350059043E /* llbuild */,
 				E1ADC22F1A8591F600D5387C /* libllbuild */,
 				E1D191B71B472305000C4E95 /* llbuild-framework */,
+				BC8DEF0420300AAF00E9EF0C /* llbuildSwift */,
 				E1604CB21BB9E032001153A1 /* swift-build-tool */,
+				147018862097909B0079261E /* ui */,
 				E1A2240019F991350059043E /* CMakeLists.txt */,
 			);
 			path = products;
@@ -1334,7 +1741,7 @@
 			isa = PBXGroup;
 			children = (
 				E1A2240219F991350059043E /* CMakeLists.txt */,
-				E1A2240319F991350059043E /* llbuild.cpp */,
+				E1A2240319F991350059043E /* main.cpp */,
 			);
 			path = llbuild;
 			sourceTree = "<group>";
@@ -1348,6 +1755,7 @@
 				E1B839581B541C1F00DB876B /* BuildSystem */,
 				E1A2241919F991530059043E /* Ninja */,
 				E1A2240919F991530059043E /* Commands */,
+				1484D1F72094548A00D3830F /* libstdc++14-workaround.h */,
 				E1A2240819F991530059043E /* CMakeLists.txt */,
 			);
 			path = lib;
@@ -1361,6 +1769,7 @@
 				E11470931B7554F800ED84CF /* FileInfo.cpp */,
 				E138129D1C536D0E000092C0 /* FileSystem.cpp */,
 				E1FE53401AB1343B00041B8E /* Hashing.cpp */,
+				402614262087B10B005BD956 /* Tracing.cpp */,
 				9DADBBAC1E256C52005B4869 /* PlatformUtility.cpp */,
 				E147DEFA1BA81CF70032D08E /* SerialQueue.cpp */,
 				E17440C21CE192FF0070A30C /* ShellUtility.cpp */,
@@ -1422,13 +1831,18 @@
 			children = (
 				E120B9EF1E4E65FC00B28469 /* BinaryCoding.h */,
 				E182BE111ABA2B8D001840AD /* Compiler.h */,
+				B563CEA620A6252500276198 /* CrossPlatformCompatibility.h */,
 				E11470901B75160400ED84CF /* FileInfo.h */,
 				E138129C1C536CFC000092C0 /* FileSystem.h */,
 				E147DEFD1BA81D0E0032D08E /* Hashing.h */,
+				1484D21E2094E9CE00D3830F /* LeanWindows.h */,
 				E1066C091BC5BCE700B892CE /* LLVM.h */,
 				9D2589301E3820E3006C76F4 /* PlatformUtility.h */,
 				E147DEFC1BA81D0E0032D08E /* SerialQueue.h */,
 				E17440C11CE192E30070A30C /* ShellUtility.h */,
+				E181D1441F7D90AC0015286C /* Stat.h */,
+				4062058120C7263C00B28281 /* StringList.h */,
+				E181D1451F7D90AC0015286C /* Tracing.h */,
 				E1A2245119F997D40059043E /* Version.h */,
 			);
 			name = Headers;
@@ -1449,6 +1863,7 @@
 			children = (
 				E1E221041A0067EF00957481 /* BuildDB.h */,
 				E1A2245819F997FE0059043E /* BuildEngine.h */,
+				1484D1F62094540400D3830F /* DependencyInfoParser.h */,
 				E19D79931A15D9F5002604FB /* MakefileDepsParser.h */,
 			);
 			name = Headers;
@@ -1470,6 +1885,13 @@
 		E1A2246A19F998C30059043E /* utils */ = {
 			isa = PBXGroup;
 			children = (
+				1484D2042094E8B100D3830F /* check-coverage */,
+				1484D2052094E8C300D3830F /* create-dummy-ninja-from-DB.py */,
+				40377C7B2061C44900C0FD4D /* generate-version-h.sh */,
+				1484D2062094E8CE00D3830F /* install-sources */,
+				1484D2112094E90600D3830F /* emacs */,
+				1484D2072094E8DE00D3830F /* manifest-generator */,
+				1484D2092094E8E700D3830F /* ptreetime */,
 				E1A2254E19F9A74B0059043E /* Xcode */,
 				E1A2246B19F998C30059043E /* unittest */,
 			);
@@ -1518,6 +1940,7 @@
 			isa = PBXGroup;
 			children = (
 				E1A2247519F998C30059043E /* gtest-death-test.h */,
+				1484D1FE2094E7C700D3830F /* gtest-llbuild-config.h */,
 				E1A2247619F998C30059043E /* gtest-message.h */,
 				E1A2247719F998C30059043E /* gtest-param-test.h */,
 				E1A2247819F998C30059043E /* gtest-printers.h */,
@@ -1535,12 +1958,14 @@
 		E1A2247F19F998C30059043E /* internal */ = {
 			isa = PBXGroup;
 			children = (
+				1484D1FF2094E7D600D3830F /* custom */,
 				E1A2248019F998C30059043E /* gtest-death-test-internal.h */,
 				E1A2248119F998C30059043E /* gtest-filepath.h */,
 				E1A2248219F998C30059043E /* gtest-internal.h */,
 				E1A2248319F998C30059043E /* gtest-linked_ptr.h */,
 				E1A2248419F998C30059043E /* gtest-param-util-generated.h */,
 				E1A2248519F998C30059043E /* gtest-param-util.h */,
+				1484D2032094E86600D3830F /* gtest-port-arch.h */,
 				E1A2248619F998C30059043E /* gtest-port.h */,
 				E1A2248719F998C30059043E /* gtest-string.h */,
 				E1A2248819F998C30059043E /* gtest-tuple.h */,
@@ -1569,6 +1994,7 @@
 			isa = PBXGroup;
 			children = (
 				E147DF171BA81D4E0032D08E /* Basic */,
+				40B3C8FE20D3AE80007C5847 /* CAPI */,
 				E1A224B419F998D40059043E /* Core */,
 				9DB0478A1DF9D39E006CDF52 /* BuildSystem */,
 				E1A224B819F998D40059043E /* Ninja */,
@@ -1581,6 +2007,7 @@
 			isa = PBXGroup;
 			children = (
 				E1A224B619F998D40059043E /* CMakeLists.txt */,
+				E124FC912075370D00ECCC50 /* BuildEngineCancellationTest.cpp */,
 				E1A224B519F998D40059043E /* BuildEngineTest.cpp */,
 				E1A0B1001C9717BA006DA08F /* DependencyInfoParserTest.cpp */,
 				E10FE0D61B7313D50059D086 /* DepsBuildEngineTest.cpp */,
@@ -1611,8 +2038,10 @@
 				E18043391A00129400662FE7 /* install-user-lit.sh */,
 				E17C29F21B5AC18C00C12DA9 /* install-user-sphinx.sh */,
 			);
+			indentWidth = 4;
 			path = Xcode;
 			sourceTree = "<group>";
+			tabWidth = 4;
 		};
 		E1ADC22F1A8591F600D5387C /* libllbuild */ = {
 			isa = PBXGroup;
@@ -1630,10 +2059,11 @@
 			isa = PBXGroup;
 			children = (
 				E1ADC2331A85925800D5387C /* llbuild */,
+				1484D1F42094534700D3830F /* module.modulemap */,
 				E1ADC2341A85928100D5387C /* README.md */,
 			);
 			name = "Public API";
-			path = "public-api";
+			path = include;
 			sourceTree = "<group>";
 		};
 		E1ADC2331A85925800D5387C /* llbuild */ = {
@@ -1642,6 +2072,8 @@
 				E1192CEC1C49D84500F85890 /* buildsystem.h */,
 				E1BE0AAD1C46F93000AD0883 /* core.h */,
 				E1ADC2351A8592AA00D5387C /* llbuild.h */,
+				403B1A48205312000018A322 /* version.h */,
+				40F4F4F220531D8A00170EE1 /* version.h.in */,
 			);
 			path = llbuild;
 			sourceTree = "<group>";
@@ -1661,6 +2093,7 @@
 			isa = PBXGroup;
 			children = (
 				E1B838C41B52E85400DB876B /* Unix */,
+				1484D2142094E99900D3830F /* Windows */,
 				E1B838A91B52E85400DB876B /* CMakeLists.txt */,
 				E1B838A71B52E85400DB876B /* Allocator.cpp */,
 				E1B838A81B52E85400DB876B /* Atomic.cpp */,
@@ -1732,6 +2165,7 @@
 			children = (
 				E1B838F41B52E8A500DB876B /* ArrayRef.h */,
 				E1B838F51B52E8A500DB876B /* DenseMap.h */,
+				404C888E20924BF8000C201A /* DenseMapInfo.h */,
 				E1B838F61B52E8A500DB876B /* Hashing.h */,
 				E1B838F71B52E8A500DB876B /* IntrusiveRefCntPtr.h */,
 				E1B838F81B52E8A500DB876B /* None.h */,
@@ -1831,7 +2265,7 @@
 				E1FC67F81BB1F417004EBC54 /* BuildValue.cpp */,
 				E1AAD28F1BC65AB200F54680 /* ExternalCommand.cpp */,
 				E1066C071BC5ACAB00B892CE /* LaneBasedExecutionQueue.cpp */,
-				E1AAD2911BC65B5000F54680 /* SwiftTools.cpp */,
+				E19880E91FA256D900E490FF /* POSIXEnvironment.h */,
 			);
 			path = BuildSystem;
 			sourceTree = "<group>";
@@ -1850,7 +2284,6 @@
 				E11470911B7517C800ED84CF /* BuildValue.h */,
 				9D2589311E38221D006C76F4 /* CommandResult.h */,
 				54E187B71CD296EA00F7EC89 /* ExternalCommand.h */,
-				54E187B81CD296EA00F7EC89 /* SwiftTools.h */,
 			);
 			name = Headers;
 			path = include/llbuild/BuildSystem;
@@ -1864,9 +2297,12 @@
 				E104FAF61B655A97005C68A0 /* BuildSystemPerfTests.mm */,
 				E171538C1A0BF702004CD598 /* CorePerfTests.mm */,
 				E1C404B01A0308F3003392BA /* NinjaPerfTests.mm */,
+				1484D1FB2094582C00D3830F /* CMakeLists.txt */,
 			);
+			indentWidth = 4;
 			path = PerfTests;
 			sourceTree = "<group>";
+			tabWidth = 4;
 		};
 		E1C404AE1A0308F3003392BA /* Supporting Files */ = {
 			isa = PBXGroup;
@@ -1889,6 +2325,7 @@
 			isa = PBXGroup;
 			children = (
 				E1C404B71A03090D003392BA /* llvm-only.ninja */,
+				1484D1FC2094586800D3830F /* README.md */,
 			);
 			path = Inputs;
 			sourceTree = "<group>";
@@ -1906,6 +2343,7 @@
 			children = (
 				E1D191C61B472372000C4E95 /* Info.plist */,
 				E1D191B81B472305000C4E95 /* llbuild-module.modulemap */,
+				1484D1F5209453A500D3830F /* README.md */,
 			);
 			path = "llbuild-framework";
 			sourceTree = "<group>";
@@ -1982,6 +2420,7 @@
 			isa = PBXHeadersBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				403B1A492053123B0018A322 /* version.h in Headers */,
 				E1D191CA1B472440000C4E95 /* llbuild.h in Headers */,
 				E1BE0AAE1C46F94000AD0883 /* core.h in Headers */,
 				E1192CED1C49D84500F85890 /* buildsystem.h in Headers */,
@@ -1991,6 +2430,27 @@
 /* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
+		40B3C90020D3AEC9007C5847 /* CAPITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 40B3C91720D3AEC9007C5847 /* Build configuration list for PBXNativeTarget "CAPITests" */;
+			buildPhases = (
+				40B3C90920D3AEC9007C5847 /* Sources */,
+				40B3C90F20D3AEC9007C5847 /* Frameworks */,
+				40B3C91520D3AEC9007C5847 /* CopyFiles */,
+				40B3C91620D3AEC9007C5847 /* Create Target Link */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				40B3C92620D3B248007C5847 /* PBXTargetDependency */,
+				40B3C90120D3AEC9007C5847 /* PBXTargetDependency */,
+				40B3C90320D3AEC9007C5847 /* PBXTargetDependency */,
+			);
+			name = CAPITests;
+			productName = CoreTests;
+			productReference = 40B3C91A20D3AEC9007C5847 /* CAPITests */;
+			productType = "com.apple.product-type.tool";
+		};
 		9DB047A71DF9D43D006CDF52 /* BuildSystemTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9DB047AC1DF9D43D006CDF52 /* Build configuration list for PBXNativeTarget "BuildSystemTests" */;
@@ -2003,6 +2463,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				40513F1F205762CD00DCA088 /* PBXTargetDependency */,
 				9DB047B81DF9D483006CDF52 /* PBXTargetDependency */,
 				9DB047B41DF9D471006CDF52 /* PBXTargetDependency */,
 				9DB047B21DF9D469006CDF52 /* PBXTargetDependency */,
@@ -2317,6 +2778,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				40513F21205762DF00DCA088 /* PBXTargetDependency */,
 				E104FAFD1B655C3C005C68A0 /* PBXTargetDependency */,
 				E17C29E61B5AAF6100C12DA9 /* PBXTargetDependency */,
 				E17C29EA1B5AAF6100C12DA9 /* PBXTargetDependency */,
@@ -2336,11 +2798,11 @@
 				E1D191B91B47232B000C4E95 /* Sources */,
 				E1D191BA1B47232B000C4E95 /* Frameworks */,
 				E1D191BB1B47232B000C4E95 /* Headers */,
-				E1D191BC1B47232B000C4E95 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				40513F1D2057629D00DCA088 /* PBXTargetDependency */,
 				E1B839461B52EAA900DB876B /* PBXTargetDependency */,
 				E1B839421B52EA9E00DB876B /* PBXTargetDependency */,
 				E1B839441B52EAA500DB876B /* PBXTargetDependency */,
@@ -2357,9 +2819,14 @@
 		E1A223E919F98F1C0059043E /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				DefaultBuildSystemTypeForWorkspace = Latest;
 				LastUpgradeCheck = 9900;
 				ORGANIZATIONNAME = "Apple Inc.";
 				TargetAttributes = {
+					40513F172057621500DCA088 = {
+						CreatedOnToolsVersion = 10.0;
+						ProvisioningStyle = Automatic;
+					};
 					9DB047A71DF9D43D006CDF52 = {
 						CreatedOnToolsVersion = 8.3;
 						ProvisioningStyle = Automatic;
@@ -2459,6 +2926,7 @@
 			projectRoot = "";
 			targets = (
 				E178FCC11A1BF3270039F8B5 /* B&I */,
+				40513F172057621500DCA088 /* Generate-version.h */,
 				E1A224C219F999B80059043E /* llbuild Tool */,
 				E1604C951BB9E01D001153A1 /* swift-build-tool */,
 				E1D191BD1B47232B000C4E95 /* llbuild-framework */,
@@ -2472,6 +2940,7 @@
 				E1A224DC19F99B0E0059043E /* gtest */,
 				E1A224E519F99C580059043E /* gtest_main */,
 				E147DEFE1BA81D330032D08E /* BasicTests */,
+				40B3C90020D3AEC9007C5847 /* CAPITests */,
 				E1A224EE19F99D880059043E /* CoreTests */,
 				9DB047A71DF9D43D006CDF52 /* BuildSystemTests */,
 				E1A224F819F99DFD0059043E /* NinjaTests */,
@@ -2500,16 +2969,42 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		E1D191BC1B47232B000C4E95 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		40513F1B2057626A00DCA088 /* Generate version.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 12;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/products/libllbuild/include/llbuild/version.h.in",
+			);
+			name = "Generate version.h";
+			outputPaths = (
+				"$(SRCROOT)/products/libllbuild/include/llbuild/version.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/utils/generate-version-h.sh\"";
+			showEnvVarsInLog = 0;
+		};
+		40B3C91620D3AEC9007C5847 /* Create Target Link */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Create Target Link";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/unittests/$(PRODUCT_NAME)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
 		9D2107C51DFA07D700BE26FF /* Create Target Link */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -2519,10 +3014,11 @@
 			);
 			name = "Create Target Link";
 			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/unittests/$(PRODUCT_NAME)",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"";
+			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"\n";
 		};
 		E147DF121BA81D330032D08E /* Create Target Link */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -2537,7 +3033,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"";
+			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E17C29F11B5AC13C00C12DA9 /* Install per-user 'sphinx' tools */ = {
@@ -2552,7 +3048,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/utils/Xcode/install-user-sphinx.sh\"";
+			shellScript = "\"${SRCROOT}/utils/Xcode/install-user-sphinx.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E17C29F41B5AC2F600C12DA9 /* Build Sphinx Docs */ = {
@@ -2567,7 +3063,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \"${SRCROOT}/utils/Xcode/build-sphinx-docs.sh\"";
+			shellScript = "env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 \"${SRCROOT}/utils/Xcode/build-sphinx-docs.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E18043371A00125500662FE7 /* Create 'lit.site.cfg' */ = {
@@ -2576,9 +3072,12 @@
 			files = (
 			);
 			inputPaths = (
+				"$(SRCROOT)/tests/lit.site.cfg.in",
 			);
 			name = "Create 'lit.site.cfg'";
 			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/tests/lit.site.cfg",
+				"$(BUILT_PRODUCTS_DIR)/tests/Unit/lit.site.cfg",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -2613,7 +3112,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"";
+			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E19EC53F1B34A44F00A2F233 /* Create Target Link */ = {
@@ -2629,7 +3128,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"";
+			shellScript = "\"${SRCROOT}/utils/Xcode/create-target-link.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
 		E1A2254C19F9A2280059043E /* Execute 'lit' tests */ = {
@@ -2650,10 +3149,20 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		40B3C90920D3AEC9007C5847 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9ADD8B2320D7009F0066BE9A /* BuildSystem-C-API.cpp in Sources */,
+				40B3C91C20D3B075007C5847 /* C-API.cpp in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		9DB047A41DF9D43D006CDF52 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				E19880EB1FA256FC00E490FF /* POSIXEnvironmentTest.cpp in Sources */,
 				E192E92F1E30014E00122F17 /* BuildValueTest.cpp in Sources */,
 				9DB047C01DF9F592006CDF52 /* LaneBasedExecutionQueueTest.cpp in Sources */,
 				C5740D091E03523100567DD8 /* BuildSystemFrontendTest.cpp in Sources */,
@@ -2687,7 +3196,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E1604CB51BB9E03E001153A1 /* swift-build-tool.cpp in Sources */,
+				E1604CB51BB9E03E001153A1 /* main.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2699,6 +3208,7 @@
 				E1FE53411AB1346700041B8E /* Hashing.cpp in Sources */,
 				E138129E1C536D0E000092C0 /* FileSystem.cpp in Sources */,
 				E11470941B7555FA00ED84CF /* FileInfo.cpp in Sources */,
+				402614272087B10B005BD956 /* Tracing.cpp in Sources */,
 				E147DEFB1BA81CF70032D08E /* SerialQueue.cpp in Sources */,
 				E1A224BE19F9995E0059043E /* Version.cpp in Sources */,
 				E17440C31CE192FF0070A30C /* ShellUtility.cpp in Sources */,
@@ -2746,7 +3256,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				E1A224CA19F999CB0059043E /* llbuild.cpp in Sources */,
+				E1A224CA19F999CB0059043E /* main.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2775,6 +3285,7 @@
 				E1A0B1011C9717BA006DA08F /* DependencyInfoParserTest.cpp in Sources */,
 				E1A224F619F99D940059043E /* BuildEngineTest.cpp in Sources */,
 				E10FE0D71B7313D50059D086 /* DepsBuildEngineTest.cpp in Sources */,
+				E124FC922075370E00ECCC50 /* BuildEngineCancellationTest.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2848,7 +3359,6 @@
 				E1FC67F91BB1F427004EBC54 /* BuildValue.cpp in Sources */,
 				E1BE0AA61C458EB000AD0883 /* BuildExecutionQueue.cpp in Sources */,
 				E11F2B7F1E4D255B00176BAD /* BuildDescription.cpp in Sources */,
-				E1AAD2921BC65B5000F54680 /* SwiftTools.cpp in Sources */,
 				E1E4A5B41BFC1394001BFFC4 /* BuildKey.cpp in Sources */,
 				E1B8395E1B541C5900DB876B /* BuildFile.cpp in Sources */,
 				E104FB001B6568E0005C68A0 /* BuildSystem.cpp in Sources */,
@@ -2873,12 +3383,49 @@
 				E1D191C91B472437000C4E95 /* C-API.cpp in Sources */,
 				E1192CEE1C49DBA600F85890 /* BuildSystem-C-API.cpp in Sources */,
 				E1192CEF1C49DBA900F85890 /* Core-C-API.cpp in Sources */,
+				BC669C54205A2C2000942C3B /* BuildSystemBindings.swift in Sources */,
+				BC669C55205A2C2000942C3B /* CoreBindings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		4020AD1E20584D4600884842 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 40513F172057621500DCA088 /* Generate-version.h */;
+			targetProxy = 4020AD1D20584D4600884842 /* PBXContainerItemProxy */;
+		};
+		40513F1D2057629D00DCA088 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 40513F172057621500DCA088 /* Generate-version.h */;
+			targetProxy = 40513F1C2057629D00DCA088 /* PBXContainerItemProxy */;
+		};
+		40513F1F205762CD00DCA088 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 40513F172057621500DCA088 /* Generate-version.h */;
+			targetProxy = 40513F1E205762CD00DCA088 /* PBXContainerItemProxy */;
+		};
+		40513F21205762DF00DCA088 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 40513F172057621500DCA088 /* Generate-version.h */;
+			targetProxy = 40513F20205762DF00DCA088 /* PBXContainerItemProxy */;
+		};
+		40B3C90120D3AEC9007C5847 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1A224DC19F99B0E0059043E /* gtest */;
+			targetProxy = 40B3C90220D3AEC9007C5847 /* PBXContainerItemProxy */;
+		};
+		40B3C90320D3AEC9007C5847 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1A224E519F99C580059043E /* gtest_main */;
+			targetProxy = 40B3C90420D3AEC9007C5847 /* PBXContainerItemProxy */;
+		};
+		40B3C92620D3B248007C5847 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E1ADC2391A85936400D5387C /* libllbuild */;
+			targetProxy = 40B3C92520D3B248007C5847 /* PBXContainerItemProxy */;
+		};
 		9D2107C41DF9FBFA00BE26FF /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 9DB047A71DF9D43D006CDF52 /* BuildSystemTests */;
@@ -3172,13 +3719,39 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		40513F182057621500DCA088 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INSTALLHDRS_SCRIPT_PHASE = YES;
+			};
+			name = Debug;
+		};
+		40513F192057621500DCA088 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				INSTALLHDRS_SCRIPT_PHASE = YES;
+			};
+			name = Release;
+		};
+		40B3C91820D3AEC9007C5847 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/products/libllbuild/include $(SRCROOT)/utils/unittest/googletest/include";
+			};
+			name = Debug;
+		};
+		40B3C91920D3AEC9007C5847 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/products/libllbuild/include $(SRCROOT)/utils/unittest/googletest/include";
+			};
+			name = Release;
+		};
 		9DB047AD1DF9D43D006CDF52 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Debug;
@@ -3186,10 +3759,6 @@
 		9DB047AE1DF9D43D006CDF52 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					NDEBUG,
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Release;
@@ -3231,10 +3800,6 @@
 		E147DF141BA81D330032D08E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Debug;
@@ -3242,10 +3807,6 @@
 		E147DF151BA81D330032D08E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Release;
@@ -3308,9 +3869,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = E14144931EBDA4A10046F282 /* Debug.xcconfig */;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++14";
-				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_CODE_COVERAGE = "$(LLBUILD_ENABLE_CODE_COVERAGE)";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -3333,7 +3891,6 @@
 				COPY_PHASE_STRIP = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_ENABLE_CPP_EXCEPTIONS = NO;
 				GCC_ENABLE_CPP_RTTI = NO;
@@ -3353,15 +3910,12 @@
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_ = YES;
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_NO = NO;
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_YES = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				ONLY_ACTIVE_ARCH = YES;
 				PROJECT_SOURCE_VERSION = "$(PROJECT_SOURCE_VERSION_$(ISEMPTY_$(RC_ProjectSourceVersion)))";
 				PROJECT_SOURCE_VERSION_ = "$(RC_ProjectSourceVersion)";
 				PROJECT_SOURCE_VERSION_empty = 9999.99;
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include";
-				USE_HEADERMAP = NO;
 			};
 			name = Debug;
 		};
@@ -3369,9 +3923,6 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = E14144941EBDA4A10046F282 /* Release.xcconfig */;
 			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++14";
-				CLANG_CXX_LIBRARY = "libc++";
 				CLANG_ENABLE_CODE_COVERAGE = "$(LLBUILD_ENABLE_CODE_COVERAGE)";
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -3395,12 +3946,10 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				GCC_C_LANGUAGE_STANDARD = gnu99;
 				GCC_ENABLE_CPP_EXCEPTIONS = NO;
 				GCC_ENABLE_CPP_RTTI = NO;
 				GCC_INLINES_ARE_PRIVATE_EXTERN = YES;
 				GCC_NO_COMMON_BLOCKS = YES;
-				GCC_PREPROCESSOR_DEFINITIONS = NDEBUG;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = NO;
 				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
@@ -3414,14 +3963,11 @@
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_ = YES;
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_NO = NO;
 				LLBUILD_ENABLE_CODE_COVERAGE_eq_YES = YES;
-				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				PROJECT_SOURCE_VERSION = "$(PROJECT_SOURCE_VERSION_$(ISEMPTY_$(RC_ProjectSourceVersion)))";
 				PROJECT_SOURCE_VERSION_ = "$(RC_ProjectSourceVersion)";
 				PROJECT_SOURCE_VERSION_empty = 9999.99;
 				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include";
-				USE_HEADERMAP = NO;
 			};
 			name = Release;
 		};
@@ -3506,10 +4052,6 @@
 		E1A224DF19F99B0E0059043E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/utils/unittest/googletest/include $(SRCROOT)/utils/unittest/googletest";
 			};
 			name = Debug;
@@ -3517,10 +4059,6 @@
 		E1A224E019F99B0E0059043E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/utils/unittest/googletest/include $(SRCROOT)/utils/unittest/googletest";
 			};
 			name = Release;
@@ -3528,10 +4066,6 @@
 		E1A224E819F99C580059043E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Debug;
@@ -3539,10 +4073,6 @@
 		E1A224E919F99C580059043E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Release;
@@ -3550,10 +4080,6 @@
 		E1A224F419F99D880059043E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Debug;
@@ -3561,10 +4087,6 @@
 		E1A224F519F99D880059043E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Release;
@@ -3572,10 +4094,6 @@
 		E1A224FF19F99DFD0059043E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Debug;
@@ -3583,10 +4101,6 @@
 		E1A2250019F99DFD0059043E /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				GCC_PREPROCESSOR_DEFINITIONS = (
-					"$(inherited)",
-					"GTEST_HAS_RTTI=0",
-				);
 				USER_HEADER_SEARCH_PATHS = "$(SRCROOT)/include $(SRCROOT)/utils/unittest/googletest/include";
 			};
 			name = Release;
@@ -3609,10 +4123,9 @@
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = "$(PROJECT_SOURCE_VERSION)";
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/public-api";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/include";
 				INSTALL_PATH = "$(DT_TOOLCHAIN_DIR)/usr/local/lib";
 				PUBLIC_HEADERS_FOLDER_PATH = "$(DT_TOOLCHAIN_DIR)/usr/local/include/llbuild";
-				SKIP_INSTALL = NO;
 			};
 			name = Debug;
 		};
@@ -3622,10 +4135,9 @@
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = "$(PROJECT_SOURCE_VERSION)";
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/public-api";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/include";
 				INSTALL_PATH = "$(DT_TOOLCHAIN_DIR)/usr/local/lib";
 				PUBLIC_HEADERS_FOLDER_PATH = "$(DT_TOOLCHAIN_DIR)/usr/local/include/llbuild";
-				SKIP_INSTALL = NO;
 			};
 			name = Release;
 		};
@@ -3697,19 +4209,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "$(LLBUILD_CODE_SIGN_IDENTITY)";
-				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = "$(PROJECT_SOURCE_VERSION)";
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/public-api";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/include";
 				INFOPLIST_FILE = "$(SRCROOT)/products/llbuild-framework/Info.plist";
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				MODULEMAP_FILE = "$(SRCROOT)/products/llbuild-framework/llbuild-module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apple.dt.llbuid;
 				PRODUCT_NAME = llbuild;
-				SKIP_INSTALL = YES;
+				SKIP_INSTALL = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(LLBUILD_SWIFT_VERSION_DEFINITIONS) LLBUILD_FRAMEWORK";
 			};
 			name = Debug;
 		};
@@ -3717,25 +4227,41 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "$(LLBUILD_CODE_SIGN_IDENTITY)";
-				CURRENT_PROJECT_VERSION = 1;
 				DEFINES_MODULE = YES;
 				DYLIB_COMPATIBILITY_VERSION = 1;
 				DYLIB_CURRENT_VERSION = "$(PROJECT_SOURCE_VERSION)";
 				DYLIB_INSTALL_NAME_BASE = "@rpath";
-				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/public-api";
+				HEADER_SEARCH_PATHS = "$(SRCROOT)/products/libllbuild/include";
 				INFOPLIST_FILE = "$(SRCROOT)/products/llbuild-framework/Info.plist";
-				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
-				MACOSX_DEPLOYMENT_TARGET = 10.10;
 				MODULEMAP_FILE = "$(SRCROOT)/products/llbuild-framework/llbuild-module.modulemap";
 				PRODUCT_BUNDLE_IDENTIFIER = com.apple.dt.llbuid;
 				PRODUCT_NAME = llbuild;
-				SKIP_INSTALL = YES;
+				SKIP_INSTALL = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(LLBUILD_SWIFT_VERSION_DEFINITIONS) LLBUILD_FRAMEWORK";
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		40513F1A2057621500DCA088 /* Build configuration list for PBXAggregateTarget "Generate-version.h" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				40513F182057621500DCA088 /* Debug */,
+				40513F192057621500DCA088 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		40B3C91720D3AEC9007C5847 /* Build configuration list for PBXNativeTarget "CAPITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				40B3C91820D3AEC9007C5847 /* Debug */,
+				40B3C91920D3AEC9007C5847 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		9DB047AC1DF9D43D006CDF52 /* Build configuration list for PBXNativeTarget "BuildSystemTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

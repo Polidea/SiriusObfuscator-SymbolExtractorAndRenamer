@@ -26,7 +26,7 @@ class LogicalPathComponent;
 
 class FormalAccess {
 public:
-  enum Kind { Shared, Exclusive, Owned };
+  enum Kind { Shared, Exclusive, Owned, Unenforced };
 
 private:
   unsigned allocatedSize;
@@ -71,6 +71,10 @@ protected:
   virtual void finishImpl(SILGenFunction &SGF) = 0;
 };
 
+// FIXME: Misnomer. This is not used for borrowing a formal memory location
+// (ExclusiveBorrowFormalAccess is always used for that). This is only used for
+// formal access from a +0 value, which requires producing a "borrowed"
+// SILValue.
 class SharedBorrowFormalAccess : public FormalAccess {
   SILValue originalValue;
   SILValue borrowedValue;
@@ -120,7 +124,7 @@ public:
 
   ~FormalEvaluationContext() {
     assert(stack.empty() &&
-           "entries remaining on writeback stack at end of function!");
+           "entries remaining on formal evaluation cleanup stack at end of function!");
   }
 
   iterator begin() { return stack.begin(); }
@@ -176,7 +180,7 @@ public:
 class FormalEvaluationScope {
   SILGenFunction &SGF;
   llvm::Optional<FormalEvaluationContext::stable_iterator> savedDepth;
-  bool wasInWritebackScope;
+  bool wasInFormalEvaluationScope;
   bool wasInInOutConversionScope;
 
 public:
@@ -193,7 +197,7 @@ public:
     if (wasInInOutConversionScope)
       return;
 
-    assert(!isPopped() && "popping an already-popped writeback scope!");
+    assert(!isPopped() && "popping an already-popped scope!");
     popImpl();
     savedDepth.reset();
   }

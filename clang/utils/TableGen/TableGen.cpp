@@ -56,6 +56,8 @@ enum ActionType {
   GenArmNeonTest,
   GenAttrDocs,
   GenDiagDocs,
+  GenOptDocs,
+  GenDataCollectors,
   GenTestPragmaAttributeSupportedAttributes
 };
 
@@ -145,6 +147,9 @@ cl::opt<ActionType> Action(
                    "Generate attribute documentation"),
         clEnumValN(GenDiagDocs, "gen-diag-docs",
                    "Generate diagnostic documentation"),
+        clEnumValN(GenOptDocs, "gen-opt-docs", "Generate option documentation"),
+        clEnumValN(GenDataCollectors, "gen-clang-data-collectors",
+                   "Generate data collectors for AST nodes"),
         clEnumValN(GenTestPragmaAttributeSupportedAttributes,
                    "gen-clang-test-pragma-attribute-supported-attributes",
                    "Generate a list of attributes supported by #pragma clang "
@@ -256,6 +261,12 @@ bool ClangTableGenMain(raw_ostream &OS, RecordKeeper &Records) {
     break;
   case GenDiagDocs:
     EmitClangDiagDocs(Records, OS);
+    break;
+  case GenOptDocs:
+    EmitClangOptDocs(Records, OS);
+    break;
+  case GenDataCollectors:
+    EmitClangDataCollectors(Records, OS);
     break;
   case GenTestPragmaAttributeSupportedAttributes:
     EmitTestPragmaAttributeSupportedAttributes(Records, OS);

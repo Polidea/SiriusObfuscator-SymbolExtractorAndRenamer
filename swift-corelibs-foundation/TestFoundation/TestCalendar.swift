@@ -7,15 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-import Foundation
-import XCTest
-#else
-import SwiftFoundation
-import SwiftXCTest
-#endif
-import CoreFoundation
-
 class TestCalendar: XCTestCase {
     
     static var allTests: [(String, (TestCalendar) -> () throws -> Void)] {
@@ -29,9 +20,9 @@ class TestCalendar: XCTestCase {
             ("test_addingDates", test_addingDates),
             ("test_datesNotOnWeekend", test_datesNotOnWeekend),
             ("test_datesOnWeekend", test_datesOnWeekend),
-            ("test_customMirror", test_customMirror)
-            // Disabled because this fails on linux https://bugs.swift.org/browse/SR-320
-            // ("test_currentCalendarRRstability", test_currentCalendarRRstability),
+            ("test_customMirror", test_customMirror),
+            ("test_ampmSymbols", test_ampmSymbols),
+            ("test_currentCalendarRRstability", test_currentCalendarRRstability),
         ]
     }
     
@@ -126,7 +117,13 @@ class TestCalendar: XCTestCase {
         XCTAssertEqual(components.isLeapMonth, true)
     }
 
-    func test_currentRRstability() {
+    func test_ampmSymbols() {
+        let calendar = Calendar(identifier: .gregorian)
+        XCTAssertEqual(calendar.amSymbol, "AM")
+        XCTAssertEqual(calendar.pmSymbol, "PM")
+    }
+
+    func test_currentCalendarRRstability() {
         var AMSymbols = [String]()
         for _ in 1...10 {
             let cal = Calendar.current
@@ -165,15 +162,23 @@ class TestCalendar: XCTestCase {
     
     func test_datesNotOnWeekend() {
         let calendar = Calendar(identifier: .gregorian)
+        let mondayInDecember = calendar.date(from: DateComponents(year: 2018, month: 12, day: 10))!
+        XCTAssertFalse(calendar.isDateInWeekend(mondayInDecember))
+        let tuesdayInNovember = calendar.date(from: DateComponents(year: 2017, month: 11, day: 14))!
+        XCTAssertFalse(calendar.isDateInWeekend(tuesdayInNovember))
         let wednesdayInFebruary = calendar.date(from: DateComponents(year: 2016, month: 2, day: 17))!
-        
         XCTAssertFalse(calendar.isDateInWeekend(wednesdayInFebruary))
+        let thursdayInOctober = calendar.date(from: DateComponents(year: 2015, month: 10, day: 22))!
+        XCTAssertFalse(calendar.isDateInWeekend(thursdayInOctober))
+        let fridayInSeptember = calendar.date(from: DateComponents(year: 2014, month: 9, day: 26))!
+        XCTAssertFalse(calendar.isDateInWeekend(fridayInSeptember))
     }
     
     func test_datesOnWeekend() {
         let calendar = Calendar(identifier: .gregorian)
+        let saturdayInJanuary = calendar.date(from: DateComponents(year:2017, month: 1, day: 7))!
+        XCTAssertTrue(calendar.isDateInWeekend(saturdayInJanuary))
         let sundayInFebruary = calendar.date(from: DateComponents(year: 2016, month: 2, day: 14))!
-        
         XCTAssertTrue(calendar.isDateInWeekend(sundayInFebruary))
     }
     
@@ -184,7 +189,7 @@ class TestCalendar: XCTestCase {
         XCTAssertEqual(calendar.identifier, calendarMirror.descendant("identifier") as? Calendar.Identifier)
         XCTAssertEqual(calendar.locale, calendarMirror.descendant("locale") as? Locale)
         XCTAssertEqual(calendar.timeZone, calendarMirror.descendant("timeZone") as? TimeZone)
-        XCTAssertEqual(calendar.firstWeekday, calendarMirror.descendant("firstWeekDay") as? Int)
+        XCTAssertEqual(calendar.firstWeekday, calendarMirror.descendant("firstWeekday") as? Int)
         XCTAssertEqual(calendar.minimumDaysInFirstWeek, calendarMirror.descendant("minimumDaysInFirstWeek") as? Int)
     }
 }

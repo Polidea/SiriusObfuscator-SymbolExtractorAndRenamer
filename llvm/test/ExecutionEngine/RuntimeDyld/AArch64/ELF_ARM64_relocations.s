@@ -1,6 +1,6 @@
-# RUN: llvm-mc -triple=arm64-none-linux-gnu -filetype=obj -o %T/reloc.o %s
-# RUN: llvm-rtdyld -triple=arm64-none-linux-gnu -verify -dummy-extern f=0x0123456789abcdef -check=%s %T/reloc.o
-        
+# RUN: llvm-mc -triple=arm64-none-linux-gnu -filetype=obj -o %t %s
+# RUN: llvm-rtdyld -triple=arm64-none-linux-gnu -verify -dummy-extern f=0x0123456789abcdef -dummy-extern symbol=0xf00f -check=%s %t
+
         .globl Q
         .section .dummy, "ax"
 Q:
@@ -20,14 +20,20 @@ g:
 # R_AARCH64_MOVW_UABS_G0_NC
         movk    x0, #:abs_g0_nc:f
 l:
+# R_AARCH64_LDST8_ABS_LO12_NC
+        ldrsb x4, [x5, :lo12:a+1]
+# R_AARCH64_LDST16_ABS_LO12_NC
+        ldrh w4, [x5, :lo12:a+2]
 # R_AARCH64_LDST32_ABS_LO12_NC
         ldr s4, [x5, :lo12:a]
 # R_AARCH64_LDST64_ABS_LO12_NC
         ldr x4, [x5, :lo12:a]
+# R_AARCH64_LDST128_ABS_LO12_NC
+        ldr q4, [x5, :lo12:a]
 p:
 # R_AARCH64_ADR_PREL_PG_HI21
 # Test both low and high immediate values
-        adrp x4, a + 20480 # 16384 + 4096
+        adrp x4, a + 20480 // 16384 + 4096
 # Align next label to 16 bytes, so that LDST immediate
 # fields will be non-zero        
         .align 4
@@ -57,9 +63,12 @@ r:
 # rtdyld-check: *{4}(g + 8) = 0xf2b13560
 # rtdyld-check: *{4}(g + 12) = 0xf299bde0
 
-## Check LDST32_ABS_LO12_NC and LDST64_ABS_LO12_NC
-# rtdyld-check: (*{4}l)[21:10] = a[11:2]
-# rtdyld-check: (*{4}(l+4))[21:10] = a[11:3]
+## Check LDSTXX_ABS_LO12_NC
+# rtdyld-check: (*{4}l)[21:10] = (a+1)[11:0]
+# rtdyld-check: (*{4}(l+4))[21:10] = (a+2)[11:1]
+# rtdyld-check: (*{4}(l+8))[21:10] = a[11:2]
+# rtdyld-check: (*{4}(l+12))[21:10] = a[11:3]
+# rtdyld-check: (*{4}(l+16))[21:10] = a[11:4]
 
 ## Check ADR_PREL_PG_HI21. Low order bits of immediate value
 ## go to bits 30:29. High order bits go to bits 23:5
@@ -73,3 +82,14 @@ r:
 ## f & 0xFFF = 0xdef (bits 11:0 of f)
 ## 0xdef << 10 = 0x37bc00
 # rtdyld-check: *{4}(a) = 0x9137bc00
+
+	.data
+ABS16:
+	.short symbol
+# rtdyld-check: (*{2}ABS16) = symbol[15:0]
+ABS32:
+	.long symbol
+# rtdyld-check: (*{4}ABS32) = symbol[31:0]
+ABS64:
+	.xword symbol
+# rtdyld-check: (*{8}ABS64) = symbol

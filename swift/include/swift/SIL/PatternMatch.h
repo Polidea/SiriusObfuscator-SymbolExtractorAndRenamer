@@ -140,17 +140,17 @@ struct OneOf_match;
 
 template <typename T0>
 struct OneOf_match<T0> {
-  typedef T0 Ty;
+  using Ty = T0;
 };
 
 template <typename T0, typename T1>
 struct OneOf_match<T0, T1> {
-  typedef match_combine_or<T0, T1> Ty;
+  using Ty = match_combine_or<T0, T1>;
 };
 
 template <typename T0, typename T1, typename ...Arguments>
 struct OneOf_match<T0, T1, Arguments ...> {
-  typedef typename OneOf_match<match_combine_or<T0, T1>, Arguments ...>::Ty Ty;
+  using Ty = typename OneOf_match<match_combine_or<T0, T1>, Arguments...>::Ty;
 };
 
 /// This is a vararg version of m_CombineOr. It is a boolean "or" of
@@ -296,19 +296,24 @@ using m_One = match_integer<1>;
 //                             Unary Instructions
 //===----------------------------------------------------------------------===//
 
-template<typename OpMatchTy, ValueKind Kind>
+template<typename OpMatchTy, SILInstructionKind Kind>
 struct UnaryOp_match {
   OpMatchTy OpMatch;
 
   UnaryOp_match(const OpMatchTy &Op) : OpMatch(Op) { }
 
-  template<typename OpTy>
-  bool match(OpTy *V) {
-    if (V->getKind() != Kind)
+  bool match(SILNode *node) {
+    if (node->getKind() != SILNodeKind(Kind))
       return false;
 
-    auto *I = dyn_cast<SILInstruction>(V);
-    if (!I || I->getNumOperands() != 1)
+    return match(cast<SILInstruction>(node));
+  }
+
+  bool match(SILInstruction *I) {
+    if (I->getKind() != Kind)
+      return false;
+
+    if (I->getNumOperands() != 1)
       return false;
 
     return OpMatch.match(I->getOperand(0));
@@ -319,7 +324,7 @@ struct UnaryOp_match {
 // further matchers to the operands of the unary operation.
 #define UNARY_OP_MATCH_WITH_ARG_MATCHER(Class)        \
   template <typename Ty>                              \
-  UnaryOp_match<Ty, ValueKind::Class>                 \
+  UnaryOp_match<Ty, SILInstructionKind::Class>        \
   m_##Class(const Ty &T) {                            \
     return T;                                         \
   }
@@ -343,7 +348,6 @@ UNARY_OP_MATCH_WITH_ARG_MATCHER(ThickToObjCMetatypeInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ObjCToThickMetatypeInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ObjCMetatypeToObjectInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ObjCExistentialMetatypeToObjectInst)
-UNARY_OP_MATCH_WITH_ARG_MATCHER(IsNonnullInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(RetainValueInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(RetainValueAddrInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ReleaseValueInst)
@@ -362,22 +366,25 @@ UNARY_OP_MATCH_WITH_ARG_MATCHER(StructElementAddrInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(LoadInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(RefElementAddrInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ClassMethodInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(ObjCMethodInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(SuperMethodInst)
-UNARY_OP_MATCH_WITH_ARG_MATCHER(DynamicMethodInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(ObjCSuperMethodInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(OpenExistentialAddrInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(OpenExistentialRefInst)
-UNARY_OP_MATCH_WITH_ARG_MATCHER(OpenExistentialOpaqueInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(OpenExistentialValueInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(InitExistentialAddrInst)
-UNARY_OP_MATCH_WITH_ARG_MATCHER(InitExistentialOpaqueInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(InitExistentialValueInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(InitExistentialRefInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(DeinitExistentialAddrInst)
-UNARY_OP_MATCH_WITH_ARG_MATCHER(DeinitExistentialOpaqueInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(DeinitExistentialValueInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(ProjectBlockStorageInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(StrongRetainInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(StrongReleaseInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(StrongRetainUnownedInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(UnownedRetainInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(UnownedReleaseInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(ClassifyBridgeObjectInst)
+UNARY_OP_MATCH_WITH_ARG_MATCHER(ValueToBridgeObjectInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(FixLifetimeInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(CopyBlockInst)
 UNARY_OP_MATCH_WITH_ARG_MATCHER(DeallocStackInst)
@@ -393,20 +400,25 @@ UNARY_OP_MATCH_WITH_ARG_MATCHER(ReturnInst)
 //                            Binary Instructions
 //===----------------------------------------------------------------------===//
 
-template<typename LHSTy, typename RHSTy, ValueKind Kind>
+template<typename LHSTy, typename RHSTy, SILInstructionKind Kind>
 struct BinaryOp_match {
   LHSTy L;
   RHSTy R;
 
   BinaryOp_match(const LHSTy &LHS, const RHSTy &RHS) : L(LHS), R(RHS) {}
 
-  template<typename OpTy>
-  bool match(OpTy *V) {
-    if (V->getKind() != Kind)
+  bool match(SILNode *node) {
+    if (node->getKind() != SILNodeKind(Kind))
       return false;
 
-    auto *I = dyn_cast<SILInstruction>(V);
-    if (!I || I->getNumOperands() != 2)
+    return match(cast<SILInstruction>(node));
+  }
+
+  bool match(SILInstruction *I) {
+    if (I->getKind() != Kind)
+      return false;
+
+    if (I->getNumOperands() != 2)
       return false;
 
     return L.match((ValueBase *)I->getOperand(0)) &&
@@ -415,7 +427,7 @@ struct BinaryOp_match {
 };
 
 template <typename LTy, typename RTy>
-BinaryOp_match<LTy, RTy, ValueKind::IndexRawPointerInst>
+BinaryOp_match<LTy, RTy, SILInstructionKind::IndexRawPointerInst>
 m_IndexRawPointerInst(const LTy &Left, const RTy &Right) {
   return {Left, Right};
 }
@@ -572,18 +584,18 @@ struct Apply_match;
 
 template <typename CalleeTy>
 struct Apply_match<CalleeTy> {
-  typedef Callee_match<CalleeTy> Ty;
+  using Ty = Callee_match<CalleeTy>;
 };
 
 template <typename CalleeTy, typename T0>
 struct Apply_match<CalleeTy, T0> {
-  typedef match_combine_and<Callee_match<CalleeTy>, Argument_match<T0>> Ty;
+  using Ty = match_combine_and<Callee_match<CalleeTy>, Argument_match<T0>>;
 };
 
 template <typename CalleeTy, typename T0, typename ...Arguments>
 struct Apply_match<CalleeTy, T0, Arguments ...> {
-  typedef match_combine_and<typename Apply_match<CalleeTy, Arguments ...>::Ty,
-                            Argument_match<T0> > Ty;
+  using Ty = match_combine_and<typename Apply_match<CalleeTy, Arguments...>::Ty,
+                               Argument_match<T0>>;
 };
 
 /// Match only an ApplyInst's Callee.

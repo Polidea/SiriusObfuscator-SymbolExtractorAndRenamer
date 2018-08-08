@@ -157,10 +157,6 @@ private:
     visit(S->getBody());
   }
 
-  void visitIfConfigStmt(IfConfigStmt * S) {
-    // Active members are attached to the enclosing declaration, so there's no
-    // need to walk anything within.
-  }
   void visitWhileStmt(WhileStmt *S) {
     if (!isReferencePointInRange(S->getSourceRange()))
       return;
@@ -175,15 +171,6 @@ private:
     visit(S->getBody());
   }
 
-  void visitForStmt(ForStmt *S) {
-    if (!isReferencePointInRange(S->getSourceRange()))
-      return;
-    visit(S->getBody());
-    for (Decl *D : S->getInitializerVarDecls()) {
-      if (auto *VD = dyn_cast<ValueDecl>(D))
-        checkValueDecl(VD, DeclVisibilityKind::LocalVariable);
-    }
-  }
   void visitForEachStmt(ForEachStmt *S) {
     if (!isReferencePointInRange(S->getSourceRange()))
       return;
@@ -238,7 +225,7 @@ private:
         }
       }
     }
-    if (!inPatterns && items.size() > 0)
+    if (!inPatterns && !items.empty())
       checkPattern(items[0].getPattern(), DeclVisibilityKind::LocalVariable);
     visit(body);
   }

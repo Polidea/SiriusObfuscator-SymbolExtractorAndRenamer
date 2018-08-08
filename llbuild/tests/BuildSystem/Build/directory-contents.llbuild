@@ -19,6 +19,20 @@
 # CHECK-REBUILD: { "new-rule", "[[RULE_NAME:R[0-9]+]]", "Ddir" },
 # CHECK-REBUILD: { "rule-does-not-need-to-run", "[[RULE_NAME]]" },
 
+# A null rebuild where the directory itself has been touched unfortunately
+# rebuilds (due to rdar://41142590).
+#
+# Sadly, some of the CI systems run on file systems where the time resolution
+# is coarse. We have to inject a pause here to cause this to roll over.
+#
+# RUN: sleep 1
+# RUN: touch %t.build/dir
+# RUN: %{llbuild} buildsystem build --serial --trace %t.touch.trace --chdir %t.build
+# RUN: %{FileCheck} --check-prefix=CHECK-TOUCH --input-file=%t.touch.trace %s
+#
+# CHECK-TOUCH: { "new-rule", "[[RULE_NAME:R[0-9]+]]", "Ndir" },
+# CHECK-TOUCH: { "rule-needs-to-run", "[[RULE_NAME]]", "invalid-value" },
+
 
 # A rebuild after adding a new file should rebuild the directory.
 #
@@ -28,6 +42,17 @@
 #
 # CHECK-MODIFIED: { "new-rule", "[[RULE_NAME:R[0-9]+]]", "Ddir" },
 # CHECK-MODIFIED: { "rule-needs-to-run", "[[RULE_NAME]]", "invalid-value" },
+
+# A rebuild after modifying a file should rebuild the directory.
+#
+# RUN: echo diff > %t.build/dir/file
+# RUN: %{llbuild} buildsystem build --serial --trace %t.modified2.trace --chdir %t.build
+# RUN: %{FileCheck} --check-prefix=CHECK-MODIFIED2 --input-file=%t.modified2.trace %s
+#
+# CHECK-MODIFIED2: { "new-rule", "[[RULE_NAME:R[0-9]+]]", "Ddir" },
+# CHECK-MODIFIED2: { "rule-does-not-need-to-run", "[[RULE_NAME]]" },
+# CHECK-MODIFIED2: { "new-rule", "[[RULE_NAME2:R[0-9]+]]", "Ndir/file" },
+# CHECK-MODIFIED2: { "rule-needs-to-run", "[[RULE_NAME2]]", "invalid-value" },
 
 client:
   name: basic

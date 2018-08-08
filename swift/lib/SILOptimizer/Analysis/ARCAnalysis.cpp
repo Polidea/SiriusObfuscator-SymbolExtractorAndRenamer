@@ -36,12 +36,14 @@ using BasicBlockRetainValue = std::pair<SILBasicBlock *, SILValue>;
 //===----------------------------------------------------------------------===//
 
 bool swift::isRetainInstruction(SILInstruction *I) {
-  return isa<StrongRetainInst>(I) || isa<RetainValueInst>(I);
+  return isa<StrongRetainInst>(I) || isa<RetainValueInst>(I) ||
+         isa<UnownedRetainInst>(I);
 }
 
 
 bool swift::isReleaseInstruction(SILInstruction *I) {
-  return isa<StrongReleaseInst>(I) || isa<ReleaseValueInst>(I);
+  return isa<StrongReleaseInst>(I) || isa<ReleaseValueInst>(I) ||
+         isa<UnownedReleaseInst>(I);
 }
 
 //===----------------------------------------------------------------------===//
@@ -70,7 +72,8 @@ bool swift::mayDecrementRefCount(SILInstruction *User,
 }
 
 bool swift::mayCheckRefCount(SILInstruction *User) {
-  return isa<IsUniqueInst>(User) || isa<IsUniqueOrPinnedInst>(User);
+  return isa<IsUniqueInst>(User) || isa<IsUniqueOrPinnedInst>(User) ||
+         isa<IsEscapingClosureInst>(User);
 }
 
 //===----------------------------------------------------------------------===//
@@ -116,42 +119,42 @@ static bool canApplyOfBuiltinUseNonTrivialValues(BuiltinInst *BInst) {
 bool swift::canNeverUseValues(SILInstruction *Inst) {
   switch (Inst->getKind()) {
   // These instructions do not use other values.
-  case ValueKind::FunctionRefInst:
-  case ValueKind::IntegerLiteralInst:
-  case ValueKind::FloatLiteralInst:
-  case ValueKind::StringLiteralInst:
-  case ValueKind::AllocStackInst:
-  case ValueKind::AllocRefInst:
-  case ValueKind::AllocRefDynamicInst:
-  case ValueKind::AllocBoxInst:
-  case ValueKind::MetatypeInst:
-  case ValueKind::WitnessMethodInst:
+  case SILInstructionKind::FunctionRefInst:
+  case SILInstructionKind::IntegerLiteralInst:
+  case SILInstructionKind::FloatLiteralInst:
+  case SILInstructionKind::StringLiteralInst:
+  case SILInstructionKind::AllocStackInst:
+  case SILInstructionKind::AllocRefInst:
+  case SILInstructionKind::AllocRefDynamicInst:
+  case SILInstructionKind::AllocBoxInst:
+  case SILInstructionKind::MetatypeInst:
+  case SILInstructionKind::WitnessMethodInst:
     return true;
 
   // DeallocStackInst do not use reference counted values.
-  case ValueKind::DeallocStackInst:
+  case SILInstructionKind::DeallocStackInst:
     return true;
 
   // Debug values do not use referenced counted values in a manner we care
   // about.
-  case ValueKind::DebugValueInst:
-  case ValueKind::DebugValueAddrInst:
+  case SILInstructionKind::DebugValueInst:
+  case SILInstructionKind::DebugValueAddrInst:
     return true;
 
   // Casts do not use pointers in a manner that we care about since we strip
   // them during our analysis. The reason for this is if the cast is not dead
   // then there must be some other use after the cast that we will protect if a
   // release is not in between the cast and the use.
-  case ValueKind::UpcastInst:
-  case ValueKind::AddressToPointerInst:
-  case ValueKind::PointerToAddressInst:
-  case ValueKind::UncheckedRefCastInst:
-  case ValueKind::UncheckedRefCastAddrInst:
-  case ValueKind::UncheckedAddrCastInst:
-  case ValueKind::RefToRawPointerInst:
-  case ValueKind::RawPointerToRefInst:
-  case ValueKind::UnconditionalCheckedCastInst:
-  case ValueKind::UncheckedBitwiseCastInst:
+  case SILInstructionKind::UpcastInst:
+  case SILInstructionKind::AddressToPointerInst:
+  case SILInstructionKind::PointerToAddressInst:
+  case SILInstructionKind::UncheckedRefCastInst:
+  case SILInstructionKind::UncheckedRefCastAddrInst:
+  case SILInstructionKind::UncheckedAddrCastInst:
+  case SILInstructionKind::RefToRawPointerInst:
+  case SILInstructionKind::RawPointerToRefInst:
+  case SILInstructionKind::UnconditionalCheckedCastInst:
+  case SILInstructionKind::UncheckedBitwiseCastInst:
     return true;
 
   // If we have a trivial bit cast between trivial types, it is not something
@@ -165,37 +168,37 @@ bool swift::canNeverUseValues(SILInstruction *Inst) {
   // trivial value though could be used as a trivial value in ways that ARC
   // dataflow will not understand implying we need to treat it as a use to be
   // safe.
-  case ValueKind::UncheckedTrivialBitCastInst: {
+  case SILInstructionKind::UncheckedTrivialBitCastInst: {
     SILValue Op = cast<UncheckedTrivialBitCastInst>(Inst)->getOperand();
     return Op->getType().isTrivial(Inst->getModule());
   }
 
   // Typed GEPs do not use pointers. The user of the typed GEP may but we will
   // catch that via the dataflow.
-  case ValueKind::StructExtractInst:
-  case ValueKind::TupleExtractInst:
-  case ValueKind::StructElementAddrInst:
-  case ValueKind::TupleElementAddrInst:
-  case ValueKind::UncheckedTakeEnumDataAddrInst:
-  case ValueKind::RefElementAddrInst:
-  case ValueKind::RefTailAddrInst:
-  case ValueKind::UncheckedEnumDataInst:
-  case ValueKind::IndexAddrInst:
-  case ValueKind::IndexRawPointerInst:
+  case SILInstructionKind::StructExtractInst:
+  case SILInstructionKind::TupleExtractInst:
+  case SILInstructionKind::StructElementAddrInst:
+  case SILInstructionKind::TupleElementAddrInst:
+  case SILInstructionKind::UncheckedTakeEnumDataAddrInst:
+  case SILInstructionKind::RefElementAddrInst:
+  case SILInstructionKind::RefTailAddrInst:
+  case SILInstructionKind::UncheckedEnumDataInst:
+  case SILInstructionKind::IndexAddrInst:
+  case SILInstructionKind::IndexRawPointerInst:
       return true;
 
   // Aggregate formation by themselves do not create new uses since it is their
   // users that would create the appropriate uses.
-  case ValueKind::EnumInst:
-  case ValueKind::StructInst:
-  case ValueKind::TupleInst:
+  case SILInstructionKind::EnumInst:
+  case SILInstructionKind::StructInst:
+  case SILInstructionKind::TupleInst:
     return true;
 
   // Only uses non reference counted values.
-  case ValueKind::CondFailInst:
+  case SILInstructionKind::CondFailInst:
     return true;
 
-  case ValueKind::BuiltinInst: {
+  case SILInstructionKind::BuiltinInst: {
     auto *BI = cast<BuiltinInst>(Inst);
 
     // Certain builtin function refs we know can never use non-trivial values.
@@ -203,8 +206,8 @@ bool swift::canNeverUseValues(SILInstruction *Inst) {
   }
   // We do not care about branch inst, since if the branch inst's argument is
   // dead, LLVM will clean it up.
-  case ValueKind::BranchInst:
-  case ValueKind::CondBranchInst:
+  case SILInstructionKind::BranchInst:
+  case SILInstructionKind::CondBranchInst:
     return true;
   default:
     return false;
@@ -441,8 +444,17 @@ mayGuaranteedUseValue(SILInstruction *User, SILValue Ptr, AliasAnalysis *AA) {
 
   FullApplySite FAS(User);
 
-  // Ok, we have a full apply site. If the apply has no arguments, we don't need
-  // to worry about any guaranteed parameters.
+  // Ok, we have a full apply site. Check if the callee is callee_guaranteed. In
+  // such a case, if we can not prove no alias, we need to be conservative and
+  // return true.
+  CanSILFunctionType FType = FAS.getSubstCalleeType();
+  if (FType->isCalleeGuaranteed() && !AA->isNoAlias(FAS.getCallee(), Ptr)) {
+    return true;
+  }
+
+  // Ok, we have a full apply site and our callee is a normal use. Thus if the
+  // apply does not have any normal arguments, we don't need to worry about any
+  // guaranteed parameters and return early.
   if (!FAS.getNumArguments())
     return false;
 
@@ -450,7 +462,6 @@ mayGuaranteedUseValue(SILInstruction *User, SILValue Ptr, AliasAnalysis *AA) {
   // iterate through the function parameters. If any of the parameters are
   // guaranteed, attempt to prove that the passed in parameter cannot alias
   // Ptr. If we fail, return true.
-  CanSILFunctionType FType = FAS.getSubstCalleeType();
   auto Params = FType->getParameters();
   for (unsigned i : indices(Params)) {    
     if (!Params[i].isGuaranteed())
@@ -487,22 +498,24 @@ void ConsumedResultToEpilogueRetainMatcher::recompute() {
   findMatchingRetains(&*BB);
 }
 
-bool
-ConsumedResultToEpilogueRetainMatcher::
-isTransitiveSuccessorsRetainFree(llvm::DenseSet<SILBasicBlock *> BBs) {
+bool ConsumedResultToEpilogueRetainMatcher::isTransitiveSuccessorsRetainFree(
+    const llvm::DenseSet<SILBasicBlock *> &BBs) {
   // For every block with retain, we need to check the transitive
   // closure of its successors are retain-free.
   for (auto &I : EpilogueRetainInsts) {
-    auto *CBB = I->getParent();
-    for (auto &Succ : CBB->getSuccessors()) {
-      if (BBs.find(Succ) != BBs.end())
+    for (auto &Succ : I->getParent()->getSuccessors()) {
+      if (BBs.count(Succ))
         continue;
       return false;
     }
   }
+
+  // FIXME: We are iterating over a DenseSet. That can lead to non-determinism
+  // and is in general pretty inefficient since we are iterating over a hash
+  // table.
   for (auto CBB : BBs) {
     for (auto &Succ : CBB->getSuccessors()) {
-      if (BBs.find(Succ) != BBs.end())
+      if (BBs.count(Succ))
         continue;
       return false;
     }
@@ -968,11 +981,10 @@ static bool successorHasLiveIn(SILBasicBlock *BB,
 static bool addLastUse(SILValue V, SILBasicBlock *BB,
                        ReleaseTracker &Tracker) {
   for (auto I = BB->rbegin(); I != BB->rend(); ++I) {
-    for (auto &Op : I->getAllOperands())
-      if (Op.get() == V) {
-        Tracker.trackLastRelease(&*I);
-        return true;
-      }
+    if (Tracker.isUser(&*I)) {
+      Tracker.trackLastRelease(&*I);
+      return true;
+    }
   }
 
   llvm_unreachable("BB is expected to have a use of a closure");
@@ -996,12 +1008,22 @@ bool swift::getFinalReleasesForValue(SILValue V, ReleaseTracker &Tracker) {
   // We'll treat this like a liveness problem where the value is the def. Each
   // block that has a use of the value has the value live-in unless it is the
   // block with the value.
-  for (auto *UI : V->getUses()) {
-    auto *User = UI->getUser();
+  SmallVector<Operand *, 8> Uses(V->getUses());
+  while (!Uses.empty()) {
+    auto *Use = Uses.pop_back_val();
+    auto *User = Use->getUser();
     auto *BB = User->getParent();
+
+    if (Tracker.isUserTransitive(User)) {
+      Tracker.trackUser(User);
+      auto *CastInst = cast<SingleValueInstruction>(User);
+      Uses.append(CastInst->getUses().begin(), CastInst->getUses().end());
+      continue;
+    }
 
     if (!Tracker.isUserAcceptable(User))
       return false;
+
     Tracker.trackUser(User);
 
     if (BB != DefBB)
@@ -1116,14 +1138,14 @@ bool swift::isARCInertTrapBB(const SILBasicBlock *BB) {
 //===----------------------------------------------------------------------===//
 //             Analysis of builtin "unsafeGuaranteed" instructions
 //===----------------------------------------------------------------------===//
-std::pair<SILInstruction *, SILInstruction *>
+std::pair<SingleValueInstruction *, SingleValueInstruction *>
 swift::getSingleUnsafeGuaranteedValueResult(BuiltinInst *BI) {
   assert(BI->getBuiltinKind() &&
          *BI->getBuiltinKind() == BuiltinValueKind::UnsafeGuaranteed &&
          "Expecting a unsafeGuaranteed builtin");
 
-  SILInstruction *GuaranteedValue = nullptr;
-  SILInstruction *Token = nullptr;
+  SingleValueInstruction *GuaranteedValue = nullptr;
+  SingleValueInstruction *Token = nullptr;
 
   auto Failed = std::make_pair(nullptr, nullptr);
 
@@ -1153,7 +1175,7 @@ swift::getSingleUnsafeGuaranteedValueResult(BuiltinInst *BI) {
   return std::make_pair(GuaranteedValue, Token);
 }
 
-BuiltinInst *swift::getUnsafeGuaranteedEndUser(SILInstruction *UnsafeGuaranteedToken) {
+BuiltinInst *swift::getUnsafeGuaranteedEndUser(SILValue UnsafeGuaranteedToken) {
   BuiltinInst *UnsafeGuaranteedEndI = nullptr;
 
   for (auto *Operand : getNonDebugUses(UnsafeGuaranteedToken)) {

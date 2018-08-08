@@ -26,6 +26,7 @@
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/Decl.h"
 #include "swift/AST/GenericEnvironment.h"
+#include "swift/AST/LazyResolver.h"
 #include "swift/AST/Module.h"
 #include "swift/AST/ProtocolConformance.h"
 #include "swift/AST/Types.h"
@@ -106,9 +107,8 @@ Type SubstitutionMap::lookupSubstitution(CanSubstitutableType type) const {
         archetype->getParent() != nullptr)
       return Type();
 
-    auto *genericEnv = archetype->getGenericEnvironment();
     type = cast<GenericTypeParamType>(
-      genericEnv->mapTypeOutOfContext(archetype)->getCanonicalType());
+      archetype->getInterfaceType()->getCanonicalType());
   }
 
   // Find the index of the replacement type based on the generic parameter we
@@ -134,8 +134,7 @@ Type SubstitutionMap::lookupSubstitution(CanSubstitutableType type) const {
 
   // The generic parameter may have been made concrete by the generic signature,
   // substitute into the concrete type.
-  ModuleDecl &anyModule = *genericParam->getASTContext().getStdlibModule();
-  if (auto concreteType = genericSig->getConcreteType(genericParam, anyModule)){
+  if (auto concreteType = genericSig->getConcreteType(genericParam)){
     // Set the replacement type to an error, to block infinite recursion.
     replacementType = ErrorType::get(concreteType);
 
@@ -168,8 +167,7 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
   // If we have an archetype, map out of the context so we can compute a
   // conformance access path.
   if (auto archetype = dyn_cast<ArchetypeType>(type)) {
-    auto *genericEnv = archetype->getGenericEnvironment();
-    type = genericEnv->mapTypeOutOfContext(type)->getCanonicalType();
+    type = archetype->getInterfaceType()->getCanonicalType();
   }
 
   // Error path: if we don't have a type parameter, there is no conformance.
@@ -180,7 +178,7 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
   // Retrieve the starting conformance from the conformance map.
   auto getInitialConformance =
     [&](Type type, ProtocolDecl *proto) -> Optional<ProtocolConformanceRef> {
-      auto known = conformanceMap.find(type->getCanonicalType().getPointer());
+      auto known = conformanceMap.find(type->getCanonicalType());
       if (known == conformanceMap.end())
         return None;
 
@@ -193,14 +191,23 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
     };
 
   auto genericSig = getGenericSignature();
-  auto &mod = *proto->getModuleContext();
 
-  // If the type doesn't conform to this protocol, fail.
-  if (!genericSig->conformsToProtocol(type, proto, mod))
+  // If the type doesn't conform to this protocol, the result isn't formed
+  // from these requirements.
+  if (!genericSig->conformsToProtocol(type, proto)) {
+    // Check whether the superclass conforms.
+    if (auto superclass = genericSig->getSuperclassBound(type)) {
+      return LookUpConformanceInSignature(*getGenericSignature())(
+                                                 type->getCanonicalType(),
+                                                 superclass,
+                                                 proto->getDeclaredType());
+    }
+
     return None;
+  }
 
   auto accessPath =
-    genericSig->getConformanceAccessPath(type, proto, mod);
+    genericSig->getConformanceAccessPath(type, proto);
 
   // Fall through because we cannot yet evaluate an access path.
   Optional<ProtocolConformanceRef> conformance;
@@ -227,8 +234,7 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
            substType->castTo<ArchetypeType>()->getSuperclass()) &&
           !substType->isTypeParameter() &&
           !substType->isExistentialType()) {
-        auto lazyResolver = M->getASTContext().getLazyResolver();
-        return *M->lookupConformance(substType, proto, lazyResolver);
+        return M->lookupConformance(substType, proto);
       }
 
       return ProtocolConformanceRef(proto);
@@ -241,7 +247,17 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
 
     // If we haven't set the signature conformances yet, force the issue now.
     if (normal->getSignatureConformances().empty()) {
+      // If we're in the process of checking the type witnesses, fail
+      // gracefully.
+      // FIXME: Seems like we should be able to get at the intermediate state
+      // to use that.
+      if (normal->getState() == ProtocolConformanceState::CheckingTypeWitnesses)
+        return None;
+
       auto lazyResolver = type->getASTContext().getLazyResolver();
+      if (lazyResolver == nullptr)
+        return None;
+
       lazyResolver->resolveTypeWitness(normal, nullptr);
 
       // Error case: the conformance is broken, so we cannot handle this
@@ -260,7 +276,11 @@ SubstitutionMap::lookupConformance(CanType type, ProtocolDecl *proto) const {
 void SubstitutionMap::
 addConformance(CanType type, ProtocolConformanceRef conformance) {
   assert(!isa<ArchetypeType>(type));
-  conformanceMap[type.getPointer()].push_back(conformance);
+  conformanceMap[type].push_back(conformance);
+}
+
+SubstitutionMap SubstitutionMap::mapReplacementTypesOutOfContext() const {
+  return subst(MapTypeOutOfContext(), MakeAbstractConformanceForGenericType());
 }
 
 SubstitutionMap SubstitutionMap::subst(const SubstitutionMap &subMap) const {
@@ -513,3 +533,27 @@ void SubstitutionMap::dump(llvm::raw_ostream &out) const {
 void SubstitutionMap::dump() const {
   return dump(llvm::errs());
 }
+
+void SubstitutionMap::profile(llvm::FoldingSetNodeID &id) const {
+  // Generic signature.
+  id.AddPointer(genericSig);
+
+  if (empty() || !genericSig) return;
+
+  // Replacement types.
+  for (Type gp : genericSig->getGenericParams()) {
+    id.AddPointer(gp.subst(*this).getPointer());
+  }
+
+  // Conformance requirements.
+  for (const auto &req : genericSig->getRequirements()) {
+    if (req.getKind() != RequirementKind::Conformance)
+      continue;
+
+    auto conformance =
+      lookupConformance(req.getFirstType()->getCanonicalType(),
+                        req.getSecondType()->castTo<ProtocolType>()->getDecl());
+    id.AddPointer(conformance ? conformance->getOpaqueValue() : nullptr);
+  }
+}
+

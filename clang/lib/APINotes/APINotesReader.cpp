@@ -310,6 +310,11 @@ namespace {
     readVariableInfo(data, info);
 
     uint8_t payload = endian::readNext<uint8_t, little, unaligned>(data);
+    if (auto rawConvention = payload & 0x7) {
+      auto convention = static_cast<RetainCountConventionKind>(rawConvention-1);
+      info.setRetainCountConvention(convention);
+    }
+    payload >>= 3;
     if (payload & 0x01) {
       info.setNoEscape(payload & 0x02);
     }
@@ -319,8 +324,16 @@ namespace {
   /// Read serialized FunctionInfo.
   void readFunctionInfo(const uint8_t *&data, FunctionInfo &info) {
     readCommonEntityInfo(data, info);
-    info.NullabilityAudited
-      = endian::readNext<uint8_t, little, unaligned>(data);
+
+    uint8_t payload = endian::readNext<uint8_t, little, unaligned>(data);
+    if (auto rawConvention = payload & 0x7) {
+      auto convention = static_cast<RetainCountConventionKind>(rawConvention-1);
+      info.setRetainCountConvention(convention);
+    }
+    payload >>= 3;
+    info.NullabilityAudited = payload & 0x1;
+    payload >>= 1; assert(payload == 0 && "Bad API notes");
+
     info.NumAdjustedNullable
       = endian::readNext<uint8_t, little, unaligned>(data);
     info.NullabilityPayload
@@ -1487,27 +1500,30 @@ APINotesReader::VersionedInfo<T>::VersionedInfo(
     SmallVector<std::pair<VersionTuple, T>, 1> results)
   : Results(std::move(results)) {
 
-  // Look for an exact version match.
-  Optional<unsigned> unversioned;
-  Selected = Results.size();
+  assert(!Results.empty());
+  assert(std::is_sorted(Results.begin(), Results.end(),
+                        [](const std::pair<VersionTuple, T> &left,
+                           const std::pair<VersionTuple, T> &right) -> bool {
+    assert(left.first != right.first && "two entries for the same version");
+    return left.first < right.first;
+  }));
 
+  Selected = Results.size();
   for (unsigned i = 0, n = Results.size(); i != n; ++i) {
-    if (Results[i].first == version) {
+    if (version && Results[i].first >= version) {
+      // If the current version is "4", then entries for 4 are better than
+      // entries for 5, but both are valid. Because entries are sorted, we get
+      // that behavior by picking the first match.
       Selected = i;
       break;
-    }
-
-    if (!Results[i].first) {
-      assert(!unversioned && "Two unversioned entries?");
-      unversioned = i;
     }
   }
 
   // If we didn't find a match but we have an unversioned result, use the
-  // unversioned result.
-  if (Selected == Results.size() && unversioned) {
-    Selected = *unversioned;
-  }
+  // unversioned result. This will always be the first entry because we encode
+  // it as version 0.
+  if (Selected == Results.size() && Results[0].first.empty())
+    Selected = 0;
 }
 
 auto APINotesReader::lookupObjCClassID(StringRef name) -> Optional<ContextID> {

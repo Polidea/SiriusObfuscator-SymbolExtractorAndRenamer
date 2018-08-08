@@ -8,6 +8,7 @@ include(CheckIncludeFileCXX)
 include(CheckLibraryExists)
 include(CheckSymbolExists)
 include(CheckFunctionExists)
+include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(TestBigEndian)
 
@@ -16,7 +17,7 @@ include(HandleLLVMStdlib)
 
 if( UNIX AND NOT (BEOS OR HAIKU) )
   # Used by check_symbol_exists:
-  set(CMAKE_REQUIRED_LIBRARIES m)
+  list(APPEND CMAKE_REQUIRED_LIBRARIES "m")
 endif()
 # x86_64 FreeBSD 9.2 requires libcxxrt to be specified explicitly.
 if( CMAKE_SYSTEM MATCHES "FreeBSD-9.2-RELEASE" AND
@@ -46,7 +47,6 @@ endfunction()
 check_include_file(dirent.h HAVE_DIRENT_H)
 check_include_file(dlfcn.h HAVE_DLFCN_H)
 check_include_file(errno.h HAVE_ERRNO_H)
-check_include_file(execinfo.h HAVE_EXECINFO_H)
 check_include_file(fcntl.h HAVE_FCNTL_H)
 check_include_file(inttypes.h HAVE_INTTYPES_H)
 check_include_file(link.h HAVE_LINK_H)
@@ -88,6 +88,15 @@ if(APPLE)
     HAVE_CRASHREPORTER_INFO)
 endif()
 
+if(${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  check_include_file(linux/magic.h HAVE_LINUX_MAGIC_H)
+  if(NOT HAVE_LINUX_MAGIC_H)
+    # older kernels use split files
+    check_include_file(linux/nfs_fs.h HAVE_LINUX_NFS_FS_H)
+    check_include_file(linux/smb.h HAVE_LINUX_SMB_H)
+  endif()
+endif()
+
 # library checks
 if( NOT PURE_WINDOWS )
   check_library_exists(pthread pthread_create "" HAVE_LIBPTHREAD)
@@ -118,35 +127,61 @@ if(HAVE_LIBPTHREAD)
   set(LLVM_PTHREAD_LIB ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
-# Don't look for these libraries on Windows. Also don't look for them if we're
-# using MSan, since uninstrumented third party code may call MSan interceptors
-# like strlen, leading to false positives.
-if( NOT PURE_WINDOWS AND NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
-  if (LLVM_ENABLE_ZLIB)
-    check_library_exists(z compress2 "" HAVE_LIBZ)
-  else()
-    set(HAVE_LIBZ 0)
-  endif()
-  # Skip libedit if using ASan as it contains memory leaks.
-  if (LLVM_ENABLE_LIBEDIT AND HAVE_HISTEDIT_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*")
-    check_library_exists(edit el_init "" HAVE_LIBEDIT)
-  else()
-    set(HAVE_LIBEDIT 0)
-  endif()
-  if(LLVM_ENABLE_TERMINFO)
-    set(HAVE_TERMINFO 0)
-    foreach(library tinfo terminfo curses ncurses ncursesw)
+# Don't look for these libraries if we're using MSan, since uninstrumented third
+# party code may call MSan interceptors like strlen, leading to false positives.
+if(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
+  set(HAVE_LIBZ 0)
+  if(LLVM_ENABLE_ZLIB)
+    foreach(library z zlib_static zlib)
       string(TOUPPER ${library} library_suffix)
-      check_library_exists(${library} setupterm "" HAVE_TERMINFO_${library_suffix})
-      if(HAVE_TERMINFO_${library_suffix})
-        set(HAVE_TERMINFO 1)
-        set(TERMINFO_LIBS "${library}")
+      check_library_exists(${library} compress2 "" HAVE_LIBZ_${library_suffix})
+      if(HAVE_LIBZ_${library_suffix})
+        set(HAVE_LIBZ 1)
+        set(ZLIB_LIBRARIES "${library}")
         break()
       endif()
     endforeach()
-  else()
-    set(HAVE_TERMINFO 0)
   endif()
+
+  # Don't look for these libraries on Windows.
+  if (NOT PURE_WINDOWS)
+    # Skip libedit if using ASan as it contains memory leaks.
+    if (LLVM_ENABLE_LIBEDIT AND HAVE_HISTEDIT_H AND NOT LLVM_USE_SANITIZER MATCHES ".*Address.*")
+      check_library_exists(edit el_init "" HAVE_LIBEDIT)
+    else()
+      set(HAVE_LIBEDIT 0)
+    endif()
+    if(LLVM_ENABLE_TERMINFO)
+      set(HAVE_TERMINFO 0)
+      foreach(library tinfo terminfo curses ncurses ncursesw)
+        string(TOUPPER ${library} library_suffix)
+        check_library_exists(${library} setupterm "" HAVE_TERMINFO_${library_suffix})
+        if(HAVE_TERMINFO_${library_suffix})
+          set(HAVE_TERMINFO 1)
+          set(TERMINFO_LIBS "${library}")
+          break()
+        endif()
+      endforeach()
+    else()
+      set(HAVE_TERMINFO 0)
+    endif()
+
+    find_library(ICONV_LIBRARY_PATH NAMES iconv libiconv libiconv-2 c)
+    set(LLVM_LIBXML2_ENABLED 0)
+    set(LIBXML2_FOUND 0)
+    if((LLVM_ENABLE_LIBXML2) AND ((CMAKE_SYSTEM_NAME MATCHES "Linux") AND (ICONV_LIBRARY_PATH) OR APPLE))
+      find_package(LibXml2)
+      if (LIBXML2_FOUND)
+        set(LLVM_LIBXML2_ENABLED 1)
+        include_directories(${LIBXML2_INCLUDE_DIR})
+        set(LIBXML2_LIBS "xml2")
+      endif()
+    endif()
+  endif()
+endif()
+
+if (LLVM_ENABLE_LIBXML2 STREQUAL "FORCE_ON" AND NOT LLVM_LIBXML2_ENABLED)
+  message(FATAL_ERROR "Failed to congifure libxml2")
 endif()
 
 check_library_exists(xar xar_open "" HAVE_LIBXAR)
@@ -156,7 +191,17 @@ endif()
 
 # function checks
 check_symbol_exists(arc4random "stdlib.h" HAVE_DECL_ARC4RANDOM)
-check_symbol_exists(backtrace "execinfo.h" HAVE_BACKTRACE)
+find_package(Backtrace)
+set(HAVE_BACKTRACE ${Backtrace_FOUND})
+set(BACKTRACE_HEADER ${Backtrace_HEADER})
+
+# Prevent check_symbol_exists from using API that is not supported for a given
+# deployment target.
+check_c_compiler_flag("-Werror=unguarded-availability-new" "C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW")
+if(C_SUPPORTS_WERROR_UNGUARDED_AVAILABILITY_NEW)
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -Werror=unguarded-availability-new")
+endif()
+
 check_symbol_exists(_Unwind_Backtrace "unwind.h" HAVE__UNWIND_BACKTRACE)
 check_symbol_exists(getpagesize unistd.h HAVE_GETPAGESIZE)
 check_symbol_exists(sysconf unistd.h HAVE_SYSCONF)
@@ -227,6 +272,7 @@ if( HAVE_DLFCN_H )
     list(APPEND CMAKE_REQUIRED_LIBRARIES dl)
   endif()
   check_symbol_exists(dlopen dlfcn.h HAVE_DLOPEN)
+  check_symbol_exists(dladdr dlfcn.h HAVE_DLADDR)
   if( HAVE_LIBDL )
     list(REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES dl)
   endif()
@@ -234,7 +280,18 @@ endif()
 
 check_symbol_exists(__GLIBC__ stdio.h LLVM_USING_GLIBC)
 if( LLVM_USING_GLIBC )
-  add_llvm_definitions( -D_GNU_SOURCE )
+  add_definitions( -D_GNU_SOURCE )
+  list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_GNU_SOURCE")
+endif()
+# This check requires _GNU_SOURCE
+check_symbol_exists(sched_getaffinity sched.h HAVE_SCHED_GETAFFINITY)
+check_symbol_exists(CPU_COUNT sched.h HAVE_CPU_COUNT)
+if(HAVE_LIBPTHREAD)
+  check_library_exists(pthread pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(pthread pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
+elseif(PTHREAD_IN_LIBC)
+  check_library_exists(c pthread_getname_np "" HAVE_PTHREAD_GETNAME_NP)
+  check_library_exists(c pthread_setname_np "" HAVE_PTHREAD_SETNAME_NP)
 endif()
 
 set(headers "sys/types.h")
@@ -489,8 +546,6 @@ if (LLVM_ENABLE_ZLIB )
   endif()
 endif()
 
-set(LLVM_PREFIX ${CMAKE_INSTALL_PREFIX})
-
 if (LLVM_ENABLE_DOXYGEN)
   message(STATUS "Doxygen enabled.")
   find_package(Doxygen REQUIRED)
@@ -511,16 +566,6 @@ if (LLVM_ENABLE_DOXYGEN)
   endif()
 else()
   message(STATUS "Doxygen disabled.")
-endif()
-
-if (LLVM_ENABLE_SPHINX)
-  message(STATUS "Sphinx enabled.")
-  find_package(Sphinx REQUIRED)
-  if (LLVM_BUILD_DOCS)
-    add_custom_target(sphinx ALL)
-  endif()
-else()
-  message(STATUS "Sphinx disabled.")
 endif()
 
 set(LLVM_BINDINGS "")
@@ -593,3 +638,38 @@ else()
 endif()
 
 string(REPLACE " " ";" LLVM_BINDINGS_LIST "${LLVM_BINDINGS}")
+
+function(find_python_module module)
+  string(REPLACE "." "_" module_name ${module})
+  string(TOUPPER ${module_name} module_upper)
+  set(FOUND_VAR PY_${module_upper}_FOUND)
+
+  execute_process(COMMAND "${PYTHON_EXECUTABLE}" "-c" "import ${module}"
+    RESULT_VARIABLE status
+    ERROR_QUIET)
+
+  if(status)
+    set(${FOUND_VAR} 0 PARENT_SCOPE)
+    message(STATUS "Could NOT find Python module ${module}")
+  else()
+    set(${FOUND_VAR} 1 PARENT_SCOPE)
+    message(STATUS "Found Python module ${module}")
+  endif()
+endfunction()
+
+set (PYTHON_MODULES
+  pygments
+  # Some systems still don't have pygments.lexers.c_cpp which was introduced in
+  # version 2.0 in 2014...
+  pygments.lexers.c_cpp
+  yaml
+  )
+foreach(module ${PYTHON_MODULES})
+  find_python_module(${module})
+endforeach()
+
+if(PY_PYGMENTS_FOUND AND PY_PYGMENTS_LEXERS_C_CPP_FOUND AND PY_YAML_FOUND)
+  set (LLVM_HAVE_OPT_VIEWER_MODULES 1)
+else()
+  set (LLVM_HAVE_OPT_VIEWER_MODULES 0)
+endif()

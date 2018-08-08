@@ -181,7 +181,7 @@ open class URLSessionConfiguration : NSObject, NSCopying {
      Note that these headers are added to the request only if not already present. */
     open var httpAdditionalHeaders: [AnyHashable : Any]? = nil
     
-    /* The maximum number of simultanous persistent connections per host */
+    /* The maximum number of simultaneous persistent connections per host */
     open var httpMaximumConnectionsPerHost: Int
     
     /* The cookie storage object to use, or nil to indicate that no cookies should be handled */
@@ -209,4 +209,22 @@ open class URLSessionConfiguration : NSObject, NSCopying {
      */
      open var protocolClasses: [AnyClass]?
 
+     /* A Boolean value that indicates whether the session should wait for connectivity to become available, or fail immediately */
+     @available(*, unavailable, message: "Not available on non-Darwin platforms")
+     open var waitsForConnectivity: Bool { NSUnsupported() }
+
+     /* A service type that specifies the Multipath TCP connection policy for transmitting data over Wi-Fi and cellular interfaces*/
+     @available(*, unavailable, message: "Not available on non-Darwin platforms")
+     open var multipathServiceType: URLSessionConfiguration.MultipathServiceType { NSUnsupported() }
+
+}
+
+@available(*, unavailable, message: "Not available on non-Darwin platforms")
+extension URLSessionConfiguration {
+    public enum MultipathServiceType {
+        case none
+        case handover
+        case interactive
+        case aggregate
+    }
 }

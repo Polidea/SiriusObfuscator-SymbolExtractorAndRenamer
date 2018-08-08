@@ -11,7 +11,7 @@
 import Basic
 
 /// A struct representing a semver version.
-public struct Version {
+public struct Version: Hashable {
 
     /// The major version.
     public let major: Int
@@ -45,19 +45,9 @@ public struct Version {
     }
 }
 
-extension Version: Hashable {
-
-    static public func == (lhs: Version, rhs: Version) -> Bool {
-        return lhs.major == rhs.major &&
-               lhs.minor == rhs.minor &&
-               lhs.patch == rhs.patch &&
-               lhs.prereleaseIdentifiers == rhs.prereleaseIdentifiers &&
-               lhs.buildMetadataIdentifiers == rhs.buildMetadataIdentifiers
-    }
-
+#if !swift(>=4.2)
+extension Version {
     public var hashValue: Int {
-        // FIXME: We need Swift hashing utilities; this is based on CityHash
-        // inspired code inside the Swift stdlib.
         let mul: UInt64 = 0x9ddfea08eb382d69
         var result: UInt64 = 0
         result = (result &* mul) ^ UInt64(bitPattern: Int64(major.hashValue))
@@ -65,9 +55,10 @@ extension Version: Hashable {
         result = (result &* mul) ^ UInt64(bitPattern: Int64(patch.hashValue))
         result = prereleaseIdentifiers.reduce(result, { ($0 &* mul) ^ UInt64(bitPattern: Int64($1.hashValue)) })
         result = buildMetadataIdentifiers.reduce(result, { ($0 &* mul) ^ UInt64(bitPattern: Int64($1.hashValue)) })
-        return Int(truncatingBitPattern: result)
+        return Int(truncatingIfNeeded: result)
     }
 }
+#endif
 
 extension Version: Comparable {
 
@@ -141,7 +132,7 @@ public extension Version {
         let requiredCharacters = string.prefix(upTo: requiredEndIndex)
         let requiredComponents = requiredCharacters
             .split(separator: ".", maxSplits: 2, omittingEmptySubsequences: false)
-            .map(String.init).flatMap({ Int($0) }).filter({ $0 >= 0 })
+            .map(String.init).compactMap({ Int($0) }).filter({ $0 >= 0 })
 
         guard requiredComponents.count == 3 else { return nil }
 

@@ -52,7 +52,7 @@ private:
     BracePair(const SourceRange &BR) : BraceRange(BR) {}
   };
 
-  typedef std::forward_list<BracePair> BracePairStack;
+  using BracePairStack = std::forward_list<BracePair>;
 
   BracePairStack BracePairs;
   class BracePairPusher {
@@ -95,7 +95,7 @@ private:
     }
   };
 
-  typedef SmallVector<swift::ASTNode, 3> ElementVector;
+  using ElementVector = SmallVector<swift::ASTNode, 3>;
 
   // Before a "return," "continue" or similar statement, emit pops of
   // all the braces up to its target.
@@ -126,6 +126,8 @@ public:
       return S;
     case StmtKind::Brace:
       return transformBraceStmt(cast<BraceStmt>(S));
+    case StmtKind::Defer:
+      return transformDeferStmt(cast<DeferStmt>(S));
     case StmtKind::If:
       return transformIfStmt(cast<IfStmt>(S));
     case StmtKind::Guard:
@@ -137,10 +139,6 @@ public:
     case StmtKind::RepeatWhile: {
       TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
       return transformRepeatWhileStmt(cast<RepeatWhileStmt>(S));
-    }
-    case StmtKind::For: {
-      TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
-      return transformForStmt(cast<ForStmt>(S));
     }
     case StmtKind::ForEach: {
       TargetKindSetter TKS(BracePairs, BracePair::TargetKinds::Break);
@@ -155,6 +153,20 @@ public:
     case StmtKind::DoCatch:
       return transformDoCatchStmt(cast<DoCatchStmt>(S));
     }
+  }
+
+  DeferStmt *transformDeferStmt(DeferStmt *DS) {
+    if (auto *FD = DS->getTempDecl()) {
+      // Temporarily unmark the DeferStmt's FuncDecl as implicit so it is
+      // transformed (as typically implicit Decls are skipped by the
+      // transformer).
+      auto Implicit = FD->isImplicit();
+      FD->setImplicit(false);
+      auto *D = transformDecl(FD);
+      D->setImplicit(Implicit);
+      assert(D == FD);
+    }
+    return DS;
   }
 
   // transform*() return their input if it's unmodified,
@@ -203,17 +215,6 @@ public:
     }
 
     return RWS;
-  }
-
-  ForStmt *transformForStmt(ForStmt *FS) {
-    if (Stmt *B = FS->getBody()) {
-      Stmt *NB = transformStmt(B);
-      if (NB != B) {
-        FS->setBody(NB);
-      }
-    }
-
-    return FS;
   }
 
   ForEachStmt *transformForEachStmt(ForEachStmt *FES) {
@@ -279,6 +280,7 @@ public:
         BraceStmt *NB = transformBraceStmt(B);
         if (NB != B) {
           FD->setBody(NB);
+          TypeChecker(Context).checkFunctionErrorHandling(FD);
         }
       }
     } else if (auto *NTD = dyn_cast<NominalTypeDecl>(D)) {
@@ -368,7 +370,7 @@ public:
 
   BraceStmt *transformBraceStmt(BraceStmt *BS, bool TopLevel = false) override {
     ArrayRef<ASTNode> OriginalElements = BS->getElements();
-    typedef SmallVector<swift::ASTNode, 3> ElementVector;
+    using ElementVector = SmallVector<swift::ASTNode, 3>;
     ElementVector Elements(OriginalElements.begin(), OriginalElements.end());
 
     SourceRange SR = BS->getSourceRange();
@@ -669,7 +671,7 @@ public:
           useJustFirst = true;
         } else {
           for (Expr *Arg : TE->getElements()) {
-            if (Arg->getType()->is<InOutType>()) {
+            if (Arg->isSemanticallyInOutExpr()) {
               useJustFirst = true;
               break;
             }
@@ -703,7 +705,7 @@ public:
                          PatternBindingDecl *&ArgPattern,
                          VarDecl *&ArgVariable) {
     const char *LoggerName =
-        isDebugPrint ? "$builtin_debugPrint" : "$builtin_print";
+        isDebugPrint ? "__builtin_debugPrint" : "__builtin_print";
 
     UnresolvedDeclRefExpr *LoggerRef = new (Context) UnresolvedDeclRefExpr(
         Context.getIdentifier(LoggerName), DeclRefKind::Ordinary,
@@ -722,7 +724,7 @@ public:
   }
 
   Added<Stmt *> logPostPrint(SourceRange SR) {
-    return buildLoggerCallWithArgs("$builtin_postPrint",
+    return buildLoggerCallWithArgs("__builtin_postPrint",
                                    MutableArrayRef<Expr *>(), SR);
   }
 
@@ -744,11 +746,11 @@ public:
     }
 
     VarDecl *VD =
-        new (Context) VarDecl(/*IsStatic*/false, /*IsLet*/true,
+        new (Context) VarDecl(/*IsStatic*/false, VarDecl::Specifier::Let,
                               /*IsCaptureList*/false, SourceLoc(),
                               Context.getIdentifier(NameBuf),
                               MaybeLoadInitExpr->getType(), TypeCheckDC);
-    VD->setInterfaceType(TypeCheckDC->mapTypeOutOfContext(VD->getType()));
+    VD->setInterfaceType(VD->getType()->mapTypeOutOfContext());
     VD->setImplicit();
 
     NamedPattern *NP = new (Context) NamedPattern(VD, /*implicit*/ true);
@@ -778,7 +780,7 @@ public:
 
     Expr *LoggerArgExprs[] = {*E, NameExpr, IDExpr};
 
-    return buildLoggerCallWithArgs("$builtin_log_with_id",
+    return buildLoggerCallWithArgs("__builtin_log_with_id",
                                    MutableArrayRef<Expr *>(LoggerArgExprs), SR);
   }
 
@@ -792,7 +794,7 @@ public:
 
   Added<Stmt *> buildScopeCall(SourceRange SR, bool IsExit) {
     const char *LoggerName =
-        IsExit ? "$builtin_log_scope_exit" : "$builtin_log_scope_entry";
+        IsExit ? "__builtin_log_scope_exit" : "__builtin_log_scope_entry";
 
     return buildLoggerCallWithArgs(LoggerName, MutableArrayRef<Expr *>(), SR);
   }
@@ -868,7 +870,7 @@ public:
                                   AccessSemantics::Ordinary, Apply->getType());
 
     UnresolvedDeclRefExpr *SendDataRef = new (Context)
-        UnresolvedDeclRefExpr(Context.getIdentifier("$builtin_send_data"),
+        UnresolvedDeclRefExpr(Context.getIdentifier("__builtin_send_data"),
                               DeclRefKind::Ordinary, DeclNameLoc());
 
     SendDataRef->setImplicit(true);

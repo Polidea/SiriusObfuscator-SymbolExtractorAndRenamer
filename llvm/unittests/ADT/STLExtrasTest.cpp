@@ -48,7 +48,7 @@ TEST(STLExtrasTest, EnumerateLValue) {
   std::vector<CharPairType> CharResults;
 
   for (auto X : llvm::enumerate(foo)) {
-    CharResults.emplace_back(X.Index, X.Value);
+    CharResults.emplace_back(X.index(), X.value());
   }
   ASSERT_EQ(3u, CharResults.size());
   EXPECT_EQ(CharPairType(0u, 'a'), CharResults[0]);
@@ -60,7 +60,7 @@ TEST(STLExtrasTest, EnumerateLValue) {
   std::vector<IntPairType> IntResults;
   const std::vector<int> bar = {1, 2, 3};
   for (auto X : llvm::enumerate(bar)) {
-    IntResults.emplace_back(X.Index, X.Value);
+    IntResults.emplace_back(X.index(), X.value());
   }
   ASSERT_EQ(3u, IntResults.size());
   EXPECT_EQ(IntPairType(0u, 1), IntResults[0]);
@@ -69,9 +69,9 @@ TEST(STLExtrasTest, EnumerateLValue) {
 
   // Test an empty range.
   IntResults.clear();
-  const std::vector<int> baz;
+  const std::vector<int> baz{};
   for (auto X : llvm::enumerate(baz)) {
-    IntResults.emplace_back(X.Index, X.Value);
+    IntResults.emplace_back(X.index(), X.value());
   }
   EXPECT_TRUE(IntResults.empty());
 }
@@ -82,7 +82,7 @@ TEST(STLExtrasTest, EnumerateModifyLValue) {
   std::vector<char> foo = {'a', 'b', 'c'};
 
   for (auto X : llvm::enumerate(foo)) {
-    ++X.Value;
+    ++X.value();
   }
   EXPECT_EQ('b', foo[0]);
   EXPECT_EQ('c', foo[1]);
@@ -97,7 +97,7 @@ TEST(STLExtrasTest, EnumerateRValueRef) {
   auto Enumerator = llvm::enumerate(std::vector<int>{1, 2, 3});
 
   for (auto X : llvm::enumerate(std::vector<int>{1, 2, 3})) {
-    Results.emplace_back(X.Index, X.Value);
+    Results.emplace_back(X.index(), X.value());
   }
 
   ASSERT_EQ(3u, Results.size());
@@ -114,8 +114,8 @@ TEST(STLExtrasTest, EnumerateModifyRValue) {
   std::vector<PairType> Results;
 
   for (auto X : llvm::enumerate(std::vector<char>{'1', '2', '3'})) {
-    ++X.Value;
-    Results.emplace_back(X.Index, X.Value);
+    ++X.value();
+    Results.emplace_back(X.index(), X.value());
   }
 
   ASSERT_EQ(3u, Results.size());
@@ -255,6 +255,24 @@ TEST(STLExtrasTest, CountAdaptor) {
   EXPECT_EQ(1, count(v, 4));
 }
 
+TEST(STLExtrasTest, for_each) {
+  std::vector<int> v{0, 1, 2, 3, 4};
+  int count = 0;
+
+  llvm::for_each(v, [&count](int) { ++count; });
+  EXPECT_EQ(5, count);
+}
+
+TEST(STLExtrasTest, ToVector) {
+  std::vector<char> v = {'a', 'b', 'c'};
+  auto Enumerated = to_vector<4>(enumerate(v));
+  ASSERT_EQ(3u, Enumerated.size());
+  for (size_t I = 0; I < v.size(); ++I) {
+    EXPECT_EQ(I, Enumerated[I].index());
+    EXPECT_EQ(v[I], Enumerated[I].value());
+  }
+}
+
 TEST(STLExtrasTest, ConcatRange) {
   std::vector<int> Expected = {1, 2, 3, 4, 5, 6, 7, 8};
   std::vector<int> Test;
@@ -308,4 +326,42 @@ TEST(STLExtrasTest, EraseIf) {
   EXPECT_EQ(7, V[3]);
 }
 
+namespace some_namespace {
+struct some_struct {
+  std::vector<int> data;
+  std::string swap_val;
+};
+
+std::vector<int>::const_iterator begin(const some_struct &s) {
+  return s.data.begin();
 }
+
+std::vector<int>::const_iterator end(const some_struct &s) {
+  return s.data.end();
+}
+
+void swap(some_struct &lhs, some_struct &rhs) {
+  // make swap visible as non-adl swap would even seem to
+  // work with std::swap which defaults to moving
+  lhs.swap_val = "lhs";
+  rhs.swap_val = "rhs";
+}
+} // namespace some_namespace
+
+TEST(STLExtrasTest, ADLTest) {
+  some_namespace::some_struct s{{1, 2, 3, 4, 5}, ""};
+  some_namespace::some_struct s2{{2, 4, 6, 8, 10}, ""};
+
+  EXPECT_EQ(*adl_begin(s), 1);
+  EXPECT_EQ(*(adl_end(s) - 1), 5);
+
+  adl_swap(s, s2);
+  EXPECT_EQ(s.swap_val, "lhs");
+  EXPECT_EQ(s2.swap_val, "rhs");
+
+  int count = 0;
+  llvm::for_each(s, [&count](int) { ++count; });
+  EXPECT_EQ(5, count);
+}
+
+} // namespace

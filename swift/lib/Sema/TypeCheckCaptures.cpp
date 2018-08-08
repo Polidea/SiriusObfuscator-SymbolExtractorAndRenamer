@@ -19,6 +19,7 @@
 #include "swift/AST/ASTVisitor.h"
 #include "swift/AST/ASTWalker.h"
 #include "swift/AST/Decl.h"
+#include "swift/AST/ForeignErrorConvention.h"
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/TypeWalker.h"
 #include "swift/Basic/Defer.h"
@@ -210,21 +211,15 @@ public:
 
       TC.diagnose(Loc, isDecl ? diag::decl_closure_noescape_use
                               : diag::closure_noescape_use,
-                  VD->getBaseName());
+                  VD->getBaseName().getIdentifier());
 
       // If we're a parameter, emit a helpful fixit to add @escaping
       auto paramDecl = dyn_cast<ParamDecl>(VD);
-      bool isAutoClosure =
-          VD->getInterfaceType()->castTo<AnyFunctionType>()->isAutoClosure();
-      if (paramDecl && !isAutoClosure) {
+      if (paramDecl) {
         TC.diagnose(paramDecl->getStartLoc(), diag::noescape_parameter,
                     paramDecl->getName())
             .fixItInsert(paramDecl->getTypeLoc().getSourceRange().Start,
                          "@escaping ");
-      } else if (isAutoClosure) {
-        // TODO: add in a fixit for autoclosure
-        TC.diagnose(VD->getLoc(), diag::noescape_autoclosure,
-                    VD->getBaseName());
       }
     }
   }
@@ -266,7 +261,7 @@ public:
           if (DC->isLocalContext()) {
             TC.diagnose(DRE->getLoc(), diag::capture_across_type_decl,
                         NTD->getDescriptiveKind(),
-                        D->getBaseName());
+                        D->getBaseName().getIdentifier());
 
             TC.diagnose(NTD->getLoc(), diag::type_declared_here);
 
@@ -333,18 +328,18 @@ public:
       if (Diagnosed.insert(capturedDecl).second) {
         if (capturedDecl == DRE->getDecl()) {
           TC.diagnose(DRE->getLoc(), diag::capture_before_declaration,
-                      capturedDecl->getBaseName());
+                      capturedDecl->getBaseName().getIdentifier());
         } else {
           TC.diagnose(DRE->getLoc(),
                       diag::transitive_capture_before_declaration,
-                      DRE->getDecl()->getBaseName(),
-                      capturedDecl->getBaseName());
+                      DRE->getDecl()->getBaseName().getIdentifier(),
+                      capturedDecl->getBaseName().getIdentifier());
           ValueDecl *prevDecl = capturedDecl;
           for (auto path : reversed(capturePath)) {
             TC.diagnose(path->getLoc(),
                         diag::transitive_capture_through_here,
                         path->getName(),
-                        prevDecl->getBaseName());
+                        prevDecl->getBaseName().getIdentifier());
             prevDecl = path;
           }
         }
@@ -357,15 +352,13 @@ public:
     if (!validateForwardCapture(DRE->getDecl()))
       return { false, DRE };
 
-    bool isInOut = (isa<ParamDecl>(D) &&
-                    cast<ParamDecl>(D)->hasType() &&
-                    cast<ParamDecl>(D)->getType()->is<InOutType>());
+    bool isInOut = (isa<ParamDecl>(D) && cast<ParamDecl>(D)->isInOut());
     bool isNested = false;
     if (auto f = AFR.getAbstractFunctionDecl())
       isNested = f->getDeclContext()->isLocalContext();
 
     if (isInOut && !AFR.isKnownNoEscape() && !isNested) {
-      if (D->getNameStr() == "self") {
+      if (D->getBaseName() == D->getASTContext().Id_self) {
         TC.diagnose(DRE->getLoc(),
           diag::closure_implicit_capture_mutating_self);
       } else {
@@ -465,9 +458,9 @@ public:
     // doesn't require its type metadata.
     if (auto declRef = dyn_cast<DeclRefExpr>(E))
       return (!declRef->getDecl()->isObjC()
-              && !E->getType()->getLValueOrInOutObjectType()
+              && !E->getType()->getWithoutSpecifierType()
                               ->hasRetainablePointerRepresentation()
-              && !E->getType()->getLValueOrInOutObjectType()
+              && !E->getType()->getWithoutSpecifierType()
                               ->is<AnyMetatypeType>());
 
     // Loading classes or metatypes doesn't require their metadata.
@@ -683,10 +676,8 @@ void TypeChecker::computeCaptures(AnyFunctionRef AFR) {
   unsigned inoutCount = 0;
   for (auto C : Captures) {
     if (auto PD = dyn_cast<ParamDecl>(C.getDecl()))
-      if (PD->hasType())
-        if (auto type = PD->getType())
-          if (isa<InOutType>(type.getPointer()))
-            inoutCount++;
+      if (PD->isInOut())
+        inoutCount++;
   }
 
   if (inoutCount > 0) {
@@ -753,9 +744,20 @@ void TypeChecker::computeCaptures(AnyFunctionRef AFR) {
   // their context.
   if (AFD && GenericParamCaptureLoc.isValid()) {
     if (auto Clas = AFD->getParent()->getAsClassOrClassExtensionContext()) {
-      if (Clas->isGenericContext() && Clas->hasClangNode()) {
+      if (Clas->usesObjCGenericsModel()) {
         diagnose(AFD->getLoc(),
                  diag::objc_generic_extension_using_type_parameter);
+
+        // If it's possible, suggest adding @objc.
+        Optional<ForeignErrorConvention> errorConvention;
+        if (!AFD->isObjC() &&
+            isRepresentableInObjC(AFD, ObjCReason::MemberOfObjCMembersClass,
+                                  errorConvention)) {
+          diagnose(AFD->getLoc(),
+                   diag::objc_generic_extension_using_type_parameter_try_objc)
+            .fixItInsert(AFD->getAttributeInsertionLoc(false), "@objc ");
+        }
+
         diagnose(GenericParamCaptureLoc,
                  diag::objc_generic_extension_using_type_parameter_here);
       }

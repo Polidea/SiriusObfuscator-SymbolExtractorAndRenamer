@@ -281,6 +281,10 @@
 // CHECK:  encoding: [0xfb]
         	sti
 
+// CHECK: salc
+// CHECK:  encoding: [0xd6]
+        	salc
+
 // CHECK: addb	$254, 3735928559(%ebx,%ecx,8)
 // CHECK:  encoding: [0x80,0x84,0xcb,0xef,0xbe,0xad,0xde,0xfe]
         	addb	$0xfe,0xdeadbeef(%ebx,%ecx,8)
@@ -2051,6 +2055,7 @@
 // CHECK:  encoding: [0x0f,0x1f,0x84,0xcb,0xef,0xbe,0xad,0xde]
         	nopl	0xdeadbeef(%ebx,%ecx,8)
 
+
 // CHECK: nopw	32493
 // CHECK:  encoding: [0x66,0x0f,0x1f,0x05,0xed,0x7e,0x00,0x00]
         	nopw	0x7eed
@@ -2062,6 +2067,14 @@
 // CHECK: nopl	305419896
 // CHECK:  encoding: [0x0f,0x1f,0x05,0x78,0x56,0x34,0x12]
         	nopl	0x12345678
+
+// CHECK: nopw	%ax
+// CHECK:  encoding: [0x66,0x0f,0x1f,0xc0]
+        	nopw	%ax
+
+// CHECK: nopl	%eax
+// CHECK:  encoding: [0x0f,0x1f,0xc0]
+        	nopl	%eax
 
 // CHECK: nop
 // CHECK:  encoding: [0x90]
@@ -2746,6 +2759,10 @@
 // CHECK: ffree	%st(2)
 // CHECK:  encoding: [0xdd,0xc2]
         	ffree	%st(2)
+
+// CHECK: ffreep	%st(2)
+// CHECK:  encoding: [0xdf,0xc2]
+        	ffreep	%st(2)
 
 // CHECK: fnop
 // CHECK:  encoding: [0xd9,0xd0]
@@ -10518,9 +10535,9 @@
 // CHECK: 	invlpga %ecx, %eax
         	invlpga %ecx, %eax
 
-// CHECK:   blendvps	(%eax), %xmm1   # encoding: [0x66,0x0f,0x38,0x14,0x08]
+// CHECK:   blendvps	%xmm0, (%eax), %xmm1   # encoding: [0x66,0x0f,0x38,0x14,0x08]
             blendvps (%eax), %xmm1
-// CHECK:   blendvps	%xmm2, %xmm1    # encoding: [0x66,0x0f,0x38,0x14,0xca]
+// CHECK:   blendvps	%xmm0, %xmm2, %xmm1    # encoding: [0x66,0x0f,0x38,0x14,0xca]
             blendvps %xmm2, %xmm1
 
 // These instructions can take an unsigned 8-bit mask as well as a signed 8-bit
@@ -10555,64 +10572,56 @@
           insertps $-64, %xmm2, %xmm1
 
 // PR13253 handle implicit optional third argument that must always be xmm0
-// CHECK: pblendvb %xmm2, %xmm1
+// CHECK: pblendvb %xmm0, %xmm2, %xmm1
 pblendvb %xmm2, %xmm1
-// CHECK: pblendvb %xmm2, %xmm1
+// CHECK: pblendvb %xmm0, %xmm2, %xmm1
 pblendvb %xmm0, %xmm2, %xmm1
-// CHECK: pblendvb (%eax), %xmm1
+// CHECK: pblendvb %xmm0, (%eax), %xmm1
 pblendvb (%eax), %xmm1
-// CHECK: pblendvb (%eax), %xmm1
+// CHECK: pblendvb %xmm0, (%eax), %xmm1
 pblendvb %xmm0, (%eax), %xmm1
-// CHECK: blendvpd %xmm2, %xmm1
+// CHECK: blendvpd %xmm0, %xmm2, %xmm1
 blendvpd %xmm2, %xmm1
-// CHECK: blendvpd %xmm2, %xmm1
+// CHECK: blendvpd %xmm0, %xmm2, %xmm1
 blendvpd %xmm0, %xmm2, %xmm1
-// CHECK: blendvpd (%eax), %xmm1
+// CHECK: blendvpd %xmm0, (%eax), %xmm1
 blendvpd (%eax), %xmm1
-// CHECK: blendvpd (%eax), %xmm1
+// CHECK: blendvpd %xmm0, (%eax), %xmm1
 blendvpd %xmm0, (%eax), %xmm1
-// CHECK: blendvps %xmm2, %xmm1
+// CHECK: blendvps %xmm0, %xmm2, %xmm1
 blendvps %xmm2, %xmm1
-// CHECK: blendvps %xmm2, %xmm1
+// CHECK: blendvps %xmm0, %xmm2, %xmm1
 blendvps %xmm0, %xmm2, %xmm1
-// CHECK: blendvps (%eax), %xmm1
+// CHECK: blendvps %xmm0, (%eax), %xmm1
 blendvps (%eax), %xmm1
-// CHECK: blendvps (%eax), %xmm1
+// CHECK: blendvps %xmm0, (%eax), %xmm1
 blendvps %xmm0, (%eax), %xmm1
 
 
 // CHECK: btl $4, (%eax)
 // CHECK: btw $4, (%eax)
 // CHECK: btl $4, (%eax)
-// CHECK: btq $4, (%eax)
 // CHECK: btsl $4, (%eax)
 // CHECK: btsw $4, (%eax)
 // CHECK: btsl $4, (%eax)
-// CHECK: btsq $4, (%eax)
 // CHECK: btrl $4, (%eax)
 // CHECK: btrw $4, (%eax)
 // CHECK: btrl $4, (%eax)
-// CHECK: btrq $4, (%eax)
 // CHECK: btcl $4, (%eax)
 // CHECK: btcw $4, (%eax)
 // CHECK: btcl $4, (%eax)
-// CHECK: btcq $4, (%eax)
 bt $4, (%eax)
 btw $4, (%eax)
 btl $4, (%eax)
-btq $4, (%eax)
 bts $4, (%eax)
 btsw $4, (%eax)
 btsl $4, (%eax)
-btsq $4, (%eax)
 btr $4, (%eax)
 btrw $4, (%eax)
 btrl $4, (%eax)
-btrq $4, (%eax)
 btc $4, (%eax)
 btcw $4, (%eax)
 btcl $4, (%eax)
-btcq $4, (%eax)
 
 // CHECK: clflushopt	3735928559(%ebx,%ecx,8)
 // CHECK:  encoding: [0x66,0x0f,0xae,0xbc,0xcb,0xef,0xbe,0xad,0xde]
@@ -10645,10 +10654,6 @@ btcq $4, (%eax)
 // CHECK: clwb	305419896
 // CHECK:  encoding: [0x66,0x0f,0xae,0x35,0x78,0x56,0x34,0x12]
         	clwb	0x12345678
-
-// CHECK: pcommit
-// CHECK:  encoding: [0x66,0x0f,0xae,0xf8]
-        	pcommit
 
 // CHECK: xsave	3735928559(%ebx,%ecx,8)
 // CHECK:  encoding: [0x0f,0xae,0xa4,0xcb,0xef,0xbe,0xad,0xde]
@@ -10769,3 +10774,9 @@ btcq $4, (%eax)
 // CHECK: 	clzero
 // CHECK:  encoding: [0x0f,0x01,0xfc]
         	clzero
+
+// CHECK: lock addl %esi, (%edi)
+// INTEL: lock add dword ptr [edi], esi
+// CHECK:  encoding: [0xf0,0x01,0x37]
+        	lock add %esi, (%edi)
+

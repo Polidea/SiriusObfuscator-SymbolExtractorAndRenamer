@@ -12,6 +12,7 @@
 
 #include "llbuild/Core/BuildEngine.h"
 
+#include "llbuild/Basic/Tracing.h"
 #include "llbuild/Core/BuildDB.h"
 
 #include "llvm/ADT/STLExtras.h"
@@ -19,6 +20,7 @@
 
 #include "BuildEngineTrace.h"
 
+#include <atomic>
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
@@ -38,11 +40,17 @@ Task::~Task() {}
 
 BuildEngineDelegate::~BuildEngineDelegate() {}
 
+bool BuildEngineDelegate::shouldResolveCycle(const std::vector<Rule*>& items,
+                                             Rule* candidateRule,
+                                             Rule::CycleAction action) {
+  return false;
+}
+
 #pragma mark - BuildEngine implementation
 
 namespace {
 
-class BuildEngineImpl {
+class BuildEngineImpl : public BuildDBDelegate {
   struct RuleInfo;
   struct TaskInfo;
 
@@ -56,7 +64,7 @@ class BuildEngineImpl {
   BuildEngineDelegate& delegate;
 
   /// The key table, used when there is no database.
-  llvm::StringMap<bool> keyTable;
+  llvm::StringMap<KeyID> keyTable;
 
   /// The mutex that protects the key table.
   std::mutex keyTableMutex;
@@ -70,6 +78,9 @@ class BuildEngineImpl {
   /// The current build iteration, used to sequentially timestamp build results.
   uint64_t currentTimestamp = 0;
 
+  /// Whether the build should be cancelled.
+  std::atomic<bool> buildCancelled{ false };
+  
   /// The queue of input requests to process.
   struct TaskInputRequest {
     /// The task making the request.
@@ -78,8 +89,11 @@ class BuildEngineImpl {
     RuleInfo* inputRuleInfo;
     /// The task provided input ID, for its own use in identifying the input.
     uintptr_t inputID;
+    /// Force the use of a prior value
+    bool forcePriorValue = false;
   };
   std::vector<TaskInputRequest> inputRequests;
+  std::vector<TaskInputRequest> finishedInputRequests;
 
   /// The queue of rules being scanned.
   struct RuleScanRequest {
@@ -151,6 +165,7 @@ class BuildEngineImpl {
     Result result = {};
     /// The current state of the rule.
     StateKind state = StateKind::Incomplete;
+    bool wasForced = false;
 
   public:
     bool isScanning() const {
@@ -195,6 +210,15 @@ class BuildEngineImpl {
       result.builtAt = engine->getCurrentTimestamp();
     }
 
+    void setCancelled() {
+      // If we have to cancel a task, it becomes incomplete. We do not need to
+      // sync this to the database, the database won't see an updated record and
+      // can continue to maintain the previous view of state -- however, we must
+      // mark the internal representation as incomplete because the result is no
+      // longer valid.
+      state = StateKind::Incomplete;
+    }
+    
     RuleScanRecord* getPendingScanRecord() {
       assert(isScanning());
       return inProgressInfo.pendingScanRecord;
@@ -299,6 +323,8 @@ class BuildEngineImpl {
   /// FinishedTaskInfos queue, which the engine may need to wait on.
   std::condition_variable finishedTaskInfosCondition;
 
+
+
 private:
   /// @name RuleScanRecord Allocation
   ///
@@ -386,6 +412,8 @@ private:
     if (ruleInfo.rule.updateStatus)
       ruleInfo.rule.updateStatus(buildEngine, Rule::StatusKind::IsScanning);
 
+    ruleInfo.wasForced = false;
+
     // If the rule has never been run, it needs to run.
     if (ruleInfo.result.builtAt == 0) {
       if (trace)
@@ -464,6 +492,7 @@ private:
 
     // Create the task for this rule.
     Task* task = ruleInfo.rule.action(buildEngine);
+    assert(task && "rule action returned null task");
 
     // Find the task info for this task.
     auto taskInfo = getTaskInfo(task);
@@ -483,7 +512,10 @@ private:
     ruleInfo.result.dependencies.clear();
 
     // Inform the task it should start.
-    task->start(buildEngine);
+    {
+      TracingEngineTaskCallback i(EngineTaskCallbackKind::Start, ruleInfo.keyID);
+      task->start(buildEngine);
+    }
 
     // Provide the task the prior result, if present.
     //
@@ -492,6 +524,7 @@ private:
     // the clients that want it can ask? It's cheap to provide here, so
     // ultimately this is mostly a matter of cleanliness.
     if (ruleInfo.result.builtAt != 0) {
+      TracingEngineTaskCallback i(EngineTaskCallbackKind::ProvidePriorValue, ruleInfo.keyID);
       task->providePriorValue(buildEngine, ruleInfo.result.value);
     }
 
@@ -510,7 +543,11 @@ private:
   void processRuleScanRequest(RuleScanRequest request) {
     auto& ruleInfo = *request.ruleInfo;
 
-    assert(ruleInfo.isScanning());
+    // With forced builds in cycle breaking, we may end up being asked to scan
+    // something that has already been 'scanned'
+    assert(ruleInfo.isScanning() || ruleInfo.wasForced);
+    if (!ruleInfo.isScanning())
+      return;
 
     // Process each of the remaining inputs.
     do {
@@ -617,7 +654,8 @@ private:
   /// \returns True on success, false if the build could not be completed; the
   /// latter only occurs when the build contains a cycle currently.
   bool executeTasks(const KeyType& buildKey) {
-    std::vector<TaskInputRequest> finishedInputRequests;
+    // Clear any previous build state
+    finishedInputRequests.clear();
 
     // Push a dummy input request for the rule to build.
     inputRequests.push_back({ nullptr, &getRuleInfoForKey(buildKey) });
@@ -626,11 +664,20 @@ private:
     while (true) {
       bool didWork = false;
 
+      // Cancel the build, if requested.
+      if (buildCancelled) {
+        // Force completion of all outstanding tasks.
+        cancelRemainingTasks();
+        return false;
+      }
+      
       // Process all of the pending rule scan requests.
       //
       // FIXME: We don't want to process all of these requests, this amounts to
       // doing all of the dependency scanning up-front.
       while (!ruleInfosToScan.empty()) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::RuleToScan, buildKey.c_str());
+        
         didWork = true;
 
         auto request = ruleInfosToScan.back();
@@ -641,6 +688,8 @@ private:
 
       // Process all of the pending input requests.
       while (!inputRequests.empty()) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::InputRequest, buildKey.c_str());
+        
         didWork = true;
 
         auto request = inputRequests.back();
@@ -695,6 +744,8 @@ private:
 
       // Process all of the finished inputs.
       while (!finishedInputRequests.empty()) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::FinishedInputRequest, buildKey.c_str());
+        
         didWork = true;
 
         auto request = finishedInputRequests.back();
@@ -735,9 +786,12 @@ private:
         //
         // FIXME: Should we provide the input key here? We have it available
         // cheaply.
-        assert(request.inputRuleInfo->isComplete(this));
-        request.taskInfo->task->provideValue(
-          buildEngine, request.inputID, request.inputRuleInfo->result.value);
+        assert(request.inputRuleInfo->isComplete(this) || request.forcePriorValue);
+        {
+          TracingEngineTaskCallback i(EngineTaskCallbackKind::ProvideValue, request.inputRuleInfo->keyID);
+          request.taskInfo->task->provideValue(
+              buildEngine, request.inputID, request.inputRuleInfo->result.value);
+        }
 
         // Decrement the wait count, and move to finish queue if necessary.
         decrementTaskWaitCount(request.taskInfo);
@@ -745,6 +799,8 @@ private:
 
       // Process all of the ready to run tasks.
       while (!readyTaskInfos.empty()) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::ReadyTask, buildKey.c_str());
+        
         didWork = true;
 
         TaskInfo* taskInfo = readyTaskInfos.back();
@@ -764,7 +820,10 @@ private:
         //
         // FIXME: We need to track this state, and generate an error if this
         // task ever requests additional inputs.
-        taskInfo->task->inputsAvailable(buildEngine);
+        {
+          TracingEngineTaskCallback i(EngineTaskCallbackKind::InputsAvailable, ruleInfo->keyID);
+          taskInfo->task->inputsAvailable(buildEngine);
+        }
 
         // Increment our count of outstanding tasks.
         ++numOutstandingUnfinishedTasks;
@@ -772,6 +831,8 @@ private:
 
       // Process all of the finished tasks.
       while (true) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::FinishedTask, buildKey.c_str());
+        
         // Try to take a task from the finished queue.
         TaskInfo* taskInfo = nullptr;
         {
@@ -835,7 +896,7 @@ private:
               ruleInfo->keyID, ruleInfo->rule, ruleInfo->result, &error);
           if (!result) {
             delegate.error(error);
-            completeRemainingTasks();
+            cancelRemainingTasks();
             return false;
           }
         }
@@ -870,7 +931,13 @@ private:
 
       // If we haven't done any other work at this point but we have pending
       // tasks, we need to wait for a task to complete.
+      //
+      // NOTE: Cancellation also implements this process, if you modify this
+      // code please also validate that \see cancelRemainingTasks() is still
+      // correct.
       if (!didWork && numOutstandingUnfinishedTasks != 0) {
+        TracingEngineQueueItemEvent i(EngineQueueItemKind::Waiting, buildKey.c_str());
+        
         // Wait for our condition variable.
         std::unique_lock<std::mutex> lock(finishedTaskInfosMutex);
 
@@ -878,36 +945,56 @@ private:
         // of the mutex, if one has been added then we may have already missed
         // the condition notification and cannot safely wait.
         if (finishedTaskInfos.empty()) {
-            finishedTaskInfosCondition.wait(lock);
+          finishedTaskInfosCondition.wait(lock);
         }
 
         didWork = true;
       }
 
-      // If we didn't do any work, we are done.
-      if (!didWork)
-        break;
-    }
+      if (!didWork) {
+        // If there was no work to do, but we still have running tasks, then
+        // we have found a cycle. Try to resolve it and continue.
+        if (!taskInfos.empty()) {
+          if (resolveCycle(buildKey)) {
+            continue;
+          } else {
+            cancelRemainingTasks();
+            return false;
+          }
+        }
 
-    // If there was no work to do, but we still have running tasks, then
-    // we have found a cycle and are deadlocked.
-    if (!taskInfos.empty()) {
-      reportCycle(buildKey);
-      return false;
+        // We didn't do any work, and we have nothing more we can/need to do.
+        break;
+      }
     }
 
     return true;
   }
 
-  /// Report the cycle which has called the engine to be unable to make forward
+  /// Attempt to resolve a cycle which has called the engine to be unable to make forward
   /// progress.
   ///
   /// \param buildKey The key which was requested to build (the reported cycle
   /// with start with this node).
-  void reportCycle(const KeyType& buildKey) {
+  /// \returns True if the engine should try to proceed, false if the build the could not
+  /// be broken.
+  bool resolveCycle(const KeyType& buildKey) {
     // Take all available locks, to ensure we dump a consistent state.
     std::lock_guard<std::mutex> guard1(taskInfosMutex);
     std::lock_guard<std::mutex> guard2(finishedTaskInfosMutex);
+
+    std::vector<Rule*> cycleList = findCycle(buildKey);
+    assert(!cycleList.empty());
+
+    if (breakCycle(cycleList))
+      return true;
+
+    delegate.cycleDetected(cycleList);
+    return false;
+  }
+
+  std::vector<Rule*> findCycle(const KeyType& buildKey) {
+    TracingEngineQueueItemEvent i(EngineQueueItemKind::FindingCycle, buildKey.c_str());
 
     // Gather all of the successor relationships.
     std::unordered_map<Rule*, std::vector<Rule*>> successorGraph;
@@ -939,35 +1026,37 @@ private:
         activeRuleScanRecords.push_back(scanRecord);
       }
     }
-      
+
     // Gather dependencies from all of the active scan records.
     std::unordered_set<const RuleScanRecord*> visitedRuleScanRecords;
     while (!activeRuleScanRecords.empty()) {
       const auto* record = activeRuleScanRecords.back();
       activeRuleScanRecords.pop_back();
-          
+
       // Mark the record and ignore it if not scanned.
       if (!visitedRuleScanRecords.insert(record).second)
         continue;
-          
+
       // For each paused request, add the dependency.
       for (const auto& request: record->pausedInputRequests) {
         if (request.taskInfo) {
           successorGraph[&request.inputRuleInfo->rule].push_back(
-              &request.taskInfo->forRuleInfo->rule);
+                                                                 &request.taskInfo->forRuleInfo->rule);
         }
       }
-          
+
       // Process the deferred scan requests.
       for (const auto& request: record->deferredScanRequests) {
         // Add the sucessor for the deferred relationship itself.
         successorGraph[&request.inputRuleInfo->rule].push_back(
-            &request.ruleInfo->rule);
-              
+                                                               &request.ruleInfo->rule);
+
         // Add the active rule scan record which needs to be traversed.
-        assert(request.ruleInfo->isScanning());
-        activeRuleScanRecords.push_back(
+        assert(request.ruleInfo->isScanning() || request.ruleInfo->wasForced);
+        if (request.ruleInfo->isScanning()) {
+          activeRuleScanRecords.push_back(
             request.ruleInfo->getPendingScanRecord());
+        }
       }
     }
 
@@ -984,10 +1073,10 @@ private:
     // if the graph reaches the same cycle).
     for (auto& entry: predecessorGraph) {
       std::sort(entry.second.begin(), entry.second.end(), [](Rule* a, Rule* b) {
-          return a->key < b->key;
-        });
+        return a->key < b->key;
+      });
     }
-    
+
     // Find the cycle by searching from the entry node.
     struct WorkItem {
       WorkItem(Rule * node) { this->node = node; }
@@ -1003,7 +1092,7 @@ private:
       // Take the top item.
       auto& entry = stack.back();
       const auto& predecessors = predecessorGraph[entry.node];
-      
+
       // If the index is 0, we just started visiting the node.
       if (entry.predecessorIndex == 0) {
         // Push the node on the stack.
@@ -1028,25 +1117,160 @@ private:
       cycleList.pop_back();
       stack.pop_back();
     }
-    assert(!cycleList.empty());
 
-    delegate.cycleDetected(cycleList);
-    completeRemainingTasks();
+    return cycleList;
   }
 
-  // Complete all of the remaining tasks.
-  //
-  // FIXME: Should we have a task abort callback?
-  void completeRemainingTasks() {
+  bool breakCycle(const std::vector<Rule*>& cycleList) {
+    // BreakingCycle doesn't need a key since it will not be called in parallel
+    TracingEngineQueueItemEvent _(EngineQueueItemKind::BreakingCycle, "0");
+
+    // Search the cycle for potential means for breaking the cycle. Right now
+    // we use two principle approaches, force a rule to be built (skipping
+    // scanning its dependencies) and supply a previously built result.
+    for (auto ruleIt = cycleList.rbegin(); ruleIt != cycleList.rend(); ruleIt++) {
+      auto& ruleInfo = getRuleInfoForKey((*ruleIt)->key);
+
+      // If this rule is scanning, try to force a rebuild to break the cycle
+      if (ruleInfo.isScanning()) {
+        // Ask the delegate if we should try to resolve this cycle by forcing
+        // a rule to be built?
+        if (!delegate.shouldResolveCycle(cycleList, &ruleInfo.rule, Rule::CycleAction::ForceBuild))
+          return false;
+
+        if (trace) {
+          trace->cycleForceRuleNeedsToRun(&ruleInfo.rule);
+        }
+
+        // Find the rule scan request, if not already deferred, for this rule
+        // and remove it. If the rule scan request was already deferred, we use
+        // the wasForced condition to ignore it later.
+        auto it = findRuleScanRequestForRule(ruleInfosToScan, &ruleInfo);
+        if (it != ruleInfosToScan.end()) {
+          ruleInfosToScan.erase(it);
+        }
+
+        // mark this rule as needs to run (forced)
+        finishScanRequest(ruleInfo, RuleInfo::StateKind::NeedsToRun);
+        ruleInfo.wasForced = true;
+
+        return true;
+      }
+
+      // Check if this rule has a (potentially) valid previous result and if so
+      // try to provide it to the node requesting it to break the cycle.
+      if (ruleInfo.isInProgressWaiting() && ruleInfo.result.builtAt != 0) {
+        auto* taskInfo = ruleInfo.getPendingTaskInfo();
+
+        // find downstream node in the cycle that wants this input
+        auto& nextRuleInfo = getRuleInfoForKey((*std::next(ruleIt))->key);
+
+        // find the corresponding request on this task
+        auto it = findTaskInputRequestForRule(taskInfo->requestedBy, &nextRuleInfo);
+        if (it == taskInfo->requestedBy.end()) {
+          // this rule has not generated an input request yet, so we cannot
+          // provide a value to it
+          continue;
+        }
+
+        // Ask the delegate if we should try to resolve this cycle by supplying
+        // a prior value?
+        if (!delegate.shouldResolveCycle(cycleList, &ruleInfo.rule, Rule::CycleAction::SupplyPriorValue))
+          return false;
+
+        // supply the prior value to the node
+        if (trace) {
+          trace->cycleSupplyPriorValue(&ruleInfo.rule, it->taskInfo->task.get());
+        }
+        it->forcePriorValue = true;
+        finishedInputRequests.insert(finishedInputRequests.end(), *it);
+
+        // remove this request from the task info
+        taskInfo->requestedBy.erase(it);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // Helper function for breakCycle, finds a rule in a RuleScanRequest vector
+  std::vector<RuleScanRequest>::iterator findRuleScanRequestForRule(
+    std::vector<RuleScanRequest>& requests, RuleInfo* ruleInfo) {
+    for (auto it = requests.begin(); it != requests.end(); it++) {
+      if (it->ruleInfo == ruleInfo) {
+        return it;
+      }
+    }
+
+    return requests.end();
+  }
+
+  // Helper function for breakCycle, finds a rule in a TaskInputRequest vector
+  std::vector<TaskInputRequest>::iterator findTaskInputRequestForRule(
+    std::vector<TaskInputRequest>& requests, RuleInfo* ruleInfo)  {
+    for (auto it = requests.begin(); it != requests.end(); it++) {
+      if (it->taskInfo->forRuleInfo == ruleInfo) {
+        return it;
+      }
+    }
+
+    return requests.end();
+  }
+
+  // Cancel all of the remaining tasks.
+  void cancelRemainingTasks() {
+    // We need to wait for any currently running tasks to be reported as
+    // complete. Not doing this would mean we could get asynchronous calls
+    // attempting to modify the task state concurrently with the cancellation
+    // process, which isn't something we want to need to synchronize on.
+    //
+    // We don't process the requests at all, we simply drain them. In practice,
+    // we expect clients to implement cancellation in conjection with causing
+    // long-running tasks to also cancel and fail, so preserving those results
+    // is not valuable.
+    while (numOutstandingUnfinishedTasks != 0) {
+        std::unique_lock<std::mutex> lock(finishedTaskInfosMutex);
+        if (finishedTaskInfos.empty()) {
+          finishedTaskInfosCondition.wait(lock);
+        } else {
+          assert(finishedTaskInfos.size() <= numOutstandingUnfinishedTasks);
+          numOutstandingUnfinishedTasks -= finishedTaskInfos.size();
+          finishedTaskInfos.clear();
+        }
+    }
+
+    std::lock_guard<std::mutex> guard(taskInfosMutex);
+
     for (auto& it: taskInfos) {
-      // Complete the task, even though it did not update the value.
+      // Cancel the task, marking it incomplete.
       //
-      // FIXME: What should we do here with the value?
+      // This will force it to rerun in a later build, but since it was already
+      // running in this build that was almost certainly going to be
+      // required. Technically, there are rare situations where it wouldn't have
+      // to rerun (e.g., if resultIsValid becomes true after being false in this
+      // run), and if we were willing to restore the tasks state--either by
+      // keeping the old one or by restoring from the database--we could ensure
+      // that doesn't happen.
+      //
+      // NOTE: Actually, we currently don't sync this write to the database, so
+      // in some cases we do actually preserve this information (if the client
+      // ends up cancelling, then reloading froom the database).
       TaskInfo* taskInfo = &it.second;
       RuleInfo* ruleInfo = taskInfo->forRuleInfo;
       assert(taskInfo == ruleInfo->getPendingTaskInfo());
       ruleInfo->setPendingTaskInfo(nullptr);
-      ruleInfo->setComplete(this);
+      ruleInfo->setCancelled();
+    }
+
+    // FIXME: This is currently an O(n) operation that could be relatively
+    // expensive on larger projects.  We should be able to do something more
+    // targeted. rdar://problem/39386591
+    for (auto& it: ruleInfos) {
+      // Cancel outstanding activity on rules
+      if (it.second.isScanning()) {
+        it.second.setCancelled();
+      }
     }
 
     // Delete all of the tasks.
@@ -1074,18 +1298,21 @@ public:
     return currentTimestamp;
   }
 
-  KeyID getKeyID(const KeyType& key) {
-    // Delegate if we have a database.
-    if (db) {
-      return db->getKeyID(key);
-    }
+  virtual KeyID getKeyID(const KeyType& key) override {
+    std::lock_guard<std::mutex> guard(keyTableMutex);
 
-    // Otherwise use our builtin key table.
-    {
-      std::lock_guard<std::mutex> guard(keyTableMutex);
-      auto it = keyTable.insert(std::make_pair(key, false)).first;
-      return (KeyID)(uintptr_t)it->getKey().data();
-    }
+    // The RHS of the mapping is actually ignored, we use the StringMap's ptr
+    // identity because it allows us to efficiently map back to the key string
+    // in `getRuleInfoForKey`.
+    auto it = keyTable.insert(std::make_pair(key, 0)).first;
+    return (KeyID)(uintptr_t)it->getKey().data();
+  }
+
+  virtual KeyType getKeyForID(KeyID key) override {
+    // Note that we don't need to lock `keyTable` here because the key entries
+    // themselves don't change once created.
+    return llvm::StringMapEntry<KeyID>::GetStringMapEntryFromKeyData(
+      (const char*)(uintptr_t)key).getKey();
   }
 
   RuleInfo& getRuleInfoForKey(const KeyType& key) {
@@ -1108,16 +1335,7 @@ public:
 
     // Otherwise, we need to resolve the full key so we can request it from the
     // delegate.
-    KeyType key;
-    if (db) {
-      key = db->getKeyForID(keyID);
-    } else {
-      // Note that we don't need to lock `keyTable` here because the key entries
-      // themselves don't change once created.
-      key = llvm::StringMapEntry<bool>::GetStringMapEntryFromKeyData(
-          (const char*)(uintptr_t)keyID).getKey();
-    }
-    return addRule(keyID, delegate.lookupRule(key));
+    return addRule(keyID, delegate.lookupRule(getKeyForID(keyID)));
   }
 
   TaskInfo* getTaskInfo(Task* task) {
@@ -1136,10 +1354,12 @@ public:
   RuleInfo& addRule(KeyID keyID, Rule&& rule) {
     auto result = ruleInfos.emplace(keyID, RuleInfo(keyID, std::move(rule)));
     if (!result.second) {
-      // FIXME: Error handling.
-      std::cerr << "error: attempt to register duplicate rule \""
-                << rule.key << "\"\n";
-      exit(1);
+      delegate.error("attempt to register duplicate rule \"" + rule.key + "\"\n");
+
+      // Set cancelled, but return something 'valid' for use until it is
+      // processed.
+      buildCancelled = true;
+      return result.first->second;
     }
 
     // If we have a database attached, retrieve any stored result.
@@ -1152,8 +1372,10 @@ public:
       std::string error;
       db->lookupRuleResult(ruleInfo.keyID, ruleInfo.rule, &ruleInfo.result, &error);
       if (!error.empty()) {
+        // FIXME: Investigate changing the database error handling model to
+        // allow builds to proceed without the database.
         delegate.error(error);
-        completeRemainingTasks();
+        buildCancelled = true;
       }
     }
 
@@ -1190,6 +1412,7 @@ public:
       trace->buildStarted();
 
     // Run the build engine, to process any necessary tasks.
+    buildCancelled = false;
     bool success = executeTasks(key);
     
     // Update the build database, if attached.
@@ -1230,11 +1453,21 @@ public:
     return ruleInfo.result.value;
   }
 
+  void cancelBuild() {
+    // Set the build cancelled marker.
+    //
+    // We do not need to handle waking the engine up, if it is waiting, because
+    // our current cancellation model requires us to wait for all outstanding
+    // tasks in any case.
+    buildCancelled = true;
+  }
+  
   bool attachDB(std::unique_ptr<BuildDB> database, std::string* error_out) {
     assert(!db && "invalid attachDB() call");
     assert(currentTimestamp == 0 && "invalid attachDB() call");
     assert(ruleInfos.empty() && "invalid attachDB() call");
     db = std::move(database);
+    db->attachDelegate(this);
 
     // Load our initial state from the database.
     bool success;
@@ -1256,7 +1489,7 @@ public:
   void dumpGraphToFile(const std::string& path) {
     FILE* fp = ::fopen(path.c_str(), "w");
     if (!fp) {
-      delegate.error("error: unable to open graph output path \"" + path + "\"");
+      delegate.error("unable to open graph output path \"" + path + "\"");
       return;
     }
 
@@ -1326,8 +1559,8 @@ public:
   void taskNeedsInput(Task* task, const KeyType& key, uintptr_t inputID) {
     // Validate the InputID.
     if (inputID > BuildEngine::kMaximumInputID) {
-      delegate.error("error: attempt to use reserved input ID");
-      completeRemainingTasks();
+      delegate.error("attempt to use reserved input ID");
+      buildCancelled = true;
       return;
     }
 
@@ -1344,8 +1577,8 @@ public:
     assert(taskInfo && "cannot request inputs for an unknown task");
 
     if (!taskInfo->forRuleInfo->isInProgressComputing()) {
-      delegate.error("error: invalid state for adding discovered dependency");
-      completeRemainingTasks();
+      delegate.error("invalid state for adding discovered dependency");
+      buildCancelled = true;
       return;
     }
 
@@ -1361,8 +1594,8 @@ public:
     assert(taskInfo && "cannot request inputs for an unknown task");
 
     if (!taskInfo->forRuleInfo->isInProgressComputing()) {
-      delegate.error("error: invalid state for marking task complete");
-      completeRemainingTasks();
+      delegate.error("invalid state for marking task complete");
+      buildCancelled = true;
       return;
     }
 
@@ -1425,6 +1658,10 @@ void BuildEngine::addRule(Rule&& rule) {
 
 const ValueType& BuildEngine::build(const KeyType& key) {
   return static_cast<BuildEngineImpl*>(impl)->build(key);
+}
+
+void BuildEngine::cancelBuild() {
+  return static_cast<BuildEngineImpl*>(impl)->cancelBuild();
 }
 
 void BuildEngine::dumpGraphToFile(const std::string& path) {

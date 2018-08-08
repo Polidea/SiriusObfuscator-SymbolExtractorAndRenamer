@@ -12,10 +12,12 @@ set(sources
   SwiftStdbool.h
   SwiftStddef.h
   SwiftStdint.h
+  System.h
   UnicodeShims.h
   Visibility.h
 
   DispatchOverlayShims.h
+  NetworkOverlayShims.h
   OSOverlayShims.h
   ObjectiveCOverlayShims.h
   SafariServicesOverlayShims.h
@@ -78,25 +80,30 @@ endif()
 string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CLANG_VERSION
   "${LLVM_PACKAGE_VERSION}")
 
-if(SWIFT_BUILT_STANDALONE)
-  set(clang_headers_locations
-      "${LLVM_LIBRARY_DIR}/clang/${CLANG_VERSION}"
+# Function to find LLVM or Clang headers
+function(find_llvm_clang_headers suffix description out_var)
+  set(headers_locations
+      "${LLVM_LIBRARY_DIR}${suffix}"
 
-      # FIXME: if we want to support separate Clang builds and mix different
-      # build configurations of Clang and Swift, this line should be adjusted.
-      "${SWIFT_PATH_TO_CLANG_BUILD}/${CMAKE_CFG_INTDIR}/lib/clang/${CLANG_VERSION}"
-      "${SWIFT_PATH_TO_CLANG_BUILD}/${LLVM_BUILD_TYPE}/lib/clang/${CLANG_VERSION}")
+      "${SWIFT_PATH_TO_CLANG_BUILD}/${CMAKE_CFG_INTDIR}/lib${suffix}"
+      "${SWIFT_PATH_TO_CLANG_BUILD}/${LLVM_BUILD_TYPE}/lib${suffix}")
 
-  set(clang_headers_location)
-  foreach(loc ${clang_headers_locations})
+  set(headers_location)
+  foreach(loc ${headers_locations})
     if(EXISTS "${loc}")
-      set(clang_headers_location "${loc}")
+      set(headers_location "${loc}")
+      set(${out_var} "${loc}" PARENT_SCOPE)
       break()
     endif()
   endforeach()
-  if("${clang_headers_location}" STREQUAL "")
-    message(FATAL_ERROR "Clang headers were not found in any of the following locations: ${clang_headers_locations}")
+  if("${headers_location}" STREQUAL "")
+    message(FATAL_ERROR "${description} headers were not found in any of the following locations: ${headers_locations}")
   endif()
+endfunction()
+
+if(SWIFT_BUILT_STANDALONE)
+  find_llvm_clang_headers("/clang/${CLANG_VERSION}" "Clang"
+    clang_headers_location)
 else() # NOT SWIFT_BUILT_STANDALONE
   set(clang_headers_location "${LLVM_LIBRARY_DIR}/clang/${CLANG_VERSION}")
 endif()

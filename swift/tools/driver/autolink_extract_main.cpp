@@ -73,8 +73,7 @@ public:
     }
 
     if (ParsedArgs.hasArg(OPT_UNKNOWN)) {
-      for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_UNKNOWN),
-                                     ParsedArgs.filtered_end())) {
+      for (const Arg *A : ParsedArgs.filtered(OPT_UNKNOWN)) {
         Diags.diagnose(SourceLoc(), diag::error_unknown_arg,
                        A->getAsString(ParsedArgs));
       }
@@ -85,12 +84,11 @@ public:
       std::string ExecutableName = llvm::sys::path::stem(MainExecutablePath);
       Table->PrintHelp(llvm::outs(), ExecutableName.c_str(),
                        "Swift Autolink Extract", options::AutolinkExtractOption,
-                       0);
+                       0, /*ShowAllAliases*/false);
       return 1;
     }
 
-    for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_INPUT),
-                                   ParsedArgs.filtered_end())) {
+    for (const Arg *A : ParsedArgs.filtered(OPT_INPUT)) {
       InputFilenames.push_back(A->getValue());
     }
 

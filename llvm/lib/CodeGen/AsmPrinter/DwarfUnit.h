@@ -65,7 +65,7 @@ public:
 //===----------------------------------------------------------------------===//
 /// This dwarf writer support class manages information associated with a
 /// source file.
-  class DwarfUnit : public DIEUnit {
+class DwarfUnit : public DIEUnit {
 protected:
   /// MDNode for the compile unit.
   const DICompileUnit *CUNode;
@@ -103,9 +103,10 @@ protected:
 
   bool applySubprogramDefinitionAttributes(const DISubprogram *SP, DIE &SPDie);
 
-public:
-  virtual ~DwarfUnit();
+  bool shareAcrossDWOCUs() const;
+  bool isShareableAcrossCUs(const DINode *D) const;
 
+public:
   // Accessors.
   AsmPrinter* getAsmPrinter() const { return Asm; }
   uint16_t getLanguage() const { return CUNode->getSourceLanguage(); }
@@ -198,9 +199,6 @@ public:
 
   /// Add a type's DW_AT_signature and set the  declaration flag.
   void addDIETypeSignature(DIE &Die, uint64_t Signature);
-  /// Add an attribute containing the type signature for a unique identifier.
-  void addDIETypeSignature(DIE &Die, dwarf::Attribute Attribute,
-                           StringRef Identifier);
 
   /// Add block data.
   void addBlock(DIE &Die, dwarf::Attribute Attribute, DIELoc *Block);
@@ -276,6 +274,10 @@ public:
   /// call insertDIE if MD is not null.
   DIE &createAndAddDIE(unsigned Tag, DIE &Parent, const DINode *N = nullptr);
 
+  bool useSegmentedStringOffsetsTable() const {
+    return DD->useSegmentedStringOffsetsTable();
+  }
+
   /// Compute the size of a header for this unit, not including the initial
   /// length field.
   virtual unsigned getHeaderSize() const {
@@ -289,11 +291,25 @@ public:
   /// Emit the header for this unit, not including the initial length field.
   virtual void emitHeader(bool UseOffsets) = 0;
 
+  /// Add the DW_AT_str_offsets_base attribute to the unit DIE.
+  void addStringOffsetsStart();
+
   virtual DwarfCompileUnit &getCU() = 0;
 
   void constructTypeDIE(DIE &Buffer, const DICompositeType *CTy);
 
+  /// addSectionDelta - Add a label delta attribute data and value.
+  DIE::value_iterator addSectionDelta(DIE &Die, dwarf::Attribute Attribute,
+                                      const MCSymbol *Hi, const MCSymbol *Lo);
+
+  /// Add a Dwarf section label attribute data and value.
+  DIE::value_iterator addSectionLabel(DIE &Die, dwarf::Attribute Attribute,
+                                      const MCSymbol *Label,
+                                      const MCSymbol *Sec);
+
 protected:
+  ~DwarfUnit();
+
   /// Create new static data member DIE.
   DIE *getOrCreateStaticMemberDIE(const DIDerivedType *DT);
 
@@ -322,7 +338,7 @@ private:
   void constructSubrangeDIE(DIE &Buffer, const DISubrange *SR, DIE *IndexTy);
   void constructArrayTypeDIE(DIE &Buffer, const DICompositeType *CTy);
   void constructEnumTypeDIE(DIE &Buffer, const DICompositeType *CTy);
-  void constructMemberDIE(DIE &Buffer, const DIDerivedType *DT);
+  DIE &constructMemberDIE(DIE &Buffer, const DIDerivedType *DT);
   void constructTemplateTypeParameterDIE(DIE &Buffer,
                                          const DITemplateTypeParameter *TP);
   void constructTemplateValueParameterDIE(DIE &Buffer,
@@ -340,9 +356,10 @@ private:
   void setIndexTyDie(DIE *D) { IndexTyDie = D; }
 
   virtual bool isDwoUnit() const = 0;
+  const MCSymbol *getCrossSectionRelativeBaseAddress() const override;
 };
 
-class DwarfTypeUnit : public DwarfUnit {
+class DwarfTypeUnit final : public DwarfUnit {
   uint64_t TypeSignature;
   const DIE *Ty;
   DwarfCompileUnit &CU;

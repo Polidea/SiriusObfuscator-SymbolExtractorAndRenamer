@@ -18,7 +18,6 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include "llvm/IR/DebugInfo.h"
 using namespace llvm;
 using namespace llvm::PatternMatch;
 
@@ -27,16 +26,17 @@ using namespace llvm::PatternMatch;
 /// The PHI arguments will be folded into a single operation with a PHI node
 /// as input. The debug location of the single operation will be the merged
 /// locations of the original PHI node arguments.
-DebugLoc InstCombiner::PHIArgMergedDebugLoc(PHINode &PN) {
+void InstCombiner::PHIArgMergedDebugLoc(Instruction *Inst, PHINode &PN) {
   auto *FirstInst = cast<Instruction>(PN.getIncomingValue(0));
-  const DILocation *Loc = FirstInst->getDebugLoc();
+  Inst->setDebugLoc(FirstInst->getDebugLoc());
+  // We do not expect a CallInst here, otherwise, N-way merging of DebugLoc
+  // will be inefficient.
+  assert(!isa<CallInst>(Inst));
 
   for (unsigned i = 1; i != PN.getNumIncomingValues(); ++i) {
     auto *I = cast<Instruction>(PN.getIncomingValue(i));
-    Loc = DILocation::getMergedLocation(Loc, I->getDebugLoc());
+    Inst->applyMergedLocation(Inst->getDebugLoc(), I->getDebugLoc());
   }
-
-  return Loc;
 }
 
 /// If we have something like phi [add (a,b), add(a,c)] and if a/b/c and the
@@ -117,7 +117,7 @@ Instruction *InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
   if (CmpInst *CIOp = dyn_cast<CmpInst>(FirstInst)) {
     CmpInst *NewCI = CmpInst::Create(CIOp->getOpcode(), CIOp->getPredicate(),
                                      LHSVal, RHSVal);
-    NewCI->setDebugLoc(PHIArgMergedDebugLoc(PN));
+    PHIArgMergedDebugLoc(NewCI, PN);
     return NewCI;
   }
 
@@ -130,7 +130,7 @@ Instruction *InstCombiner::FoldPHIArgBinOpIntoPHI(PHINode &PN) {
   for (unsigned i = 1, e = PN.getNumIncomingValues(); i != e; ++i)
     NewBinOp->andIRFlags(PN.getIncomingValue(i));
 
-  NewBinOp->setDebugLoc(PHIArgMergedDebugLoc(PN));
+  PHIArgMergedDebugLoc(NewBinOp, PN);
   return NewBinOp;
 }
 
@@ -239,7 +239,7 @@ Instruction *InstCombiner::FoldPHIArgGEPIntoPHI(PHINode &PN) {
       GetElementPtrInst::Create(FirstInst->getSourceElementType(), Base,
                                 makeArrayRef(FixedOperands).slice(1));
   if (AllInBounds) NewGEP->setIsInBounds();
-  NewGEP->setDebugLoc(PHIArgMergedDebugLoc(PN));
+  PHIArgMergedDebugLoc(NewGEP, PN);
   return NewGEP;
 }
 
@@ -399,7 +399,7 @@ Instruction *InstCombiner::FoldPHIArgLoadIntoPHI(PHINode &PN) {
     for (Value *IncValue : PN.incoming_values())
       cast<LoadInst>(IncValue)->setVolatile(false);
 
-  NewLI->setDebugLoc(PHIArgMergedDebugLoc(PN));
+  PHIArgMergedDebugLoc(NewLI, PN);
   return NewLI;
 }
 
@@ -457,8 +457,8 @@ Instruction *InstCombiner::FoldPHIArgZextsIntoPHI(PHINode &Phi) {
   }
 
   // The more common cases of a phi with no constant operands or just one
-  // variable operand are handled by FoldPHIArgOpIntoPHI() and FoldOpIntoPhi()
-  // respectively. FoldOpIntoPhi() wants to do the opposite transform that is
+  // variable operand are handled by FoldPHIArgOpIntoPHI() and foldOpIntoPhi()
+  // respectively. foldOpIntoPhi() wants to do the opposite transform that is
   // performed here. It tries to replicate a cast in the phi operand's basic
   // block to expose other folding opportunities. Thus, InstCombine will
   // infinite loop without this check.
@@ -507,7 +507,7 @@ Instruction *InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
     // Be careful about transforming integer PHIs.  We don't want to pessimize
     // the code by turning an i32 into an i1293.
     if (PN.getType()->isIntegerTy() && CastSrcTy->isIntegerTy()) {
-      if (!ShouldChangeType(PN.getType(), CastSrcTy))
+      if (!shouldChangeType(PN.getType(), CastSrcTy))
         return nullptr;
     }
   } else if (isa<BinaryOperator>(FirstInst) || isa<CmpInst>(FirstInst)) {
@@ -565,7 +565,7 @@ Instruction *InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
   if (CastInst *FirstCI = dyn_cast<CastInst>(FirstInst)) {
     CastInst *NewCI = CastInst::Create(FirstCI->getOpcode(), PhiVal,
                                        PN.getType());
-    NewCI->setDebugLoc(PHIArgMergedDebugLoc(PN));
+    PHIArgMergedDebugLoc(NewCI, PN);
     return NewCI;
   }
 
@@ -576,14 +576,14 @@ Instruction *InstCombiner::FoldPHIArgOpIntoPHI(PHINode &PN) {
     for (unsigned i = 1, e = PN.getNumIncomingValues(); i != e; ++i)
       BinOp->andIRFlags(PN.getIncomingValue(i));
 
-    BinOp->setDebugLoc(PHIArgMergedDebugLoc(PN));
+    PHIArgMergedDebugLoc(BinOp, PN);
     return BinOp;
   }
 
   CmpInst *CIOp = cast<CmpInst>(FirstInst);
   CmpInst *NewCI = CmpInst::Create(CIOp->getOpcode(), CIOp->getPredicate(),
                                    PhiVal, ConstantOp);
-  NewCI->setDebugLoc(PHIArgMergedDebugLoc(PN));
+  PHIArgMergedDebugLoc(NewCI, PN);
   return NewCI;
 }
 
@@ -636,10 +636,10 @@ static bool PHIsEqualValue(PHINode *PN, Value *NonPhiInVal,
 /// Return an existing non-zero constant if this phi node has one, otherwise
 /// return constant 1.
 static ConstantInt *GetAnyNonZeroConstInt(PHINode &PN) {
-  assert(isa<IntegerType>(PN.getType()) && "Expect only intger type phi");
+  assert(isa<IntegerType>(PN.getType()) && "Expect only integer type phi");
   for (Value *V : PN.operands())
     if (auto *ConstVA = dyn_cast<ConstantInt>(V))
-      if (!ConstVA->isZeroValue())
+      if (!ConstVA->isZero())
         return ConstVA;
   return ConstantInt::get(cast<IntegerType>(PN.getType()), 1);
 }
@@ -836,12 +836,12 @@ Instruction *InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
         }
 
         // Otherwise, do an extract in the predecessor.
-        Builder->SetInsertPoint(Pred->getTerminator());
+        Builder.SetInsertPoint(Pred->getTerminator());
         Value *Res = InVal;
         if (Offset)
-          Res = Builder->CreateLShr(Res, ConstantInt::get(InVal->getType(),
+          Res = Builder.CreateLShr(Res, ConstantInt::get(InVal->getType(),
                                                           Offset), "extract");
-        Res = Builder->CreateTrunc(Res, Ty, "extract.t");
+        Res = Builder.CreateTrunc(Res, Ty, "extract.t");
         PredVal = Res;
         EltPHI->addIncoming(Res, Pred);
 
@@ -880,7 +880,7 @@ Instruction *InstCombiner::SliceUpIllegalIntegerPHI(PHINode &FirstPhi) {
 // PHINode simplification
 //
 Instruction *InstCombiner::visitPHINode(PHINode &PN) {
-  if (Value *V = SimplifyInstruction(&PN, DL, &TLI, &DT, &AC))
+  if (Value *V = SimplifyInstruction(&PN, SQ.getWithInstruction(&PN)))
     return replaceInstUsesWith(PN, V);
 
   if (Instruction *Result = FoldPHIArgZextsIntoPHI(PN))

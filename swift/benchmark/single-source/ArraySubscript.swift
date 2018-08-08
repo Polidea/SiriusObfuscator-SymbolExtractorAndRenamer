@@ -13,6 +13,11 @@
 // This test checks the performance of modifying an array element.
 import TestsUtils
 
+public let ArraySubscript = BenchmarkInfo(
+  name: "ArraySubscript",
+  runFunction: run_ArraySubscript,
+  tags: [.validation, .api, .Array])
+
 @inline(never)
 public func run_ArraySubscript(_ N: Int) {
   SRand()
@@ -25,7 +30,7 @@ public func run_ArraySubscript(_ N: Int) {
   var arrays = [[Int]](repeating: [], count: numArrays)
   for i in 0..<numArrays {
     for _ in 0..<numArrayElements {
-      arrays[i].append(Int(truncatingBitPattern: Random()))
+      arrays[i].append(Int(truncatingIfNeeded: Random()))
     }
   }
 

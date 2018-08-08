@@ -10,13 +10,13 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 import Darwin
 #elseif os(Linux) || CYGWIN
 import Glibc
 #endif
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 internal let kCFURLPOSIXPathStyle = CFURLPathStyle.cfurlposixPathStyle
 internal let kCFURLWindowsPathStyle = CFURLPathStyle.cfurlWindowsPathStyle
 #endif
@@ -29,39 +29,40 @@ private func _standardizedPath(_ path: String) -> String {
 }
 
 internal func _pathComponents(_ path: String?) -> [String]? {
-    if let p = path {
-        var result = [String]()
-        if p.length == 0 {
-            return result
-        } else {
-            let characterView = p.characters
-            var curPos = characterView.startIndex
-            let endPos = characterView.endIndex
-            if characterView[curPos] == "/" {
-                result.append("/")
-            }
-            
-            while curPos < endPos {
-                while curPos < endPos && characterView[curPos] == "/" {
-                    curPos = characterView.index(after: curPos)
-                }
-                if curPos == endPos {
-                    break
-                }
-                var curEnd = curPos
-                while curEnd < endPos && characterView[curEnd] != "/" {
-                    curEnd = characterView.index(after: curEnd)
-                }
-                result.append(String(characterView[curPos ..< curEnd]))
-                curPos = curEnd
-            }
-        }
-        if p.length > 1 && p.hasSuffix("/") {
+    guard let p = path else {
+        return nil
+    }
+
+    var result = [String]()
+    if p.length == 0 {
+        return result
+    } else {
+        let characterView = p
+        var curPos = characterView.startIndex
+        let endPos = characterView.endIndex
+        if characterView[curPos] == "/" {
             result.append("/")
         }
-        return result
+
+        while curPos < endPos {
+            while curPos < endPos && characterView[curPos] == "/" {
+                curPos = characterView.index(after: curPos)
+            }
+            if curPos == endPos {
+                break
+            }
+            var curEnd = curPos
+            while curEnd < endPos && characterView[curEnd] != "/" {
+                curEnd = characterView.index(after: curEnd)
+            }
+            result.append(String(characterView[curPos ..< curEnd]))
+            curPos = curEnd
+        }
     }
-    return nil
+    if p.length > 1 && p.hasSuffix("/") {
+        result.append("/")
+    }
+    return result
 }
 
 public struct URLResourceKey : RawRepresentable, Equatable, Hashable {
@@ -254,7 +255,11 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying {
     }
     
     open override var description: String {
-        return CFCopyDescription(_cfObject)._swiftObject
+        if self.relativeString != self.absoluteString {
+            return "\(self.relativeString) -- \(self.baseURL!)"
+        } else {
+            return self.absoluteString
+        }
     }
 
     deinit {
@@ -309,7 +314,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying {
 
         let thePath = _standardizedPath(path)
         
-        var isDir : Bool = false
+        var isDir: ObjCBool = false
         if thePath.hasSuffix("/") {
             isDir = true
         } else {
@@ -323,7 +328,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying {
             let _ = FileManager.default.fileExists(atPath: absolutePath, isDirectory: &isDir)
         }
 
-        self.init(fileURLWithPath: thePath, isDirectory: isDir, relativeTo: baseURL)
+        self.init(fileURLWithPath: thePath, isDirectory: isDir.boolValue, relativeTo: baseURL)
     }
 
     public convenience init(fileURLWithPath path: String, isDirectory isDir: Bool) {
@@ -339,7 +344,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying {
             thePath = path
         }
 
-        var isDir : Bool = false
+        var isDir: ObjCBool = false
         if thePath.hasSuffix("/") {
             isDir = true
         } else {
@@ -348,7 +353,7 @@ open class NSURL : NSObject, NSSecureCoding, NSCopying {
             }
         }
         super.init()
-        _CFURLInitWithFileSystemPathRelativeToBase(_cfObject, thePath._cfObject, kCFURLPOSIXPathStyle, isDir, nil)
+        _CFURLInitWithFileSystemPathRelativeToBase(_cfObject, thePath._cfObject, kCFURLPOSIXPathStyle, isDir.boolValue, nil)
     }
     
     public convenience init(fileURLWithFileSystemRepresentation path: UnsafePointer<Int8>, isDirectory isDir: Bool, relativeTo baseURL: URL?) {
@@ -708,41 +713,40 @@ extension NSURL {
     }
     
     internal func _pathByFixingSlashes(compress : Bool = true, stripTrailing: Bool = true) -> String? {
-        if let p = path {
-            if p == "/" {
-                return p
-            }
-            
-            var result = p
-            if compress {
-                result.withMutableCharacters { characterView in
-                    let startPos = characterView.startIndex
-                    var endPos = characterView.endIndex
-                    var curPos = startPos
-                    
-                    while curPos < endPos {
-                        if characterView[curPos] == "/" {
-                            var afterLastSlashPos = curPos
-                            while afterLastSlashPos < endPos && characterView[afterLastSlashPos] == "/" {
-                                afterLastSlashPos = characterView.index(after: afterLastSlashPos)
-                            }
-                            if afterLastSlashPos != characterView.index(after: curPos) {
-                                characterView.replaceSubrange(curPos ..< afterLastSlashPos, with: ["/"])
-                                endPos = characterView.endIndex
-                            }
-                            curPos = afterLastSlashPos
-                        } else {
-                            curPos = characterView.index(after: curPos)
-                        }
+        guard let p = path else {
+            return nil
+        }
+
+        if p == "/" {
+            return p
+        }
+
+        var result = p
+        if compress {
+            let startPos = result.startIndex
+            var endPos = result.endIndex
+            var curPos = startPos
+
+            while curPos < endPos {
+                if result[curPos] == "/" {
+                    var afterLastSlashPos = curPos
+                    while afterLastSlashPos < endPos && result[afterLastSlashPos] == "/" {
+                        afterLastSlashPos = result.index(after: afterLastSlashPos)
                     }
+                    if afterLastSlashPos != result.index(after: curPos) {
+                        result.replaceSubrange(curPos ..< afterLastSlashPos, with: ["/"])
+                        endPos = result.endIndex
+                    }
+                    curPos = afterLastSlashPos
+                } else {
+                    curPos = result.index(after: curPos)
                 }
             }
-            if stripTrailing && result.hasSuffix("/") {
-                result.remove(at: result.characters.index(before: result.characters.endIndex))
-            }
-            return result
         }
-        return nil
+        if stripTrailing && result.hasSuffix("/") {
+            result.remove(at: result.index(before: result.endIndex))
+        }
+        return result
     }
 
     open var pathComponents: [String]? {
@@ -757,7 +761,7 @@ extension NSURL {
             return fixedSelf
         }
         
-        return String(fixedSelf.characters.suffix(from: fixedSelf._startOfLastPathComponent))
+        return String(fixedSelf.suffix(from: fixedSelf._startOfLastPathComponent))
     }
     
     open var pathExtension: String? {
@@ -769,7 +773,7 @@ extension NSURL {
         }
         
         if let extensionPos = fixedSelf._startOfPathExtension {
-            return String(fixedSelf.characters.suffix(from: extensionPos))
+            return String(fixedSelf.suffix(from: extensionPos))
         } else {
             return ""
         }
@@ -779,8 +783,8 @@ extension NSURL {
         var result : URL? = appendingPathComponent(pathComponent, isDirectory: false)
         if !pathComponent.hasSuffix("/") && isFileURL {
             if let urlWithoutDirectory = result {
-                var isDir : Bool = false
-                if FileManager.default.fileExists(atPath: urlWithoutDirectory.path, isDirectory: &isDir) && isDir {
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: urlWithoutDirectory.path, isDirectory: &isDir) && isDir.boolValue {
                     result = self.appendingPathComponent(pathComponent, isDirectory: true)
                 }
             }
@@ -859,14 +863,14 @@ extension NSURL {
         }
 
         // It might be a responsibility of NSURL(fileURLWithPath:). Check it.
-        var isExistingDirectory = false
+        var isExistingDirectory: ObjCBool = false
         let _ = FileManager.default.fileExists(atPath: resolvedPath, isDirectory: &isExistingDirectory)
 
         if excludeSystemDirs {
             resolvedPath = resolvedPath._tryToRemovePathPrefix("/private") ?? resolvedPath
         }
 
-        if isExistingDirectory && !resolvedPath.hasSuffix("/") {
+        if isExistingDirectory.boolValue && !resolvedPath.hasSuffix("/") {
             resolvedPath += "/"
         }
         
@@ -1243,37 +1247,37 @@ open class NSURLComponents: NSObject, NSCopying {
     open var queryItems: [URLQueryItem]? {
         get {
             // This CFURL implementation returns a CFArray of CFDictionary; each CFDictionary has an entry for name and optionally an entry for value
-            if let queryArray = _CFURLComponentsCopyQueryItems(_components) {
-                let count = CFArrayGetCount(queryArray)
-                
-                return (0..<count).map { idx in
-                    let oneEntry = unsafeBitCast(CFArrayGetValueAtIndex(queryArray, idx), to: NSDictionary.self)
-                    let swiftEntry = oneEntry._swiftObject 
-                    let entryName = swiftEntry["name"] as! String
-                    let entryValue = swiftEntry["value"] as? String
-                    return URLQueryItem(name: entryName, value: entryValue)
-                }
-            } else {
+            guard let queryArray = _CFURLComponentsCopyQueryItems(_components) else {
                 return nil
+            }
+
+            let count = CFArrayGetCount(queryArray)
+            return (0..<count).map { idx in
+                let oneEntry = unsafeBitCast(CFArrayGetValueAtIndex(queryArray, idx), to: NSDictionary.self)
+                let swiftEntry = oneEntry._swiftObject
+                let entryName = swiftEntry["name"] as! String
+                let entryValue = swiftEntry["value"] as? String
+                return URLQueryItem(name: entryName, value: entryValue)
             }
         }
         set(new) {
-            if let new = new {
-                // The CFURL implementation requires two CFArrays, one for names and one for values
-                var names = [CFTypeRef]()
-                var values = [CFTypeRef]()
-                for entry in new {
-                    names.append(entry.name._cfObject)
-                    if let v = entry.value {
-                        values.append(v._cfObject)
-                    } else {
-                        values.append(kCFNull)
-                    }
-                }
-                _CFURLComponentsSetQueryItems(_components, names._cfObject, values._cfObject)
-            } else {
+            guard let new = new else {
                 self.percentEncodedQuery = nil
+                return
             }
+
+            // The CFURL implementation requires two CFArrays, one for names and one for values
+            var names = [CFTypeRef]()
+            var values = [CFTypeRef]()
+            for entry in new {
+                names.append(entry.name._cfObject)
+                if let v = entry.value {
+                    values.append(v._cfObject)
+                } else {
+                    values.append(kCFNull)
+                }
+            }
+            _CFURLComponentsSetQueryItems(_components, names._cfObject, values._cfObject)
         }
     }
 }

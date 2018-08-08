@@ -17,10 +17,10 @@
 #include "lldb/Core/Address.h"
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/RangeMap.h"
-#include "lldb/Core/UUID.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Symbol/ObjectFile.h"
+#include "lldb/Utility/FileSpec.h"
 #include "lldb/Utility/SafeMachO.h"
+#include "lldb/Utility/UUID.h"
 
 //----------------------------------------------------------------------
 // This class needs to be hidden as eventually belongs in a plugin that
@@ -67,7 +67,7 @@ public:
 
   static bool SaveCore(const lldb::ProcessSP &process_sp,
                        const lldb_private::FileSpec &outfile,
-                       lldb_private::Error &error);
+                       lldb_private::Status &error);
 
   static bool MagicBytesMatch(lldb::DataBufferSP &data_sp, lldb::addr_t offset,
                               lldb::addr_t length);
@@ -162,14 +162,14 @@ protected:
   // with an on-disk dyld_shared_cache file.  The process will record
   // the shared cache UUID so the on-disk cache can be matched or rejected
   // correctly.
-  lldb_private::UUID GetProcessSharedCacheUUID(lldb_private::Process *);
+  void GetProcessSharedCacheUUID(lldb_private::Process *, lldb::addr_t &base_addr, lldb_private::UUID &uuid);
 
   // Intended for same-host arm device debugging where lldb will read
   // shared cache libraries out of its own memory instead of the remote
   // process' memory as an optimization.  If lldb's shared cache UUID
   // does not match the process' shared cache UUID, this optimization
   // should not be used.
-  lldb_private::UUID GetLLDBSharedCacheUUID();
+  void GetLLDBSharedCacheUUID(lldb::addr_t &base_addir, lldb_private::UUID &uuid);
 
   lldb_private::Section *GetMachHeaderSection();
 

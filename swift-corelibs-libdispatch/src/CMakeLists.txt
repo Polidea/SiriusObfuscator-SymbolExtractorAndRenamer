@@ -19,6 +19,7 @@ add_library(dispatch
               time.c
               transform.c
               voucher.c
+              shims.c
               protocol.defs
               provider.d
               allocator_internal.h
@@ -46,14 +47,23 @@ add_library(dispatch
               shims/atomic_sfb.h
               shims/getprogname.h
               shims/hw_config.h
-              shims/linux_stubs.c
-              shims/linux_stubs.h
               shims/lock.c
               shims/lock.h
               shims/perfmon.h
               shims/time.h
               shims/tsd.h
               shims/yield.h)
+if(UNIX)
+  target_sources(dispatch
+                 PRIVATE
+                   shims/generic_unix_stubs.c
+                   shims/generic_unix_stubs.h)
+elseif(WIN32)
+  target_sources(dispatch
+                 PRIVATE
+                   shims/generic_win_stubs.c
+                   shims/generic_win_stubs.h)
+endif()
 if(DISPATCH_USE_INTERNAL_WORKQUEUE)
   target_sources(dispatch
                  PRIVATE
@@ -93,20 +103,23 @@ if(ENABLE_SWIFT)
                       swift/Source.swift
                       swift/Time.swift
                       swift/Wrapper.swift
+                    TARGET
+                      ${CMAKE_C_COMPILER_TARGET}
                     CFLAGS
                       -fblocks
                       -fmodule-map-file=${CMAKE_SOURCE_DIR}/dispatch/module.modulemap
                     SWIFT_FLAGS
                       -I ${CMAKE_SOURCE_DIR}
-                      ${swift_optimization_flags})
-  add_dependencies(swiftDispatch
-                     module-map-symlinks)
+                      -I/usr/include
+                      ${swift_optimization_flags}
+                    DEPENDS
+                      ${CMAKE_SOURCE_DIR}/dispatch/module.modulemap)
   target_sources(dispatch
                  PRIVATE
                    swift/DispatchStubs.cc
                    ${CMAKE_CURRENT_BINARY_DIR}/swiftDispatch.o)
 endif()
-if(dtrace_EXECUTABLE)
+if(ENABLE_DTRACE)
   dtrace_usdt_probe(${CMAKE_CURRENT_SOURCE_DIR}/provider.d
                     OUTPUT_SOURCES
                       dispatch_dtrace_provider_headers)
@@ -126,6 +139,11 @@ if(WITH_BLOCKS_RUNTIME)
                              SYSTEM BEFORE PRIVATE
                                "${WITH_BLOCKS_RUNTIME}")
 endif()
+if(WIN32)
+  target_compile_definitions(dispatch
+                             PRIVATE
+                               _CRT_NONSTDC_NO_WARNINGS)
+endif()
 if("${CMAKE_C_SIMULATE_ID}" STREQUAL "MSVC")
   target_compile_options(dispatch PRIVATE /EHsc-)
 else()
@@ -140,6 +158,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL Windows)
   target_compile_definitions(dispatch
                              PRIVATE
                                -D_CRT_SECURE_NO_WARNINGS)
+elseif(CMAKE_SYSTEM_NAME STREQUAL Android)
+  target_compile_options(dispatch
+                         PRIVATE
+                           -U_GNU_SOURCE)
 endif()
 if(BSD_OVERLAY_FOUND)
   target_compile_options(dispatch
@@ -174,6 +196,13 @@ target_link_libraries(dispatch PRIVATE Threads::Threads)
 if(WITH_BLOCKS_RUNTIME)
   target_link_libraries(dispatch PRIVATE BlocksRuntime)
 endif()
+if(CMAKE_SYSTEM_NAME STREQUAL Windows)
+  target_link_libraries(dispatch
+                        PRIVATE
+                          WS2_32
+                          WinMM
+                          synchronization)
+endif()
 if(CMAKE_SYSTEM_NAME STREQUAL Darwin)
   set_property(TARGET dispatch
                APPEND_STRING
@@ -189,6 +218,12 @@ if(USE_GOLD_LINKER)
                PROPERTY LINK_FLAGS
                  -fuse-ld=gold)
 endif()
+if(USE_LLD_LINKER)
+  set_property(TARGET dispatch
+               APPEND_STRING
+               PROPERTY LINK_FLAGS
+                 -fuse-ld=lld)
+endif()
 
 # Temporary staging; the various swift projects that depend on libdispatch
 # all expect libdispatch.so to be in src/.libs/libdispatch.so
@@ -202,12 +237,12 @@ add_custom_command(TARGET dispatch POST_BUILD
 install(TARGETS
           dispatch
         DESTINATION
-          "${CMAKE_INSTALL_LIBDIR}")
+          "${INSTALL_TARGET_DIR}")
 if(ENABLE_SWIFT)
   install(FILES
             ${CMAKE_CURRENT_BINARY_DIR}/swift/Dispatch.swiftmodule
             ${CMAKE_CURRENT_BINARY_DIR}/swift/Dispatch.swiftdoc
           DESTINATION
-            "${CMAKE_INSTALL_LIBDIR}/swift/${SWIFT_OS}/${CMAKE_SYSTEM_PROCESSOR}")
+            "${INSTALL_TARGET_DIR}/${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 

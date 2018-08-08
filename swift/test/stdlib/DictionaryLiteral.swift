@@ -14,7 +14,6 @@
 
 // REQUIRES: objc_interop
 
-import SwiftExperimental
 import Foundation
 import StdlibUnittest
 
@@ -35,7 +34,6 @@ func checkAssociatedTypes() {
     iteratorType: IndexingIterator<Subject>.self,
     subSequenceType: RandomAccessSlice<Subject>.self,
     indexType: Int.self,
-    indexDistanceType: Int.self,
     indicesType: CountableRange<Int>.self)
 }
 
@@ -51,8 +49,9 @@ let anNSString = "Foo" as NSString
 var stringNSStringLet: DictionaryLiteral = [ "a": aString as NSString, "b": anNSString]
 expectType(DictionaryLiteral<String, NSString>.self, &stringNSStringLet)
 
-var hetero1: DictionaryLiteral = ["a": 1 as NSNumber, "b": "Foo" as NSString]
-expectType(DictionaryLiteral<String, NSObject>.self, &hetero1)
+var hetero: DictionaryLiteral = ["a": 1 as NSNumber, "b": "Foo" as NSString]
+expectType(DictionaryLiteral<String, NSObject>.self, &hetero)
 
-var hetero2: DictionaryLiteral = ["a": 1 as NSNumber, "b": "Foo" as NSString]
-expectType(DictionaryLiteral<String, NSObject>.self, &hetero2)
+let aliased: KeyValuePairs<String,String> = strings
+expectType(DictionaryLiteral<String, String>.self, &strings)
+

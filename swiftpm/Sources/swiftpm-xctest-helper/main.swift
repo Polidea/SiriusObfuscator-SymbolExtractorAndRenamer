@@ -33,7 +33,7 @@ func run() throws {
     guard let bundle = Bundle(path: bundlePath), bundle.load() else {
         throw Error.unableToLoadBundle(bundlePath)
     }
-    let suite = XCTestSuite.default()
+    let suite = XCTestSuite.default
 
     let splitSet: Set<Character> = ["[", " ", "]", ":"]
 
@@ -54,7 +54,7 @@ func run() throws {
     var testCases = [[String: AnyObject]]()
 
     for case let testCaseSuite as XCTestSuite in suite.tests {
-        let testSuite: [[String: AnyObject]] = testCaseSuite.tests.flatMap({
+        let testSuite: [[String: AnyObject]] = testCaseSuite.tests.compactMap({
             guard case let testCaseSuite as XCTestSuite = $0 else { return nil }
             // Get the name of the XCTest subclass with its target name if possible.
             // If the subclass contains atleast one test get the name using reflection,
@@ -63,11 +63,11 @@ func run() throws {
             if let firstTest = testCaseSuite.tests.first {
                 name = String(reflecting: type(of: firstTest))
             } else {
-                name = testCaseSuite.name ?? "nil"
+                name = testCaseSuite.name
             }
 
             // Collect the test methods.
-            let tests: [[String: String]] = testCaseSuite.tests.flatMap({ test in
+            let tests: [[String: String]] = testCaseSuite.tests.compactMap({ test in
                 guard case let test as XCTestCase = test else { return nil }
                 // Split the test description into an array. Description formats:
                 // `-[ClassName MethodName]`, `-[ClassName MethodNameAndReturnError:]`
@@ -85,7 +85,7 @@ func run() throws {
             return ["name": name as NSString, "tests": tests as NSArray]
         })
         testCases.append([
-            "name": (testCaseSuite.name ?? "nil") as NSString,
+            "name": testCaseSuite.name as NSString,
             "tests": testSuite as NSArray,
         ])
     }

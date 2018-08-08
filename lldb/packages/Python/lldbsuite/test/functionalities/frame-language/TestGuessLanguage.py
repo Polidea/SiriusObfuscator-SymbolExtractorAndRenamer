@@ -39,7 +39,7 @@ class TestFrameGuessLanguage(TestBase):
 
     def do_test(self):
         """Test GuessLanguage for C & C++."""
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Create a target by the debugger.
         target = self.dbg.CreateTarget(exe)
@@ -73,7 +73,12 @@ class TestFrameGuessLanguage(TestBase):
         self.assertTrue(breakpoint.GetHitCount() == 1)
 
         thread = threads[0]
-        self.check_language(thread, 0, lldb.eLanguageTypeC99)
+        c_frame_language = lldb.eLanguageTypeC99
+        # gcc emits DW_LANG_C89 even if -std=c99 was specified
+        if "gcc" in self.getCompiler():
+            c_frame_language = lldb.eLanguageTypeC89
+
+        self.check_language(thread, 0, c_frame_language)
         self.check_language(thread, 1, lldb.eLanguageTypeC_plus_plus)
         self.check_language(thread, 2, lldb.eLanguageTypeC_plus_plus)
         

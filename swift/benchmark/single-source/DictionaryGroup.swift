@@ -12,6 +12,11 @@
 
 import TestsUtils
 
+public let DictionaryGroup = [
+  BenchmarkInfo(name: "DictionaryGroup", runFunction: run_DictionaryGroup, tags: [.validation, .api, .Dictionary]),
+  BenchmarkInfo(name: "DictionaryGroupOfObjects", runFunction: run_DictionaryGroupOfObjects, tags: [.validation, .api, .Dictionary]),
+]
+
 let count = 10_000
 let result = count / 10
 
@@ -31,8 +36,8 @@ class Box<T : Hashable> : Hashable {
     value = v
   }
 
-  var hashValue: Int {
-    return value.hashValue
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(value)
   }
 
   static func ==(lhs: Box, rhs: Box) -> Bool {

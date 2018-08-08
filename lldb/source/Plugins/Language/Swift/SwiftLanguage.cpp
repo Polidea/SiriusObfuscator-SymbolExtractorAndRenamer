@@ -12,7 +12,7 @@
 
 #include "SwiftLanguage.h"
 
-#include "lldb/Core/ConstString.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectVariable.h"
@@ -21,6 +21,7 @@
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 
+#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Variable.h"
@@ -436,6 +437,10 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
       "Swift.Array summary provider",
       ConstString(SwiftLanguageRuntime::GetCurrentMangledName("_TtCs21_SwiftDeferredNSArray")), summary_flags, false);
   AddCXXSummary(
+      swift_category_sp, lldb_private::formatters::swift::Array_SummaryProvider,
+      "Swift.Array summary provider",
+      ConstString("Swift._SwiftDeferredNSArray"), summary_flags, false);
+  AddCXXSummary(
       swift_category_sp, lldb_private::formatters::NSArraySummaryProvider,
       "Swift.Array summary provider",
       ConstString("_TtCs21_SwiftDeferredNSArray"), summary_flags, false);
@@ -511,6 +516,13 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
                   ConstString("_TtCs21_SwiftDeferredNSArray"),
                   synth_flags,
                   false);
+  AddCXXSynthetic(swift_category_sp,
+                  lldb_private::formatters::swift::ArraySyntheticFrontEndCreator,
+                  "Swift.Array synthetic children",
+                  ConstString("Swift._SwiftDeferredNSArray"),
+                  synth_flags,
+                  false);
+
 
   AddCXXSynthetic(
       swift_category_sp,
@@ -710,6 +722,21 @@ static void LoadSwiftFormatters(lldb::TypeCategoryImplSP swift_category_sp) {
       lldb_private::formatters::swift::StridedRangeGenerator_SummaryProvider,
       "Swift.StridedRangeGenerator summary provider",
       ConstString("Swift.StridedRangeGenerator<.+>$"), summary_flags, true);
+
+  TypeSummaryImpl::Flags simd_summary_flags;
+  simd_summary_flags.SetCascades(false)
+      .SetDontShowChildren(true)
+      .SetHideItemNames(true)
+      .SetShowMembersOneLiner(false);
+  const char *accelSIMDTypes = "^(simd\.)?(simd_)?("
+                               "(int|uint|float|double)[234]|"
+                               "(float|double)[234]x[234]|"
+                               "quat(f|d)"
+                               ")$";
+  AddCXXSummary(swift_category_sp,
+                lldb_private::formatters::swift::AccelerateSIMD_SummaryProvider,
+                "Accelerate/SIMD summary provider", ConstString(accelSIMDTypes),
+                simd_summary_flags, true);
 
   TypeSummaryImpl::Flags nil_summary_flags;
   nil_summary_flags.SetCascades(true)
@@ -1322,14 +1349,14 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
             Target *target = exe_scope->CalculateTarget().get();
             if (target) {
               const bool create_on_demand = false;
-              Error error;
-              SwiftASTContext *ast_ctx(
-                  target->GetScratchSwiftASTContext(error, create_on_demand));
+              Status error;
+              SwiftASTContext *ast_ctx(target->GetScratchSwiftASTContext(
+                  error, *exe_scope, create_on_demand));
               if (ast_ctx) {
                 const bool is_mangled = true;
                 Mangled mangled(ConstString(input), is_mangled);
                 if (mangled.GuessLanguage() == eLanguageTypeSwift) {
-                  Error error;
+                  Status error;
                   auto candidate =
                       ast_ctx->GetTypeFromMangledTypename(input, error);
                   if (candidate.IsValid() && error.Success())
@@ -1381,9 +1408,9 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
           if (exe_scope) {
             Target *target = exe_scope->CalculateTarget().get();
             const bool create_on_demand = false;
-            Error error;
-            SwiftASTContext *ast_ctx(
-                target->GetScratchSwiftASTContext(error, create_on_demand));
+            Status error;
+            SwiftASTContext *ast_ctx(target->GetScratchSwiftASTContext(
+                error, *exe_scope, create_on_demand));
             if (ast_ctx) {
               auto iter = ast_ctx->GetModuleCache().begin(),
                    end = ast_ctx->GetModuleCache().end();
@@ -1398,7 +1425,7 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
                 swift::ModuleDecl::AccessPathTy access_path;
 
                 module->forAllVisibleModules(
-                    access_path, true,
+                    access_path,
                     [ast_ctx, input, name_parts, &results](
                         swift::ModuleDecl::ImportedModule imported_module) -> bool {
                       auto module = imported_module.second;
@@ -1588,7 +1615,7 @@ SwiftLanguage::GetDeclPrintingHelper() {
   };
 }
 
-LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Error &error) {
+LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
   static ConstString g_SwiftBool("Swift.Bool");
   static ConstString g_value("_value");
 
@@ -1648,6 +1675,7 @@ bool SwiftLanguage::GetFunctionDisplayName(
         }
       }
     }
+    break;
   }
   case Language::FunctionNameRepresentation::eNameWithArgs: {
     if (sc->function) {

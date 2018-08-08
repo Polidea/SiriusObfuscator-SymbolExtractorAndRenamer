@@ -2,7 +2,7 @@
 
 // REQUIRES: objc_interop
 
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -38,6 +38,6 @@ public enum TestE : Int{
 	case A1
 	case B1
 }
-// CHECK: typedef SWIFT_ENUM(NSInteger, TestE)
+// CHECK: typedef SWIFT_ENUM(NSInteger, TestE, closed)
 // CHECK-NEXT: {{^}} A2 SWIFT_COMPILE_NAME("A1") = 0,
 // CHECK-NEXT: {{^}} TestEB1 = 1,

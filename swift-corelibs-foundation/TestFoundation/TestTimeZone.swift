@@ -7,18 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
-
-
 class TestTimeZone: XCTestCase {
 
     static var allTests: [(String, (TestTimeZone) -> () throws -> Void)] {
@@ -121,6 +109,9 @@ class TestTimeZone: XCTestCase {
     }
     
     func test_localizedName() {
+#if os(Android)
+	XCTFail("Named timezones not available on Android")
+#else
         let initialTimeZone = NSTimeZone.default
         NSTimeZone.default = TimeZone(identifier: "America/New_York")!
         let defaultTimeZone = NSTimeZone.default
@@ -132,6 +123,7 @@ class TestTimeZone: XCTestCase {
         XCTAssertEqual(defaultTimeZone.localizedName(for: .shortDaylightSaving, locale: locale), "EDT")
         XCTAssertEqual(defaultTimeZone.localizedName(for: .shortGeneric, locale: locale), "ET")
         NSTimeZone.default = initialTimeZone //reset the TimeZone
+#endif
     }
 
     func test_initializingTimeZoneWithOffset() {

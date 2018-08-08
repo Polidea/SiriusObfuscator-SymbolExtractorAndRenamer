@@ -40,6 +40,7 @@ namespace SourceKit {
   class SwiftEditorDocumentFileMap;
   class SwiftLangSupport;
   class SwiftInvocation;
+  struct SwiftStatistics;
   typedef RefPtr<SwiftInvocation> SwiftInvocationRef;
   class EditorDiagConsumer;
 
@@ -48,7 +49,7 @@ public:
   struct Implementation;
   Implementation &Impl;
 
-  explicit ASTUnit(uint64_t Generation);
+  explicit ASTUnit(uint64_t Generation, SwiftStatistics &Statistics);
   ~ASTUnit();
 
   swift::CompilerInstance &getCompilerInstance() const;
@@ -116,6 +117,16 @@ public:
                               ArrayRef<const char *> OrigArgs,
                               StringRef PrimaryFile,
                               std::string &Error);
+
+  /// Initializes \p Invocation as if for typechecking, but with no inputs.
+  ///
+  /// If \p AllowInputs is false, it is an error for \p OrigArgs to contain any
+  /// input files.
+  bool initCompilerInvocationNoInputs(swift::CompilerInvocation &Invocation,
+                                      ArrayRef<const char *> OrigArgs,
+                                      swift::DiagnosticEngine &Diags,
+                                      std::string &Error,
+                                      bool AllowInputs = true);
 
   void removeCachedAST(SwiftInvocationRef Invok);
 

@@ -42,7 +42,7 @@ REPL::REPL(LLVMCastKind kind, Target &target) : m_target(target), m_kind(kind) {
 
 REPL::~REPL() = default;
 
-lldb::REPLSP REPL::Create(Error &err, lldb::LanguageType language,
+lldb::REPLSP REPL::Create(Status &err, lldb::LanguageType language,
                           Debugger *debugger, Target *target,
                           const char *repl_options) {
   uint32_t idx = 0;
@@ -292,9 +292,20 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
       expr_options.SetTryAllThreads(m_command_options.try_all_threads);
       expr_options.SetGenerateDebugInfo(true);
       expr_options.SetREPLEnabled(true);
+      expr_options.SetTrapExceptions(false);
       expr_options.SetColorizeErrors(colorize_err);
       expr_options.SetPoundLine(m_repl_source_path.c_str(),
                                 m_code.GetSize() + 1);
+
+      // There is no point in trying to run REPL expressions on just the
+      // current thread of the program, since the REPL tracks the states of
+      // individual threads as you would in a regular debugging session.
+      // Interrupting the process to switch from one thread to many has
+      // observable effects (for instance it causes anything waiting in the
+      // kernel to be interrupted). Since we aren't getting any benefit from
+      // doing this in the REPL, let's not.
+      expr_options.SetStopOthers(false);
+
       if (m_command_options.timeout > 0)
         expr_options.SetTimeout(std::chrono::microseconds(m_command_options.timeout));
       else
@@ -316,7 +327,7 @@ void REPL::IOHandlerInputComplete(IOHandler &io_handler, std::string &code) {
 
       const char *expr_prefix = nullptr;
       lldb::ValueObjectSP result_valobj_sp;
-      Error error;
+      Status error;
       lldb::ModuleSP jit_module_sp;
       lldb::ExpressionResults execution_results =
           UserExpression::Evaluate(exe_ctx, expr_options, code.c_str(),
@@ -525,8 +536,8 @@ bool QuitCommandOverrideCallback(void *baton, const char **argv) {
   return false;
 }
 
-Error REPL::RunLoop() {
-  Error error;
+Status REPL::RunLoop() {
+  Status error;
 
   error = DoInitialization();
   m_repl_source_path = GetSourcePath();

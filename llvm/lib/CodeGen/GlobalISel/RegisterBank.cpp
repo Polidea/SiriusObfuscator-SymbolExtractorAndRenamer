@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/GlobalISel/RegisterBank.h"
-#include "llvm/Target/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
 
 #define DEBUG_TYPE "registerbank"
 
@@ -48,7 +48,7 @@ bool RegisterBank::verify(const TargetRegisterInfo &TRI) const {
 
       // Verify that the Size of the register bank is big enough to cover
       // all the register classes it covers.
-      assert((getSize() >= SubRC.getSize() * 8) &&
+      assert(getSize() >= TRI.getRegSizeInBits(SubRC) &&
              "Size is not big enough for all the subclasses!");
       assert(covers(SubRC) && "Not all subclasses are covered");
     }

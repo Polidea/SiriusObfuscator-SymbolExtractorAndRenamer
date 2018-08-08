@@ -45,9 +45,6 @@ public:
 
 private:
   bool FileHasEntryPoint = false;
-  bool SILSerializeWitnessTables;
-
-  bool InsideAbstractStorageDecl = false;
 
   void addSymbol(StringRef name) {
     auto isNewValue = Symbols.insert(name).second;
@@ -71,14 +68,14 @@ private:
 
   void addConformances(DeclContext *DC);
 
+  void addDispatchThunk(SILDeclRef declRef);
+
 public:
   TBDGenVisitor(StringSet &symbols, const llvm::Triple &triple,
                 const UniversalLinkageInfo &universalLinkInfo,
-                ModuleDecl *swiftModule, bool silSerializeWitnessTables,
-                StringRef installName)
+                ModuleDecl *swiftModule, StringRef installName)
       : Symbols(symbols), Triple(triple), UniversalLinkInfo(universalLinkInfo),
-        SwiftModule(swiftModule), InstallName(installName),
-        SILSerializeWitnessTables(silSerializeWitnessTables) {}
+        SwiftModule(swiftModule), InstallName(installName) {}
 
   void setFileHasEntryPoint(bool hasEntryPoint) {
     FileHasEntryPoint = hasEntryPoint;
@@ -87,33 +84,9 @@ public:
       addSymbol("main");
   }
 
-  void visitMembers(Decl *D) {
-    SmallVector<Decl *, 4> members;
-    auto addMembers = [&](DeclRange range) {
-      for (auto member : range)
-        members.push_back(member);
-    };
-    if (auto ED = dyn_cast<ExtensionDecl>(D))
-      addMembers(ED->getMembers());
-    else if (auto NTD = dyn_cast<NominalTypeDecl>(D))
-      addMembers(NTD->getMembers());
-    else if (auto ASD = dyn_cast<AbstractStorageDecl>(D))
-      ASD->getAllAccessorFunctions(members);
-
-    for (auto member : members) {
-      ASTVisitor::visit(member);
-    }
-  }
-
   void visitPatternBindingDecl(PatternBindingDecl *PBD);
 
-  void visitValueDecl(ValueDecl *VD);
-
   void visitAbstractFunctionDecl(AbstractFunctionDecl *AFD);
-
-  void visitTypeAliasDecl(TypeAliasDecl *TAD) {
-    // any information here is encoded elsewhere
-  }
 
   void visitNominalTypeDecl(NominalTypeDecl *NTD);
 
@@ -125,11 +98,11 @@ public:
 
   void visitProtocolDecl(ProtocolDecl *PD);
 
-  void visitAbstractStorageDecl(AbstractStorageDecl *ASD);
-
   void visitVarDecl(VarDecl *VD);
 
-  void visitDecl(Decl *D) { visitMembers(D); }
+  void visitEnumDecl(EnumDecl *ED);
+
+  void visitDecl(Decl *D) {}
 };
 } // end namespace tbdgen
 } // end namespace swift

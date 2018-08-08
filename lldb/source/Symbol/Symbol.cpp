@@ -12,13 +12,13 @@
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/Section.h"
-#include "lldb/Core/Stream.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Symbol/Symtab.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/Stream.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -375,7 +375,6 @@ const char *Symbol::GetTypeAsString() const {
     ENUM_TO_CSTRING(ObjCMetaClass);
     ENUM_TO_CSTRING(ObjCIVar);
     ENUM_TO_CSTRING(IVarOffset);
-    ENUM_TO_CSTRING(Metadata)
     ENUM_TO_CSTRING(ReExported);
   default:
     break;

@@ -11,7 +11,7 @@
 import Basic
 
 /// The type of product.
-public enum ProductType {
+public enum ProductType: CustomStringConvertible, Equatable {
 
     /// The type of library.
     public enum LibraryType {
@@ -34,6 +34,24 @@ public enum ProductType {
 
     /// A test product.
     case test
+    
+    public var description: String {
+        switch self {
+        case .executable:
+            return "executable"
+        case .test:
+            return "test"
+        case .library(let type):
+            switch type {
+            case .automatic:
+                return "automatic"
+            case .dynamic:
+                return "dynamic"
+            case .static:
+                return "static"
+            }
+        }
+    }
 }
 
 public class Product {
@@ -71,25 +89,6 @@ public class Product {
 
 extension Product: CustomStringConvertible {
     public var description: String {
-        return "<Product: \(name)"
-    }
-}
-
-extension ProductType: Equatable {
-    public static func == (lhs: ProductType, rhs: ProductType) -> Bool {
-        switch (lhs, rhs) {
-        case (.executable, .executable):
-            return true
-        case (.executable, _):
-            return false
-        case (.test, .test):
-            return true
-        case (.test, _):
-            return false
-        case (.library(let lhsType), .library(let rhsType)):
-            return lhsType == rhsType
-        case (.library, _):
-            return false
-        }
+        return "<Product: \(name)>"
     }
 }

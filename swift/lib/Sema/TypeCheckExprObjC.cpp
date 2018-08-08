@@ -15,6 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 #include "TypeChecker.h"
+#include "TypoCorrection.h"
 #include "swift/Basic/Range.h"
 
 using namespace swift;
@@ -78,7 +79,7 @@ Optional<Type> TypeChecker::checkObjCKeyPathExpr(DeclContext *dc,
   Type currentType;
   auto updateState = [&](bool isProperty, Type newType) {
     // Strip off optionals.
-    newType = newType->lookThroughAllAnyOptionalTypes();
+    newType = newType->lookThroughAllOptionalTypes();
 
     // If updating to a type, just set the new type; there's nothing
     // more to do.
@@ -248,11 +249,12 @@ Optional<Type> TypeChecker::checkObjCKeyPathExpr(DeclContext *dc,
     // If we didn't find anything, try to apply typo-correction.
     bool resultsAreFromTypoCorrection = false;
     if (!lookup) {
+      TypoCorrectionResults corrections(*this, componentName,
+                                        DeclNameLoc(componentNameLoc));
       performTypoCorrection(dc, DeclRefKind::Ordinary, lookupType,
-                            componentName, componentNameLoc,
                             (lookupType ? defaultMemberTypeLookupOptions
                                         : defaultUnqualifiedLookupOptions),
-                            lookup);
+                            corrections);
 
       if (currentType)
         diagnose(componentNameLoc, diag::could_not_find_type_member,
@@ -262,10 +264,8 @@ Optional<Type> TypeChecker::checkObjCKeyPathExpr(DeclContext *dc,
                  componentName, false);
 
       // Note all the correction candidates.
-      for (auto &result : lookup) {
-        noteTypoCorrection(componentName, DeclNameLoc(componentNameLoc),
-                           result);
-      }
+      corrections.noteAllCandidates();
+      corrections.addAllCandidatesToLookup(lookup);
 
       isInvalid = true;
       if (!lookup) break;
@@ -277,13 +277,14 @@ Optional<Type> TypeChecker::checkObjCKeyPathExpr(DeclContext *dc,
     // If we have more than one result, filter out unavailable or
     // obviously unusable candidates.
     if (lookup.size() > 1) {
-      lookup.filter([&](LookupResult::Result result) -> bool {
+      lookup.filter([&](LookupResultEntry result, bool isOuter) -> bool {
           // Drop unavailable candidates.
-          if (result->getAttrs().isUnavailable(Context))
+          if (result.getValueDecl()->getAttrs().isUnavailable(Context))
             return false;
 
           // Drop non-property, non-type candidates.
-          if (!isa<VarDecl>(result.Decl) && !isa<TypeDecl>(result.Decl))
+          if (!isa<VarDecl>(result.getValueDecl()) &&
+              !isa<TypeDecl>(result.getValueDecl()))
             return false;
 
           return true;
@@ -304,13 +305,14 @@ Optional<Type> TypeChecker::checkObjCKeyPathExpr(DeclContext *dc,
                  componentName);
 
       for (auto result : lookup) {
-        diagnose(result, diag::decl_declared_here, result->getFullName());
+        diagnose(result.getValueDecl(), diag::decl_declared_here,
+                 result.getValueDecl()->getFullName());
       }
       isInvalid = true;
       break;
     }
 
-    auto found = lookup.front().Decl;
+    auto found = lookup.front().getValueDecl();
 
     // Handle property references.
     if (auto var = dyn_cast<VarDecl>(found)) {

@@ -46,7 +46,7 @@ open class NSSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCodi
         super.init()
         let buffer = UnsafeBufferPointer(start: objects, count: cnt)
         for obj in buffer {
-            _storage.insert(obj as! NSObject)
+            _storage.insert(_SwiftValue.store(obj))
         }
     }
     
@@ -107,7 +107,10 @@ open class NSSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCodi
         return true
     }
     
-    open func description(withLocale locale: Locale?) -> String { NSUnimplemented() }
+    open func description(withLocale locale: Locale?) -> String { 
+      // NSUnimplemented() 
+      return description
+    }
     
     override open var _cfTypeID: CFTypeID {
         return CFSetGetTypeID()
@@ -135,7 +138,7 @@ open class NSSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding, NSCodi
         }
         self.init(objects: buffer, count: array.count)
         buffer.deinitialize(count: array.count)
-        buffer.deallocate(capacity: array.count)
+        buffer.deallocate()
     }
 
     public convenience init(set: Set<AnyHashable>) {
@@ -255,7 +258,7 @@ extension NSSet {
             withUnsafeMutablePointer(to: &stop) { stop in
                 block(obj, stop)
             }
-            if stop {
+            if stop.boolValue {
                 break
             }
         }

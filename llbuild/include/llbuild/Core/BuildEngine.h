@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2015 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See http://swift.org/LICENSE.txt for license information
@@ -13,15 +13,17 @@
 #ifndef LLBUILD_CORE_BUILDENGINE_H
 #define LLBUILD_CORE_BUILDENGINE_H
 
+#include "llbuild/Basic/Compiler.h"
+
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Twine.h"
+
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/Twine.h"
 
 namespace llbuild {
 namespace core {
@@ -89,6 +91,9 @@ struct Result {
 /// complete its computation and provide the output. The Task is responsible for
 /// providing the engine with the computed value when ready using \see
 /// BuildEngine::taskIsComplete().
+///
+/// A task which has been cancelled may be destroyed without any of the above
+/// behaviors having been completed.
 class Task {
 public:
   Task() {}
@@ -164,6 +169,14 @@ public:
     IsComplete = 2
   };
 
+  enum class CycleAction {
+    /// Indicates a rule will be forced to build
+    ForceBuild = 0,
+
+    /// Indicates a rule's prior value will be supplied to a downstream rule
+    SupplyPriorValue = 1
+  };
+
   /// The key computed by the rule.
   KeyType key;
 
@@ -197,6 +210,24 @@ public:
   /// requested Key cannot be supplied, the delegate should provide a dummy rule
   /// that the client can translate into an error.
   virtual Rule lookupRule(const KeyType& key) = 0;
+
+  /// Called when a cycle is detected by the build engine to check if it should
+  /// attempt to resolve the cycle and continue
+  ///
+  /// \param items The ordered list of items comprising the cycle, starting from
+  /// the node which was requested to build and ending with the first node in
+  /// the cycle (i.e., the node participating in the cycle will appear twice).
+  /// \param candidateRule The rule the engine will use to attempt to break the
+  /// cycle.
+  /// \param action The action the engine will take on the candidateRule.
+  /// \returns True if the engine should attempt to resolve the cycle, false
+  /// otherwise. Resolution is attempted by either forcing items to be built, or
+  /// supplying a previously built result to a node in the cycle. The latter
+  /// action may yield unexpected results and thus this should be opted into
+  /// with care.
+  virtual bool shouldResolveCycle(const std::vector<Rule*>& items,
+                                  Rule* candidateRule,
+                                  Rule::CycleAction action);
 
   /// Called when a cycle is detected by the build engine and it cannot make
   /// forward progress.
@@ -237,6 +268,10 @@ public:
 class BuildEngine {
   void *impl;
 
+  // Copying is disabled.
+  BuildEngine(const BuildEngine&) LLBUILD_DELETED_FUNCTION;
+  void operator=(const BuildEngine&) LLBUILD_DELETED_FUNCTION;
+
 public:
   /// Create a build engine with the given delegate.
   explicit BuildEngine(BuildEngineDelegate& delegate);
@@ -269,6 +304,21 @@ public:
   /// discovered currently.
   const ValueType& build(const KeyType& key);
 
+  /// Cancel the currently running build.
+  ///
+  /// The engine guarantees that it will not *start* any task after processing
+  /// the current engine work loop iteration after it has been cancelled.
+  ///
+  /// This method is thread-safe.
+  ///
+  /// This method should only be used when a build is actively running. Invoking
+  /// this method before a build has started will have no effect.
+  //
+  // FIXME: This method is hard to use correctly, we should modify build to
+  // return an explicit object to represent an in-flight build, and then expose
+  // cancellation on that.
+  void cancelBuild();
+  
   /// Attach a database for persisting build state.
   ///
   /// A database should only be attached immediately after creating the engine,

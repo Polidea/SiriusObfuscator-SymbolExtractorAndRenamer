@@ -17,7 +17,9 @@
 #include "llbuild/Basic/BinaryCoding.h"
 #include "llbuild/Basic/Compiler.h"
 #include "llbuild/Basic/FileInfo.h"
+#include "llbuild/Basic/Hashing.h"
 #include "llbuild/Basic/LLVM.h"
+#include "llbuild/Basic/StringList.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SmallVector.h"
@@ -56,6 +58,9 @@ class BuildValue {
 
     /// The signature of a directories contents.
     DirectoryTreeSignature,
+
+    /// The signature of a directories structure.
+    DirectoryTreeStructureSignature,
 
     /// A value produced by stale file removal.
     StaleFileRemoval,
@@ -97,7 +102,7 @@ class BuildValue {
   uint32_t numOutputInfos = 0;
 
   /// The command hash, for successful commands.
-  uint64_t commandSignature = 0;
+  basic::CommandSignature commandSignature;
 
   union {
     /// The file info for the rule output, for existing inputs, successful
@@ -113,16 +118,11 @@ class BuildValue {
   // FIXME: We are currently paying the cost for carrying this around on every
   // value, which is very wasteful. We need to redesign this type to be
   // customized to each exact value.
-  struct {
-    /// The values are packed as a sequence of C strings.
-    char* contents;
-
-    /// The total length of the contents.
-    uint64_t size;
-  } stringValues = {0, 0};
+  basic::StringList stringValues;
 
   bool kindHasCommandSignature() const {
-    return isSuccessfulCommand() || isDirectoryTreeSignature();
+    return isSuccessfulCommand() || isDirectoryTreeSignature() ||
+      isDirectoryTreeStructureSignature();
   }
 
   bool kindHasStringList() const {
@@ -140,10 +140,10 @@ private:
 
   BuildValue() {}
   BuildValue(basic::BinaryDecoder& decoder);
-  BuildValue(Kind kind, uint64_t commandSignature = 0)
+  BuildValue(Kind kind, basic::CommandSignature commandSignature = basic::CommandSignature())
       : kind(kind), commandSignature(commandSignature) { }
   BuildValue(Kind kind, ArrayRef<FileInfo> outputInfos,
-             uint64_t commandSignature = 0)
+             basic::CommandSignature commandSignature = basic::CommandSignature())
       : kind(kind), numOutputInfos(outputInfos.size()),
         commandSignature(commandSignature)
   {
@@ -162,50 +162,20 @@ private:
   BuildValue(Kind kind, FileInfo directoryInfo, ArrayRef<std::string> values)
       : BuildValue(kind, directoryInfo)
   {
-    // Construct the concatenated data.
-    uint64_t size = 0;
-    for (auto value: values) {
-      size += value.size() + 1;
-    }
-    char *p, *contents = p = new char[size];
-    for (auto value: values) {
-      assert(value.find('\0') == StringRef::npos);
-      memcpy(p, value.data(), value.size());
-      p += value.size();
-      *p++ = '\0';
-    }
-    stringValues.contents = contents;
-    stringValues.size = size;
+    assert(kindHasStringList());
+
+    stringValues = basic::StringList(values);
   }
 
-  BuildValue(Kind kind, ArrayRef<std::string> values) : kind(kind) {
-    // Construct the concatenated data.
-    uint64_t size = 0;
-    for (auto value: values) {
-      size += value.size() + 1;
-    }
-    char *p, *contents = p = new char[size];
-    for (auto value: values) {
-      assert(value.find('\0') == StringRef::npos);
-      memcpy(p, value.data(), value.size());
-      p += value.size();
-      *p++ = '\0';
-    }
-    stringValues.contents = contents;
-    stringValues.size = size;
+  BuildValue(Kind kind, ArrayRef<std::string> values)
+      : kind(kind), stringValues(values) {
+    assert(kindHasStringList());
   }
 
   
   std::vector<StringRef> getStringListValues() const {
     assert(kindHasStringList());
-    std::vector<StringRef> result;
-    for (uint64_t i = 0; i < stringValues.size;) {
-      auto value = StringRef(&stringValues.contents[i]);
-      assert(i + value.size() <= stringValues.size);
-      result.push_back(value);
-      i += value.size() + 1;
-    }
-    return result;
+    return stringValues.getValues();
   }
 
   FileInfo& getNthOutputInfo(unsigned n) {
@@ -232,8 +202,7 @@ public:
       valueData.asOutputInfo = rhs.valueData.asOutputInfo;
     }
     if (rhs.kindHasStringList()) {
-      stringValues = rhs.stringValues;
-      rhs.stringValues.contents = nullptr;
+      stringValues = std::move(rhs.stringValues);
     }
   }
   BuildValue& operator=(BuildValue&& rhs) {
@@ -253,8 +222,7 @@ public:
         valueData.asOutputInfo = rhs.valueData.asOutputInfo;
       }
       if (rhs.kindHasStringList()) {
-        stringValues = rhs.stringValues;
-        rhs.stringValues.contents = nullptr;
+        stringValues = std::move(rhs.stringValues);
       }
     }
     return *this;
@@ -262,9 +230,6 @@ public:
   ~BuildValue() {
     if (hasMultipleOutputs()) {
       delete[] valueData.asOutputInfos;
-    }
-    if (kindHasStringList()) {
-      delete[] stringValues.contents;
     }
   }
 
@@ -288,8 +253,11 @@ public:
                                           ArrayRef<std::string> values) {
     return BuildValue(Kind::DirectoryContents, directoryInfo, values);
   }
-  static BuildValue makeDirectoryTreeSignature(uint64_t signature) {
+  static BuildValue makeDirectoryTreeSignature(basic::CommandSignature signature) {
     return BuildValue(Kind::DirectoryTreeSignature, signature);
+  }
+  static BuildValue makeDirectoryTreeStructureSignature(basic::CommandSignature signature) {
+    return BuildValue(Kind::DirectoryTreeStructureSignature, signature);
   }
   static BuildValue makeMissingOutput() {
     return BuildValue(Kind::MissingOutput);
@@ -298,7 +266,7 @@ public:
     return BuildValue(Kind::FailedInput);
   }
   static BuildValue makeSuccessfulCommand(
-      ArrayRef<FileInfo> outputInfos, uint64_t commandSignature) {
+      ArrayRef<FileInfo> outputInfos, basic::CommandSignature commandSignature) {
     return BuildValue(Kind::SuccessfulCommand, outputInfos, commandSignature);
   }
   static BuildValue makeFailedCommand() {
@@ -334,6 +302,9 @@ public:
   bool isDirectoryTreeSignature() const {
     return kind == Kind::DirectoryTreeSignature;
   }
+  bool isDirectoryTreeStructureSignature() const {
+    return kind == Kind::DirectoryTreeStructureSignature;
+  }
   bool isStaleFileRemoval() const { return kind == Kind::StaleFileRemoval; }
   
   bool isMissingOutput() const { return kind == Kind::MissingOutput; }
@@ -357,8 +328,14 @@ public:
     return getStringListValues();
   }
   
-  uint64_t getDirectoryTreeSignature() const {
+  basic::CommandSignature getDirectoryTreeSignature() const {
     assert(isDirectoryTreeSignature() && "invalid call for value kind");
+    return commandSignature;
+  }
+  
+  basic::CommandSignature getDirectoryTreeStructureSignature() const {
+    assert(isDirectoryTreeStructureSignature() &&
+           "invalid call for value kind");
     return commandSignature;
   }
 
@@ -389,7 +366,7 @@ public:
     }
   }
 
-  uint64_t getCommandSignature() const {
+  basic::CommandSignature getCommandSignature() const {
     assert(isSuccessfulCommand() && "invalid call for value kind");
     return commandSignature;
   }
@@ -421,7 +398,7 @@ template<>
 struct basic::BinaryCodingTraits<buildsystem::BuildValue::Kind> {
   typedef buildsystem::BuildValue::Kind Kind;
   
-  static inline void encode(Kind& value, BinaryEncoder& coder) {
+  static inline void encode(const Kind& value, BinaryEncoder& coder) {
     uint8_t tmp = uint8_t(value);
     assert(value == Kind(tmp));
     coder.write(tmp);
@@ -453,11 +430,7 @@ inline buildsystem::BuildValue::BuildValue(basic::BinaryDecoder& coder) {
     }
   }
   if (kindHasStringList()) {
-    coder.read(stringValues.size);
-    StringRef contents;
-    coder.readBytes(stringValues.size, contents);
-    stringValues.contents = new char[stringValues.size];
-    memcpy(stringValues.contents, contents.data(), contents.size());
+    stringValues = basic::StringList(coder);
   }
   coder.finish();
 }
@@ -474,8 +447,7 @@ inline core::ValueType buildsystem::BuildValue::toData() const {
     }
   }
   if (kindHasStringList()) {
-    coder.write(stringValues.size);
-    coder.writeBytes(StringRef(stringValues.contents, stringValues.size));
+    stringValues.encode(coder);
   }
   return coder.contents();
 }

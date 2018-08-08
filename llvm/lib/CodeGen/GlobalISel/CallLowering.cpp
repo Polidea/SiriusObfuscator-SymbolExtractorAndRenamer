@@ -16,10 +16,10 @@
 #include "llvm/CodeGen/GlobalISel/MachineIRBuilder.h"
 #include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Target/TargetLowering.h"
 
 using namespace llvm;
 
@@ -37,7 +37,7 @@ bool CallLowering::lowerCall(
   for (auto &Arg : CS.args()) {
     ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{},
                     i < NumFixedArgs};
-    setArgFlags(OrigArg, i + 1, DL, CS);
+    setArgFlags(OrigArg, i + AttributeList::FirstArgIndex, DL, CS);
     OrigArgs.push_back(OrigArg);
     ++i;
   }
@@ -50,16 +50,16 @@ bool CallLowering::lowerCall(
 
   ArgInfo OrigRet{ResReg, CS.getType(), ISD::ArgFlagsTy{}};
   if (!OrigRet.Ty->isVoidTy())
-    setArgFlags(OrigRet, AttributeSet::ReturnIndex, DL, CS);
+    setArgFlags(OrigRet, AttributeList::ReturnIndex, DL, CS);
 
-  return lowerCall(MIRBuilder, Callee, OrigRet, OrigArgs);
+  return lowerCall(MIRBuilder, CS.getCallingConv(), Callee, OrigRet, OrigArgs);
 }
 
 template <typename FuncInfoTy>
 void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                const DataLayout &DL,
                                const FuncInfoTy &FuncInfo) const {
-  const AttributeSet &Attrs = FuncInfo.getAttributes();
+  const AttributeList &Attrs = FuncInfo.getAttributes();
   if (Attrs.hasAttribute(OpIdx, Attribute::ZExt))
     Arg.Flags.setZExt();
   if (Attrs.hasAttribute(OpIdx, Attribute::SExt))
@@ -83,8 +83,8 @@ void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
     // For ByVal, alignment should be passed from FE.  BE will guess if
     // this info is not there but there are cases it cannot get right.
     unsigned FrameAlign;
-    if (FuncInfo.getParamAlignment(OpIdx))
-      FrameAlign = FuncInfo.getParamAlignment(OpIdx);
+    if (FuncInfo.getParamAlignment(OpIdx - 2))
+      FrameAlign = FuncInfo.getParamAlignment(OpIdx - 2);
     else
       FrameAlign = getTLI()->getByValTypeAlignment(ElementTy, DL);
     Arg.Flags.setByValAlign(FrameAlign);
@@ -108,7 +108,7 @@ bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
                                      ArrayRef<ArgInfo> Args,
                                      ValueHandler &Handler) const {
   MachineFunction &MF = MIRBuilder.getMF();
-  const Function &F = *MF.getFunction();
+  const Function &F = MF.getFunction();
   const DataLayout &DL = F.getParent()->getDataLayout();
 
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -121,8 +121,16 @@ bool CallLowering::handleAssignments(MachineIRBuilder &MIRBuilder,
       return false;
   }
 
-  for (unsigned i = 0, e = Args.size(); i != e; ++i) {
-    CCValAssign &VA = ArgLocs[i];
+  for (unsigned i = 0, e = Args.size(), j = 0; i != e; ++i, ++j) {
+    assert(j < ArgLocs.size() && "Skipped too many arg locs");
+
+    CCValAssign &VA = ArgLocs[j];
+    assert(VA.getValNo() == i && "Location doesn't correspond to current arg");
+
+    if (VA.needsCustom()) {
+      j += Handler.assignCustomValue(Args[i], makeArrayRef(ArgLocs).slice(j));
+      continue;
+    }
 
     if (VA.isRegLoc())
       Handler.assignValueToReg(Args[i].Reg, VA.getLocReg(), VA);
@@ -152,10 +160,11 @@ unsigned CallLowering::ValueHandler::extendRegister(unsigned ValReg,
     // FIXME: bitconverting between vector types may or may not be a
     // nop in big-endian situations.
     return ValReg;
-  case CCValAssign::AExt:
+  case CCValAssign::AExt: {
     assert(!VA.getLocVT().isVector() && "unexpected vector extend");
-    // Otherwise, it's a nop.
-    return ValReg;
+    auto MIB = MIRBuilder.buildAnyExt(LocTy, ValReg);
+    return MIB->getOperand(0).getReg();
+  }
   case CCValAssign::SExt: {
     unsigned NewReg = MRI.createGenericVirtualRegister(LocTy);
     MIRBuilder.buildSExt(NewReg, ValReg);

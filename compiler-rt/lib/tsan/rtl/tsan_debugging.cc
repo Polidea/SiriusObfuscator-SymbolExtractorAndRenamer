@@ -25,7 +25,6 @@ static const char *ReportTypeDescription(ReportType typ) {
   if (typ == ReportTypeUseAfterFree) return "heap-use-after-free";
   if (typ == ReportTypeVptrUseAfterFree) return "heap-use-after-free-vptr";
   if (typ == ReportTypeExternalRace) return "external-race";
-  if (typ == ReportTypeSwiftAccessRace) return "swift-access-race";
   if (typ == ReportTypeThreadLeak) return "thread-leak";
   if (typ == ReportTypeMutexDestroyLocked) return "locked-mutex-destroy";
   if (typ == ReportTypeMutexDoubleLock) return "mutex-double-lock";
@@ -80,6 +79,13 @@ int __tsan_get_report_data(void *report, const char **description, int *count,
   *thread_count = rep->threads.Size();
   *unique_tid_count = rep->unique_tids.Size();
   if (rep->sleep) CopyTrace(rep->sleep->frames, sleep_trace, trace_size);
+  return 1;
+}
+
+SANITIZER_INTERFACE_ATTRIBUTE
+int __tsan_get_report_tag(void *report, uptr *tag) {
+  const ReportDesc *rep = (ReportDesc *)report;
+  *tag = rep->tag;
   return 1;
 }
 
@@ -152,7 +158,7 @@ int __tsan_get_report_mutex(void *report, uptr idx, uptr *mutex_id, void **addr,
 }
 
 SANITIZER_INTERFACE_ATTRIBUTE
-int __tsan_get_report_thread(void *report, uptr idx, int *tid, uptr *os_id,
+int __tsan_get_report_thread(void *report, uptr idx, int *tid, tid_t *os_id,
                              int *running, const char **name, int *parent_tid,
                              void **trace, uptr trace_size) {
   const ReportDesc *rep = (ReportDesc *)report;
@@ -229,7 +235,7 @@ const char *__tsan_locate_address(uptr addr, char *name, uptr name_size,
 
 SANITIZER_INTERFACE_ATTRIBUTE
 int __tsan_get_alloc_stack(uptr addr, uptr *trace, uptr size, int *thread_id,
-                           uptr *os_id) {
+                           tid_t *os_id) {
   MBlock *b = 0;
   Allocator *a = allocator();
   if (a->PointerIsMine((void *)addr)) {

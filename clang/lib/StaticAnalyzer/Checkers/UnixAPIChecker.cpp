@@ -45,6 +45,8 @@ class UnixAPIChecker : public Checker< check::PreStmt<CallExpr> > {
   mutable Optional<uint64_t> Val_O_CREAT;
 
 public:
+  DefaultBool CheckMisuse, CheckPortability;
+
   void checkPreStmt(const CallExpr *CE, CheckerContext &C) const;
 
   void CheckOpen(CheckerContext &C, const CallExpr *CE) const;
@@ -192,7 +194,7 @@ void UnixAPIChecker::CheckOpenVariant(CheckerContext &C,
 
   // Now check if oflags has O_CREAT set.
   const Expr *oflagsEx = CE->getArg(FlagsArgIndex);
-  const SVal V = state->getSVal(oflagsEx, C.getLocationContext());
+  const SVal V = C.getSVal(oflagsEx);
   if (!V.getAs<NonLoc>()) {
     // The case where 'V' can be a location can only be due to a bad header,
     // so in this case bail out.
@@ -246,8 +248,7 @@ void UnixAPIChecker::CheckPthreadOnce(CheckerContext &C,
   // Check if the first argument is stack allocated.  If so, issue a warning
   // because that's likely to be bad news.
   ProgramStateRef state = C.getState();
-  const MemRegion *R =
-    state->getSVal(CE->getArg(0), C.getLocationContext()).getAsRegion();
+  const MemRegion *R = C.getSVal(CE->getArg(0)).getAsRegion();
   if (!R || !isa<StackSpaceRegion>(R->getMemorySpace()))
     return;
 
@@ -334,7 +335,7 @@ void UnixAPIChecker::BasicAllocationCheck(CheckerContext &C,
   ProgramStateRef state = C.getState();
   ProgramStateRef trueState = nullptr, falseState = nullptr;
   const Expr *arg = CE->getArg(sizeArg);
-  SVal argVal = state->getSVal(arg, C.getLocationContext());
+  SVal argVal = C.getSVal(arg);
 
   if (argVal.isUnknownOrUndef())
     return;
@@ -362,7 +363,7 @@ void UnixAPIChecker::CheckCallocZero(CheckerContext &C,
   unsigned int i;
   for (i = 0; i < nArgs; i++) {
     const Expr *arg = CE->getArg(i);
-    SVal argVal = state->getSVal(arg, C.getLocationContext());
+    SVal argVal = C.getSVal(arg);
     if (argVal.isUnknownOrUndef()) {
       if (i == 0)
         continue;
@@ -437,29 +438,42 @@ void UnixAPIChecker::checkPreStmt(const CallExpr *CE,
   if (FName.empty())
     return;
 
-  SubChecker SC =
-    llvm::StringSwitch<SubChecker>(FName)
-      .Case("open", &UnixAPIChecker::CheckOpen)
-      .Case("openat", &UnixAPIChecker::CheckOpenAt)
-      .Case("pthread_once", &UnixAPIChecker::CheckPthreadOnce)
-      .Case("calloc", &UnixAPIChecker::CheckCallocZero)
-      .Case("malloc", &UnixAPIChecker::CheckMallocZero)
-      .Case("realloc", &UnixAPIChecker::CheckReallocZero)
-      .Case("reallocf", &UnixAPIChecker::CheckReallocfZero)
-      .Cases("alloca", "__builtin_alloca", &UnixAPIChecker::CheckAllocaZero)
-      .Case("__builtin_alloca_with_align",
-            &UnixAPIChecker::CheckAllocaWithAlignZero)
-      .Case("valloc", &UnixAPIChecker::CheckVallocZero)
-      .Default(nullptr);
-
-  if (SC)
-    (this->*SC)(C, CE);
+  if (CheckMisuse) {
+    if (SubChecker SC =
+            llvm::StringSwitch<SubChecker>(FName)
+                .Case("open", &UnixAPIChecker::CheckOpen)
+                .Case("openat", &UnixAPIChecker::CheckOpenAt)
+                .Case("pthread_once", &UnixAPIChecker::CheckPthreadOnce)
+                .Default(nullptr)) {
+      (this->*SC)(C, CE);
+    }
+  }
+  if (CheckPortability) {
+    if (SubChecker SC =
+            llvm::StringSwitch<SubChecker>(FName)
+                .Case("calloc", &UnixAPIChecker::CheckCallocZero)
+                .Case("malloc", &UnixAPIChecker::CheckMallocZero)
+                .Case("realloc", &UnixAPIChecker::CheckReallocZero)
+                .Case("reallocf", &UnixAPIChecker::CheckReallocfZero)
+                .Cases("alloca", "__builtin_alloca",
+                       &UnixAPIChecker::CheckAllocaZero)
+                .Case("__builtin_alloca_with_align",
+                      &UnixAPIChecker::CheckAllocaWithAlignZero)
+                .Case("valloc", &UnixAPIChecker::CheckVallocZero)
+                .Default(nullptr)) {
+      (this->*SC)(C, CE);
+    }
+  }
 }
 
 //===----------------------------------------------------------------------===//
 // Registration.
 //===----------------------------------------------------------------------===//
 
-void ento::registerUnixAPIChecker(CheckerManager &mgr) {
-  mgr.registerChecker<UnixAPIChecker>();
-}
+#define REGISTER_CHECKER(Name)                                                 \
+  void ento::registerUnixAPI##Name##Checker(CheckerManager &mgr) {             \
+    mgr.registerChecker<UnixAPIChecker>()->Check##Name = true;                 \
+  }
+
+REGISTER_CHECKER(Misuse)
+REGISTER_CHECKER(Portability)

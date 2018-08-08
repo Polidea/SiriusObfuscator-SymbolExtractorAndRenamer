@@ -108,27 +108,27 @@ public:
     ExpectedTypeRelation = relation;
   }
 
-  void addAccessControlKeyword(Accessibility Access) {
+  void addAccessControlKeyword(AccessLevel Access) {
     switch (Access) {
-    case Accessibility::Private:
+    case AccessLevel::Private:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "private ");
       break;
-    case Accessibility::FilePrivate:
+    case AccessLevel::FilePrivate:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "fileprivate ");
       break;
-    case Accessibility::Internal:
+    case AccessLevel::Internal:
       // 'internal' is the default, don't add it.
       break;
-    case Accessibility::Public:
+    case AccessLevel::Public:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "public ");
       break;
-    case Accessibility::Open:
+    case AccessLevel::Open:
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::AccessControlKeyword,
           "open ");
@@ -315,7 +315,8 @@ public:
   }
 
   void addCallParameter(Identifier Name, Identifier LocalName, Type Ty,
-                        bool IsVarArg, bool Outermost) {
+                        bool IsVarArg, bool Outermost, bool IsInOut,
+                        bool IsIUO) {
     CurrentNestingLevel++;
 
     addSimpleChunk(CodeCompletionString::Chunk::ChunkKind::CallParameterBegin);
@@ -344,10 +345,10 @@ public:
     }
 
     // 'inout' arguments are printed specially.
-    if (auto *IOT = Ty->getAs<InOutType>()) {
+    if (IsInOut) {
       addChunkWithTextNoCopy(
           CodeCompletionString::Chunk::ChunkKind::Ampersand, "&");
-      Ty = IOT->getObjectType();
+      Ty = Ty->getInOutObjectType();
     }
 
     if (Name.empty() && !LocalName.empty()) {
@@ -371,12 +372,14 @@ public:
 
     PrintOptions PO;
     PO.SkipAttributes = true;
+    PO.PrintOptionalAsImplicitlyUnwrapped = IsIUO;
+    std::string TypeName = Ty->getString(PO);
     addChunkWithText(CodeCompletionString::Chunk::ChunkKind::CallParameterType,
-                     Ty->getString(PO));
+                     TypeName);
 
     // Look through optional types and type aliases to find out if we have
     // function/closure parameter type that is not an autoclosure.
-    Ty = Ty->lookThroughAllAnyOptionalTypes();
+    Ty = Ty->lookThroughAllOptionalTypes();
     if (auto AFT = Ty->getAs<AnyFunctionType>()) {
       if (!AFT->isAutoClosure()) {
         // If this is a closure type, add ChunkKind::CallParameterClosureType.
@@ -394,9 +397,10 @@ public:
     CurrentNestingLevel--;
   }
 
-  void addCallParameter(Identifier Name, Type Ty, bool IsVarArg,
-                        bool Outermost) {
-    addCallParameter(Name, Identifier(), Ty, IsVarArg, Outermost);
+  void addCallParameter(Identifier Name, Type Ty, bool IsVarArg, bool Outermost,
+                        bool IsInOut, bool IsIUO) {
+    addCallParameter(Name, Identifier(), Ty, IsVarArg, Outermost, IsInOut,
+                     IsIUO);
   }
 
   void addGenericParameter(StringRef Name) {

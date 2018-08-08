@@ -44,9 +44,35 @@ struct C<T> {
   subscript<X>(noHashableConstraint sub: X) -> X { get { return sub } set { } }
 }
 
+struct Unavailable {
+  @available(*, unavailable)
+  var unavailableProperty: Int
+  // expected-note@-1 {{'unavailableProperty' has been explicitly marked unavailable here}}
+
+  @available(*, unavailable)
+  subscript(x: Sub) -> Int { get { } set { } }
+  // expected-note@-1 {{'subscript' has been explicitly marked unavailable here}}
+}
+
+struct Deprecated {
+  @available(*, deprecated)
+  var deprecatedProperty: Int
+
+  @available(*, deprecated)
+  subscript(x: Sub) -> Int { get { } set { } }
+}
+
+@available(*, deprecated)
+func getDeprecatedSub() -> Sub {
+  return Sub()
+}
+
 extension Array where Element == A {
   var property: Prop { fatalError() }
 }
+
+protocol P { var member: String { get } }
+extension B : P { var member : String { return "Member Value" } }
 
 struct Exactly<T> {}
 
@@ -175,6 +201,14 @@ func testKeyPath(sub: Sub, optSub: OptSub,
   let _ = \C<Int>.[sub]
   let _ = \C<Int>.[noHashableConstraint: sub]
   let _ = \C<Int>.[noHashableConstraint: nonHashableSub] // expected-error{{subscript index of type 'NonHashableSub' in a key path must be Hashable}}
+
+  let _ = \Unavailable.unavailableProperty // expected-error {{'unavailableProperty' is unavailable}}
+  let _ = \Unavailable.[sub] // expected-error {{'subscript' is unavailable}}
+
+  let _ = \Deprecated.deprecatedProperty // expected-warning {{'deprecatedProperty' is deprecated}}
+  let _ = \Deprecated.[sub] // expected-warning {{'subscript' is deprecated}}
+
+  let _ = \A.[getDeprecatedSub()] // expected-warning {{'getDeprecatedSub()' is deprecated}}
 }
 
 func testKeyPathInGenericContext<H: Hashable, X>(hashable: H, anything: X) {
@@ -266,7 +300,10 @@ struct ZwithSubscript {
   subscript(keyPath kp: PartialKeyPath<ZwithSubscript>) -> Any { return 0 }
 }
 
+struct NotZ {}
+
 func testKeyPathSubscript(readonly: ZwithSubscript, writable: inout ZwithSubscript,
+                          wrongType: inout NotZ,
                           kp: KeyPath<ZwithSubscript, Int>,
                           wkp: WritableKeyPath<ZwithSubscript, Int>,
                           rkp: ReferenceWritableKeyPath<ZwithSubscript, Int>) {
@@ -309,6 +346,12 @@ func testKeyPathSubscript(readonly: ZwithSubscript, writable: inout ZwithSubscri
   readonly[keyPath: akp] = anyqSink1 // expected-error{{cannot assign to immutable}}
   // FIXME: silently falls back to keypath application, which seems inconsistent
   writable[keyPath: akp] = anyqSink2 // expected-error{{cannot assign to immutable}}
+
+  _ = wrongType[keyPath: kp] // expected-error{{cannot be applied}}
+  _ = wrongType[keyPath: wkp] // expected-error{{cannot be applied}}
+  _ = wrongType[keyPath: rkp] // expected-error{{cannot be applied}}
+  _ = wrongType[keyPath: pkp] // expected-error{{cannot be applied}}
+  _ = wrongType[keyPath: akp]
 }
 
 func testKeyPathSubscriptMetatype(readonly: Z.Type, writable: inout Z.Type,
@@ -355,6 +398,34 @@ func testKeyPathSubscriptLValue(base: Z, kp: inout KeyPath<Z, Z>) {
   _ = base[keyPath: kp]
 }
 
+func testKeyPathSubscriptExistentialBase(concreteBase: inout B,
+                                     existentialBase: inout P,
+                                     kp: KeyPath<P, String>,
+                                     wkp: WritableKeyPath<P, String>,
+                                     rkp: ReferenceWritableKeyPath<P, String>,
+                                     pkp: PartialKeyPath<P>,
+                                     s: String) {
+  _ = concreteBase[keyPath: kp]
+  _ = concreteBase[keyPath: wkp]
+  _ = concreteBase[keyPath: rkp]
+  _ = concreteBase[keyPath: pkp]
+
+  concreteBase[keyPath: kp] = s // expected-error{{}}
+  concreteBase[keyPath: wkp] = s // expected-error{{}}
+  concreteBase[keyPath: rkp] = s
+  concreteBase[keyPath: pkp] = s // expected-error{{}}
+
+  _ = existentialBase[keyPath: kp]
+  _ = existentialBase[keyPath: wkp]
+  _ = existentialBase[keyPath: rkp]
+  _ = existentialBase[keyPath: pkp]
+
+  existentialBase[keyPath: kp] = s // expected-error{{}}
+  existentialBase[keyPath: wkp] = s
+  existentialBase[keyPath: rkp] = s
+  existentialBase[keyPath: pkp] = s // expected-error{{}}
+}
+
 struct AA {
   subscript(x: Int) -> Int { return x }
   subscript(labeled x: Int) -> Int { return x }
@@ -368,6 +439,11 @@ class CC {
 func testKeyPathOptional() {
   _ = \AA.c?.i
   _ = \AA.c!.i
+
+  // SR-6198
+  let path: KeyPath<CC,Int>! = \CC.i
+  let cc = CC()
+  _ = cc[keyPath: path]
 }
 
 func testLiteralInAnyContext() {
@@ -424,6 +500,121 @@ struct BassSubscript {
 func testImplicitConversionInSubscriptIndex() {
   _ = \BassSubscript.[Treble()]
   _ = \BassSubscript.["hello"] // expected-error{{must be Hashable}}
+}
+
+// Crash in diagnostics
+struct AmbiguousSubscript {
+  subscript(sub: Sub) -> Int { get { } set { } }
+  // expected-note@-1 {{'subscript' declared here}}
+
+  subscript(y y: Sub) -> Int { get { } set { } }
+  // expected-note@-1 {{'subscript(y:)' declared here}}
+}
+
+func useAmbiguousSubscript(_ sub: Sub) {
+  let _: PartialKeyPath<AmbiguousSubscript> = \.[sub]
+  // expected-error@-1 {{ambiguous reference to member 'subscript'}}
+}
+
+struct BothUnavailableSubscript {
+  @available(*, unavailable)
+  subscript(sub: Sub) -> Int { get { } set { } }
+
+  @available(*, unavailable)
+  subscript(y y: Sub) -> Int { get { } set { } }
+}
+
+func useBothUnavailableSubscript(_ sub: Sub) {
+  let _: PartialKeyPath<BothUnavailableSubscript> = \.[sub]
+  // expected-error@-1 {{type of expression is ambiguous without more context}}
+}
+
+// SR-6106
+func sr6106() {
+  class B {}
+  class A {
+    var b: B? = nil
+  }
+  class C {
+    var a: A?
+    func myFunc() {
+      let _ = \C.a?.b
+    }
+  }
+}
+
+// SR-6744
+func sr6744() {
+    struct ABC {
+        let value: Int
+        func value(adding i: Int) -> Int { return value + i }
+    }
+
+    let abc = ABC(value: 0)
+    func get<T>(for kp: KeyPath<ABC, T>) -> T {
+        return abc[keyPath: kp]
+    }
+    _ = get(for: \.value)
+}
+
+struct VisibilityTesting {
+  private(set) var x: Int
+  fileprivate(set) var y: Int
+  let z: Int
+
+  // Key path exprs should not get special dispensation to write to lets
+  // in init contexts
+  init() {
+    var xRef = \VisibilityTesting.x
+    var yRef = \VisibilityTesting.y
+    var zRef = \VisibilityTesting.z
+    expect(&xRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    expect(&yRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    // Allow WritableKeyPath for Swift 3/4 only.
+    expect(&zRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+  }
+
+  func inPrivateContext() {
+    var xRef = \VisibilityTesting.x
+    var yRef = \VisibilityTesting.y
+    var zRef = \VisibilityTesting.z
+    expect(&xRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    expect(&yRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    expect(&zRef,
+      toHaveType: Exactly<KeyPath<VisibilityTesting, Int>>.self)
+  }
+}
+
+struct VisibilityTesting2 {
+  func inFilePrivateContext() {
+    var xRef = \VisibilityTesting.x
+    var yRef = \VisibilityTesting.y
+    var zRef = \VisibilityTesting.z
+    // Allow WritableKeyPath for Swift 3/4 only.
+    expect(&xRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    expect(&yRef,
+      toHaveType: Exactly<WritableKeyPath<VisibilityTesting, Int>>.self)
+    expect(&zRef,
+      toHaveType: Exactly<KeyPath<VisibilityTesting, Int>>.self)
+  }
+}
+
+protocol PP {}
+class Base : PP { var i: Int = 0 }
+class Derived : Base {}
+
+func testSubtypeKeypathClass(_ keyPath: ReferenceWritableKeyPath<Base, Int>) {
+  testSubtypeKeypathClass(\Derived.i)
+}
+
+func testSubtypeKeypathProtocol(_ keyPath: ReferenceWritableKeyPath<PP, Int>) {
+  testSubtypeKeypathProtocol(\Base.i) // expected-error {{type 'PP' has no member 'i'}}
 }
 
 func testSyntaxErrors() { // expected-note{{}}

@@ -159,6 +159,8 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
         guard aDecoder.allowsKeyedCoding else {
             preconditionFailure("Unkeyed coding is unsupported.")
         }
+
+        super.init()
         
         if let encodedURL = aDecoder.decodeObject(forKey: "NS.url") as? NSURL {
             self.url = encodedURL._swiftObject
@@ -267,8 +269,28 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     
     open internal(set) var timeoutInterval: TimeInterval = 60.0
 
+    internal var _httpMethod: String? = "GET"
+
     /// Returns the HTTP request method of the receiver.
-    open fileprivate(set) var httpMethod: String? = "GET"
+    open fileprivate(set) var httpMethod: String? {
+        get { return _httpMethod }
+        set { _httpMethod = NSURLRequest._normalized(newValue) }
+    }
+
+    private class func _normalized(_ raw: String?) -> String {
+        guard let raw = raw else {
+            return "GET"
+        }
+
+        let nsMethod = NSString(raw)
+
+        for method in ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT"] {
+            if nsMethod.caseInsensitiveCompare(method) == .orderedSame {
+                return method
+            }
+        }
+        return raw
+    }
     
     /// A dictionary containing all the HTTP header fields
     /// of the receiver.
@@ -298,7 +320,7 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
             switch body {
             case .data(let data):
                 return data
-            case .stream(_):
+            case .stream:
                 return nil
             }
         }
@@ -308,7 +330,7 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     open var httpBodyStream: InputStream? {
         if let body = _body {
             switch body {
-            case .data(_):
+            case .data:
                 return nil
             case .stream(let stream):
                 return stream
@@ -324,6 +346,11 @@ open class NSURLRequest : NSObject, NSSecureCoding, NSCopying, NSMutableCopying 
     open internal(set) var httpShouldHandleCookies: Bool = true
     
     open internal(set) var httpShouldUsePipelining: Bool = true
+
+    open override var description: String {
+        let url = self.url?.description ?? "(null)"
+        return super.description + " { URL: \(url) }"
+    }
 }
 
 /// An `NSMutableURLRequest` object represents a mutable URL load
@@ -455,7 +482,7 @@ open class NSMutableURLRequest : NSURLRequest {
                 switch body {
                 case .data(let data):
                     return data
-                case .stream(_):
+                case .stream:
                     return nil
                 }
             }
@@ -474,7 +501,7 @@ open class NSMutableURLRequest : NSURLRequest {
         get {
             if let body = _body {
                 switch body {
-                case .data(_):
+                case .data:
                     return nil
                 case .stream(let stream):
                     return stream

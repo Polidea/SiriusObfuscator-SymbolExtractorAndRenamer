@@ -8,7 +8,7 @@
  See http://swift.org/CONTRIBUTORS.txt for Swift project authors
 */
 
-import libc
+import SPMLibc
 import POSIX
 import Foundation
 
@@ -21,14 +21,14 @@ import Foundation
 /// sible, while making it fairly easy to find those calls later.
 
 /// Returns a structure containing information about the file system entity at `path`, or nil
-/// if that path doesn't exist in the file system.  Read, write or execute permission of the 
+/// if that path doesn't exist in the file system.  Read, write or execute permission of the
 /// file system entity at `path` itself is not required, but all ancestor directories must be searchable.
 /// If they are not, or if any other file system error occurs, this function throws a SystemError.
 /// If `followSymlink` is true and the file system entity at `path` is a symbolic link, it is traversed;
 /// otherwise it is not (any symbolic links in path components other than the last one are always traversed).
 /// If symbolic links are followed and the file system entity at `path` is a symbolic link that points to a
 /// non-existent path, then this function returns nil.
-private func stat(_ path: AbsolutePath, followSymlink: Bool = true) throws -> libc.stat {
+private func stat(_ path: AbsolutePath, followSymlink: Bool = true) throws -> SPMLibc.stat {
     if followSymlink {
         return try stat(path.asString)
     }
@@ -44,11 +44,11 @@ public func exists(_ path: AbsolutePath, followSymlink: Bool = true) -> Bool {
 }
 
 /// Returns true if and only if `path` refers to an existent file system entity and that entity is a regular file.
-/// If `followSymlink` is true, and the last path component is a symbolic link, the result pertains to the destination 
+/// If `followSymlink` is true, and the last path component is a symbolic link, the result pertains to the destination
 /// of the symlink; otherwise it pertains to the symlink itself. If any file system error other than non-existence
 /// occurs, this function throws an error.
 public func isFile(_ path: AbsolutePath, followSymlink: Bool = true) -> Bool {
-    guard let status = try? stat(path, followSymlink: followSymlink), status.kind == .file else {
+    guard let status = try? stat(path, followSymlink: followSymlink), status.st_mode & S_IFMT == S_IFREG else {
         return false
     }
     return true
@@ -59,7 +59,7 @@ public func isFile(_ path: AbsolutePath, followSymlink: Bool = true) -> Bool {
 /// of the symlink; otherwise it pertains to the symlink itself.  If any file system error other than non-existence
 /// occurs, this function throws an error.
 public func isDirectory(_ path: AbsolutePath, followSymlink: Bool = true) -> Bool {
-    guard let status = try? stat(path, followSymlink: followSymlink), status.kind == .directory else {
+    guard let status = try? stat(path, followSymlink: followSymlink), status.st_mode & S_IFMT == S_IFDIR else {
         return false
     }
     return true
@@ -68,7 +68,7 @@ public func isDirectory(_ path: AbsolutePath, followSymlink: Bool = true) -> Boo
 /// Returns true if and only if `path` refers to an existent file system entity and that entity is a symbolic link.
 /// If any file system error other than non-existence occurs, this function throws an error.
 public func isSymlink(_ path: AbsolutePath) -> Bool {
-    guard let status = try? stat(path, followSymlink: false), status.kind == .symlink else {
+    guard let status = try? stat(path, followSymlink: false), status.st_mode & S_IFMT == S_IFLNK else {
         return false
     }
     return true
@@ -89,7 +89,7 @@ public func makeDirectories(_ path: AbsolutePath) throws {
 }
 
 /// Recursively deletes the file system entity at `path`.  If there is no file system entity at `path`, this function
-/// does nothing (in particular, this is not considered to be an error).
+/// throws an error.
 public func removeFileTree(_ path: AbsolutePath) throws {
     try FileManager.default.removeItem(atPath: path.asString)
 }
@@ -98,24 +98,22 @@ public func removeFileTree(_ path: AbsolutePath) throws {
 /// be a relative path, otherwise it will be absolute.
 public func createSymlink(_ path: AbsolutePath, pointingAt dest: AbsolutePath, relative: Bool = true) throws {
     let destString = relative ? dest.relative(to: path.parentDirectory).asString : dest.asString
-    let rv = libc.symlink(destString, path.asString)
+    let rv = SPMLibc.symlink(destString, path.asString)
     guard rv == 0 else { throw SystemError.symlink(errno, path.asString, dest: destString) }
 }
 
 public func rename(_ path: AbsolutePath, to dest: AbsolutePath) throws {
-    let rv = libc.rename(path.asString, dest.asString)
+    let rv = SPMLibc.rename(path.asString, dest.asString)
     guard rv == 0 else { throw SystemError.rename(errno, old: path.asString, new: dest.asString) }
 }
 
 public func unlink(_ path: AbsolutePath) throws {
-    let rv = libc.unlink(path.asString)
+    let rv = SPMLibc.unlink(path.asString)
     guard rv == 0 else { throw SystemError.unlink(errno, path.asString) }
 }
 
-/// The current working directory of the process (same as returned by POSIX' `getcwd()` function or Foundation's
-/// `currentDirectoryPath` method).
-/// FIXME: This should probably go onto `FileSystem`, under the assumption that each file system has its own notion of
-/// the `current` working directory.
+/// The current working directory of the processs.
+@available(*, deprecated, renamed: "localFileSystem.currentWorkingDirectory")
 public var currentWorkingDirectory: AbsolutePath {
     let cwdStr = FileManager.default.currentDirectoryPath
     return AbsolutePath(cwdStr)
@@ -214,16 +212,17 @@ public class RecursibleDirectoryContentsGenerator: IteratorProtocol, Sequence {
 extension AbsolutePath {
     /// Returns a path suitable for display to the user (if possible, it is made
     /// to be relative to the current working directory).
-    /// - Note: Therefore this function relies on the working directory's not
-    /// changing during execution.
-    public var prettyPath: String {
-        let currDir = currentWorkingDirectory
+    public func prettyPath(cwd: AbsolutePath? = localFileSystem.currentWorkingDirectory) -> String {
+        guard let dir = cwd else {
+            // No current directory, display as is.
+            return self.asString
+        }
         // FIXME: Instead of string prefix comparison we should add a proper API
         // to AbsolutePath to determine ancestry.
-        if self == currDir {
+        if self == dir {
             return "."
-        } else if self.asString.hasPrefix(currDir.asString + "/") {
-            return "./" + self.relative(to: currDir).asString
+        } else if self.asString.hasPrefix(dir.asString + "/") {
+            return "./" + self.relative(to: dir).asString
         } else {
             return self.asString
         }

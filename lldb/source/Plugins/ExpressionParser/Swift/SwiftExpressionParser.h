@@ -14,9 +14,9 @@
 #define liblldb_SwiftExpressionParser_h_
 
 #include "Plugins/ExpressionParser/Clang/IRForTarget.h"
-#include "lldb/Core/ArchSpec.h"
+#include "lldb/Utility/ArchSpec.h"
 #include "lldb/Core/ClangForward.h"
-#include "lldb/Core/Error.h"
+#include "lldb/Utility/Status.h"
 #include "lldb/Expression/ExpressionParser.h"
 #include "lldb/Expression/Materializer.h"
 #include "lldb/Symbol/SymbolContext.h"
@@ -114,7 +114,7 @@ public:
   ///     An error code indicating the success or failure of the operation.
   ///     Test with Success().
   //------------------------------------------------------------------
-  Error
+  Status
   PrepareForExecution(lldb::addr_t &func_addr, lldb::addr_t &func_end,
                       lldb::IRExecutionUnitSP &execution_unit_ap,
                       ExecutionContext &exe_ctx, bool &can_interpret,
@@ -147,22 +147,32 @@ public:
 
 private:
   bool PerformAutoImport(swift::SourceFile &source_file, bool user_imports,
-                         Error &error);
+                         Status &error);
 
-  Expression &m_expr;   ///< The expression to be parsed
-  std::string m_triple; ///< The triple to use when compiling
-  std::unique_ptr<llvm::LLVMContext>
-      m_llvm_context; ///< The context to use for IR generation
-  std::unique_ptr<llvm::Module> m_module;      ///< The module to build IR into
-  lldb::IRExecutionUnitSP m_execution_unit_sp; ///< The container for the IR, to
-                                               ///be JIT-compiled or interpreted
-  SwiftASTContext
-      *m_swift_ast_context; ///< The AST context to build the expression into
-  SymbolContext m_sc;       ///< The symbol context to use when parsing
-  lldb::StackFrameWP m_stack_frame_wp; ///< The stack frame to use (if possible)
-                                       ///when determining dynamic types.
-  EvaluateExpressionOptions m_options; ///< If true, we are running in REPL mode
+  /// The expression to be parsed.
+  Expression &m_expr;
+  /// The triple to use when compiling.
+  std::string m_triple;
+  /// The context to use for IR generation.
+  std::unique_ptr<llvm::LLVMContext> m_llvm_context;
+  /// The module to build IR into.
+  std::unique_ptr<llvm::Module> m_module;
+  /// The container for the IR, to be JIT-compiled or interpreted.
+  lldb::IRExecutionUnitSP m_execution_unit_sp;
+  /// The AST context to build the expression into.
+  SwiftASTContext *m_swift_ast_context;
+  /// Used to manage the memory of a potential on-off context.
+  //lldb::TypeSystemSP m_typesystem_sp;
+  /// The symbol context to use when parsing.
+  SymbolContext m_sc;
+  // The execution context scope of the expression.
+  ExecutionContextScope *m_exe_scope;
+  /// The stack frame to use (if possible) when determining dynamic
+  /// types.
+  lldb::StackFrameWP m_stack_frame_wp;
+  /// If true, we are running in REPL mode
+  EvaluateExpressionOptions m_options;
 };
-}
+} // namespace lldb_private
 
 #endif // liblldb_SwiftExpressionParser_h_

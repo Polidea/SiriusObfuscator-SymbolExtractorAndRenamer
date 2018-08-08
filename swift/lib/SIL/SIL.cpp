@@ -44,47 +44,18 @@ FormalLinkage swift::getDeclLinkage(const ValueDecl *D) {
   if (isa<ClangModuleUnit>(fileContext))
     return FormalLinkage::PublicNonUnique;
 
-  if (!D->hasAccessibility()) {
-    assert(D->getDeclContext()->isLocalContext());
+  switch (D->getEffectiveAccess()) {
+  case AccessLevel::Public:
+  case AccessLevel::Open:
+    return FormalLinkage::PublicUnique;
+  case AccessLevel::Internal:
+    return FormalLinkage::HiddenUnique;
+  case AccessLevel::FilePrivate:
+  case AccessLevel::Private:
     return FormalLinkage::Private;
   }
 
-  switch (D->getEffectiveAccess()) {
-  case Accessibility::Public:
-  case Accessibility::Open:
-    return FormalLinkage::PublicUnique;
-  case Accessibility::Internal:
-    // If we're serializing all function bodies, type metadata for internal
-    // types needs to be public too.
-    if (D->getDeclContext()->getParentModule()->getResilienceStrategy()
-        == ResilienceStrategy::Fragile)
-      return FormalLinkage::PublicUnique;
-    return FormalLinkage::HiddenUnique;
-  case Accessibility::FilePrivate:
-  case Accessibility::Private:
-    // Why "hidden" instead of "private"? Because the debugger may need to
-    // access these symbols.
-    return FormalLinkage::HiddenUnique;
-  }
-
-  llvm_unreachable("Unhandled Accessibility in switch.");
-}
-
-FormalLinkage swift::getTypeLinkage(CanType type) {
-  FormalLinkage result = FormalLinkage::Top;
-
-  // Merge all nominal types from the structural type.
-  (void) type.findIf([&](Type _type) {
-    CanType type = CanType(_type);
-
-    // For any nominal type reference, look at the type declaration.
-    if (auto nominal = type->getAnyNominal())
-      result ^= getDeclLinkage(nominal);
-
-    return false; // continue searching
-  });
-
-  return result;
+  llvm_unreachable("Unhandled access level in switch.");
 }
 
 SILLinkage swift::getSILLinkage(FormalLinkage linkage,
@@ -101,9 +72,6 @@ SILLinkage swift::getSILLinkage(FormalLinkage linkage,
   case FormalLinkage::HiddenUnique:
     return (forDefinition ? SILLinkage::Hidden : SILLinkage::HiddenExternal);
 
-  case FormalLinkage::HiddenNonUnique:
-    return (forDefinition ? SILLinkage::Shared : SILLinkage::HiddenExternal);
-
   case FormalLinkage::Private:
     return SILLinkage::Private;
   }
@@ -117,27 +85,126 @@ swift::getLinkageForProtocolConformance(const NormalProtocolConformance *C,
   if (C->isBehaviorConformance())
     return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
 
-  ModuleDecl *conformanceModule = C->getDeclContext()->getParentModule();
-
   // If the conformance was synthesized by the ClangImporter, give it
   // shared linkage.
-  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
-  auto typeUnit = typeDecl->getModuleScopeContext();
-  if (isa<ClangModuleUnit>(typeUnit)
-      && conformanceModule == typeUnit->getParentModule())
+  if (isa<ClangModuleUnit>(C->getDeclContext()->getModuleScopeContext()))
     return SILLinkage::Shared;
 
-  Accessibility accessibility = std::min(C->getProtocol()->getEffectiveAccess(),
-                                         typeDecl->getEffectiveAccess());
-  switch (accessibility) {
-    case Accessibility::Private:
-    case Accessibility::FilePrivate:
+  auto typeDecl = C->getType()->getNominalOrBoundGenericNominal();
+  AccessLevel access = std::min(C->getProtocol()->getEffectiveAccess(),
+                                typeDecl->getEffectiveAccess());
+  switch (access) {
+    case AccessLevel::Private:
+    case AccessLevel::FilePrivate:
       return (definition ? SILLinkage::Private : SILLinkage::PrivateExternal);
 
-    case Accessibility::Internal:
+    case AccessLevel::Internal:
       return (definition ? SILLinkage::Hidden : SILLinkage::HiddenExternal);
 
     default:
       return (definition ? SILLinkage::Public : SILLinkage::PublicExternal);
   }
+}
+
+bool SILModule::isTypeMetadataAccessible(CanType type) {
+  // SILModules built for the debugger have special powers to access metadata
+  // for types in other files/modules.
+  if (getASTContext().LangOpts.DebuggerSupport)
+    return true;
+
+  assert(type->isLegalFormalType());
+
+  return !type.findIf([&](CanType type) {
+    // Note that this function returns true if the type is *illegal* to use.
+
+    // Ignore non-nominal types.
+    auto decl = type.getNominalOrBoundGenericNominal();
+    if (!decl)
+      return false;
+
+    // Check whether the declaration is inaccessible from the current context.
+    switch (getDeclLinkage(decl)) {
+
+    // Public declarations are accessible from everywhere.
+    case FormalLinkage::PublicUnique:
+    case FormalLinkage::PublicNonUnique:
+      return false;
+
+    // Hidden declarations are inaccessible from different modules.
+    case FormalLinkage::HiddenUnique:
+      return (decl->getModuleContext() != getSwiftModule());
+
+    // Private declarations are inaccessible from different files unless
+    // this is WMO and we're in the same module.
+    case FormalLinkage::Private: {
+      // The only time we don't have an associated DC is in the
+      // integrated REPL, where we also don't have a concept of other
+      // source files within the current module.
+      if (!AssociatedDeclContext)
+        return (decl->getModuleContext() != getSwiftModule());
+
+      // The associated DC should be either a SourceFile or, in WMO mode,
+      // a ModuleDecl.  In the WMO modes, IRGen will ensure that private
+      // declarations are usable throughout the module.  Therefore, in
+      // either case we just need to make sure that the declaration comes
+      // from within the associated DC.
+      auto declDC = decl->getDeclContext();
+      return !(declDC == AssociatedDeclContext ||
+               declDC->isChildContextOf(AssociatedDeclContext));
+    }
+    }
+    llvm_unreachable("bad linkage");
+  });
+}
+
+/// Answer whether IRGen's emitTypeMetadataForLayout can fetch metadata for
+/// a type, which is the necessary condition for being able to do value
+/// operations on the type using dynamic metadata.
+static bool isTypeMetadataForLayoutAccessible(SILModule &M, SILType type) {
+  // Look through types that aren't necessarily legal formal types:
+
+  //   - tuples
+  if (auto tupleType = type.getAs<TupleType>()) {
+    for (auto index : indices(tupleType.getElementTypes())) {
+      if (!isTypeMetadataForLayoutAccessible(M, type.getTupleElementType(index)))
+        return false;
+    }
+    return true;
+  }
+
+  //   - optionals
+  if (auto objType = type.getOptionalObjectType()) {
+    return isTypeMetadataForLayoutAccessible(M, objType);
+  }
+
+  //   - function types
+  if (type.is<SILFunctionType>())
+    return true;
+
+  //   - metatypes
+  if (type.is<AnyMetatypeType>())
+    return true;
+
+  // Otherwise, check that we can fetch the type metadata.
+  return M.isTypeMetadataAccessible(type.getSwiftRValueType());
+
+}
+
+/// Can we perform value operations on the given type?  We have no way
+/// of doing value operations on resilient-layout types from other modules
+/// that are ABI-private to their defining module.  But if the type is not
+/// ABI-private, we can always at least fetch its metadata and use the
+/// value witness table stored there.
+bool SILModule::isTypeABIAccessible(SILType type) {
+  // Fixed-ABI types can have value operations done without metadata.
+  if (Types.getTypeLowering(type).isFixedABI())
+    return true;
+
+  assert(!type.is<ReferenceStorageType>() &&
+         !type.is<SILFunctionType>() &&
+         !type.is<AnyMetatypeType>() &&
+         "unexpected SIL lowered-only type with non-fixed layout");
+
+  // Otherwise, we need to be able to fetch layout-metadata for the type.
+  return isTypeMetadataForLayoutAccessible(*this, type);
 }

@@ -34,15 +34,11 @@ class CodeCompletionCallbacks {
 protected:
   Parser &P;
   ASTContext &Context;
-  Parser::ParserPosition ExprBeginPosition;
+  ParserPosition ExprBeginPosition;
 
   /// The declaration parsed during delayed parsing that was caused by code
   /// completion. This declaration contained the code completion token.
   Decl *ParsedDecl = nullptr;
-
-  /// If code completion is done inside a controlling expression of a C-style
-  /// for loop statement, this is the declaration of the iteration variable.
-  Decl *CStyleForLoopIterationVariable = nullptr;
 
   /// True if code completion is done inside a raw value expression of an enum
   /// case.
@@ -69,7 +65,7 @@ public:
     return CompleteExprSelectorContext != ObjCSelectorContext::None;
   }
 
-  void setExprBeginning(Parser::ParserPosition PP) {
+  void setExprBeginning(ParserPosition PP) {
     ExprBeginPosition = PP;
   }
 
@@ -83,27 +79,6 @@ public:
   void setLeadingSequenceExprs(ArrayRef<Expr *> exprs) {
     leadingSequenceExprs.assign(exprs.begin(), exprs.end());
   }
-
-  class InCStyleForExprRAII {
-    CodeCompletionCallbacks *Callbacks;
-
-  public:
-    InCStyleForExprRAII(CodeCompletionCallbacks *Callbacks,
-                        Decl *IterationVariable)
-        : Callbacks(Callbacks) {
-      if (Callbacks)
-        Callbacks->CStyleForLoopIterationVariable = IterationVariable;
-    }
-
-    void finished() {
-      if (Callbacks)
-        Callbacks->CStyleForLoopIterationVariable = nullptr;
-    }
-
-    ~InCStyleForExprRAII() {
-      finished();
-    }
-  };
 
   class InEnumElementRawValueRAII {
     CodeCompletionCallbacks *Callbacks;
@@ -226,6 +201,8 @@ public:
   virtual void completeReturnStmt(CodeCompletionExpr *E) = 0;
 
   virtual void completeAfterPound(CodeCompletionExpr *E, StmtKind ParentKind) = 0;
+
+  virtual void completeAfterIfStmt(bool hasElse) = 0;
 
   virtual void completeGenericParams(TypeLoc TL) = 0;
 

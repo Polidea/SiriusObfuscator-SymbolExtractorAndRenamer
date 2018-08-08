@@ -7,18 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
-
-
 class TestDate : XCTestCase {
     
     static var allTests: [(String, (TestDate) -> () throws -> Void)] {
@@ -36,31 +24,33 @@ class TestDate : XCTestCase {
             ("test_Compare", test_Compare),
             ("test_IsEqualToDate", test_IsEqualToDate),
             ("test_timeIntervalSinceReferenceDate", test_timeIntervalSinceReferenceDate),
+            ("test_recreateDateComponentsFromDate", test_recreateDateComponentsFromDate),
         ]
     }
     
     func test_BasicConstruction() {
         let d = Date()
-        XCTAssertNotNil(d)
+        XCTAssert(d.timeIntervalSince1970 != 0)
+        XCTAssert(d.timeIntervalSinceReferenceDate != 0)
     }
 
     func test_descriptionWithLocale() {
         let d = NSDate(timeIntervalSince1970: 0)
         XCTAssertEqual(d.description(with: nil), "1970-01-01 00:00:00 +0000")
-        XCTAssertNotNil(d.description(with: Locale(identifier: "ja_JP")))
+        XCTAssertFalse(d.description(with: Locale(identifier: "ja_JP")).isEmpty)
     }
     
     func test_InitTimeIntervalSince1970() {
         let ti: TimeInterval = 1
         let d = Date(timeIntervalSince1970: ti)
-        XCTAssertNotNil(d)
+        XCTAssert(d.timeIntervalSince1970 == ti)
     }
     
     func test_InitTimeIntervalSinceSinceDate() {
         let ti: TimeInterval = 1
         let d1 = Date()
         let d2 = Date(timeInterval: ti, since: d1)
-        XCTAssertNotNil(d2)
+        XCTAssertNotNil(d2.timeIntervalSince1970 == d1.timeIntervalSince1970 + ti)
     }
     
     func test_TimeIntervalSinceSinceDate() {
@@ -72,19 +62,22 @@ class TestDate : XCTestCase {
     
     func test_DistantFuture() {
         let d = Date.distantFuture
-        XCTAssertNotNil(d)
+        let now = Date()
+        XCTAssertGreaterThan(d, now)
     }
     
     func test_DistantPast() {
+        let now = Date()
         let d = Date.distantPast
-        XCTAssertNotNil(d)
+
+        XCTAssertLessThan(d, now)
     }
     
     func test_DateByAddingTimeInterval() {
         let ti: TimeInterval = 1
         let d1 = Date()
         let d2 = d1 + ti
-        XCTAssertNotNil(d2)
+        XCTAssertNotNil(d2.timeIntervalSince1970 == d1.timeIntervalSince1970 + ti)
     }
     
     func test_EarlierDate() {
@@ -122,5 +115,41 @@ class TestDate : XCTestCase {
         let d2 = Date().timeIntervalSinceReferenceDate
         XCTAssertTrue(d1 <= sinceReferenceDate)
         XCTAssertTrue(d2 >= sinceReferenceDate)
+    }
+    
+    func test_recreateDateComponentsFromDate() {
+        let components = DateComponents(calendar: Calendar(identifier: .gregorian),
+                                        timeZone: .current,
+                                        era: 1,
+                                        year: 2017,
+                                        month: 11,
+                                        day: 5,
+                                        hour: 20,
+                                        minute: 38,
+                                        second: 11,
+                                        nanosecond: 40)
+        guard let date = Calendar(identifier: .gregorian).date(from: components) else {
+            XCTFail()
+            return
+        }
+        let recreatedComponents = Calendar(identifier: .gregorian).dateComponents(in: .current, from: date)
+        XCTAssertEqual(recreatedComponents.era, 1)
+        XCTAssertEqual(recreatedComponents.year, 2017)
+        XCTAssertEqual(recreatedComponents.month, 11)
+        XCTAssertEqual(recreatedComponents.hour, 20)
+        XCTAssertEqual(recreatedComponents.minute, 38)
+        
+        // Nanoseconds are currently not supported by UCalendar C API, returns nil
+        // XCTAssertEqual(recreatedComponents.nanosecond, 40)
+        
+        XCTAssertEqual(recreatedComponents.weekday, 1)
+        XCTAssertEqual(recreatedComponents.weekdayOrdinal, 1)
+        
+        // Quarter is currently not supported by UCalendar C API, returns nil
+        // XCTAssertEqual(recreatedComponents.quarter, 3)
+        
+        XCTAssertEqual(recreatedComponents.weekOfMonth, 2)
+        XCTAssertEqual(recreatedComponents.weekOfYear, 45)
+        XCTAssertEqual(recreatedComponents.yearForWeekOfYear, 2017)
     }
 }

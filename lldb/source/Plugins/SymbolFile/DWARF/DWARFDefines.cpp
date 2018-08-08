@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "DWARFDefines.h"
-#include "lldb/Core/ConstString.h"
+#include "lldb/Utility/ConstString.h"
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -468,16 +468,6 @@ const char *DW_ORD_value_to_name(uint32_t val) {
   llvm::StringRef llvmstr = llvm::dwarf::ArrayOrderString(val);
   if (llvmstr.empty()) {
     snprintf(invalid, sizeof(invalid), "Unknown DW_ORD constant: 0x%x", val);
-    return invalid;
-  }
-  return llvmstr.data();
-}
-
-const char *DW_DSC_value_to_name(uint32_t val) {
-  static char invalid[100];
-  llvm::StringRef llvmstr = llvm::dwarf::DiscriminantString(val);
-  if (llvmstr.empty()) {
-    snprintf(invalid, sizeof(invalid), "Unknown DW_DSC constant: 0x%x", val);
     return invalid;
   }
   return llvmstr.data();

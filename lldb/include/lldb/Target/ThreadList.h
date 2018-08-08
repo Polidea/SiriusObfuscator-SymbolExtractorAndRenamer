@@ -13,10 +13,10 @@
 #include <mutex>
 #include <vector>
 
-#include "lldb/Core/UserID.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadCollection.h"
 #include "lldb/Utility/Iterable.h"
+#include "lldb/Utility/UserID.h"
 #include "lldb/lldb-private.h"
 
 namespace lldb_private {
@@ -101,6 +101,8 @@ public:
   lldb::ThreadSP FindThreadByIndexID(uint32_t index_id, bool can_update = true);
 
   lldb::ThreadSP GetThreadSPForThreadPtr(Thread *thread_ptr);
+
+  lldb::ThreadSP GetBackingThread(const lldb::ThreadSP &real_thread);
 
   bool ShouldStop(Event *event_ptr);
 

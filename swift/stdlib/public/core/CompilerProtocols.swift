@@ -148,6 +148,7 @@ public protocol RawRepresentable {
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@inlinable // FIXME(sil-serialize-all)
 public func == <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
   where T.RawValue : Equatable {
   return lhs.rawValue == rhs.rawValue
@@ -158,6 +159,7 @@ public func == <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@inlinable // FIXME(sil-serialize-all)
 public func != <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
   where T.RawValue : Equatable {
   return lhs.rawValue != rhs.rawValue
@@ -170,9 +172,53 @@ public func != <T : RawRepresentable>(lhs: T, rhs: T) -> Bool
 /// - Parameters:
 ///   - lhs: A raw-representable instance.
 ///   - rhs: A second raw-representable instance.
+@inlinable // FIXME(sil-serialize-all)
 public func != <T : Equatable>(lhs: T, rhs: T) -> Bool
   where T : RawRepresentable, T.RawValue : Equatable {
   return lhs.rawValue != rhs.rawValue
+}
+
+/// A type that provides a collection of all of its values.
+///
+/// Types that conform to the `CaseIterable` protocol are typically
+/// enumerations without associated values. When using a `CaseIterable` type,
+/// you can access a collection of all of the type's cases by using the type's
+/// `allCases` property.
+///
+/// For example, the `CompassDirection` enumeration declared in this example
+/// conforms to `CaseIterable`. You access the number of cases and the cases
+/// themselves through `CompassDirection.allCases`.
+///
+///     enum CompassDirection: CaseIterable {
+///         case north, south, east, west
+///     }
+///
+///     print("There are \(CompassDirection.allCases.count) directions.")
+///     // Prints "There are 4 directions."
+///     let caseList = CompassDirection.allCases
+///                                    .map({ "\($0)" })
+///                                    .joined(separator: ", ")
+///     // caseList == "north, south, east, west"
+///
+/// Conforming to the CaseIterable Protocol
+/// =======================================
+///
+/// The compiler can automatically provide an implementation of the
+/// `CaseIterable` requirements for any enumeration without associated values
+/// or `@available` attributes on its cases. The synthesized `allCases`
+/// collection provides the cases in order of their declaration.
+///
+/// You can take advantage of this compiler support when defining your own
+/// custom enumeration by declaring conformance to `CaseIterable` in the
+/// enumeration's original declaration. The `CompassDirection` example above
+/// demonstrates this automatic implementation.
+public protocol CaseIterable {
+  /// A type that can represent a collection of all values of this type.
+  associatedtype AllCases: Collection
+    where AllCases.Element == Self
+  
+  /// A collection of all values of this type.
+  static var allCases: AllCases { get }
 }
 
 /// A type that can be initialized using the nil literal, `nil`.
@@ -363,15 +409,15 @@ public protocol _ExpressibleByBuiltinExtendedGraphemeClusterLiteral
 /// A type that can be initialized with a string literal containing a single
 /// extended grapheme cluster.
 ///
-/// An *extended grapheme cluster* is a group of one or more Unicode code
-/// points that approximates a single user-perceived character.  Many
+/// An *extended grapheme cluster* is a group of one or more Unicode scalar
+/// values that approximates a single user-perceived character.  Many
 /// individual characters, such as "é", "김", and "🇮🇳", can be made up of
-/// multiple Unicode code points. These code points are combined by Unicode's
-/// boundary algorithms into extended grapheme clusters.
+/// multiple Unicode scalar values. These code points are combined by
+/// Unicode's boundary algorithms into extended grapheme clusters.
 ///
 /// The `String`, `StaticString`, and `Character` types conform to the
-/// `ExpressibleByExtendedGraphemeClusterLiteral` protocol. You can initialize a
-/// variable or constant of any of these types using a string literal that
+/// `ExpressibleByExtendedGraphemeClusterLiteral` protocol. You can initialize
+/// a variable or constant of any of these types using a string literal that
 /// holds a single character.
 ///
 ///     let snowflake: Character = "❄︎"
@@ -402,6 +448,7 @@ public protocol ExpressibleByExtendedGraphemeClusterLiteral
 extension ExpressibleByExtendedGraphemeClusterLiteral
   where ExtendedGraphemeClusterLiteralType == UnicodeScalarLiteralType {
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(unicodeScalarLiteral value: ExtendedGraphemeClusterLiteralType) {
     self.init(extendedGraphemeClusterLiteral: value)
@@ -467,6 +514,7 @@ public protocol ExpressibleByStringLiteral
 extension ExpressibleByStringLiteral
   where StringLiteralType == ExtendedGraphemeClusterLiteralType {
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(extendedGraphemeClusterLiteral value: StringLiteralType) {
     self.init(stringLiteral: value)
@@ -505,8 +553,8 @@ extension ExpressibleByStringLiteral
 ///   initialize a type that conforms to `ExpressibleByArrayLiteral` simply by
 ///   assigning an existing array.
 ///
-///         let anotherSet: Set = employeesArray
-///         // error: cannot convert value of type '[String]' to specified type 'Set'
+///       let anotherSet: Set = employeesArray
+///       // error: cannot convert value of type '[String]' to specified type 'Set'
 ///
 /// Type Inference of Array Literals
 /// ================================
@@ -726,6 +774,7 @@ public protocol _ExpressibleByColorLiteral {
 }
 
 extension _ExpressibleByColorLiteral {
+  @inlinable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.2, obsoleted: 4.0,
     message: "This initializer is only meant to be used by color literals")
   public init(
@@ -770,9 +819,6 @@ public protocol _ExpressibleByFileReferenceLiteral {
 /// then Array would no longer be a _DestructorSafeContainer.
 public protocol _DestructorSafeContainer {
 }
-
-@available(*, unavailable, renamed: "Bool")
-public typealias BooleanType = Bool
 
 // Deprecated by SE-0115.
 

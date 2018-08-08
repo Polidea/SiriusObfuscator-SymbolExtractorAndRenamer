@@ -1,5 +1,5 @@
 // RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -sil-inline-generics -enable-sil-verify-all %s -O | %FileCheck %s
-// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -simplify-cfg -enable-sil-verify-all %s -O | %FileCheck --check-prefix=CHECK-SIMPLIFY-CFG %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -jumpthread-simplify-cfg -enable-sil-verify-all %s -O | %FileCheck --check-prefix=CHECK-SIMPLIFY-CFG %s
 
 // Check some corner cases related to tracking of opened archetypes.
 // For example, the compiler used to crash compiling the "process" function (rdar://28024272)
@@ -210,8 +210,8 @@ sil hidden_external @use : $@convention(thin) <τ_0_0> (@in τ_0_0) -> ()
 // It should contain alloc_ref and alloc_stack instructions using opened archetypes.
 // CHECK-LABEL: sil @bar
 // CHECK: open_existential{{.*}}C08045E0-2779-11E7-970E-A45E60E99281
-// CHECK: alloc_ref{{.*}}C08045E0-2779-11E7-970E-A45E60E99281
 // CHECK: alloc_stack{{.*}}C08045E0-2779-11E7-970E-A45E60E99281
+// CHECK: alloc_ref{{.*}}C08045E0-2779-11E7-970E-A45E60E99281
 // CHECK-NOT: function_ref @use
 // CHECK: function_ref @use 
 // CHECK-NOT: function_ref

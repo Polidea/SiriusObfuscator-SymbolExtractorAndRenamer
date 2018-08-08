@@ -19,6 +19,7 @@ Using Clang as a Compiler
    UsersManual
    Toolchain
    LanguageExtensions
+   ClangCommandLineReference
    AttributeReference
    DiagnosticsReference
    CrossCompilation
@@ -38,6 +39,7 @@ Using Clang as a Compiler
    SourceBasedCodeCoverage
    Modules
    MSVCCompatibility
+   OpenMPSupport
    ThinLTO
    CommandGuide/index
    FAQ
@@ -59,6 +61,7 @@ Using Clang as a Library
    LibASTMatchers
    HowToSetupToolingForLLVM
    JSONCompilationDatabase
+   RefactoringEngine
 
 Using Clang Tools
 =================
@@ -82,6 +85,7 @@ Design Documents
    PTHInternals
    PCHInternals
    ItaniumMangleAbiTags
+   HardwareAssistedAddressSanitizerDesign.rst
 
 
 Indices and tables

@@ -7,9 +7,6 @@
 |*
 \*===----------------------------------------------------------------------===*/
 
-#include "InstrProfiling.h"
-#include "InstrProfilingInternal.h"
-#include "InstrProfilingUtil.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +28,10 @@
 #include <sys/types.h>
 #endif
 #endif
+
+#include "InstrProfiling.h"
+#include "InstrProfilingInternal.h"
+#include "InstrProfilingUtil.h"
 
 /* From where is profile name specified.
  * The order the enumerators define their
@@ -89,22 +90,31 @@ typedef struct lprofFilename {
 COMPILER_RT_WEAK lprofFilename lprofCurFilename = {
     0, 0, 0, {0}, {0}, 0, 0, 0, {0}, 0, PNS_unknown};
 
-int getpid(void);
 static int getCurFilenameLength();
 static const char *getCurFilename(char *FilenameBuf);
 static unsigned doMerging() { return lprofCurFilename.MergePoolSize; }
 
 /* Return 1 if there is an error, otherwise return  0.  */
-static uint32_t fileWriter(ProfDataIOVec *IOVecs, uint32_t NumIOVecs,
-                           void **WriterCtx) {
+static uint32_t fileWriter(ProfDataWriter *This, ProfDataIOVec *IOVecs,
+                           uint32_t NumIOVecs) {
   uint32_t I;
-  FILE *File = (FILE *)*WriterCtx;
+  FILE *File = (FILE *)This->WriterCtx;
   for (I = 0; I < NumIOVecs; I++) {
-    if (fwrite(IOVecs[I].Data, IOVecs[I].ElmSize, IOVecs[I].NumElm, File) !=
-        IOVecs[I].NumElm)
-      return 1;
+    if (IOVecs[I].Data) {
+      if (fwrite(IOVecs[I].Data, IOVecs[I].ElmSize, IOVecs[I].NumElm, File) !=
+          IOVecs[I].NumElm)
+        return 1;
+    } else {
+      if (fseek(File, IOVecs[I].ElmSize * IOVecs[I].NumElm, SEEK_CUR) == -1)
+        return 1;
+    }
   }
   return 0;
+}
+
+static void initFileWriter(ProfDataWriter *This, FILE *File) {
+  This->Write = fileWriter;
+  This->WriterCtx = File;
 }
 
 COMPILER_RT_VISIBILITY ProfBufferIO *
@@ -112,7 +122,12 @@ lprofCreateBufferIOInternal(void *File, uint32_t BufferSz) {
   FreeHook = &free;
   DynamicBufferIOBuffer = (uint8_t *)calloc(BufferSz, 1);
   VPBufferSize = BufferSz;
-  return lprofCreateBufferIO(fileWriter, File);
+  ProfDataWriter *fileWriter =
+      (ProfDataWriter *)calloc(sizeof(ProfDataWriter), 1);
+  initFileWriter(fileWriter, File);
+  ProfBufferIO *IO = lprofCreateBufferIO(fileWriter);
+  IO->OwnFileWriter = 1;
+  return IO;
 }
 
 static void setupIOBuffer() {
@@ -126,9 +141,10 @@ static void setupIOBuffer() {
 
 /* Read profile data in \c ProfileFile and merge with in-memory
    profile counters. Returns -1 if there is fatal error, otheriwse
-   0 is returned.
+   0 is returned. Returning 0 does not mean merge is actually
+   performed. If merge is actually done, *MergeDone is set to 1.
 */
-static int doProfileMerging(FILE *ProfileFile) {
+static int doProfileMerging(FILE *ProfileFile, int *MergeDone) {
   uint64_t ProfileFileSize;
   char *ProfileBuffer;
 
@@ -173,6 +189,8 @@ static int doProfileMerging(FILE *ProfileFile) {
   __llvm_profile_merge_from_buffer(ProfileBuffer, ProfileFileSize);
   (void)munmap(ProfileBuffer, ProfileFileSize);
 
+  *MergeDone = 1;
+
   return 0;
 }
 
@@ -194,7 +212,7 @@ static void createProfileDir(const char *Filename) {
  * dumper. With profile merging enabled, each executable as well as any of
  * its instrumented shared libraries dump profile data into their own data file.
 */
-static FILE *openFileForMerging(const char *ProfileFileName) {
+static FILE *openFileForMerging(const char *ProfileFileName, int *MergeDone) {
   FILE *ProfileFile;
   int rc;
 
@@ -203,15 +221,14 @@ static FILE *openFileForMerging(const char *ProfileFileName) {
   if (!ProfileFile)
     return NULL;
 
-  rc = doProfileMerging(ProfileFile);
-  if (rc || COMPILER_RT_FTRUNCATE(ProfileFile, 0L) ||
+  rc = doProfileMerging(ProfileFile, MergeDone);
+  if (rc || (!*MergeDone && COMPILER_RT_FTRUNCATE(ProfileFile, 0L)) ||
       fseek(ProfileFile, 0L, SEEK_SET) == -1) {
     PROF_ERR("Profile Merging of file %s failed: %s\n", ProfileFileName,
              strerror(errno));
     fclose(ProfileFile);
     return NULL;
   }
-  fseek(ProfileFile, 0L, SEEK_SET);
   return ProfileFile;
 }
 
@@ -220,17 +237,20 @@ static int writeFile(const char *OutputName) {
   int RetVal;
   FILE *OutputFile;
 
+  int MergeDone = 0;
   if (!doMerging())
     OutputFile = fopen(OutputName, "ab");
   else
-    OutputFile = openFileForMerging(OutputName);
+    OutputFile = openFileForMerging(OutputName, &MergeDone);
 
   if (!OutputFile)
     return -1;
 
   FreeHook = &free;
   setupIOBuffer();
-  RetVal = lprofWriteData(fileWriter, OutputFile, lprofGetVPDataReader());
+  ProfDataWriter fileWriter;
+  initFileWriter(&fileWriter, OutputFile);
+  RetVal = lprofWriteData(&fileWriter, lprofGetVPDataReader(), MergeDone);
 
   fclose(OutputFile);
   return RetVal;
@@ -334,7 +354,7 @@ static int parseFilenamePattern(const char *FilenamePat,
     if (FilenamePat[I] == '%') {
       if (FilenamePat[++I] == 'p') {
         if (!NumPids++) {
-          if (snprintf(PidChars, MAX_PID_SIZE, "%d", getpid()) <= 0) {
+          if (snprintf(PidChars, MAX_PID_SIZE, "%ld", (long)getpid()) <= 0) {
             PROF_WARN("Unable to get pid for filename pattern %s. Using the "
                       "default name.",
                       FilenamePat);
@@ -554,8 +574,10 @@ void __llvm_profile_initialize_file(void) {
 
   EnvFilenamePat = getFilenamePatFromEnv();
   if (EnvFilenamePat) {
-    SelectedPat = EnvFilenamePat;
-    PNS = PNS_environment;
+    /* Pass CopyFilenamePat = 1, to ensure that the filename would be valid 
+       at the  moment when __llvm_profile_write_file() gets executed. */
+    parseAndSetFilename(EnvFilenamePat, PNS_environment, 1);
+    return;
   } else if (hasCommandLineOverrider) {
     SelectedPat = INSTR_PROF_PROFILE_NAME_VAR;
     PNS = PNS_command_line;

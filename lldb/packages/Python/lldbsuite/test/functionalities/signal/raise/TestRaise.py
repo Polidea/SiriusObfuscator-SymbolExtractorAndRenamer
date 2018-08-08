@@ -16,6 +16,7 @@ from lldbsuite.test import lldbutil
 class RaiseTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
+    NO_DEBUG_INFO_TESTCASE = True
 
     def test_sigstop(self):
         self.build()
@@ -28,6 +29,10 @@ class RaiseTestCase(TestBase):
     def test_sigsigrtmin(self):
         self.build()
         self.signal_test('SIGRTMIN', True)
+
+    def test_sigtrap(self):
+        self.build()
+        self.signal_test('SIGTRAP', True)
 
     def launch(self, target, signal):
         # launch the process, do not stop at entry point.
@@ -53,7 +58,7 @@ class RaiseTestCase(TestBase):
 
     def signal_test(self, signal, test_passing):
         """Test that we handle inferior raising signals"""
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Create a target by the debugger.
         target = self.dbg.CreateTarget(exe)
@@ -192,7 +197,7 @@ class RaiseTestCase(TestBase):
         """Test that we catch a signal in the edge case where the process receives it while we are
         about to interrupt it"""
         self.build()
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Create a target by the debugger.
         target = self.dbg.CreateTarget(exe)

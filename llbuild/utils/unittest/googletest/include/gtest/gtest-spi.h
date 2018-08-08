@@ -35,6 +35,8 @@
 #ifndef GTEST_INCLUDE_GTEST_GTEST_SPI_H_
 #define GTEST_INCLUDE_GTEST_GTEST_SPI_H_
 
+#include "gtest/gtest-llbuild-config.h"
+
 #include "gtest/gtest.h"
 
 namespace testing {
@@ -223,7 +225,7 @@ class GTEST_API_ SingleFailureChecker {
         (substr));\
     {\
       ::testing::ScopedFakeTestPartResultReporter gtest_reporter(\
-          ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS,\
+          ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS, \
           &gtest_failures);\
       if (::testing::internal::AlwaysTrue()) { statement; }\
     }\

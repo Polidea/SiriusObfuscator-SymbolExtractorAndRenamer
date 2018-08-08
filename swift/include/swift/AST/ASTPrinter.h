@@ -84,7 +84,7 @@ enum class PrintStructureKind {
 class ASTPrinter {
   unsigned CurrentIndentation = 0;
   unsigned PendingNewlines = 0;
-  const NominalTypeDecl *SynthesizeTarget = nullptr;
+  TypeOrExtensionDecl SynthesizeTarget;
 
   void printTextImpl(StringRef Text);
 
@@ -136,13 +136,14 @@ public:
 
   /// Called before printing a synthesized extension.
   virtual void printSynthesizedExtensionPre(const ExtensionDecl *ED,
-                                            const NominalTypeDecl *NTD,
+                                            TypeOrExtensionDecl NTD,
                                             Optional<BracketOptions> Bracket) {}
 
   /// Called after printing a synthesized extension.
   virtual void printSynthesizedExtensionPost(const ExtensionDecl *ED,
-                                             const NominalTypeDecl *NTD,
-                                             Optional<BracketOptions> Bracket) {}
+                                             TypeOrExtensionDecl TargetDecl,
+                                             Optional<BracketOptions> Bracket) {
+  }
 
   /// Called before printing a structured entity.
   ///
@@ -213,7 +214,7 @@ public:
     CurrentIndentation = NumSpaces;
   }
 
-  void setSynthesizedTarget(NominalTypeDecl *Target) {
+  void setSynthesizedTarget(TypeOrExtensionDecl Target) {
     assert((!SynthesizeTarget || !Target || Target == SynthesizeTarget) &&
            "unexpected change of setSynthesizedTarget");
     // FIXME: this can overwrite the original target with nullptr.
@@ -305,9 +306,6 @@ public:
   }
 };
 
-bool shouldPrint(const Decl *D, PrintOptions &Options);
-bool shouldPrintPattern(const Pattern *P, PrintOptions &Options);
-
 void printContext(raw_ostream &os, DeclContext *dc);
 
 bool printRequirementStub(ValueDecl *Requirement, DeclContext *Adopter,
@@ -321,6 +319,16 @@ uint8_t getKeywordLen(tok keyword);
 
 /// Get <#code#>;
 StringRef getCodePlaceholder();
+
+/// Given an array of enum element decls, print them as case statements with
+/// placeholders as contents.
+void printEnumElementsAsCases(
+    llvm::DenseSet<EnumElementDecl *> &UnhandledElements,
+    llvm::raw_ostream &OS);
+
+void getInheritedForPrinting(const Decl *decl,
+                             llvm::function_ref<bool(const Decl*)> shouldPrint,
+                             llvm::SmallVectorImpl<TypeLoc> &Results);
 
 } // namespace swift
 

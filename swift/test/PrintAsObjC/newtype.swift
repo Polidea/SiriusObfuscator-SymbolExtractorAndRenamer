@@ -2,7 +2,7 @@
 
 // REQUIRES: objc_interop
 
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 
 // FIXME: BEGIN -enable-source-import hackaround
 // RUN:  %target-swift-frontend(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -emit-module -o %t %S/../Inputs/clang-importer-sdk/swift-modules/ObjectiveC.swift
@@ -43,6 +43,12 @@ class TestStructLike : NSObject {
   @objc func takesNewtypeDictionary(_ a: [StructLikeStringWrapper: StructLikeStringWrapper]) {}
   // CHECK: - (void)takesNewtypeOptional:(StructLikeStringWrapper _Nullable)a;
   @objc func takesNewtypeOptional(_ a: StructLikeStringWrapper?) {}
+
+  // CHECK: - (void)takesNewtypeObjectDictionary:(NSDictionary<StructLikeObjectWrapper, StructLikeObjectWrapper> * _Nonnull)a;
+  @objc func takesNewtypeObjectDictionary(_ a: [StructLikeObjectWrapper: StructLikeObjectWrapper]) {}
+
+  // CHECK: - (void)takesNewtypeErrorArray:(NSArray<StructLikeErrorWrapper> * _Nonnull)a;
+  @objc func takesNewtypeErrorArray(_ a: [StructLikeErrorWrapper]) {}
 }
 // CHECK: @end
 

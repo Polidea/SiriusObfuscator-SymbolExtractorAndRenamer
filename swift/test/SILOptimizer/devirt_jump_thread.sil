@@ -1,4 +1,4 @@
-// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all %s -simplify-cfg -cse | %FileCheck %s
+// RUN: %target-sil-opt -assume-parsing-unqualified-ownership-sil -enable-sil-verify-all %s -jumpthread-simplify-cfg -cse | %FileCheck %s
 
 // Check that jump-threading works for sequences of checked_cast_br instructions produced by the devirtualizer.
 // This allows for simplifications of code like e.g. f.foo() + f.foo()
@@ -291,7 +291,7 @@ bb0(%0 : $FooClass):
   checked_cast_br [exact] %0 : $FooClass to $FooClass, bb3, bb4 // id: %1
 
 bb1(%2 : $Int32):                                   // Preds: bb3 bb4
-  %101 = class_method [volatile] %100 : $Bar, #Bar.foo!1.foreign : (Bar) -> () -> (), $@convention(objc_method) (Bar) -> ()
+  %101 = objc_method %100 : $Bar, #Bar.foo!1.foreign : (Bar) -> () -> (), $@convention(objc_method) (Bar) -> ()
   checked_cast_br [exact] %0 : $FooClass to $FooClass, bb5, bb6 // id: %3
 
 bb2(%4 : $Int32):                                   // Preds: bb5 bb6
@@ -344,9 +344,9 @@ bb0(%0 : $Int32, %1 : $FooClass):
 
 
 sil_vtable FooClass {
-  #FooClass.foo!1: _TFC18devirt_jump_thread8FooClass3foofS0_FSiSi	// devirt_jump_thread.FooClass.foo (devirt_jump_thread.FooClass)(Swift.Int32) -> Swift.Int32
-  #FooClass.value!getter.1: _TFC18devirt_jump_thread8FooClassg5valueSi	// devirt_jump_thread.FooClass.value.getter : Swift.Int32
-  #FooClass.value!setter.1: _TFC18devirt_jump_thread8FooClasss5valueSi	// devirt_jump_thread.FooClass.value.setter : Swift.Int32
+  #FooClass.foo!1: @_TFC18devirt_jump_thread8FooClass3foofS0_FSiSi	// devirt_jump_thread.FooClass.foo (devirt_jump_thread.FooClass)(Swift.Int32) -> Swift.Int32
+  #FooClass.value!getter.1: @_TFC18devirt_jump_thread8FooClassg5valueSi	// devirt_jump_thread.FooClass.value.getter : Swift.Int32
+  #FooClass.value!setter.1: @_TFC18devirt_jump_thread8FooClasss5valueSi	// devirt_jump_thread.FooClass.value.setter : Swift.Int32
 }
 
 class C {

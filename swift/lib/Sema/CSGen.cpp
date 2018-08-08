@@ -24,6 +24,7 @@
 #include "swift/Sema/IDETypeChecking.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/StringSwitch.h"
 #include <utility>
 
 using namespace swift;
@@ -102,14 +103,13 @@ namespace {
     unsigned haveIntLiteral : 1;
     unsigned haveFloatLiteral : 1;
     unsigned haveStringLiteral : 1;
-    
+
     llvm::SmallSet<TypeBase*, 16> collectedTypes;
 
     llvm::SmallVector<TypeVariableType *, 16> intLiteralTyvars;
     llvm::SmallVector<TypeVariableType *, 16> floatLiteralTyvars;
     llvm::SmallVector<TypeVariableType *, 16> stringLiteralTyvars;
 
-    llvm::SmallVector<ClosureExpr *, 4> closureExprs;
     llvm::SmallVector<BinaryExpr *, 4> binaryExprs;
 
     // TODO: manage as a set of lists, to speed up addition of binding
@@ -122,8 +122,8 @@ namespace {
       haveStringLiteral = false;
     }
 
-    bool haveLiteral() { 
-      return haveIntLiteral || haveFloatLiteral || haveStringLiteral; 
+    bool hasLiteral() {
+      return haveIntLiteral || haveFloatLiteral || haveStringLiteral;
     }
   };
 
@@ -226,6 +226,10 @@ namespace {
 
         return { false, expr };
       }
+
+      if (isa<CollectionExpr>(expr)) {
+        return { true, expr };
+      }
       
       if (auto UDE = dyn_cast<UnresolvedDotExpr>(expr)) {
         
@@ -237,14 +241,8 @@ namespace {
       }
 
 
-      if (auto CE = dyn_cast<ClosureExpr>(expr)) {
-        if (!(LTI.closureExprs.size() || *LTI.closureExprs.end() == CE)) {
-          LTI.closureExprs.push_back(CE);
-          return { true, expr };
-        } else {
-          CS.optimizeConstraints(expr);
-          return { false, expr };
-        }
+      if (isa<ClosureExpr>(expr)) {
+        return { true, expr };
       }
 
       if (auto FVE = dyn_cast<ForceValueExpr>(expr)) {
@@ -322,17 +320,6 @@ namespace {
       return { true, expr };
     }
     
-    Expr *walkToExprPost(Expr *expr) override {
-
-      if (auto CE = dyn_cast<ClosureExpr>(expr)) {
-        if (LTI.closureExprs.size() && *LTI.closureExprs.end() == CE) {
-          LTI.closureExprs.pop_back();
-        }
-      }
-
-      return expr;
-    }
-    
     /// \brief Ignore statements.
     std::pair<bool, Stmt *> walkToStmtPre(Stmt *stmt) override {
       return { false, stmt };
@@ -406,73 +393,71 @@ namespace {
     if (lti.collectedTypes.size() == 1) {
       // TODO: Compute the BCT.
 
-      auto favoredTy = (*lti.collectedTypes.begin())->getLValueOrInOutObjectType();
-
+      // It's only useful to favor the type instead of
+      // binding it directly to arguments/result types,
+      // which means in case it has been miscalculated
+      // solver can still make progress.
+      auto favoredTy = (*lti.collectedTypes.begin())->getWithoutSpecifierType();
       CS.setFavoredType(expr, favoredTy.getPointer());
-      
+
       // If we have a chain of identical binop expressions with homogeneous
       // argument types, we can directly simplify the associated constraint
       // graph.
       auto simplifyBinOpExprTyVars = [&]() {
-        if (!lti.haveLiteral()) {
-          for (auto binExp1 : lti.binaryExprs) {
-            for (auto binExp2 : lti.binaryExprs) {
-              if (binExp1 == binExp2)
-                continue;
+        // Don't attempt to do linking if there are
+        // literals intermingled with other inferred types.
+        if (lti.hasLiteral())
+          return;
 
-              auto fnTy1 = CS.getType(binExp1)->getAs<TypeVariableType>();
-              auto fnTy2 = CS.getType(binExp2)->getAs<TypeVariableType>();
+        for (auto binExp1 : lti.binaryExprs) {
+          for (auto binExp2 : lti.binaryExprs) {
+            if (binExp1 == binExp2)
+              continue;
 
-              if (!(fnTy1 && fnTy2))
-                return;
+            auto fnTy1 = CS.getType(binExp1)->getAs<TypeVariableType>();
+            auto fnTy2 = CS.getType(binExp2)->getAs<TypeVariableType>();
 
-              auto ODR1 = dyn_cast<OverloadedDeclRefExpr>(binExp1->getFn());
-              auto ODR2 = dyn_cast<OverloadedDeclRefExpr>(binExp2->getFn());
+            if (!(fnTy1 && fnTy2))
+              return;
 
-              if (!(ODR1 && ODR2))
-                return; 
+            auto ODR1 = dyn_cast<OverloadedDeclRefExpr>(binExp1->getFn());
+            auto ODR2 = dyn_cast<OverloadedDeclRefExpr>(binExp2->getFn());
 
-              // TODO: We currently limit this optimization to known arithmetic
-              // operators, but we should be able to broaden this out to
-              // logical operators as well.
-              if (!isArithmeticOperatorDecl(ODR1->getDecls()[0]))
-                return;
+            if (!(ODR1 && ODR2))
+              return;
 
-              if (ODR1->getDecls()[0]->getBaseName() !=
-                  ODR2->getDecls()[0]->getBaseName())
-                return;
+            // TODO: We currently limit this optimization to known arithmetic
+            // operators, but we should be able to broaden this out to
+            // logical operators as well.
+            if (!isArithmeticOperatorDecl(ODR1->getDecls()[0]))
+              return;
 
-              // All things equal, we can merge the tyvars for the function
-              // types.
-              auto rep1 = CS.getRepresentative(fnTy1);
-              auto rep2 = CS.getRepresentative(fnTy2);
+            if (ODR1->getDecls()[0]->getBaseName() !=
+                ODR2->getDecls()[0]->getBaseName())
+              return;
 
-              if (rep1 != rep2) {
-                CS.mergeEquivalenceClasses(rep1, rep2, 
+            // All things equal, we can merge the tyvars for the function
+            // types.
+            auto rep1 = CS.getRepresentative(fnTy1);
+            auto rep2 = CS.getRepresentative(fnTy2);
+
+            if (rep1 != rep2) {
+              CS.mergeEquivalenceClasses(rep1, rep2,
+                                         /*updateWorkList*/ false);
+            }
+
+            auto odTy1 = CS.getType(ODR1)->getAs<TypeVariableType>();
+            auto odTy2 = CS.getType(ODR2)->getAs<TypeVariableType>();
+
+            if (odTy1 && odTy2) {
+              auto odRep1 = CS.getRepresentative(odTy1);
+              auto odRep2 = CS.getRepresentative(odTy2);
+
+              // Since we'll be choosing the same overload, we can merge
+              // the overload tyvar as well.
+              if (odRep1 != odRep2)
+                CS.mergeEquivalenceClasses(odRep1, odRep2,
                                            /*updateWorkList*/ false);
-
-                // Since we're merging argument constraints, make sure that
-                // the representative tyvar is properly bound to the argument
-                // type.
-                CS.addConstraint(ConstraintKind::Bind,
-                                 rep1,
-                                 favoredTy,
-                                 CS.getConstraintLocator(binExp1));
-              }
-
-              auto odTy1 = CS.getType(ODR1)->getAs<TypeVariableType>();
-              auto odTy2 = CS.getType(ODR2)->getAs<TypeVariableType>();
-
-              if (odTy1 && odTy2) {
-                auto odRep1 = CS.getRepresentative(odTy1);
-                auto odRep2 = CS.getRepresentative(odTy2);
-
-                // Since we'll be choosing the same overload, we can merge
-                // the overload tyvar as well.
-                if (odRep1 != odRep2)
-                  CS.mergeEquivalenceClasses(odRep1, odRep2,
-                                             /*updateWorkList*/ false);
-              }
             }
           }
         }
@@ -533,7 +518,7 @@ namespace {
                             Type argTy,
                             Type otherArgTy = Type()) {
     // Determine the argument type.
-    argTy = argTy->getLValueOrInOutObjectType();
+    argTy = argTy->getWithoutSpecifierType();
 
     // Do the types match exactly?
     if (paramTy->isEqual(argTy))
@@ -547,7 +532,7 @@ namespace {
 
     // Dig out the second argument type.
     if (otherArgTy)
-      otherArgTy = otherArgTy->getLValueOrInOutObjectType();
+      otherArgTy = otherArgTy->getWithoutSpecifierType();
 
     // If there is another, concrete argument, check whether it's type
     // conforms to the literal protocol and test against it directly.
@@ -643,8 +628,6 @@ namespace {
         auto overloadChoice = favoredConstraints[0]->getOverloadChoice();
         auto overloadType = overloadChoice.getDecl()->getInterfaceType();
         auto resultType = overloadType->getAs<AnyFunctionType>()->getResult();
-        resultType = overloadChoice.getDecl()->getInnermostDeclContext()
-            ->mapTypeIntoContext(resultType);
         CS.setFavoredType(expr, resultType.getPointer());
       }
 
@@ -696,8 +679,7 @@ namespace {
     auto fTy = VD->getInterfaceType()->getAs<AnyFunctionType>();
     assert(fTy && "attempting to count parameters of a non-function type");
     
-    auto inputTy = fTy->getInput();
-    size_t nOperands = getOperandCount(inputTy);
+    size_t nOperands = fTy->getParams().size();
     size_t nNoDefault = 0;
     
     if (auto AFD = dyn_cast<AbstractFunctionDecl>(VD)) {
@@ -731,10 +713,8 @@ namespace {
         fnTy = fnTy->getResult()->castTo<AnyFunctionType>();
       }
       
-      Type paramTy = value->getInnermostDeclContext()
-          ->mapTypeIntoContext(fnTy->getInput());
-      auto resultTy = value->getInnermostDeclContext()
-          ->mapTypeIntoContext(fnTy->getResult());
+      Type paramTy = fnTy->getInput();
+      auto resultTy = fnTy->getResult();
       auto contextualTy = CS.getContextualType(expr);
 
       return isFavoredParamAndArg(
@@ -808,9 +788,6 @@ namespace {
           }
         }
         Type paramTy = fnTy->getInput();
-        paramTy = value->getInnermostDeclContext()
-            ->mapTypeIntoContext(paramTy);
-        
         return favoredTy->isEqual(paramTy);
       };
 
@@ -851,7 +828,20 @@ namespace {
 
     Type firstArgTy = argTupleTy->getElement(0).getType()->getWithoutParens();
     Type secondArgTy = argTupleTy->getElement(1).getType()->getWithoutParens();
-    
+
+    auto isOptionalWithMatchingObjectType = [](Type optional,
+                                               Type object) -> bool {
+      if (auto objTy = optional->getRValueType()->getOptionalObjectType())
+        return objTy->getRValueType()->isEqual(object->getRValueType());
+
+      return false;
+    };
+
+    auto isPotentialForcingOpportunity = [&](Type first, Type second) -> bool {
+      return isOptionalWithMatchingObjectType(first, second) ||
+             isOptionalWithMatchingObjectType(second, first);
+    };
+
     // Determine whether the given declaration is favored.
     auto isFavoredDecl = [&](ValueDecl *value) -> bool {
       auto valueTy = value->getInterfaceType();
@@ -895,8 +885,7 @@ namespace {
         fnTy = fnTy->getResult()->castTo<AnyFunctionType>();
       }
       
-      Type paramTy = value->getInnermostDeclContext()
-          ->mapTypeIntoContext(fnTy->getInput());
+      Type paramTy = fnTy->getInput();
       auto paramTupleTy = paramTy->getAs<TupleType>();
       if (!paramTupleTy || paramTupleTy->getNumElements() != 2)
         return false;
@@ -904,17 +893,16 @@ namespace {
       auto firstParamTy = paramTupleTy->getElement(0).getType();
       auto secondParamTy = paramTupleTy->getElement(1).getType();
       
-      auto resultTy = value->getInnermostDeclContext()
-          ->mapTypeIntoContext(fnTy->getResult());
+      auto resultTy = fnTy->getResult();
       auto contextualTy = CS.getContextualType(expr);
-      
-      return
-        (isFavoredParamAndArg(CS, firstParamTy, firstArg, firstArgTy,
-                              secondArgTy) ||
-         isFavoredParamAndArg(CS, secondParamTy, secondArg, secondArgTy,
-                              firstArgTy)) &&
-         firstParamTy->isEqual(secondParamTy) &&
-        (!contextualTy || contextualTy->isEqual(resultTy));
+
+      return (isFavoredParamAndArg(CS, firstParamTy, firstArg, firstArgTy,
+                                   secondArgTy) ||
+              isFavoredParamAndArg(CS, secondParamTy, secondArg, secondArgTy,
+                                   firstArgTy)) &&
+             firstParamTy->isEqual(secondParamTy) &&
+             !isPotentialForcingOpportunity(firstArgTy, secondArgTy) &&
+             (!contextualTy || contextualTy->isEqual(resultTy));
     };
     
     favorCallOverloads(expr, CS, isFavoredDecl);
@@ -971,6 +959,7 @@ namespace {
 } // end anonymous namespace
 
 namespace {
+
   class ConstraintGenerator : public ExprVisitor<ConstraintGenerator, Type> {
     ConstraintSystem &CS;
     DeclContext *CurDC;
@@ -989,17 +978,22 @@ namespace {
     /// \brief Add constraints for a reference to a named member of the given
     /// base type, and return the type of such a reference.
     Type addMemberRefConstraints(Expr *expr, Expr *base, DeclName name,
-                                 FunctionRefKind functionRefKind) {
+                                 FunctionRefKind functionRefKind,
+                                 ArrayRef<ValueDecl *> outerAlternatives) {
       // The base must have a member of the given name, such that accessing
       // that member through the base returns a value convertible to the type
       // of this expression.
       auto baseTy = CS.getType(base);
       auto tv = CS.createTypeVariable(
                   CS.getConstraintLocator(expr, ConstraintLocator::Member),
-                  TVO_CanBindToLValue |
-                  TVO_CanBindToInOut);
-      CS.addValueMemberConstraint(baseTy, name, tv, CurDC, functionRefKind,
-        CS.getConstraintLocator(expr, ConstraintLocator::Member));
+                  TVO_CanBindToLValue);
+      SmallVector<OverloadChoice, 4> outerChoices;
+      for (auto decl : outerAlternatives) {
+        outerChoices.push_back(OverloadChoice(Type(), decl, functionRefKind));
+      }
+      CS.addValueMemberConstraint(
+          baseTy, name, tv, CurDC, functionRefKind, outerChoices,
+          CS.getConstraintLocator(expr, ConstraintLocator::Member));
       return tv;
     }
 
@@ -1017,11 +1011,11 @@ namespace {
 
       auto memberLocator =
         CS.getConstraintLocator(expr, ConstraintLocator::Member);
-      auto tv = CS.createTypeVariable(memberLocator,
-                                      TVO_CanBindToLValue |
-                                      TVO_CanBindToInOut);
+      auto tv = CS.createTypeVariable(memberLocator, TVO_CanBindToLValue);
 
-      OverloadChoice choice(CS.getType(base), decl, functionRefKind);
+      OverloadChoice choice =
+          OverloadChoice(CS.getType(base), decl, functionRefKind);
+
       auto locator = CS.getConstraintLocator(expr, ConstraintLocator::Member);
       CS.addBindOverloadConstraint(tv, choice, locator, CurDC);
       return tv;
@@ -1032,8 +1026,6 @@ namespace {
                                  ValueDecl *declOrNull,
                                  ConstraintLocator *memberLocator = nullptr,
                                  ConstraintLocator *indexLocator = nullptr) {
-      ASTContext &Context = CS.getASTContext();
-
       // Locators used in this expression.
       if (!indexLocator)
         indexLocator
@@ -1047,8 +1039,8 @@ namespace {
       // I -> inout? O, where I and O are fresh type variables. The index
       // expression must be convertible to I and the subscript expression
       // itself has type inout? O, where O may or may not be an lvalue.
-      auto inputTv = CS.createTypeVariable(indexLocator, TVO_CanBindToInOut);
-      
+      auto inputTv = CS.createTypeVariable(indexLocator);
+
       // For an integer subscript expression on an array slice type, instead of
       // introducing a new type variable we can easily obtain the element type.
       if (isa<SubscriptExpr>(anchor)) {
@@ -1057,7 +1049,7 @@ namespace {
         auto baseObjTy = baseTy;
         if (baseObjTy->is<LValueType>()) {
           isLValueBase = true;
-          baseObjTy = baseObjTy->getLValueOrInOutObjectType();
+          baseObjTy = baseObjTy->getWithoutSpecifierType();
         }
         
         if (CS.isArrayType(baseObjTy.getPointer())) {
@@ -1094,9 +1086,7 @@ namespace {
       }
       
       if (outputTy.isNull()) {
-        outputTy = CS.createTypeVariable(resultLocator,
-                                         TVO_CanBindToLValue |
-                                         TVO_CanBindToInOut);
+        outputTy = CS.createTypeVariable(resultLocator, TVO_CanBindToLValue);
       } else {
         // TODO: Generalize this for non-subscript-expr anchors, so that e.g.
         // keypath lookup benefits from the peephole as well.
@@ -1125,12 +1115,14 @@ namespace {
       // a known subscript here. This might be cleaner if we split off a new
       // UnresolvedSubscriptExpr from SubscriptExpr.
       if (auto decl = declOrNull) {
-        OverloadChoice choice(baseTy, decl, FunctionRefKind::DoubleApply);
+        OverloadChoice choice =
+            OverloadChoice(baseTy, decl, FunctionRefKind::DoubleApply);
         CS.addBindOverloadConstraint(fnTy, choice, memberLocator,
                                      CurDC);
       } else {
-        CS.addValueMemberConstraint(baseTy, Context.Id_subscript,
+        CS.addValueMemberConstraint(baseTy, DeclBaseName::createSubscript(),
                                     fnTy, CurDC, FunctionRefKind::DoubleApply,
+                                    /*outerAlternatives=*/{},
                                     memberLocator);
       }
 
@@ -1184,8 +1176,7 @@ namespace {
       
 
       auto tv = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                      TVO_PrefersSubtypeBinding |
-                                      TVO_CanBindToInOut);
+                                      TVO_PrefersSubtypeBinding);
       CS.addConstraint(ConstraintKind::LiteralConformsTo, tv,
                        protocol->getDeclaredType(),
                        CS.getConstraintLocator(expr));
@@ -1207,9 +1198,7 @@ namespace {
       // The type of the expression must conform to the
       // ExpressibleByStringInterpolation protocol.
       auto locator = CS.getConstraintLocator(expr);
-      auto tv = CS.createTypeVariable(locator,
-                                      TVO_PrefersSubtypeBinding |
-                                      TVO_CanBindToInOut);
+      auto tv = CS.createTypeVariable(locator, TVO_PrefersSubtypeBinding);
       CS.addConstraint(ConstraintKind::LiteralConformsTo, tv,
                        interpolationProto->getDeclaredType(),
                        locator);
@@ -1254,8 +1243,7 @@ namespace {
       }
 
       auto tv = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                      TVO_PrefersSubtypeBinding |
-                                      TVO_CanBindToInOut);
+                                      TVO_PrefersSubtypeBinding);
       
       CS.addConstraint(ConstraintKind::LiteralConformsTo, tv,
                        protocol->getDeclaredType(),
@@ -1282,9 +1270,8 @@ namespace {
           CS.getConstraintLocator(expr, ConstraintLocator::ApplyArgument));
 
       Type result = tv;
-      if (constr->getFailability() != OTK_None) {
-        result = OptionalType::get(constr->getFailability(), result);
-      }
+      if (constr->getFailability() != OTK_None)
+        result = OptionalType::get(result);
 
       return result;
     }
@@ -1299,8 +1286,7 @@ namespace {
         if (VD->hasInterfaceType() &&
             VD->getInterfaceType()->is<UnresolvedType>()) {
           return CS.createTypeVariable(CS.getConstraintLocator(E),
-                                       TVO_CanBindToLValue |
-                                       TVO_CanBindToInOut);
+                                       TVO_CanBindToLValue);
         }
       }
 
@@ -1320,13 +1306,12 @@ namespace {
       // Create an overload choice referencing this declaration and immediately
       // resolve it. This records the overload for use later.
       auto tv = CS.createTypeVariable(locator,
-                                      TVO_CanBindToLValue |
-                                      TVO_CanBindToInOut);
-      CS.resolveOverload(locator, tv,
-                         OverloadChoice(Type(), E->getDecl(),
-                                        E->getFunctionRefKind()),
-                         CurDC);
-      
+                                      TVO_CanBindToLValue);
+
+      OverloadChoice choice =
+          OverloadChoice(Type(), E->getDecl(), E->getFunctionRefKind());
+      CS.resolveOverload(locator, tv, choice, CurDC);
+
       if (auto *VD = dyn_cast<VarDecl>(E->getDecl())) {
         if (VD->getInterfaceType() &&
             !VD->getInterfaceType()->is<TypeVariableType>()) {
@@ -1357,8 +1342,8 @@ namespace {
     }
 
     Type resolveTypeReferenceInExpression(TypeRepr *rep) {
-      TypeResolutionOptions options = TR_AllowUnboundGenerics;
-      options |= TR_InExpression;
+      TypeResolutionOptions options = TypeResolutionFlags::AllowUnboundGenerics;
+      options |= TypeResolutionFlags::InExpression;
       return CS.TC.resolveType(rep, CS.DC, options);
     }
 
@@ -1374,7 +1359,7 @@ namespace {
       
       auto locator = CS.getConstraintLocator(E);
       type = CS.openUnboundGenericType(type, locator);
-      E->getTypeLoc().setType(type, /*validated=*/true);
+      CS.setType(E->getTypeLoc(), type);
       return MetatypeType::get(type);
     }
 
@@ -1387,9 +1372,7 @@ namespace {
       // that will be equal to different types depending on which overload
       // is selected.
       auto locator = CS.getConstraintLocator(expr);
-      auto tv = CS.createTypeVariable(locator,
-                                      TVO_CanBindToLValue |
-                                      TVO_CanBindToInOut);
+      auto tv = CS.createTypeVariable(locator, TVO_CanBindToLValue);
       ArrayRef<ValueDecl*> decls = expr->getDecls();
       SmallVector<OverloadChoice, 4> choices;
       
@@ -1401,8 +1384,9 @@ namespace {
         if (decls[i]->isInvalid())
           continue;
 
-        choices.push_back(OverloadChoice(Type(), decls[i],
-                                         expr->getFunctionRefKind()));
+        OverloadChoice choice =
+            OverloadChoice(Type(), decls[i], expr->getFunctionRefKind());
+        choices.push_back(choice);
       }
 
       // If there are no valid overloads, give up.
@@ -1419,8 +1403,7 @@ namespace {
       // to help us determine which declaration the user meant to refer to.
       // FIXME: Do we need to note that we're doing some kind of recovery?
       return CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                   TVO_CanBindToLValue |
-                                   TVO_CanBindToInOut);
+                                   TVO_CanBindToLValue);
     }
     
     Type visitMemberRefExpr(MemberRefExpr *expr) {
@@ -1430,9 +1413,7 @@ namespace {
     }
     
     Type visitDynamicMemberRefExpr(DynamicMemberRefExpr *expr) {
-      return addMemberRefConstraints(expr, expr->getBase(),
-                                     expr->getMember().getDecl(),
-                                     /*FIXME:*/FunctionRefKind::DoubleApply);
+      llvm_unreachable("Already typechecked");
     }
     
     virtual Type visitUnresolvedMemberExpr(UnresolvedMemberExpr *expr) {
@@ -1445,10 +1426,8 @@ namespace {
 
       auto memberLocator
         = CS.getConstraintLocator(expr, ConstraintLocator::UnresolvedMember);
-      auto baseTy = CS.createTypeVariable(baseLocator, TVO_CanBindToInOut);
-      auto memberTy = CS.createTypeVariable(memberLocator,
-                                            TVO_CanBindToLValue |
-                                            TVO_CanBindToInOut);
+      auto baseTy = CS.createTypeVariable(baseLocator);
+      auto memberTy = CS.createTypeVariable(memberLocator, TVO_CanBindToLValue);
 
       // An unresolved member expression '.member' is modeled as a value member
       // constraint
@@ -1467,10 +1446,8 @@ namespace {
         // The result type of the function must be convertible to the base type.
         // TODO: we definitely want this to include ImplicitlyUnwrappedOptional; does it
         // need to include everything else in the world?
-        auto outputTy
-          = CS.createTypeVariable(
-              CS.getConstraintLocator(expr, ConstraintLocator::ApplyFunction),
-              TVO_CanBindToInOut);
+        auto outputTy = CS.createTypeVariable(
+            CS.getConstraintLocator(expr, ConstraintLocator::FunctionResult));
         CS.addConstraint(ConstraintKind::Conversion, outputTy, baseTy,
           CS.getConstraintLocator(expr, ConstraintLocator::RvalueAdjustment));
 
@@ -1489,9 +1466,7 @@ namespace {
       
       // The member type also needs to be convertible to the context type, which
       // preserves lvalue-ness.
-      auto resultTy = CS.createTypeVariable(memberLocator,
-                                            TVO_CanBindToLValue |
-                                            TVO_CanBindToInOut);
+      auto resultTy = CS.createTypeVariable(memberLocator, TVO_CanBindToLValue);
       CS.addConstraint(ConstraintKind::Conversion, memberTy, resultTy,
                        memberLocator);
       CS.addConstraint(ConstraintKind::Equal, resultTy, baseTy,
@@ -1500,11 +1475,18 @@ namespace {
     }
 
     Type visitUnresolvedDotExpr(UnresolvedDotExpr *expr) {
+      // If this is Builtin.type_join*, just return any type and move
+      // on since we're going to discard this, and creating any type
+      // variables for the reference will cause problems.
+      auto typeOperation = getTypeOperation(expr, CS.getASTContext());
+      if (typeOperation != TypeOperation::None)
+        return CS.getASTContext().TheAnyType;
+
       // Open a member constraint for constructor delegations on the
       // subexpr type.
       if (CS.TC.getSelfForInitDelegationInConstructor(CS.DC, expr)) {
         auto baseTy = CS.getType(expr->getBase())
-                        ->getLValueOrInOutObjectType();
+                        ->getWithoutSpecifierType();
 
         // 'self' or 'super' will reference an instance, but the constructor
         // is semantically a member of the metatype. This:
@@ -1518,14 +1500,15 @@ namespace {
         auto argsTy = CS.createTypeVariable(
                         CS.getConstraintLocator(expr),
                           TVO_CanBindToLValue |
-                          TVO_PrefersSubtypeBinding |
-                          TVO_CanBindToInOut);
-        auto resultTy = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                              TVO_CanBindToInOut);
+                          TVO_PrefersSubtypeBinding);
+        auto resultTy = CS.createTypeVariable(CS.getConstraintLocator(expr));
         auto methodTy = FunctionType::get(argsTy, resultTy);
-        CS.addValueMemberConstraint(baseTy, expr->getName(),
-          methodTy, CurDC, expr->getFunctionRefKind(),
-          CS.getConstraintLocator(expr, ConstraintLocator::ConstructorMember));
+        CS.addValueMemberConstraint(
+            baseTy, expr->getName(), methodTy, CurDC,
+            expr->getFunctionRefKind(),
+            /*outerAlternatives=*/{},
+            CS.getConstraintLocator(expr,
+                                    ConstraintLocator::ConstructorMember));
 
         // The result of the expression is the partial application of the
         // constructor to the subexpression.
@@ -1533,7 +1516,8 @@ namespace {
       }
 
       return addMemberRefConstraints(expr, expr->getBase(), expr->getName(),
-                                     expr->getFunctionRefKind());
+                                     expr->getFunctionRefKind(),
+                                     expr->getOuterAlternatives());
     }
     
     Type visitUnresolvedSpecializeExpr(UnresolvedSpecializeExpr *expr) {
@@ -1574,9 +1558,9 @@ namespace {
           // open type.
           auto locator = CS.getConstraintLocator(expr);
           for (size_t i = 0, size = specializations.size(); i < size; ++i) {
-            if (tc.validateType(specializations[i], CS.DC,
-                                (TR_InExpression |
-                                 TR_AllowUnboundGenerics)))
+            TypeResolutionOptions options = TypeResolutionFlags::InExpression;
+            options |= TypeResolutionFlags::AllowUnboundGenerics;
+            if (tc.validateType(specializations[i], CS.DC, options))
               return Type();
 
             CS.addConstraint(ConstraintKind::Equal,
@@ -1625,8 +1609,7 @@ namespace {
 
     Type visitOptionalTryExpr(OptionalTryExpr *expr) {
       auto valueTy = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                           TVO_PrefersSubtypeBinding |
-                                           TVO_CanBindToInOut);
+                                           TVO_PrefersSubtypeBinding);
 
       Type optTy = getOptionalType(expr->getSubExpr()->getLoc(), valueTy);
       if (!optTy)
@@ -1644,7 +1627,9 @@ namespace {
       }
 
       auto &ctx = CS.getASTContext();
-      return ParenType::get(ctx, CS.getType(expr->getSubExpr()));
+      auto parenType = CS.getType(expr->getSubExpr())->getInOutObjectType();
+      auto parenFlags = ParameterTypeFlags().withInOut(expr->isSemanticallyInOutExpr());
+      return ParenType::get(ctx, parenType, parenFlags);
     }
 
     Type visitTupleExpr(TupleExpr *expr) {
@@ -1653,8 +1638,11 @@ namespace {
       SmallVector<TupleTypeElt, 4> elements;
       elements.reserve(expr->getNumElements());
       for (unsigned i = 0, n = expr->getNumElements(); i != n; ++i) {
-        elements.push_back(TupleTypeElt(CS.getType(expr->getElement(i)),
-                                        expr->getElementName(i)));
+        auto *elt = expr->getElement(i);
+        auto ty = CS.getType(elt);
+        auto flags = ParameterTypeFlags().withInOut(elt->isSemanticallyInOutExpr());
+        elements.push_back(TupleTypeElt(ty->getInOutObjectType(),
+                                        expr->getElementName(i), flags));
       }
 
       return TupleType::get(elements, CS.getASTContext());
@@ -1722,9 +1710,7 @@ namespace {
         return contextualArrayType;
       }
       
-      auto arrayTy = CS.createTypeVariable(locator,
-                                           TVO_PrefersSubtypeBinding |
-                                           TVO_CanBindToInOut);
+      auto arrayTy = CS.createTypeVariable(locator, TVO_PrefersSubtypeBinding);
 
       // The array must be an array literal type.
       CS.addConstraint(ConstraintKind::LiteralConformsTo, arrayTy,
@@ -1820,8 +1806,7 @@ namespace {
       }
       
       auto dictionaryTy = CS.createTypeVariable(locator,
-                                                TVO_PrefersSubtypeBinding |
-                                                TVO_CanBindToInOut);
+                                                TVO_PrefersSubtypeBinding);
 
       // The dictionary must be a dictionary literal type.
       CS.addConstraint(ConstraintKind::LiteralConformsTo, dictionaryTy,
@@ -1937,27 +1922,32 @@ namespace {
       Identifier name
         = context.getIdentifier(llvm::utostr(expr->getFieldNumber()));
       return addMemberRefConstraints(expr, expr->getBase(), name,
-                                     FunctionRefKind::Unapplied);
+                                     FunctionRefKind::Unapplied,
+                                     /*outerAlternatives=*/{});
     }
 
     /// Give each parameter in a ClosureExpr a fresh type variable if parameter
     /// types were not specified, and return the eventual function type.
-    Type getTypeForParameterList(ParameterList *params,
-                                 ConstraintLocatorBuilder locator) {
-      for (auto param : *params) {
+    Type getTypeForParameterList(ClosureExpr *closureExpr) {
+      auto *params = closureExpr->getParameters();
+      for (auto i : indices(params->getArray())) {
+        auto *param = params->get(i);
+        auto *locator = CS.getConstraintLocator(
+            closureExpr, LocatorPathElt::getTupleElement(i));
+
         // If a type was explicitly specified, use its opened type.
         if (auto type = param->getTypeLoc().getType()) {
           // FIXME: Need a better locator for a pattern as a base.
           Type openedType = CS.openUnboundGenericType(type, locator);
-          param->setType(openedType);
-          param->setInterfaceType(openedType);
+          assert(!param->isImmutable() || !openedType->is<InOutType>());
+          param->setType(openedType->getInOutObjectType());
+          param->setInterfaceType(openedType->getInOutObjectType());
           continue;
         }
 
         // Otherwise, create a fresh type variable.
-        Type ty = CS.createTypeVariable(CS.getConstraintLocator(locator),
-                                        TVO_CanBindToInOut);
-        
+        Type ty = CS.createTypeVariable(locator, TVO_CanBindToInOut);
+
         param->setType(ty);
         param->setInterfaceType(ty);
       }
@@ -1980,42 +1970,60 @@ namespace {
         // Var doesn't affect the type.
         return getTypeForPattern(cast<VarPattern>(pattern)->getSubPattern(),
                                  locator);
-      case PatternKind::Any:
-        // For a pattern of unknown type, create a new type variable.
-        return CS.createTypeVariable(CS.getConstraintLocator(locator),
-                                     TVO_CanBindToInOut);
+      case PatternKind::Any: {
+        // If we have a type from an initializer expression, and that
+        // expression does not produce an InOut type, use it.  This
+        // will avoid exponential typecheck behavior in the case of
+        // tuples, nested arrays, and dictionary literals.
+        //
+        // Otherwise, create a new type variable.
+        if (auto boundExpr = locator.trySimplifyToExpr()) {
+          if (!boundExpr->isSemanticallyInOutExpr())
+            return CS.getType(boundExpr)->getRValueType();
+        }
+
+        return CS.createTypeVariable(CS.getConstraintLocator(locator));
+      }
 
       case PatternKind::Named: {
         auto var = cast<NamedPattern>(pattern)->getDecl();
-        
-        auto boundExpr = locator.trySimplifyToExpr();
-        auto haveBoundCollectionLiteral = boundExpr &&
-                                            !var->hasNonPatternBindingInit() &&
-                                            (isa<ArrayExpr>(boundExpr) ||
-                                             isa<DictionaryExpr>(boundExpr));
 
-        // For a named pattern without a type, create a new type variable
-        // and use it as the type of the variable.
+        // If we have a type from an initializer expression, and that
+        // expression does not produce an InOut type, use it.  This
+        // will avoid exponential typecheck behavior in the case of
+        // tuples, nested arrays, and dictionary literals.
         //
-        // FIXME: For now, substitute in the bound type for literal collection
-        // exprs that would otherwise result in a simple conversion constraint
-        // being placed between two type variables. (The bound type and the
-        // collection type, which will always be the same in this case.)
-        // This will avoid exponential typecheck behavior in the case of nested
-        // array and dictionary literals.
-        Type ty = haveBoundCollectionLiteral ?
-                    CS.getType(boundExpr) :
-                    CS.createTypeVariable(CS.getConstraintLocator(locator),
-                                          TVO_CanBindToInOut);
-
-        // For weak variables, use Optional<T>.
-        if (auto *OA = var->getAttrs().getAttribute<OwnershipAttr>())
-          if (OA->get() == Ownership::Weak) {
-            ty = CS.getTypeChecker().getOptionalType(var->getLoc(), ty);
-            if (!ty) return Type();
+        // Otherwise, create a new type variable.
+        auto ty = Type();
+        if (!var->hasNonPatternBindingInit()) {
+          if (auto boundExpr = locator.trySimplifyToExpr()) {
+            if (!boundExpr->isSemanticallyInOutExpr())
+              ty = CS.getType(boundExpr)->getRValueType();
           }
+        }
 
-        return ty;
+        auto ROK = ReferenceOwnership::Strong; // The default.
+        if (auto *OA = var->getAttrs().getAttribute<ReferenceOwnershipAttr>())
+          ROK = OA->get();
+
+        switch (ROK) {
+        case ReferenceOwnership::Strong:
+        case ReferenceOwnership::Unowned:
+        case ReferenceOwnership::Unmanaged:
+          if (ty)
+            return ty;
+          return CS.createTypeVariable(CS.getConstraintLocator(locator));
+        case ReferenceOwnership::Weak:
+          // For weak variables, use Optional<T>.
+          if (ty && ty->getOptionalObjectType())
+            return ty; // Already Optional<T>.
+          // Create a fresh type variable to handle overloaded expressions.
+          if (!ty || ty->is<TypeVariableType>())
+            ty = CS.createTypeVariable(CS.getConstraintLocator(locator));
+          return CS.getTypeChecker().getOptionalType(var->getLoc(), ty);
+        }
+
+        llvm_unreachable("Unhandled ReferenceOwnership kind");
       }
 
       case PatternKind::Typed: {
@@ -2023,8 +2031,6 @@ namespace {
         // FIXME: Need a better locator for a pattern as a base.
         Type openedType = CS.openUnboundGenericType(typedPattern->getType(),
                                                     locator);
-        if (auto weakTy = openedType->getAs<WeakStorageType>())
-          openedType = weakTy->getReferentType();
 
         // For a typed pattern, simply return the opened type of the pattern.
         // FIXME: Error recovery if the type is an error type?
@@ -2053,8 +2059,7 @@ namespace {
 #include "swift/AST/PatternNodes.def"
         // TODO: we could try harder here, e.g. for enum elements to provide the
         // enum type.
-        return CS.createTypeVariable(CS.getConstraintLocator(locator),
-                                     TVO_CanBindToInOut);
+        return CS.createTypeVariable(CS.getConstraintLocator(locator));
       }
 
       llvm_unreachable("Unhandled pattern kind");
@@ -2183,7 +2188,7 @@ namespace {
           pattern = pattern->getSemanticsProvidingPattern();
           while (auto isp = dyn_cast<IsPattern>(pattern)) {
             if (CS.TC.validateType(isp->getCastTypeLoc(), CS.DC,
-                                   TR_InExpression))
+                                   TypeResolutionFlags::InExpression))
               return false;
 
             if (!isp->hasSubPattern()) {
@@ -2203,7 +2208,7 @@ namespace {
           Type exnType = CS.TC.getExceptionType(CS.DC, clause->getCatchLoc());
           if (!exnType ||
               CS.TC.coercePatternToType(pattern, CS.DC, exnType,
-                                        TR_InExpression)) {
+                                        TypeResolutionFlags::InExpression)) {
             return false;
           }
 
@@ -2290,7 +2295,7 @@ namespace {
 
         // If no return type was specified, create a fresh type
         // variable for it.
-        funcTy = CS.createTypeVariable(locator, TVO_CanBindToInOut);
+        funcTy = CS.createTypeVariable(locator);
 
         // Allow it to default to () if there are no return statements.
         if (closureHasNoResult(expr)) {
@@ -2303,12 +2308,7 @@ namespace {
 
       // Give each parameter in a ClosureExpr a fresh type variable if parameter
       // types were not specified, and return the eventual function type.
-      auto paramTy = getTypeForParameterList(
-                       expr->getParameters(),
-                       CS.getConstraintLocator(
-                         expr,
-                         LocatorPathElt::getTupleElement(0)));
-
+      auto paramTy = getTypeForParameterList(expr);
       auto extInfo = FunctionType::ExtInfo();
       
       if (closureCanThrow(expr))
@@ -2332,8 +2332,7 @@ namespace {
       //     S < lvalue T
       //
       // where T is a fresh type variable.
-      auto lvalue = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                          TVO_CanBindToInOut);
+      auto lvalue = CS.createTypeVariable(CS.getConstraintLocator(expr));
       auto bound = LValueType::get(lvalue);
       auto result = InOutType::get(lvalue);
       CS.addConstraint(ConstraintKind::Conversion,
@@ -2343,8 +2342,7 @@ namespace {
     }
 
     Type visitDynamicTypeExpr(DynamicTypeExpr *expr) {
-      auto tv = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                      TVO_CanBindToInOut);
+      auto tv = CS.createTypeVariable(CS.getConstraintLocator(expr));
       CS.addConstraint(ConstraintKind::DynamicTypeOf, tv,
                        CS.getType(expr->getBase()),
            CS.getConstraintLocator(expr, ConstraintLocator::RvalueAdjustment));
@@ -2357,9 +2355,15 @@ namespace {
 
     Type visitApplyExpr(ApplyExpr *expr) {
       Type outputTy;
-      
+
       auto fnExpr = expr->getFn();
-      
+
+      if (auto *UDE = dyn_cast<UnresolvedDotExpr>(fnExpr)) {
+        auto typeOperation = getTypeOperation(UDE, CS.getASTContext());
+        if (typeOperation != TypeOperation::None)
+          return resultOfTypeOperation(typeOperation, expr->getArg());
+      }
+
       if (isa<DeclRefExpr>(fnExpr)) {
         if (auto fnType = CS.getType(fnExpr)->getAs<AnyFunctionType>()) {
           outputTy = fnType->getResult();
@@ -2415,9 +2419,7 @@ namespace {
       // variables T1 and T2.
       if (outputTy.isNull()) {
         outputTy = CS.createTypeVariable(
-                     CS.getConstraintLocator(expr,
-                                             ConstraintLocator::ApplyFunction),
-                                             TVO_CanBindToInOut);
+            CS.getConstraintLocator(expr, ConstraintLocator::FunctionResult));
       } else {
         // Since we know what the output type is, we can set it as the favored
         // type of this expression.
@@ -2491,8 +2493,7 @@ namespace {
 
       // The branches must be convertible to a common type.
       auto resultTy = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                            TVO_PrefersSubtypeBinding |
-                                            TVO_CanBindToInOut);
+                                            TVO_PrefersSubtypeBinding);
       CS.addConstraint(ConstraintKind::Conversion,
                        CS.getType(expr->getThenExpr()), resultTy,
                        CS.getConstraintLocator(expr->getThenExpr()));
@@ -2506,6 +2507,15 @@ namespace {
       llvm_unreachable("Already type-checked");
     }
 
+    Type
+    createTypeVariableAndDisjunctionForIUOCoercion(Type toType,
+                                                   ConstraintLocator *locator) {
+      auto typeVar = CS.createTypeVariable(locator);
+      CS.buildDisjunctionForImplicitlyUnwrappedOptional(typeVar, toType,
+                                                        locator);
+      return typeVar;
+    }
+
     Type visitForcedCheckedCastExpr(ForcedCheckedCastExpr *expr) {
       auto &tc = CS.getTypeChecker();
       auto fromExpr = expr->getSubExpr();
@@ -2513,21 +2523,30 @@ namespace {
         return nullptr;
 
       // Validate the resulting type.
-      TypeResolutionOptions options = TR_AllowUnboundGenerics;
-      options |= TR_InExpression;
+      TypeResolutionOptions options = TypeResolutionFlags::AllowUnboundGenerics;
+      options |= TypeResolutionFlags::InExpression;
+      // Prior to Swift 5, we allow 'as T!' and turn it into a disjunction.
+      if (!CS.getASTContext().isSwiftVersionAtLeast(5))
+        options |= TypeResolutionFlags::AllowIUODeprecated;
       if (tc.validateType(expr->getCastTypeLoc(), CS.DC, options))
         return nullptr;
 
       // Open the type we're casting to.
       auto toType = CS.openUnboundGenericType(expr->getCastTypeLoc().getType(),
                                               CS.getConstraintLocator(expr));
-      expr->getCastTypeLoc().setType(toType, /*validated=*/true);
+      CS.setType(expr->getCastTypeLoc(), toType);
 
       auto fromType = CS.getType(fromExpr);
-      auto locator = CS.getConstraintLocator(fromExpr);
+      auto locator = CS.getConstraintLocator(expr);
 
       // The source type can be checked-cast to the destination type.
       CS.addConstraint(ConstraintKind::CheckedCast, fromType, toType, locator);
+
+      // If the result type was declared IUO, add a disjunction for
+      // bindings for the result of the coercion.
+      auto *TR = expr->getCastTypeLoc().getTypeRepr();
+      if (TR && TR->getKind() == TypeReprKind::ImplicitlyUnwrappedOptional)
+        return createTypeVariableAndDisjunctionForIUOCoercion(toType, locator);
 
       return toType;
     }
@@ -2536,21 +2555,33 @@ namespace {
       auto &tc = CS.getTypeChecker();
       
       // Validate the resulting type.
-      TypeResolutionOptions options = TR_AllowUnboundGenerics;
-      options |= TR_InExpression;
+      TypeResolutionOptions options = TypeResolutionFlags::AllowUnboundGenerics;
+      options |= TypeResolutionFlags::InExpression;
+      // Prior to Swift 5, we allow 'as T!' and turn it into a disjunction.
+      if (!CS.getASTContext().isSwiftVersionAtLeast(5))
+        options |= TypeResolutionFlags::AllowIUODeprecated;
       if (tc.validateType(expr->getCastTypeLoc(), CS.DC, options))
         return nullptr;
 
       // Open the type we're casting to.
       auto toType = CS.openUnboundGenericType(expr->getCastTypeLoc().getType(),
                                               CS.getConstraintLocator(expr));
-      expr->getCastTypeLoc().setType(toType, /*validated=*/true);
+      CS.setType(expr->getCastTypeLoc(), toType);
 
       auto fromType = CS.getType(expr->getSubExpr());
       auto locator = CS.getConstraintLocator(expr);
 
-      CS.addExplicitConversionConstraint(fromType, toType, /*allowFixes=*/true,
-                                         locator);
+      // Add a conversion constraint for the direct conversion between
+      // types.
+      CS.addExplicitConversionConstraint(fromType, toType,
+                                         /*allowFixes=*/true, locator);
+
+      // If the result type was declared IUO, add a disjunction for
+      // bindings for the result of the coercion.
+      auto *TR = expr->getCastTypeLoc().getTypeRepr();
+      if (TR && TR->getKind() == TypeReprKind::ImplicitlyUnwrappedOptional)
+        return createTypeVariableAndDisjunctionForIUOCoercion(toType, locator);
+
       return toType;
     }
 
@@ -2561,27 +2592,39 @@ namespace {
         return nullptr;
 
       // Validate the resulting type.
-      TypeResolutionOptions options = TR_AllowUnboundGenerics;
-      options |= TR_InExpression;
+      TypeResolutionOptions options = TypeResolutionFlags::AllowUnboundGenerics;
+      options |= TypeResolutionFlags::InExpression;
+      // Prior to Swift 5, we allow 'as T!' and turn it into a disjunction.
+      if (!CS.getASTContext().isSwiftVersionAtLeast(5))
+        options |= TypeResolutionFlags::AllowIUODeprecated;
       if (tc.validateType(expr->getCastTypeLoc(), CS.DC, options))
         return nullptr;
 
       // Open the type we're casting to.
       auto toType = CS.openUnboundGenericType(expr->getCastTypeLoc().getType(),
                                               CS.getConstraintLocator(expr));
-      expr->getCastTypeLoc().setType(toType, /*validated=*/true);
+      CS.setType(expr->getCastTypeLoc(), toType);
 
       auto fromType = CS.getType(fromExpr);
-      auto locator = CS.getConstraintLocator(fromExpr);
+      auto locator = CS.getConstraintLocator(expr);
+
       CS.addConstraint(ConstraintKind::CheckedCast, fromType, toType, locator);
+
+      // If the result type was declared IUO, add a disjunction for
+      // bindings for the result of the coercion.
+      auto *TR = expr->getCastTypeLoc().getTypeRepr();
+      if (TR && TR->getKind() == TypeReprKind::ImplicitlyUnwrappedOptional)
+        return createTypeVariableAndDisjunctionForIUOCoercion(
+            OptionalType::get(toType), locator);
+
       return OptionalType::get(toType);
     }
 
     Type visitIsExpr(IsExpr *expr) {
       // Validate the type.
       auto &tc = CS.getTypeChecker();
-      TypeResolutionOptions options = TR_AllowUnboundGenerics;
-      options |= TR_InExpression;
+      TypeResolutionOptions options = TypeResolutionFlags::AllowUnboundGenerics;
+      options |= TypeResolutionFlags::InExpression;
       if (tc.validateType(expr->getCastTypeLoc(), CS.DC, options))
         return nullptr;
 
@@ -2589,7 +2632,7 @@ namespace {
       // FIXME: Locator for the cast type?
       auto toType = CS.openUnboundGenericType(expr->getCastTypeLoc().getType(),
                                               CS.getConstraintLocator(expr));
-      expr->getCastTypeLoc().setType(toType, /*validated=*/true);
+      CS.setType(expr->getCastTypeLoc(), toType);
 
       // Add a checked cast constraint.
       auto fromType = CS.getType(expr->getSubExpr());
@@ -2603,7 +2646,7 @@ namespace {
 
     Type visitDiscardAssignmentExpr(DiscardAssignmentExpr *expr) {
       auto locator = CS.getConstraintLocator(expr);
-      auto typeVar = CS.createTypeVariable(locator, /*options=*/0);
+      auto typeVar = CS.createTypeVariable(locator);
       return LValueType::get(typeVar);
     }
     
@@ -2618,8 +2661,7 @@ namespace {
       if (!destTy)
         return Type();
       if (destTy->is<UnresolvedType>()) {
-        return CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                     /*options=*/0);
+        return CS.createTypeVariable(CS.getConstraintLocator(expr));
       }
       
       // The source must be convertible to the destination.
@@ -2637,9 +2679,7 @@ namespace {
       // just plop an open type variable here.
       
       auto locator = CS.getConstraintLocator(expr);
-      auto typeVar = CS.createTypeVariable(locator,
-                                           TVO_CanBindToLValue |
-                                           TVO_CanBindToInOut);
+      auto typeVar = CS.createTypeVariable(locator, TVO_CanBindToLValue);
       return typeVar;
     }
 
@@ -2662,8 +2702,7 @@ namespace {
 
       auto objectTy = CS.createTypeVariable(locator,
                                             TVO_PrefersSubtypeBinding |
-                                            TVO_CanBindToLValue |
-                                            TVO_CanBindToInOut);
+                                            TVO_CanBindToLValue);
       
       // The result is the object type of the optional subexpression.
       CS.addConstraint(ConstraintKind::OptionalObject,
@@ -2678,8 +2717,7 @@ namespace {
       // optional types, e.g. T? over T??; otherwise we don't really
       // have a preference.
       auto valueTy = CS.createTypeVariable(CS.getConstraintLocator(expr),
-                                           TVO_PrefersSubtypeBinding |
-                                           TVO_CanBindToInOut);
+                                           TVO_PrefersSubtypeBinding);
 
       Type optTy = getOptionalType(expr->getSubExpr()->getLoc(), valueTy);
       if (!optTy)
@@ -2697,8 +2735,7 @@ namespace {
 
       auto objectTy = CS.createTypeVariable(locator,
                                             TVO_PrefersSubtypeBinding |
-                                            TVO_CanBindToLValue |
-                                            TVO_CanBindToInOut);
+                                            TVO_CanBindToLValue);
       
       // The result is the object type of the optional subexpression.
       CS.addConstraint(ConstraintKind::OptionalObject,
@@ -2719,8 +2756,8 @@ namespace {
       auto locator = CS.getConstraintLocator(expr);
       auto projectedTy = CS.createTypeVariable(locator,
                                                TVO_CanBindToLValue);
-      CS.addKeyPathApplicationConstraint(expr->getKeyPath()->getType(),
-                                         expr->getBase()->getType(),
+      CS.addKeyPathApplicationConstraint(CS.getType(expr->getKeyPath()),
+                                         CS.getType(expr->getBase()),
                                          projectedTy,
                                          locator);
       return projectedTy;
@@ -2739,7 +2776,7 @@ namespace {
         auto &placeholderTy
           = editorPlaceholderVariables[currentEditorPlaceholderVariable];
         if (!placeholderTy) {
-          placeholderTy = CS.createTypeVariable(locator, TVO_CanBindToInOut);
+          placeholderTy = CS.createTypeVariable(locator);
 
           CS.addConstraint(ConstraintKind::Defaultable,
                            placeholderTy,
@@ -2795,16 +2832,18 @@ namespace {
       // For native key paths, traverse the key path components to set up
       // appropriate type relationships at each level.
       auto locator = CS.getConstraintLocator(E);
-      Type root = CS.createTypeVariable(locator, TVO_CanBindToInOut);
-      
+      Type root = CS.createTypeVariable(locator);
+
       // If a root type was explicitly given, then resolve it now.
       if (auto rootRepr = E->getRootType()) {
         auto rootObjectTy = resolveTypeReferenceInExpression(rootRepr);
         if (!rootObjectTy || rootObjectTy->hasError())
           return Type();
         rootObjectTy = CS.openUnboundGenericType(rootObjectTy, locator);
-        CS.addConstraint(ConstraintKind::Bind, root, rootObjectTy,
-                         locator);
+        // Allow \Derived.property to be inferred as \Base.property to
+        // simulate a sort of covariant conversion from
+        // KeyPath<Derived, T> to KeyPath<Base, T>.
+        CS.addConstraint(ConstraintKind::Subtype, rootObjectTy, root, locator);
       }
       
       bool didOptionalChain = false;
@@ -2821,9 +2860,7 @@ namespace {
         // This should only appear in resolved ASTs, but we may need to
         // re-type-check the constraints during failure diagnosis.
         case KeyPathExpr::Component::Kind::Property: {
-          auto memberTy = CS.createTypeVariable(locator,
-                                                TVO_CanBindToLValue |
-                                                TVO_CanBindToInOut);
+          auto memberTy = CS.createTypeVariable(locator, TVO_CanBindToLValue);
           auto lookupName = kind == KeyPathExpr::Component::Kind::UnresolvedProperty
             ? component.getUnresolvedDeclName()
             : component.getDeclRef().getDecl()->getFullName();
@@ -2837,6 +2874,7 @@ namespace {
                                       memberTy,
                                       CurDC,
                                       refKind,
+                                      /*outerAlternatives=*/{},
                                       memberLocator);
           base = memberTy;
           break;
@@ -2860,15 +2898,14 @@ namespace {
           
           // We can't assign an optional back through an optional chain
           // today. Force the base to an rvalue.
-          auto rvalueTy = CS.createTypeVariable(locator, 0);
+          auto rvalueTy = CS.createTypeVariable(locator);
           CS.addConstraint(ConstraintKind::Equal, base, rvalueTy, locator);
           base = rvalueTy;
           LLVM_FALLTHROUGH;
         }
         case KeyPathExpr::Component::Kind::OptionalForce: {
           auto optionalObjTy = CS.createTypeVariable(locator,
-                                                     TVO_CanBindToLValue |
-                                                     TVO_CanBindToInOut);
+                                                     TVO_CanBindToLValue);
           
           CS.addConstraint(ConstraintKind::OptionalObject, base, optionalObjTy,
                            locator);
@@ -2889,14 +2926,14 @@ namespace {
       // If there was an optional chaining component, the end result must be
       // optional.
       if (didOptionalChain) {
-        auto objTy = CS.createTypeVariable(locator, TVO_CanBindToInOut);
+        auto objTy = CS.createTypeVariable(locator);
         auto optTy = OptionalType::get(objTy);
         CS.addConstraint(ConstraintKind::Conversion, base, optTy,
                          locator);
         base = optTy;
       }
-      
-      auto rvalueBase = CS.createTypeVariable(locator, TVO_CanBindToInOut);
+
+      auto rvalueBase = CS.createTypeVariable(locator);
       CS.addConstraint(ConstraintKind::Equal, base, rvalueBase, locator);
       
       // The result is a KeyPath from the root to the end component.
@@ -2907,8 +2944,7 @@ namespace {
       } else {
         // The type of key path depends on the overloads chosen for the key
         // path components.
-        kpTy = CS.createTypeVariable(CS.getConstraintLocator(E),
-                                     TVO_CanBindToInOut);
+        kpTy = CS.createTypeVariable(CS.getConstraintLocator(E));
         CS.addKeyPathConstraint(kpTy, root, rvalueBase,
                                 CS.getConstraintLocator(E));
       }
@@ -2918,19 +2954,163 @@ namespace {
     Type visitKeyPathDotExpr(KeyPathDotExpr *E) {
       llvm_unreachable("found KeyPathDotExpr in CSGen");
     }
+
+    enum class TypeOperation { None,
+                               Join,
+                               JoinInout,
+                               JoinMeta,
+                               JoinNonexistent
+    };
+
+    static TypeOperation getTypeOperation(UnresolvedDotExpr *UDE,
+                                          ASTContext &Context) {
+      auto *DRE = dyn_cast<DeclRefExpr>(UDE->getBase());
+      if (!DRE)
+        return TypeOperation::None;
+
+      if (DRE->getDecl() != Context.TheBuiltinModule)
+        return TypeOperation::None;
+
+      return llvm::StringSwitch<TypeOperation>(
+                 UDE->getName().getBaseIdentifier().str())
+          .Case("type_join", TypeOperation::Join)
+          .Case("type_join_inout", TypeOperation::JoinInout)
+          .Case("type_join_meta", TypeOperation::JoinMeta)
+          .Case("type_join_nonexistent", TypeOperation::JoinNonexistent)
+          .Default(TypeOperation::None);
+    }
+
+    Type resultOfTypeOperation(TypeOperation op, Expr *Arg) {
+      auto *tuple = dyn_cast<TupleExpr>(Arg);
+      assert(tuple && "Expected argument tuple for join operations!");
+
+      auto *lhs = tuple->getElement(0);
+      auto *rhs = tuple->getElement(1);
+
+      switch (op) {
+      case TypeOperation::None:
+        llvm_unreachable(
+            "We should have a valid type operation at this point!");
+
+      case TypeOperation::Join: {
+        auto lhsMeta = CS.getType(lhs)->getAs<MetatypeType>();
+        auto rhsMeta = CS.getType(rhs)->getAs<MetatypeType>();
+        if (!lhsMeta || !rhsMeta)
+          llvm_unreachable("Unexpected argument types for Builtin.type_join!");
+
+        auto &ctx = lhsMeta->getASTContext();
+
+        auto join =
+            Type::join(lhsMeta->getInstanceType(), rhsMeta->getInstanceType());
+
+        if (!join)
+          return ErrorType::get(ctx);
+
+        return MetatypeType::get(*join, ctx)->getCanonicalType();
+      }
+
+      case TypeOperation::JoinInout: {
+        auto lhsInOut = CS.getType(lhs)->getAs<InOutType>();
+        auto rhsMeta = CS.getType(rhs)->getAs<MetatypeType>();
+        if (!lhsInOut || !rhsMeta)
+          llvm_unreachable("Unexpected argument types for Builtin.type_join!");
+
+        auto &ctx = lhsInOut->getASTContext();
+
+        auto join =
+            Type::join(lhsInOut, rhsMeta->getInstanceType());
+
+        if (!join)
+          return ErrorType::get(ctx);
+
+        return MetatypeType::get(*join, ctx)->getCanonicalType();
+      }
+
+      case TypeOperation::JoinMeta: {
+        auto lhsMeta = CS.getType(lhs)->getAs<MetatypeType>();
+        auto rhsMeta = CS.getType(rhs)->getAs<MetatypeType>();
+        if (!lhsMeta || !rhsMeta)
+          llvm_unreachable("Unexpected argument types for Builtin.type_join!");
+
+        auto &ctx = lhsMeta->getASTContext();
+
+        auto join = Type::join(lhsMeta, rhsMeta);
+
+        if (!join)
+          return ErrorType::get(ctx);
+
+        return *join;
+      }
+
+      case TypeOperation::JoinNonexistent: {
+        auto lhsMeta = CS.getType(lhs)->getAs<MetatypeType>();
+        auto rhsMeta = CS.getType(rhs)->getAs<MetatypeType>();
+        if (!lhsMeta || !rhsMeta)
+          llvm_unreachable("Unexpected argument types for Builtin.type_join_nonexistent!");
+
+        auto &ctx = lhsMeta->getASTContext();
+
+        auto join =
+            Type::join(lhsMeta->getInstanceType(), rhsMeta->getInstanceType());
+
+        // Verify that we could not compute a join.
+        if (join)
+          llvm_unreachable("Unexpected result from join - it should not have been computable!");
+
+        // The return value is unimportant.
+        return MetatypeType::get(ctx.TheAnyType)->getCanonicalType();
+      }
+      }
+    }
   };
 
   /// \brief AST walker that "sanitizes" an expression for the
   /// constraint-based type checker.
   ///
-  /// This is only necessary because Sema fills in too much type information
-  /// before the type-checker runs, causing redundant work.
+  /// This is necessary because Sema fills in too much type information before
+  /// the type-checker runs, causing redundant work, and for expression that
+  /// have already been typechecked and may contain unhandled AST nodes.
   class SanitizeExpr : public ASTWalker {
+    ConstraintSystem &CS;
     TypeChecker &TC;
+    bool eraseOpenExistentialsOnly;
+    llvm::SmallDenseMap<OpaqueValueExpr *, Expr *, 4> OpenExistentials;
+
   public:
-    SanitizeExpr(TypeChecker &tc) : TC(tc) { }
+    SanitizeExpr(ConstraintSystem &cs, bool eraseOEsOnly = false)
+        : CS(cs), TC(cs.getTypeChecker()),
+          eraseOpenExistentialsOnly(eraseOEsOnly) { }
 
     std::pair<bool, Expr *> walkToExprPre(Expr *expr) override {
+      bool walkIntoChildren = true;
+      if (auto OOE = dyn_cast<OpenExistentialExpr>(expr)) {
+        auto archetypeVal = OOE->getOpaqueValue();
+        auto base = OOE->getExistentialValue();
+
+        // Walk the base expression to erase any existentials within it
+        base = base->walk(*this);
+
+        bool inserted = OpenExistentials.insert({archetypeVal, base}).second;
+        assert(inserted && "OpaqueValue appears multiple times?");
+        (void)inserted;
+        expr = OOE->getSubExpr();
+      } else if (auto OVE = dyn_cast<OpaqueValueExpr>(expr)) {
+        auto value = OpenExistentials.find(OVE);
+        assert(value != OpenExistentials.end() &&
+               "didn't see this OVE in a containing OpenExistentialExpr?");
+        expr = value->second;
+      } else if (auto CDE = dyn_cast<CollectionUpcastConversionExpr>(expr)) {
+        // Handle collection upcasts specially so that we don't blow up on
+        // their embedded OVEs.
+        if (auto result = CDE->getSubExpr()->walk(*this)) {
+          CDE->setSubExpr(result);
+          walkIntoChildren = false;
+        }
+      }
+
+      if (eraseOpenExistentialsOnly)
+        return {true, expr};
+
       // Let's check if condition of the IfExpr looks properly
       // type-checked, and roll it back to the original state,
       // because otherwise, since condition is implicitly Int1,
@@ -2957,6 +3137,25 @@ namespace {
     }
 
     Expr *walkToExprPost(Expr *expr) override {
+      if (CS.hasType(expr)) {
+        Type type = CS.getType(expr);
+        if (type->hasOpenedExistential()) {
+          type = type.transform([&](Type type) -> Type {
+            if (auto archetype = type->getAs<ArchetypeType>())
+              if (auto existentialType = archetype->getOpenedExistentialType())
+                return existentialType;
+
+            return type;
+          });
+          CS.setType(expr, type);
+          // Set new type to the expression directly.
+          expr->setType(type);
+        }
+      }
+
+      if (eraseOpenExistentialsOnly)
+        return expr;
+
       if (auto implicit = dyn_cast<ImplicitConversionExpr>(expr)) {
         // Skip implicit conversions completely.
         return implicit->getSubExpr();
@@ -2976,6 +3175,17 @@ namespace {
                                     memberAndFunctionRef.first,
                                     memberLoc,
                                     expr->isImplicit());
+        }
+      }
+
+      if (auto *dynamicMember = dyn_cast<DynamicMemberRefExpr>(expr)) {
+        if (auto memberRef = dynamicMember->getMember()) {
+          auto base = skipImplicitConversions(dynamicMember->getBase());
+          return new (TC.Context) MemberRefExpr(base,
+                                                dynamicMember->getDotLoc(),
+                                                memberRef,
+                                                dynamicMember->getNameLoc(),
+                                                expr->isImplicit());
         }
       }
 
@@ -3001,6 +3211,12 @@ namespace {
 
     /// \brief Ignore declarations.
     bool walkToDeclPre(Decl *decl) override { return false; }
+
+    // Don't walk into statements.  This handles the BraceStmt in
+    // non-single-expr closures, so we don't walk into their body.
+    std::pair<bool, Stmt *> walkToStmtPre(Stmt *S) override {
+      return { false, S };
+    }
   };
 
   class ConstraintWalker : public ASTWalker {
@@ -3042,11 +3258,19 @@ namespace {
 
       // Don't visit CoerceExpr with an empty sub expression. They may occur
       // if the body of a closure was not visited while pre-checking because
-      // of an error in the closure's signature
+      // of an error in the closure's signature.
       if (auto coerceExpr = dyn_cast<CoerceExpr>(expr)) {
         if (!coerceExpr->getSubExpr()) {
           return { false, expr };
         }
+      }
+
+      // Don't visit IfExpr with empty sub expressions. They may occur
+      // if the body of a closure was not visited while pre-checking because
+      // of an error in the closure's signature.
+      if (auto ifExpr = dyn_cast<IfExpr>(expr)) {
+        if (!ifExpr->getThenExpr() || !ifExpr->getElseExpr())
+          return { false, expr };
       }
 
       return { true, expr };
@@ -3055,6 +3279,36 @@ namespace {
     /// \brief Once we've visited the children of the given expression,
     /// generate constraints from the expression.
     Expr *walkToExprPost(Expr *expr) override {
+
+      // Handle the Builtin.type_join* family of calls by replacing
+      // them with dot_self_expr of type_expr with the type being the
+      // result of the join.
+      if (auto *apply = dyn_cast<ApplyExpr>(expr)) {
+        auto fnExpr = apply->getFn();
+        if (auto *UDE = dyn_cast<UnresolvedDotExpr>(fnExpr)) {
+          auto &CS = CG.getConstraintSystem();
+          auto typeOperation =
+              ConstraintGenerator::getTypeOperation(UDE, CS.getASTContext());
+
+          if (typeOperation != ConstraintGenerator::TypeOperation::None) {
+            auto joinMetaTy =
+                CG.resultOfTypeOperation(typeOperation, apply->getArg());
+            auto joinTy = joinMetaTy->castTo<MetatypeType>()->getInstanceType();
+
+            auto *TE = TypeExpr::createImplicit(joinTy, CS.getASTContext());
+            CS.cacheType(TE);
+            CS.setType(TE->getTypeLoc(), joinTy);
+
+            auto *DSE = new (CS.getASTContext())
+                DotSelfExpr(TE, SourceLoc(), SourceLoc(), CS.getType(TE));
+            DSE->setImplicit();
+            CS.cacheType(DSE);
+
+            return DSE;
+          }
+        }
+      }
+
       if (auto closure = dyn_cast<ClosureExpr>(expr)) {
         if (closure->hasSingleExpressionBody()) {
           CG.exitClosure(closure);
@@ -3162,7 +3416,7 @@ namespace {
 
 Expr *ConstraintSystem::generateConstraints(Expr *expr) {
   // Remove implicit conversions from the expression.
-  expr = expr->walk(SanitizeExpr(getTypeChecker()));
+  expr = expr->walk(SanitizeExpr(*this));
 
   // Walk the expression to associate labeled arguments.
   expr->walk(ArgumentLabelWalker(*this, expr));
@@ -3181,7 +3435,7 @@ Expr *ConstraintSystem::generateConstraints(Expr *expr) {
 
 Expr *ConstraintSystem::generateConstraintsShallow(Expr *expr) {
   // Sanitize the expression.
-  expr = SanitizeExpr(getTypeChecker()).walkToExprPost(expr);
+  expr = SanitizeExpr(*this).walkToExprPost(expr);
 
   cacheSubExprTypes(expr);
 
@@ -3230,8 +3484,7 @@ class InferUnresolvedMemberConstraintGenerator : public ConstraintGenerator {
   TypeVariableType *createFreeTypeVariableType(Expr *E) {
     auto &CS = getConstraintSystem();
     return CS.createTypeVariable(CS.getConstraintLocator(nullptr),
-                                 TVO_CanBindToLValue |
-                                 TVO_CanBindToInOut);
+                                 TVO_CanBindToLValue);
   }
 
 public:
@@ -3292,9 +3545,11 @@ bool swift::typeCheckUnresolvedExpr(DeclContext &DC,
                                     SmallVectorImpl<Type> &PossibleTypes) {
   PrettyStackTraceExpr stackTrace(DC.getASTContext(),
                                   "type-checking unresolved member", Parent);
+
   ConstraintSystemOptions Options = ConstraintSystemFlags::AllowFixes;
   auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
   ConstraintSystem CS(*TC, &DC, Options);
+  Parent = Parent->walk(SanitizeExpr(CS));
   CleanupIllFormedExpressionRAII cleanup(TC->Context, Parent);
   InferUnresolvedMemberConstraintGenerator MCG(E, CS);
   ConstraintWalker cw(MCG);
@@ -3309,7 +3564,7 @@ bool swift::typeCheckUnresolvedExpr(DeclContext &DC,
   }
 
   SmallVector<Solution, 3> solutions;
-  if (CS.solve(solutions, FreeTypeVariableBinding::Allow)) {
+  if (CS.solve(Parent, solutions, FreeTypeVariableBinding::UnresolvedType)) {
     return false;
   }
 
@@ -3329,14 +3584,15 @@ bool swift::typeCheckUnresolvedExpr(DeclContext &DC,
 
 bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
                                const ExtensionDecl *ED) {
-  ConstraintSystemOptions Options;
-  NominalTypeDecl *Nominal = BaseTy->getNominalOrBoundGenericNominal();
-  if (!Nominal || !BaseTy->isSpecialized() ||
-      ED->getGenericRequirements().empty() ||
+  if (!ED->isConstrainedExtension() ||
       // We'll crash if we leak type variables from one constraint
       // system into the new one created below.
-      BaseTy->hasTypeVariable())
+      BaseTy->hasTypeVariable() ||
+      // We can't do anything if the base type has unbound generic
+      // parameters either.
+      BaseTy->hasUnboundGenericType())
     return true;
+
   std::unique_ptr<TypeChecker> CreatedTC;
   // If the current ast context has no type checker, create one for it.
   auto *TC = static_cast<TypeChecker*>(DC.getASTContext().getLazyResolver());
@@ -3344,66 +3600,23 @@ bool swift::isExtensionApplied(DeclContext &DC, Type BaseTy,
     CreatedTC.reset(new TypeChecker(DC.getASTContext()));
     TC = CreatedTC.get();
   }
-  if (ED->getAsProtocolExtensionContext())
-    return TC->isProtocolExtensionUsable(&DC, BaseTy, const_cast<ExtensionDecl*>(ED));
+
+  ConstraintSystemOptions Options;
   ConstraintSystem CS(*TC, &DC, Options);
   auto Loc = CS.getConstraintLocator(nullptr);
-  std::vector<Identifier> Scratch;
-  bool Failed = false;
-  SmallVector<Type, 3> TypeScratch;
 
   // Prepare type substitution map.
   SubstitutionMap Substitutions = BaseTy->getContextSubstitutionMap(
     DC.getParentModule(), ED);
-  auto resolveType = [&](Type Ty) {
-    return Ty.subst(Substitutions);
-  };
-
-  auto createMemberConstraint = [&](Requirement &Req, ConstraintKind Kind) {
-    auto First = resolveType(Req.getFirstType());
-    auto Second = resolveType(Req.getSecondType());
-    if (First.isNull() || Second.isNull()) {
-      Failed = true;
-      return;
-    }
-    // Add constraints accordingly.
-    CS.addConstraint(Kind, First, Second, Loc);
-  };
 
   // For every requirement, add a constraint.
   for (auto Req : ED->getGenericRequirements()) {
-    switch(Req.getKind()) {
-      case RequirementKind::Conformance:
-        createMemberConstraint(Req, ConstraintKind::ConformsTo);
-        break;
-      case RequirementKind::Layout:
-        if (Req.getLayoutConstraint()->isClass()) {
-          auto First = resolveType(Req.getFirstType());
-          CS.addConstraint(ConstraintKind::ConformsTo, First,
-                           CS.getASTContext().getAnyObjectType(),
-                           Loc);
-        }
-
-        // Nothing else can appear outside of @_specialize yet, and Sema
-        // doesn't know how to check.
-        break;
-      case RequirementKind::Superclass: {
-        createMemberConstraint(Req, ConstraintKind::Subtype);
-
-        auto First = resolveType(Req.getFirstType());
-        CS.addConstraint(ConstraintKind::ConformsTo, First,
-                         CS.getASTContext().getAnyObjectType(),
-                         Loc);
-
-        break;
-      }
-      case RequirementKind::SameType:
-        createMemberConstraint(Req, ConstraintKind::Equal);
-        break;
+    if (auto resolved = Req.subst(Substitutions)) {
+      CS.addConstraint(*resolved, Loc);
+    } else {
+      return false;
     }
   }
-  if (Failed)
-    return true;
 
   // Having a solution implies the extension's requirements have been fulfilled.
   return CS.solveSingle().hasValue();
@@ -3436,6 +3649,10 @@ bool swift::isEqual(Type T1, Type T2, DeclContext &DC) {
 
 bool swift::isConvertibleTo(Type T1, Type T2, DeclContext &DC) {
   return canSatisfy(T1, T2, false, ConstraintKind::Conversion, &DC);
+}
+
+void swift::eraseOpenedExistentials(ConstraintSystem &CS, Expr *&expr) {
+  expr = expr->walk(SanitizeExpr(CS, /*eraseOEsOnly=*/true));
 }
 
 struct ResolvedMemberResult::Implementation {
@@ -3490,7 +3707,7 @@ swift::resolveValueMember(DeclContext &DC, Type BaseTy, DeclName Name) {
 
   // Keep track of all the unviable members.
   for (auto Can : LookupResult.UnviableCandidates)
-    Result.Impl.AllDecls.push_back(Can.first);
+    Result.Impl.AllDecls.push_back(Can.first.getDecl());
 
   // Keep track of the start of viable choices.
   Result.Impl.ViableStartIdx = Result.Impl.AllDecls.size();
@@ -3501,9 +3718,7 @@ swift::resolveValueMember(DeclContext &DC, Type BaseTy, DeclName Name) {
 
   // Try to figure out the best overload.
   ConstraintLocator *Locator = CS.getConstraintLocator(nullptr);
-  TypeVariableType *TV = CS.createTypeVariable(Locator,
-                                               TVO_CanBindToLValue |
-                                               TVO_CanBindToInOut);
+  TypeVariableType *TV = CS.createTypeVariable(Locator, TVO_CanBindToLValue);
   CS.addOverloadSet(TV, LookupResult.ViableCandidates, &DC, Locator);
   Optional<Solution> OpSolution = CS.solveSingle();
   ValueDecl *Selected = nullptr;

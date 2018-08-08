@@ -22,6 +22,7 @@ add_lldb_library(lldbCommands
   CommandObjectSettings.cpp
   CommandObjectSource.cpp
   CommandObjectSyntax.cpp
+  CommandObjectStats.cpp
   CommandObjectTarget.cpp
   CommandObjectThread.cpp
   CommandObjectType.cpp
@@ -33,6 +34,7 @@ add_lldb_library(lldbCommands
   LINK_LIBS
     swiftAST
     swiftIDE
+    lldbBase
     lldbBreakpoint
     lldbCore
     lldbDataFormatters

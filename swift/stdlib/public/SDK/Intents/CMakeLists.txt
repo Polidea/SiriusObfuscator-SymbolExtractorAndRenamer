@@ -8,8 +8,10 @@ add_swift_library(swiftIntents ${SWIFT_SDK_OVERLAY_LIBRARY_BUILD_TYPES} IS_SDK_O
   INGetCarLockStatusIntentResponse.swift
   INGetCarPowerLevelStatusIntentResponse.swift
   INIntegerResolutionResult.swift
+  INIntent.swift
   INNotebookItemTypeResolutionResult.swift
   INParameter.swift
+  INPlayMediaIntent.swift
   INRequestRideIntent.swift
   INRideOption.swift
   INSaveProfileInCarIntent.swift
@@ -23,6 +25,7 @@ add_swift_library(swiftIntents ${SWIFT_SDK_OVERLAY_LIBRARY_BUILD_TYPES} IS_SDK_O
   INSetSeatSettingsInCarIntent.swift
   INStartPhotoPlaybackIntentResponse.swift
   INStartWorkoutIntent.swift
+  NSStringIntents.swift
 
   SWIFT_COMPILE_FLAGS "${SWIFT_RUNTIME_SWIFT_COMPILE_FLAGS}"
   LINK_FLAGS "${SWIFT_RUNTIME_SWIFT_LINK_FLAGS}"

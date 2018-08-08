@@ -19,8 +19,8 @@
 #include "llvm/ADT/DenseMap.h"
 
 // Project includes
-#include "lldb/Core/ConstString.h"
 #include "lldb/Core/ValueObject.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-public.h"
 
 namespace lldb_private {
@@ -242,7 +242,12 @@ public:
                            lldb::ByteOrder byte_order,
                            uint32_t addr_byte_size) = 0;
 
-  virtual ConstString GetNextPersistentVariableName(bool is_error = false) = 0;
+  /// Return a new persistent variable name with the specified prefix.
+  ConstString GetNextPersistentVariableName(Target &target,
+                                            llvm::StringRef prefix);
+
+  virtual llvm::StringRef
+  GetPersistentVariablePrefix(bool is_error = false) const = 0;
 
   virtual void
   RemovePersistentVariable(lldb::ExpressionVariableSP variable) = 0;

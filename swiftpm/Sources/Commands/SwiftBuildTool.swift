@@ -37,7 +37,8 @@ public class SwiftBuildTool: SwiftTool<BuildToolOptions> {
             toolName: "build",
             usage: "[options]",
             overview: "Build sources into binary products",
-            args: args
+            args: args,
+            seeAlso: type(of: self).otherToolNames()
         )
     }
 
@@ -51,8 +52,17 @@ public class SwiftBuildTool: SwiftTool<BuildToolOptions> {
           #endif
 
             guard let subset = options.buildSubset(diagnostics: diagnostics) else { return }
-            let plan = try buildPlan()
-            try build(plan: plan, subset: subset)
+          
+            // Check if we need to generate the llbuild manifest.
+            let regenerateManifest = try shouldRegenerateManifest()
+            if regenerateManifest {
+                // Create the build plan and build normally.
+                let plan = try BuildPlan(buildParameters: buildParameters(), graph: loadPackageGraph(), diagnostics: diagnostics)
+                try build(plan: plan, subset: subset)
+            } else {
+                // Otherwise, run llbuild directly.
+                try build(parameters: buildParameters(), subset: subset)
+            }
 
         case .binPath:
             try print(buildParameters().buildPath.asString)
@@ -176,5 +186,11 @@ fileprivate extension BuildSubset {
         case .target:
             return targetOptionName
         }
+    }
+}
+
+extension SwiftBuildTool: ToolName {
+    static var toolName: String {
+        return "swift build"
     }
 }

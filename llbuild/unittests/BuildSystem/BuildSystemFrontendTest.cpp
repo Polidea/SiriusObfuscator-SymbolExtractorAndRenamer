@@ -50,7 +50,6 @@ namespace {
 /// Allows for command skipping via ``commandsToSkip``.
 class TestBuildSystemFrontendDelegate : public BuildSystemFrontendDelegate {
   using super = BuildSystemFrontendDelegate;
-  FileSystem& fs;
 
   std::mutex traceMutex;
   std::string traceData;
@@ -58,10 +57,8 @@ class TestBuildSystemFrontendDelegate : public BuildSystemFrontendDelegate {
 
 public:
   TestBuildSystemFrontendDelegate(SourceMgr& sourceMgr,
-                                  const BuildSystemInvocation& invocation,
-                                  FileSystem& fs):
+                                  const BuildSystemInvocation& invocation):
       BuildSystemFrontendDelegate(sourceMgr, invocation, "client", 0),
-      fs(fs),
       traceStream(traceData)
   {
   }
@@ -179,17 +176,14 @@ public:
     super::commandProcessHadError(command, handle, message);
   }
 
-  virtual void commandProcessFinished(Command* command, ProcessHandle handle, CommandResult result,
-                                      int exitStatus) override {
+  virtual void commandProcessFinished(Command* command, ProcessHandle handle,
+                                      const CommandExtendedResult& result) override {
     {
         std::lock_guard<std::mutex> lock(traceMutex);
-        traceStream << __FUNCTION__ << ": " << command->getName() << ": " << exitStatus << "\n";
+        traceStream << __FUNCTION__ << ": " << command->getName() << ": "
+                    << result.exitStatus << "\n";
     }
-    super::commandProcessFinished(command, handle, result, exitStatus);
-  }
-
-  virtual FileSystem& getFileSystem() override {
-    return fs;
+    super::commandProcessFinished(command, handle, result);
   }
 
   virtual std::unique_ptr<Tool> lookupTool(StringRef name) override {
@@ -197,6 +191,11 @@ public:
   }
 
   virtual void cycleDetected(const std::vector<core::Rule*>& items) override { }
+
+  virtual void error(StringRef filename, const Token& at, const Twine& message) override {
+    std::lock_guard<std::mutex> lock(traceMutex);
+    traceStream << __FUNCTION__ << ": " << message << "\n";
+  }
 };
 
 
@@ -254,10 +253,10 @@ commands:
 )END");
 
   {
-    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
     delegate.commandsToSkip.insert("2");
 
-    BuildSystemFrontend frontend(delegate, invocation);
+    BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
     ASSERT_TRUE(frontend.build(""));
 
     ASSERT_TRUE(delegate.checkTrace(R"END(
@@ -287,9 +286,9 @@ commandFinished: 3: 0
   // re-run 3. 1 doesn't have to run at all, so we don't expect to get asked
   // if it should start.
   {
-    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
 
-    BuildSystemFrontend frontend(delegate, invocation);
+    BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
     ASSERT_TRUE(frontend.build(""));
 
     ASSERT_TRUE(delegate.checkTrace(R"END(
@@ -336,10 +335,10 @@ commands:
 )END");
 
   {
-    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
     delegate.commandsToSkip.insert("1");
 
-    BuildSystemFrontend frontend(delegate, invocation);
+    BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
     ASSERT_FALSE(frontend.build(""));
     ASSERT_EQ(1u, delegate.getNumFailedCommands());
 
@@ -362,9 +361,9 @@ hadCommandFailure
 
   // If we rebuild incrementally without skipping, we expect to run 1 and 2.
   {
-    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+    TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
 
-    BuildSystemFrontend frontend(delegate, invocation);
+    BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
     ASSERT_TRUE(frontend.build(""));
 
     ASSERT_TRUE(delegate.checkTrace(R"END(
@@ -408,10 +407,10 @@ commands:
         outputs: ["2"]
 )END");
 
-  TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+  TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
   delegate.commandsToSkip.insert("1");
   
-  BuildSystemFrontend frontend(delegate, invocation);
+  BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
   ASSERT_TRUE(frontend.build(""));
 
   ASSERT_TRUE(delegate.checkTrace(R"END(
@@ -454,10 +453,10 @@ commands:
   // We need to delete the symlink ourselves, because llvm's remove()
   // currently refuses to delete symlinks.
 
-  TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation, *fs);
+  TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
   delegate.commandsToSkip.insert("1");
   
-  BuildSystemFrontend frontend(delegate, invocation);
+  BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
   ASSERT_TRUE(frontend.build(""));
 
   ASSERT_TRUE(delegate.checkTrace(R"END(
@@ -475,6 +474,19 @@ commandProcessStarted: 3
 commandProcessFinished: 3: 0
 commandFinished: 3: 0
 )END"));
+}
+
+TEST_F(BuildSystemFrontendTest, singleNodeBuildLogsMissingInputs) {
+  writeBuildFile(R"END(
+client:
+  name: client
+)END");
+
+  TestBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
+  BuildSystemFrontend frontend(delegate, invocation, createLocalFileSystem());
+
+  ASSERT_FALSE(frontend.buildNode("/missing"));
+  ASSERT_TRUE(delegate.checkTrace("error: missing input '/missing' and no rule to build it\n"));
 }
 
 }

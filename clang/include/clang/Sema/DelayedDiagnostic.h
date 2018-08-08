@@ -23,6 +23,7 @@
 #define LLVM_CLANG_SEMA_DELAYEDDIAGNOSTIC_H
 
 #include "clang/Sema/Sema.h"
+#include "llvm/ADT/ArrayRef.h"
 
 namespace clang {
 namespace sema {
@@ -123,13 +124,13 @@ public:
   void Destroy();
 
   static DelayedDiagnostic makeAvailability(AvailabilityResult AR,
-                                            SourceLocation Loc,
-                                            const NamedDecl *D,
+                                            ArrayRef<SourceLocation> Locs,
+                                            const NamedDecl *ReferringDecl,
+                                            const NamedDecl *OffendingDecl,
                                             const ObjCInterfaceDecl *UnknownObjCClass,
                                             const ObjCPropertyDecl  *ObjCProperty,
                                             StringRef Msg,
                                             bool ObjCPropertyAccess);
-
 
   static DelayedDiagnostic makeAccess(SourceLocation Loc,
                                       const AccessedEntity &Entity) {
@@ -164,14 +165,24 @@ public:
     return *reinterpret_cast<const AccessedEntity*>(AccessData);
   }
 
-  const NamedDecl *getAvailabilityDecl() const {
+  const NamedDecl *getAvailabilityReferringDecl() const {
     assert(Kind == Availability && "Not an availability diagnostic.");
-    return AvailabilityData.Decl;
+    return AvailabilityData.ReferringDecl;
+  }
+
+  const NamedDecl *getAvailabilityOffendingDecl() const {
+    return AvailabilityData.OffendingDecl;
   }
 
   StringRef getAvailabilityMessage() const {
     assert(Kind == Availability && "Not an availability diagnostic.");
     return StringRef(AvailabilityData.Message, AvailabilityData.MessageLen);
+  }
+
+  ArrayRef<SourceLocation> getAvailabilitySelectorLocs() const {
+    assert(Kind == Availability && "Not an availability diagnostic.");
+    return llvm::makeArrayRef(AvailabilityData.SelectorLocs,
+                              AvailabilityData.NumSelectorLocs);
   }
 
   AvailabilityResult getAvailabilityResult() const {
@@ -213,11 +224,14 @@ public:
 private:
 
   struct AD {
-    const NamedDecl *Decl;
+    const NamedDecl *ReferringDecl;
+    const NamedDecl *OffendingDecl;
     const ObjCInterfaceDecl *UnknownObjCClass;
     const ObjCPropertyDecl  *ObjCProperty;
     const char *Message;
     size_t MessageLen;
+    SourceLocation *SelectorLocs;
+    size_t NumSelectorLocs;
     AvailabilityResult AR;
     bool ObjCPropertyAccess;
   };

@@ -29,6 +29,7 @@
 namespace swift {
 
 class DominanceInfo;
+template <class T> class NullablePtr;
 
 /// Transform a Use Range (Operand*) into a User Range (SILInstruction*)
 using UserTransform = std::function<SILInstruction *(Operand *)>;
@@ -45,10 +46,12 @@ inline ValueBaseUserRange makeUserRange(
 using DeadInstructionSet = llvm::SmallSetVector<SILInstruction *, 8>;
 
 /// \brief Create a retain of \p Ptr before the \p InsertPt.
-SILInstruction *createIncrementBefore(SILValue Ptr, SILInstruction *InsertPt);
+NullablePtr<SILInstruction> createIncrementBefore(SILValue Ptr,
+                                                  SILInstruction *InsertPt);
 
 /// \brief Create a release of \p Ptr before the \p InsertPt.
-SILInstruction *createDecrementBefore(SILValue Ptr, SILInstruction *InsertPt);
+NullablePtr<SILInstruction> createDecrementBefore(SILValue Ptr,
+                                                  SILInstruction *InsertPt);
 
 /// \brief For each of the given instructions, if they are dead delete them
 /// along with their dead operands.
@@ -99,11 +102,7 @@ void eraseUsesOfInstruction(
 /// value itself)
 void eraseUsesOfValue(SILValue V);
 
-FullApplySite findApplyFromDevirtualizedResult(SILInstruction *I);
-
-/// Check that this is a partial apply of a reabstraction thunk and return the
-/// argument of the partial apply if it is.
-SILValue isPartialApplyOfReabstractionThunk(PartialApplyInst *PAI);
+FullApplySite findApplyFromDevirtualizedResult(SILValue value);
 
 /// Cast a value into the expected, ABI compatible type if necessary.
 /// This may happen e.g. when:
@@ -155,15 +154,12 @@ SILLinkage getSpecializedLinkage(SILFunction *F, SILLinkage L);
 
 /// Tries to optimize a given apply instruction if it is a concatenation of
 /// string literals. Returns a new instruction if optimization was possible.
-SILInstruction *tryToConcatenateStrings(ApplyInst *AI, SILBuilder &B);
-
+SingleValueInstruction *tryToConcatenateStrings(ApplyInst *AI, SILBuilder &B);
 
 /// Tries to perform jump-threading on all checked_cast_br instruction in
 /// function \p Fn.
 bool tryCheckedCastBrJumpThreading(SILFunction *Fn, DominanceInfo *DT,
                           SmallVectorImpl<SILBasicBlock *> &BlocksForWorklist);
-
-void recalcDomTreeForCCBOpt(DominanceInfo *DT, SILFunction &F);
 
 /// A structure containing callbacks that are called when an instruction is
 /// removed or added.
@@ -191,7 +187,7 @@ struct InstModCallbacks {
 ///
 /// In the future this should be extended to be less conservative with users.
 bool
-tryDeleteDeadClosure(SILInstruction *Closure,
+tryDeleteDeadClosure(SingleValueInstruction *Closure,
                      InstModCallbacks Callbacks = InstModCallbacks());
 
 /// Given a SILValue argument to a partial apply \p Arg and the associated
@@ -218,15 +214,17 @@ public:
 
   /// Constructor for the value \p Def with a specific set of users of Def's
   /// users.
-  ValueLifetimeAnalysis(SILValue Def, ArrayRef<SILInstruction*> UserList) :
+  ValueLifetimeAnalysis(SILInstruction *Def, ArrayRef<SILInstruction*> UserList) :
       DefValue(Def), UserSet(UserList.begin(), UserList.end()) {
     propagateLiveness();
   }
 
   /// Constructor for the value \p Def considering all the value's uses.
-  ValueLifetimeAnalysis(SILValue Def) : DefValue(Def) {
-    for (Operand *Op : Def->getUses()) {
-      UserSet.insert(Op->getUser());
+  ValueLifetimeAnalysis(SILInstruction *Def) : DefValue(Def) {
+    for (auto result : Def->getResults()) {
+      for (Operand *op : result->getUses()) {
+        UserSet.insert(op->getUser());
+      }
     }
     propagateLiveness();
   }
@@ -240,22 +238,34 @@ public:
     /// a critical edges.
     AllowToModifyCFG,
     
-    /// Ignore exit edges from the lifetime region at all.
-    IgnoreExitEdges
+    /// Require that all users must commonly post-dominate the definition. In
+    /// other words: All paths from the definition to the function exit must
+    /// contain at least one use. Fail if this is not the case.
+    UsersMustPostDomDef
   };
 
   /// Computes and returns the lifetime frontier for the value in \p Fr.
+  ///
   /// Returns true if all instructions in the frontier could be found in
   /// non-critical edges.
   /// Returns false if some frontier instructions are located on critical edges.
   /// In this case, if \p mode is AllowToModifyCFG, those critical edges are
   /// split, otherwise nothing is done and the returned \p Fr is not valid.
-  bool computeFrontier(Frontier &Fr, Mode mode);
+  ///
+  /// If \p DEBlocks is provided, all dead-end blocks are ignored. This prevents
+  /// unreachable-blocks to be included in the frontier.
+  bool computeFrontier(Frontier &Fr, Mode mode,
+                       DeadEndBlocks *DEBlocks = nullptr);
 
   /// Returns true if the instruction \p Inst is located within the value's
   /// lifetime.
   /// It is assumed that \p Inst is located after the value's definition.
   bool isWithinLifetime(SILInstruction *Inst);
+
+  /// Returns true if the value is alive at the begin of block \p BB.
+  bool isAliveAtBeginOfBlock(SILBasicBlock *BB) {
+    return LiveBlocks.count(BB) && BB != DefValue->getParent();
+  }
 
   /// For debug dumping.
   void dump() const;
@@ -263,7 +273,7 @@ public:
 private:
 
   /// The value.
-  SILValue DefValue;
+  SILInstruction *DefValue;
 
   /// The set of blocks where the value is live.
   llvm::SmallSetVector<SILBasicBlock *, 16> LiveBlocks;
@@ -277,16 +287,11 @@ private:
 
   /// Returns the last use of the value in the live block \p BB.
   SILInstruction *findLastUserInBlock(SILBasicBlock *BB);
-
-  /// Returns true if the value is alive at the begin of block \p BB.
-  bool isAliveAtBeginOfBlock(SILBasicBlock *BB) {
-    return LiveBlocks.count(BB) && BB != DefValue->getParentBlock();
-  }
 };
 
 /// Base class for BB cloners.
 class BaseThreadingCloner : public SILClonerWithScopes<BaseThreadingCloner> {
-  friend class SILVisitor<BaseThreadingCloner>;
+  friend class SILInstructionVisitor<BaseThreadingCloner>;
   friend class SILCloner<BaseThreadingCloner>;
 
   protected:
@@ -312,7 +317,7 @@ class BaseThreadingCloner : public SILClonerWithScopes<BaseThreadingCloner> {
 
   SILValue remapValue(SILValue Value) {
     // If this is a use of an instruction in another block, then just use it.
-    if (auto SI = dyn_cast<SILInstruction>(Value)) {
+    if (auto SI = Value->getDefiningInstruction()) {
       if (SI->getParent() != FromBB)
         return Value;
     } else if (auto BBArg = dyn_cast<SILArgument>(Value)) {
@@ -331,8 +336,13 @@ class BaseThreadingCloner : public SILClonerWithScopes<BaseThreadingCloner> {
     SILCloner<BaseThreadingCloner>::postProcess(Orig, Cloned);
     // A terminator defines no values. Keeping terminators in the AvailVals list
     // is problematic because terminators get replaced during SSA update.
-    if (!isa<TermInst>(Orig))
-      AvailVals.push_back(std::make_pair(Orig, SILValue(Cloned)));
+    auto results = Orig->getResults();
+    assert(results.size() == Cloned->getResults().size());
+    if (!results.empty()) {
+      auto clonedResults = Cloned->getResults();
+      for (size_t i = 0, e = results.size(); i != e; ++i)
+        AvailVals.push_back(std::make_pair(results[i], clonedResults[i]));
+    }
   }
 };
 
@@ -416,121 +426,6 @@ void updateSSAAfterCloning(BaseThreadingCloner &Cloner, SILBasicBlock *SrcBB,
                            SILBasicBlock *DestBB,
                            bool NeedToSplitCriticalEdges = true);
 
-/// \brief This is a helper class used to optimize casts.
-class CastOptimizer {
-  // Callback to be called when uses of an instruction should be replaced.
-  std::function<void (SILInstruction *I, ValueBase *V)> ReplaceInstUsesAction;
-
-  // Callback to call when an instruction needs to be erased.
-  std::function<void (SILInstruction *)> EraseInstAction;
-
-  // Callback to call after an optimization was performed based on the fact
-  // that a cast will succeed.
-  std::function<void ()> WillSucceedAction;
-
-  // Callback to call after an optimization was performed based on the fact
-  // that a cast will fail.
-  std::function<void ()> WillFailAction;
-
-  /// Optimize a cast from a bridged ObjC type into
-  /// a corresponding Swift type implementing _ObjectiveCBridgeable.
-  SILInstruction *
-  optimizeBridgedObjCToSwiftCast(SILInstruction *Inst,
-      bool isConditional,
-      SILValue Src,
-      SILValue Dest,
-      CanType Source,
-      CanType Target,
-      Type BridgedSourceTy,
-      Type BridgedTargetTy,
-      SILBasicBlock *SuccessBB,
-      SILBasicBlock *FailureBB);
-
-  /// Optimize a cast from a Swift type implementing _ObjectiveCBridgeable
-  /// into a bridged ObjC type.
-  SILInstruction *
-  optimizeBridgedSwiftToObjCCast(SILInstruction *Inst,
-      CastConsumptionKind ConsumptionKind,
-      bool isConditional,
-      SILValue Src,
-      SILValue Dest,
-      CanType Source,
-      CanType Target,
-      Type BridgedSourceTy,
-      Type BridgedTargetTy,
-      SILBasicBlock *SuccessBB,
-      SILBasicBlock *FailureBB);
-
-  void deleteInstructionsAfterUnreachable(SILInstruction *UnreachableInst,
-                                          SILInstruction *TrapInst);
-
-public:
-  CastOptimizer(std::function<void (SILInstruction *I, ValueBase *V)> ReplaceInstUsesAction,
-                std::function<void (SILInstruction *)> EraseAction,
-                std::function<void ()> WillSucceedAction,
-                std::function<void ()> WillFailAction = [](){})
-    : ReplaceInstUsesAction(ReplaceInstUsesAction),
-      EraseInstAction(EraseAction),
-      WillSucceedAction(WillSucceedAction),
-      WillFailAction(WillFailAction) {}
-
-  // This constructor is used in
-  // 'SILOptimizer/Mandatory/ConstantPropagation.cpp'. MSVC2015 compiler
-  // couldn't use the single constructor version which has three default
-  // arguments. It seems the number of the default argument with lambda is
-  // limited.
-  CastOptimizer(std::function<void (SILInstruction *I, ValueBase *V)> ReplaceInstUsesAction,
-                std::function<void (SILInstruction *)> EraseAction = [](SILInstruction*){})
-    : CastOptimizer(ReplaceInstUsesAction, EraseAction, [](){}, [](){}) {}
-
-  /// Simplify checked_cast_br. It may change the control flow.
-  SILInstruction *
-  simplifyCheckedCastBranchInst(CheckedCastBranchInst *Inst);
-
-  /// Simplify checked_cast_value_br. It may change the control flow.
-  SILInstruction *
-  simplifyCheckedCastValueBranchInst(CheckedCastValueBranchInst *Inst);
-
-  /// Simplify checked_cast_addr_br. It may change the control flow.
-  SILInstruction *
-  simplifyCheckedCastAddrBranchInst(CheckedCastAddrBranchInst *Inst);
-
-  /// Optimize checked_cast_br. This cannot change the control flow.
-  SILInstruction *
-  optimizeCheckedCastBranchInst(CheckedCastBranchInst *Inst);
-
-  /// Optimize checked_cast_value_br. This cannot change the control flow.
-  SILInstruction *
-  optimizeCheckedCastValueBranchInst(CheckedCastValueBranchInst *Inst);
-
-  /// Optimize checked_cast_addr_br. This cannot change the control flow.
-  SILInstruction *
-  optimizeCheckedCastAddrBranchInst(CheckedCastAddrBranchInst *Inst);
-
-  /// Optimize unconditional_checked_cast. This cannot change the control flow.
-  ValueBase *
-  optimizeUnconditionalCheckedCastInst(UnconditionalCheckedCastInst *Inst);
-
-  /// Optimize unconditional_checked_cast_addr. This cannot change the control
-  /// flow.
-  SILInstruction *
-  optimizeUnconditionalCheckedCastAddrInst(UnconditionalCheckedCastAddrInst *Inst);
-
-  /// Check if it is a bridged cast and optimize it.
-  /// May change the control flow.
-  SILInstruction *
-  optimizeBridgedCasts(SILInstruction *Inst,
-      CastConsumptionKind ConsumptionKind,
-      bool isConditional,
-      SILValue Src,
-      SILValue Dest,
-      CanType Source,
-      CanType Target,
-      SILBasicBlock *SuccessBB,
-      SILBasicBlock *FailureBB);
-
-};
-
 // Helper class that provides a callback that can be used in
 // inliners/cloners for collecting new call sites.
 class CloneCollector {
@@ -572,20 +467,20 @@ class IgnoreExpectUseIterator
   ValueBaseUseIterator OrigUseChain;
   ValueBaseUseIterator CurrentIter;
 
-  static bool isExpect(Operand *Use) {
+  static BuiltinInst *isExpect(Operand *Use) {
     if (auto *BI = dyn_cast<BuiltinInst>(Use->getUser()))
       if (BI->getIntrinsicInfo().ID == llvm::Intrinsic::expect)
-        return true;
-    return false;
+        return BI;
+    return nullptr;
   }
 
   // Advance through expect users to their users until we encounter a user that
   // is not an expect.
   void advanceThroughExpects() {
     while (CurrentIter == OrigUseChain &&
-           CurrentIter != ValueBaseUseIterator(nullptr) &&
-           isExpect(*CurrentIter)) {
-      auto *Expect = CurrentIter->getUser();
+           CurrentIter != ValueBaseUseIterator(nullptr)) {
+      auto *Expect = isExpect(*CurrentIter);
+      if (!Expect) return;
       CurrentIter = Expect->use_begin();
       // Expect with no users advance to next item in original use chain.
       if (CurrentIter == Expect->use_end())
@@ -654,7 +549,11 @@ ignore_expect_uses(ValueBase *V) {
 /// An example of how this is useful is in cases where one is splitting up an
 /// aggregate and reforming it, the reformed aggregate may have extract
 /// operations from it. These can be simplified and removed.
-bool simplifyUsers(SILInstruction *I);
+bool simplifyUsers(SingleValueInstruction *I);
+
+///  True if a type can be expanded
+/// without a significant increase to code size.
+bool shouldExpand(SILModule &Module, SILType Ty);
 
 /// Check if a given type is a simple type, i.e. a builtin
 /// integer or floating point type or a struct/tuple whose members
@@ -674,7 +573,7 @@ bool analyzeStaticInitializer(SILValue V,
 /// The sequence is traversed inside out, i.e.
 /// starting with the innermost struct_element_addr
 void replaceLoadSequence(SILInstruction *I,
-                         SILInstruction *Value,
+                         SILValue Value,
                          SILBuilder &B);
 
 
@@ -710,6 +609,48 @@ SILType getExactDynamicTypeOfUnderlyingObject(SILValue S, SILModule &M,
 /// Will look through single basic block predecessor arguments.
 void hoistAddressProjections(Operand &Op, SILInstruction *InsertBefore,
                              DominanceInfo *DomTree);
+
+/// Utility class for cloning init values into the static initializer of a
+/// SILGlobalVariable.
+class StaticInitCloner : public SILCloner<StaticInitCloner> {
+  friend class SILInstructionVisitor<StaticInitCloner>;
+  friend class SILCloner<StaticInitCloner>;
+
+  /// The number of not yet cloned operands for each instruction.
+  llvm::DenseMap<SILInstruction *, int> NumOpsToClone;
+
+  /// List of instructions for which all operands are already cloned (or which
+  /// don't have any operands).
+  llvm::SmallVector<SILInstruction *, 8> ReadyToClone;
+
+public:
+  StaticInitCloner(SILGlobalVariable *GVar)
+      : SILCloner<StaticInitCloner>(GVar) { }
+
+  /// Add \p InitVal and all its operands (transitively) for cloning.
+  ///
+  /// Note: all init values must are added, before calling clone().
+  void add(SILInstruction *InitVal);
+
+  /// Clone \p InitVal and all its operands into the initializer of the
+  /// SILGlobalVariable.
+  ///
+  /// \return Returns the cloned instruction in the SILGlobalVariable.
+  SingleValueInstruction *clone(SingleValueInstruction *InitVal);
+
+  /// Convenience function to clone a single \p InitVal.
+  static void appendToInitializer(SILGlobalVariable *GVar,
+                                  SingleValueInstruction *InitVal) {
+    StaticInitCloner Cloner(GVar);
+    Cloner.add(InitVal);
+    Cloner.clone(InitVal);
+  }
+
+protected:
+  SILLocation remapLocation(SILLocation Loc) {
+    return ArtificialUnreachableLocation();
+  }
+};
 
 } // end namespace swift
 

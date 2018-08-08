@@ -54,6 +54,8 @@ private:
 
 public:
   FormatterDocument(std::unique_ptr<llvm::MemoryBuffer> Buffer) {
+    // Formatting logic requires tokens on source file.
+    CompInv.getLangOptions().CollectParsedToken = true;
     updateCode(std::move(Buffer));
   }
 
@@ -94,9 +96,8 @@ private:
   }
 
 public:
-  void setMainExecutablePath(const std::string &Path) {
-    MainExecutablePath = Path;
-  }
+  SwiftFormatInvocation(const std::string &ExecPath)
+      : MainExecutablePath(ExecPath) {}
 
   const std::string &getOutputFilename() { return OutputFilename; }
 
@@ -137,13 +138,11 @@ public:
         Diags.diagnose(SourceLoc(), diag::error_invalid_arg_value,
                        A->getAsString(ParsedArgs), A->getValue());
 
-    for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_line_range),
-                                   ParsedArgs.filtered_end()))
+    for (const Arg *A : ParsedArgs.filtered(OPT_line_range))
       LineRanges.push_back(A->getValue());
 
     if (ParsedArgs.hasArg(OPT_UNKNOWN)) {
-      for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_UNKNOWN),
-                                     ParsedArgs.filtered_end())) {
+      for (const Arg *A : ParsedArgs.filtered(OPT_UNKNOWN)) {
         Diags.diagnose(SourceLoc(), diag::error_unknown_arg,
                        A->getAsString(ParsedArgs));
       }
@@ -153,12 +152,12 @@ public:
     if (ParsedArgs.getLastArg(OPT_help)) {
       std::string ExecutableName = llvm::sys::path::stem(MainExecutablePath);
       Table->PrintHelp(llvm::outs(), ExecutableName.c_str(),
-                       "Swift Format Tool", options::SwiftFormatOption, 0);
+                       "Swift Format Tool", options::SwiftFormatOption, 0,
+                       /*ShowAllAliases*/false);
       return 1;
     }
 
-    for (const Arg *A : make_range(ParsedArgs.filtered_begin(OPT_INPUT),
-                                   ParsedArgs.filtered_end())) {
+    for (const Arg *A : ParsedArgs.filtered(OPT_INPUT)) {
       InputFilenames.push_back(A->getValue());
     }
 
@@ -242,10 +241,8 @@ int swift_format_main(ArrayRef<const char *> Args, const char *Argv0,
   PrintingDiagnosticConsumer PDC;
   Instance.addDiagnosticConsumer(&PDC);
 
-  SwiftFormatInvocation Invocation;
-  std::string MainExecutablePath =
-      llvm::sys::fs::getMainExecutable(Argv0, MainAddr);
-  Invocation.setMainExecutablePath(MainExecutablePath);
+  SwiftFormatInvocation Invocation(
+      llvm::sys::fs::getMainExecutable(Argv0, MainAddr));
 
   DiagnosticEngine &Diags = Instance.getDiags();
   if (Invocation.parseArgs(Args, Diags) != 0)

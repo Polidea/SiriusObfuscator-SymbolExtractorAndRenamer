@@ -492,7 +492,9 @@ public:
     if (basic::sys::pipe(BasicBuildSystemFrontendDelegate::signalWatchingPipe) < 0) {
       perror("pipe");
     }
-    new std::thread(&BasicBuildSystemFrontendDelegate::signalWaitThread, this);
+    std::thread handlerThread(
+        &BasicBuildSystemFrontendDelegate::signalWaitThread, this);
+    handlerThread.detach();
   }
 
   ~BasicBuildSystemFrontendDelegate() {
@@ -503,8 +505,6 @@ public:
     basic::sys::close(BasicBuildSystemFrontendDelegate::signalWatchingPipe[1]);
     signalWatchingPipe[1] = -1;
   }
-
-  virtual basic::FileSystem& getFileSystem() override { return *fileSystem; }
 
   virtual void hadCommandFailure() override {
     // Call the base implementation.
@@ -568,7 +568,8 @@ static int executeBuildCommand(std::vector<std::string> args) {
 
   // Create the frontend object.
   BasicBuildSystemFrontendDelegate delegate(sourceMgr, invocation);
-  BuildSystemFrontend frontend(delegate, invocation);
+  BuildSystemFrontend frontend(delegate, invocation,
+                               basic::createLocalFileSystem());
   if (!frontend.build(targetToBuild)) {
     // If there were failed commands, report the count and return an error.
     if (delegate.getNumFailedCommands()) {

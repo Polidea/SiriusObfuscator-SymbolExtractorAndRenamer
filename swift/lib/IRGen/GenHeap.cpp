@@ -24,11 +24,13 @@
 
 #include "swift/Basic/SourceLoc.h"
 #include "swift/ABI/MetadataValues.h"
+#include "swift/AST/ASTContext.h"
 #include "swift/AST/GenericEnvironment.h"
 #include "swift/AST/IRGenOptions.h"
 
 #include "ConstantBuilder.h"
 #include "Explosion.h"
+#include "GenClass.h"
 #include "GenProto.h"
 #include "GenType.h"
 #include "IRGenDebugInfo.h"
@@ -36,6 +38,7 @@
 #include "IRGenModule.h"
 #include "HeapTypeInfo.h"
 #include "IndirectTypeInfo.h"
+#include "MetadataRequest.h"
 #include "WeakTypeInfo.h"
 
 #include "GenHeap.h"
@@ -78,6 +81,34 @@ HeapLayout::HeapLayout(IRGenModule &IGM, LayoutStrategy strategy,
 #endif
 }
 
+static llvm::Value *calcInitOffset(swift::irgen::IRGenFunction &IGF,
+                                   unsigned int i,
+                                   const swift::irgen::HeapLayout &layout) {
+  llvm::Value *offset = nullptr;
+  if (i == 0) {
+    auto startoffset = layout.getSize();
+    offset = llvm::ConstantInt::get(IGF.IGM.SizeTy, startoffset.getValue());
+    return offset;
+  }
+  auto &prevElt = layout.getElement(i - 1);
+  auto prevType = layout.getElementTypes()[i - 1];
+  // Start calculating offsets from the last fixed-offset field.
+  Size lastFixedOffset = layout.getElement(i - 1).getByteOffset();
+  if (auto *fixedType = dyn_cast<FixedTypeInfo>(&prevElt.getTypeForLayout())) {
+    // If the last fixed-offset field is also fixed-size, we can
+    // statically compute the end of the fixed-offset fields.
+    auto fixedEnd = lastFixedOffset + fixedType->getFixedSize();
+    offset = llvm::ConstantInt::get(IGF.IGM.SizeTy, fixedEnd.getValue());
+  } else {
+    // Otherwise, we need to add the dynamic size to the fixed start
+    // offset.
+    offset = llvm::ConstantInt::get(IGF.IGM.SizeTy, lastFixedOffset.getValue());
+    offset = IGF.Builder.CreateAdd(
+        offset, prevElt.getTypeForLayout().getSize(IGF, prevType));
+  }
+  return offset;
+}
+
 HeapNonFixedOffsets::HeapNonFixedOffsets(IRGenFunction &IGF,
                                          const HeapLayout &layout) {
   if (!layout.isFixedLayout()) {
@@ -93,7 +124,7 @@ HeapNonFixedOffsets::HeapNonFixedOffsets(IRGenFunction &IGF,
       case ElementLayout::Kind::InitialNonFixedSize:
         // Factor the non-fixed-size field's alignment into the total alignment.
         totalAlign = IGF.Builder.CreateOr(totalAlign,
-                                    elt.getType().getAlignmentMask(IGF, eltTy));
+                                    elt.getTypeForLayout().getAlignmentMask(IGF, eltTy));
         LLVM_FALLTHROUGH;
       case ElementLayout::Kind::Empty:
       case ElementLayout::Kind::Fixed:
@@ -104,38 +135,12 @@ HeapNonFixedOffsets::HeapNonFixedOffsets(IRGenFunction &IGF,
       case ElementLayout::Kind::NonFixed:
         // Start calculating non-fixed offsets from the end of the first fixed
         // field.
-        if (i == 0) {
-          totalAlign = elt.getType().getAlignmentMask(IGF, eltTy);
-          offset = totalAlign;
-          Offsets.push_back(totalAlign);
-          break;
-        }
-
-        assert(i > 0 && "shouldn't begin with a non-fixed field");
-        auto &prevElt = layout.getElement(i-1);
-        auto prevType = layout.getElementTypes()[i-1];
-        // Start calculating offsets from the last fixed-offset field.
         if (!offset) {
-          Size lastFixedOffset = layout.getElement(i-1).getByteOffset();
-          if (auto *fixedType = dyn_cast<FixedTypeInfo>(&prevElt.getType())) {
-            // If the last fixed-offset field is also fixed-size, we can
-            // statically compute the end of the fixed-offset fields.
-            auto fixedEnd = lastFixedOffset + fixedType->getFixedSize();
-            offset
-              = llvm::ConstantInt::get(IGF.IGM.SizeTy, fixedEnd.getValue());
-          } else {
-            // Otherwise, we need to add the dynamic size to the fixed start
-            // offset.
-            offset
-              = llvm::ConstantInt::get(IGF.IGM.SizeTy,
-                                       lastFixedOffset.getValue());
-            offset = IGF.Builder.CreateAdd(offset,
-                                     prevElt.getType().getSize(IGF, prevType));
-          }
+          offset = calcInitOffset(IGF, i, layout);
         }
         
         // Round up to alignment to get the offset.
-        auto alignMask = elt.getType().getAlignmentMask(IGF, eltTy);
+        auto alignMask = elt.getTypeForLayout().getAlignmentMask(IGF, eltTy);
         auto notAlignMask = IGF.Builder.CreateNot(alignMask);
         offset = IGF.Builder.CreateAdd(offset, alignMask);
         offset = IGF.Builder.CreateAnd(offset, notAlignMask);
@@ -144,7 +149,7 @@ HeapNonFixedOffsets::HeapNonFixedOffsets(IRGenFunction &IGF,
         
         // Advance by the field's size to start the next field.
         offset = IGF.Builder.CreateAdd(offset,
-                                       elt.getType().getSize(IGF, eltTy));
+                                       elt.getTypeForLayout().getSize(IGF, eltTy));
         totalAlign = IGF.Builder.CreateOr(totalAlign, alignMask);
 
         break;
@@ -165,6 +170,14 @@ void irgen::emitDeallocateHeapObject(IRGenFunction &IGF,
   // FIXME: We should call a fast deallocator for heap objects with
   // known size.
   IGF.Builder.CreateCall(IGF.IGM.getDeallocObjectFn(),
+                         {object, size, alignMask});
+}
+
+void emitDeallocateUninitializedHeapObject(IRGenFunction &IGF,
+                                           llvm::Value *object,
+                                           llvm::Value *size,
+                                           llvm::Value *alignMask) {
+  IGF.Builder.CreateCall(IGF.IGM.getDeallocUninitializedObjectFn(),
                          {object, size, alignMask});
 }
 
@@ -213,7 +226,7 @@ static llvm::Function *createDtorFn(IRGenModule &IGM,
     // The type metadata bindings should be at a fixed offset, so we can pass
     // None for NonFixedOffsets. If we didn't, we'd have a chicken-egg problem.
     auto bindingsAddr = layout.getElement(0).project(IGF, structAddr, None);
-    layout.getBindings().restore(IGF, bindingsAddr);
+    layout.getBindings().restore(IGF, bindingsAddr, MetadataState::Complete);
   }
 
   // Figure out the non-fixed offsets.
@@ -226,8 +239,9 @@ static llvm::Function *createDtorFn(IRGenModule &IGM,
     if (field.isPOD())
       continue;
 
-    field.getType().destroy(IGF, field.project(IGF, structAddr, offsets),
-                            fieldTy);
+    field.getTypeForAccess().destroy(
+        IGF, field.project(IGF, structAddr, offsets), fieldTy,
+        true /*Called from metadata constructors: must be outlined*/);
   }
 
   emitDeallocateHeapObject(IGF, &*fn->arg_begin(), offsets.getSize(),
@@ -486,26 +500,29 @@ namespace {
         ValueType(valueType) {}
 
     void initializeWithCopy(IRGenFunction &IGF, Address destAddr,
-                            Address srcAddr, SILType T) const override {
+                            Address srcAddr, SILType T,
+                            bool isOutlined) const override {
       IGF.emitNativeWeakCopyInit(destAddr, srcAddr);
     }
 
     void initializeWithTake(IRGenFunction &IGF, Address destAddr,
-                            Address srcAddr, SILType T) const override {
+                            Address srcAddr, SILType T,
+                            bool isOutlined) const override {
       IGF.emitNativeWeakTakeInit(destAddr, srcAddr);
     }
 
-    void assignWithCopy(IRGenFunction &IGF, Address destAddr,
-                        Address srcAddr, SILType T) const override {
+    void assignWithCopy(IRGenFunction &IGF, Address destAddr, Address srcAddr,
+                        SILType T, bool isOutlined) const override {
       IGF.emitNativeWeakCopyAssign(destAddr, srcAddr);
     }
 
-    void assignWithTake(IRGenFunction &IGF, Address destAddr,
-                        Address srcAddr, SILType T) const override {
+    void assignWithTake(IRGenFunction &IGF, Address destAddr, Address srcAddr,
+                        SILType T, bool isOutlined) const override {
       IGF.emitNativeWeakTakeAssign(destAddr, srcAddr);
     }
 
-    void destroy(IRGenFunction &IGF, Address addr, SILType T) const override {
+    void destroy(IRGenFunction &IGF, Address addr, SILType T,
+                 bool isOutlined) const override {
       IGF.emitNativeWeakDestroy(addr);
     }
 
@@ -641,28 +658,28 @@ namespace {
                          IsNotPOD, IsNotBitwiseTakable, IsFixedSize) {
     }
 
-    void assignWithCopy(IRGenFunction &IGF, Address dest,
-                        Address src, SILType type) const override {
+    void assignWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                        SILType type, bool isOutlined) const override {
       IGF.emitUnknownUnownedCopyAssign(dest, src);
     }
 
-    void initializeWithCopy(IRGenFunction &IGF, Address dest,
-                            Address src, SILType type) const override {
+    void initializeWithCopy(IRGenFunction &IGF, Address dest, Address src,
+                            SILType type, bool isOutlined) const override {
       IGF.emitUnknownUnownedCopyInit(dest, src);
     }
 
-    void assignWithTake(IRGenFunction &IGF, Address dest,
-                        Address src, SILType type) const override {
+    void assignWithTake(IRGenFunction &IGF, Address dest, Address src,
+                        SILType type, bool isOutlined) const override {
       IGF.emitUnknownUnownedTakeAssign(dest, src);
     }
 
-    void initializeWithTake(IRGenFunction &IGF, Address dest,
-                            Address src, SILType type) const override {
+    void initializeWithTake(IRGenFunction &IGF, Address dest, Address src,
+                            SILType type, bool isOutlined) const override {
       IGF.emitUnknownUnownedTakeInit(dest, src);
     }
 
-    void destroy(IRGenFunction &IGF, Address addr,
-                 SILType type) const override {
+    void destroy(IRGenFunction &IGF, Address addr, SILType type,
+                 bool isOutlined) const override {
       IGF.emitUnknownUnownedDestroy(addr);
     }
 
@@ -714,26 +731,29 @@ namespace {
         ValueType(valueType) {}
 
     void initializeWithCopy(IRGenFunction &IGF, Address destAddr,
-                            Address srcAddr, SILType T) const override {
+                            Address srcAddr, SILType T,
+                            bool isOutlined) const override {
       IGF.emitUnknownWeakCopyInit(destAddr, srcAddr);
     }
 
     void initializeWithTake(IRGenFunction &IGF, Address destAddr,
-                            Address srcAddr, SILType T) const override {
+                            Address srcAddr, SILType T,
+                            bool isOutlined) const override {
       IGF.emitUnknownWeakTakeInit(destAddr, srcAddr);
     }
 
-    void assignWithCopy(IRGenFunction &IGF, Address destAddr,
-                        Address srcAddr, SILType T) const override {
+    void assignWithCopy(IRGenFunction &IGF, Address destAddr, Address srcAddr,
+                        SILType T, bool isOutlined) const override {
       IGF.emitUnknownWeakCopyAssign(destAddr, srcAddr);
     }
 
-    void assignWithTake(IRGenFunction &IGF, Address destAddr,
-                        Address srcAddr, SILType T) const override {
+    void assignWithTake(IRGenFunction &IGF, Address destAddr, Address srcAddr,
+                        SILType T, bool isOutlined) const override {
       IGF.emitUnknownWeakTakeAssign(destAddr, srcAddr);
     }
 
-    void destroy(IRGenFunction &IGF, Address addr, SILType T) const override {
+    void destroy(IRGenFunction &IGF, Address addr, SILType T,
+                 bool isOutlined) const override {
       IGF.emitUnknownWeakDestroy(addr);
     }
                                 
@@ -837,31 +857,38 @@ static llvm::FunctionType *getTypeOfFunction(llvm::Constant *fn) {
 
 /// Emit a unary call to perform a ref-counting operation.
 ///
-/// \param fn - expected signature 'void (T)'
+/// \param fn - expected signature 'void (T)' or 'T (T)'
 static void emitUnaryRefCountCall(IRGenFunction &IGF,
                                   llvm::Constant *fn,
                                   llvm::Value *value) {
   auto cc = IGF.IGM.DefaultCC;
-  if (auto fun = dyn_cast<llvm::Function>(fn))
+  auto fun = dyn_cast<llvm::Function>(fn);
+  if (fun)
     cc = fun->getCallingConv();
 
   // Instead of casting the input, we cast the function type.
   // This tends to produce less IR, but might be evil.
-  if (value->getType() != getTypeOfFunction(fn)->getParamType(0)) {
+  auto origFnType = getTypeOfFunction(fn);
+  if (value->getType() != origFnType->getParamType(0)) {
+    auto resultTy = origFnType->getReturnType() == IGF.IGM.VoidTy
+                        ? IGF.IGM.VoidTy
+                        : value->getType();
     llvm::FunctionType *fnType =
-      llvm::FunctionType::get(IGF.IGM.VoidTy, value->getType(), false);
+      llvm::FunctionType::get(resultTy, value->getType(), false);
     fn = llvm::ConstantExpr::getBitCast(fn, fnType->getPointerTo());
   }
   
   // Emit the call.
   llvm::CallInst *call = IGF.Builder.CreateCall(fn, value);
+  if (fun && fun->hasParamAttribute(0, llvm::Attribute::Returned))
+    call->addParamAttr(0, llvm::Attribute::Returned);
   call->setCallingConv(cc);
   call->setDoesNotThrow();
 }
 
 /// Emit a copy-like call to perform a ref-counting operation.
 ///
-/// \param fn - expected signature 'void (T, T)'
+/// \param fn - expected signature 'void (T, T)' or 'T (T, T)'
 static void emitCopyLikeCall(IRGenFunction &IGF,
                              llvm::Constant *fn,
                              llvm::Value *dest,
@@ -870,20 +897,27 @@ static void emitCopyLikeCall(IRGenFunction &IGF,
          "type mismatch in binary refcounting operation");
 
   auto cc = IGF.IGM.DefaultCC;
-  if (auto fun = dyn_cast<llvm::Function>(fn))
+  auto fun = dyn_cast<llvm::Function>(fn);
+  if (fun)
     cc = fun->getCallingConv();
 
   // Instead of casting the inputs, we cast the function type.
   // This tends to produce less IR, but might be evil.
-  if (dest->getType() != getTypeOfFunction(fn)->getParamType(0)) {
+  auto origFnType = getTypeOfFunction(fn);
+  if (dest->getType() != origFnType->getParamType(0)) {
     llvm::Type *paramTypes[] = { dest->getType(), dest->getType() };
+    auto resultTy = origFnType->getReturnType() == IGF.IGM.VoidTy
+                        ? IGF.IGM.VoidTy
+                        : dest->getType();
     llvm::FunctionType *fnType =
-      llvm::FunctionType::get(IGF.IGM.VoidTy, paramTypes, false);
+      llvm::FunctionType::get(resultTy, paramTypes, false);
     fn = llvm::ConstantExpr::getBitCast(fn, fnType->getPointerTo());
   }
   
   // Emit the call.
   llvm::CallInst *call = IGF.Builder.CreateCall(fn, {dest, src});
+  if (fun && fun->hasParamAttribute(0, llvm::Attribute::Returned))
+    call->addParamAttr(0, llvm::Attribute::Returned);
   call->setCallingConv(cc);
   call->setDoesNotThrow();
 }
@@ -923,7 +957,7 @@ static llvm::Value *emitLoadWeakLikeCall(IRGenFunction &IGF,
 
 /// Emit a call to a function with a storeWeak-like signature.
 ///
-/// \param fn - expected signature 'void (Weak*, T)'
+/// \param fn - expected signature 'void (Weak*, T)' or 'Weak* (Weak*, T)'
 static void emitStoreWeakLikeCall(IRGenFunction &IGF,
                                   llvm::Constant *fn,
                                   llvm::Value *addr,
@@ -933,20 +967,27 @@ static void emitStoreWeakLikeCall(IRGenFunction &IGF,
          "address is not of a weak or unowned reference");
 
   auto cc = IGF.IGM.DefaultCC;
-  if (auto fun = dyn_cast<llvm::Function>(fn))
+  auto fun = dyn_cast<llvm::Function>(fn);
+  if (fun)
     cc = fun->getCallingConv();
 
   // Instead of casting the inputs, we cast the function type.
   // This tends to produce less IR, but might be evil.
-  if (value->getType() != getTypeOfFunction(fn)->getParamType(1)) {
+  auto origFnType = getTypeOfFunction(fn);
+  if (value->getType() != origFnType->getParamType(1)) {
     llvm::Type *paramTypes[] = { addr->getType(), value->getType() };
+    auto resultTy = origFnType->getReturnType() == IGF.IGM.VoidTy
+                        ? IGF.IGM.VoidTy
+                        : addr->getType();
     llvm::FunctionType *fnType =
-      llvm::FunctionType::get(IGF.IGM.VoidTy, paramTypes, false);
+      llvm::FunctionType::get(resultTy, paramTypes, false);
     fn = llvm::ConstantExpr::getBitCast(fn, fnType->getPointerTo());
   }
 
   // Emit the call.
   llvm::CallInst *call = IGF.Builder.CreateCall(fn, {addr, value});
+  if (fun && fun->hasParamAttribute(0, llvm::Attribute::Returned))
+    call->addParamAttr(0, llvm::Attribute::Returned);
   call->setCallingConv(cc);
   call->setDoesNotThrow();
 }
@@ -967,6 +1008,7 @@ void IRGenFunction::emitNativeStrongRetain(llvm::Value *value,
                                        : IGM.getNativeNonAtomicStrongRetainFn(),
       value);
   call->setDoesNotThrow();
+  call->addParamAttr(0, llvm::Attribute::Returned);
 }
 
 /// Emit a store of a live value to the given retaining variable.
@@ -1249,9 +1291,9 @@ llvm::Constant *IRGenModule::getFixLifetimeFn() {
   // Don't inline the function, so it stays as a signal to the ARC passes.
   // The ARC passes will remove references to the function when they're
   // no longer needed.
-  fixLifetime->addAttribute(llvm::AttributeSet::FunctionIndex,
+  fixLifetime->addAttribute(llvm::AttributeList::FunctionIndex,
                             llvm::Attribute::NoInline);
-  
+
   // Give the function an empty body.
   auto entry = llvm::BasicBlock::Create(LLVMContext, "", fixLifetime);
   llvm::ReturnInst::Create(LLVMContext, entry);
@@ -1264,7 +1306,8 @@ llvm::Constant *IRGenModule::getFixLifetimeFn() {
 /// optimizer not to touch this value.
 void IRGenFunction::emitFixLifetime(llvm::Value *value) {
   // If we aren't running the LLVM ARC optimizer, we don't need to emit this.
-  if (!IGM.IRGen.Opts.Optimize || IGM.IRGen.Opts.DisableLLVMARCOpts)
+  if (!IGM.IRGen.Opts.shouldOptimize() ||
+      IGM.IRGen.Opts.DisableSwiftSpecificLLVMOptzns)
     return;
   if (doesNotRequireRefCounting(value)) return;
   emitUnaryRefCountCall(*this, IGM.getFixLifetimeFn(), value);
@@ -1393,6 +1436,22 @@ emitIsUniqueCall(llvm::Value *value, SourceLoc loc, bool isNonNull,
   return call;
 }
 
+llvm::Value *IRGenFunction::emitIsEscapingClosureCall(
+    llvm::Value *value, SourceLoc sourceLoc, unsigned verificationType) {
+  auto loc = SILLocation::decode(sourceLoc, IGM.Context.SourceMgr);
+  auto line = llvm::ConstantInt::get(IGM.Int32Ty, loc.Line);
+  auto col = llvm::ConstantInt::get(IGM.Int32Ty, loc.Column);
+  auto filename = IGM.getAddrOfGlobalString(loc.Filename);
+  auto filenameLength =
+      llvm::ConstantInt::get(IGM.Int32Ty, loc.Filename.size());
+  auto type = llvm::ConstantInt::get(IGM.Int32Ty, verificationType);
+  llvm::CallInst *call =
+      Builder.CreateCall(IGM.getIsEscapingClosureAtFileLocationFn(),
+                         {value, filename, filenameLength, line, col, type});
+  call->setDoesNotThrow();
+  return call;
+}
+
 namespace {
 /// Basic layout and common operations for box types.
 class BoxTypeInfo : public HeapTypeInfo<BoxTypeInfo> {
@@ -1500,7 +1559,7 @@ public:
     auto boxedInterfaceType = boxedType;
     if (env) {
       boxedInterfaceType = SILType::getPrimitiveType(
-        env->mapTypeOutOfContext(boxedType.getSwiftRValueType())
+        boxedType.getSwiftRValueType()->mapTypeOutOfContext()
            ->getCanonicalType(),
          boxedType.getCategory());
     }
@@ -1519,7 +1578,7 @@ public:
     auto size = layout.emitSize(IGF.IGM);
     auto alignMask = layout.emitAlignMask(IGF.IGM);
 
-    emitDeallocateHeapObject(IGF, box, size, alignMask);
+    emitDeallocateUninitializedHeapObject(IGF, box, size, alignMask);
   }
 
   Address
@@ -1657,11 +1716,9 @@ Address irgen::emitProjectBox(IRGenFunction &IGF,
                        boxType->getFieldType(IGF.IGM.getSILModule(), 0));
 }
 
-Address irgen::emitAllocateExistentialBoxInBuffer(IRGenFunction &IGF,
-                                                  SILType boxedType,
-                                                  Address destBuffer,
-                                                  GenericEnvironment *env,
-                                                  const llvm::Twine &name) {
+Address irgen::emitAllocateExistentialBoxInBuffer(
+    IRGenFunction &IGF, SILType boxedType, Address destBuffer,
+    GenericEnvironment *env, const llvm::Twine &name, bool isOutlined) {
   // Get a box for the boxed value.
   auto boxType = SILBoxType::get(boxedType.getSwiftRValueType());
   auto &boxTI = IGF.getTypeInfoForLowered(boxType).as<BoxTypeInfo>();
@@ -1672,7 +1729,8 @@ Address irgen::emitAllocateExistentialBoxInBuffer(IRGenFunction &IGF,
                    Address(IGF.Builder.CreateBitCast(
                                destBuffer.getAddress(),
                                owned.getOwner()->getType()->getPointerTo()),
-                           destBuffer.getAlignment()));
+                           destBuffer.getAlignment()),
+                   isOutlined);
   return owned.getAddress();
 }
 
@@ -1734,3 +1792,247 @@ DEFINE_COPY_OP(UnknownWeakCopyInit)
 DEFINE_COPY_OP(UnknownWeakCopyAssign)
 DEFINE_COPY_OP(UnknownWeakTakeInit)
 DEFINE_COPY_OP(UnknownWeakTakeAssign)
+
+llvm::Value *IRGenFunction::getLocalSelfMetadata() {
+  assert(LocalSelf && "no local self metadata");
+  switch (SelfKind) {
+  case SwiftMetatype:
+    return LocalSelf;
+  case ObjCMetatype:
+    return emitObjCMetadataRefForMetadata(*this, LocalSelf);
+  case ObjectReference:
+    return emitDynamicTypeOfOpaqueHeapObject(*this, LocalSelf,
+                                             MetatypeRepresentation::Thick);
+  }
+
+  llvm_unreachable("Not a valid LocalSelfKind.");
+}
+
+/// Given a non-tagged object pointer, load a pointer to its class object.
+llvm::Value *irgen::emitLoadOfObjCHeapMetadataRef(IRGenFunction &IGF,
+                                                  llvm::Value *object) {
+  if (IGF.IGM.TargetInfo.hasISAMasking()) {
+    object = IGF.Builder.CreateBitCast(object,
+                                       IGF.IGM.IntPtrTy->getPointerTo());
+    llvm::Value *metadata =
+      IGF.Builder.CreateLoad(Address(object, IGF.IGM.getPointerAlignment()));
+    llvm::Value *mask = IGF.Builder.CreateLoad(IGF.IGM.getAddrOfObjCISAMask());
+    metadata = IGF.Builder.CreateAnd(metadata, mask);
+    metadata = IGF.Builder.CreateIntToPtr(metadata, IGF.IGM.TypeMetadataPtrTy);
+    return metadata;
+  } else if (IGF.IGM.TargetInfo.hasOpaqueISAs()) {
+    return emitHeapMetadataRefForUnknownHeapObject(IGF, object);
+  } else {
+    object = IGF.Builder.CreateBitCast(object,
+                                  IGF.IGM.TypeMetadataPtrTy->getPointerTo());
+    llvm::Value *metadata =
+      IGF.Builder.CreateLoad(Address(object, IGF.IGM.getPointerAlignment()));
+    return metadata;
+  }
+}
+
+/// Given a pointer to a heap object (i.e. definitely not a tagged
+/// pointer), load its heap metadata pointer.
+static llvm::Value *emitLoadOfHeapMetadataRef(IRGenFunction &IGF,
+                                              llvm::Value *object,
+                                              IsaEncoding isaEncoding,
+                                              bool suppressCast) {
+  switch (isaEncoding) {
+  case IsaEncoding::Pointer: {
+    // Drill into the object pointer.  Rather than bitcasting, we make
+    // an effort to do something that should explode if we get something
+    // mistyped.
+    llvm::StructType *structTy =
+      cast<llvm::StructType>(
+        cast<llvm::PointerType>(object->getType())->getElementType());
+
+    llvm::Value *slot;
+
+    // We need a bitcast if we're dealing with an opaque class.
+    if (structTy->isOpaque()) {
+      auto metadataPtrPtrTy = IGF.IGM.TypeMetadataPtrTy->getPointerTo();
+      slot = IGF.Builder.CreateBitCast(object, metadataPtrPtrTy);
+
+    // Otherwise, make a GEP.
+    } else {
+      auto zero = llvm::ConstantInt::get(IGF.IGM.Int32Ty, 0);
+
+      SmallVector<llvm::Value*, 4> indexes;
+      indexes.push_back(zero);
+      do {
+        indexes.push_back(zero);
+
+        // Keep drilling down to the first element type.
+        auto eltTy = structTy->getElementType(0);
+        assert(isa<llvm::StructType>(eltTy) || eltTy == IGF.IGM.TypeMetadataPtrTy);
+        structTy = dyn_cast<llvm::StructType>(eltTy);
+      } while (structTy != nullptr);
+
+      slot = IGF.Builder.CreateInBoundsGEP(object, indexes);
+
+      if (!suppressCast) {
+        slot = IGF.Builder.CreateBitCast(slot,
+                                    IGF.IGM.TypeMetadataPtrTy->getPointerTo());
+      }
+    }
+
+    auto metadata = IGF.Builder.CreateLoad(Address(slot,
+                                               IGF.IGM.getPointerAlignment()));
+    if (IGF.IGM.EnableValueNames && object->hasName())
+      metadata->setName(llvm::Twine(object->getName()) + ".metadata");
+    return metadata;
+  }
+      
+  case IsaEncoding::ObjC: {
+    // Feed the object pointer to object_getClass.
+    llvm::Value *objcClass = emitLoadOfObjCHeapMetadataRef(IGF, object);
+    objcClass = IGF.Builder.CreateBitCast(objcClass, IGF.IGM.TypeMetadataPtrTy);
+    return objcClass;
+  }
+  }
+
+  llvm_unreachable("Not a valid IsaEncoding.");
+}
+
+/// Given an object of class type, produce the heap metadata reference
+/// as an %objc_class*.
+llvm::Value *irgen::emitHeapMetadataRefForHeapObject(IRGenFunction &IGF,
+                                                     llvm::Value *object,
+                                                     CanType objectType,
+                                                     bool suppressCast) {
+  ClassDecl *theClass = objectType.getClassOrBoundGenericClass();
+  if (theClass && isKnownNotTaggedPointer(IGF.IGM, theClass))
+    return emitLoadOfHeapMetadataRef(IGF, object,
+                                     getIsaEncodingForType(IGF.IGM, objectType),
+                                     suppressCast);
+
+  // OK, ask the runtime for the class pointer of this potentially-ObjC object.
+  return emitHeapMetadataRefForUnknownHeapObject(IGF, object);
+}
+
+llvm::Value *irgen::emitHeapMetadataRefForHeapObject(IRGenFunction &IGF,
+                                                     llvm::Value *object,
+                                                     SILType objectType,
+                                                     bool suppressCast) {
+  return emitHeapMetadataRefForHeapObject(IGF, object,
+                                          objectType.getSwiftRValueType(),
+                                          suppressCast);
+}
+
+/// Given an opaque class instance pointer, produce the type metadata reference
+/// as a %type*.
+llvm::Value *irgen::emitDynamicTypeOfOpaqueHeapObject(IRGenFunction &IGF,
+                                                  llvm::Value *object,
+                                                  MetatypeRepresentation repr) {
+  object = IGF.Builder.CreateBitCast(object, IGF.IGM.ObjCPtrTy);
+  llvm::CallInst *metadata;
+  
+  switch (repr) {
+  case MetatypeRepresentation::ObjC:
+    metadata = IGF.Builder.CreateCall(IGF.IGM.getGetObjCClassFromObjectFn(),
+                                      object,
+                                      object->getName() + ".Type");
+    break;
+  case MetatypeRepresentation::Thick:
+    metadata = IGF.Builder.CreateCall(IGF.IGM.getGetObjectTypeFn(),
+                                      object,
+                                      object->getName() + ".Type");
+    break;
+  case MetatypeRepresentation::Thin:
+    llvm_unreachable("class metadata can't be thin");
+  }
+  
+  metadata->setDoesNotThrow();
+  metadata->setOnlyReadsMemory();
+  return metadata;
+}
+
+llvm::Value *irgen::
+emitHeapMetadataRefForUnknownHeapObject(IRGenFunction &IGF,
+                                        llvm::Value *object) {
+  object = IGF.Builder.CreateBitCast(object, IGF.IGM.ObjCPtrTy);
+  auto metadata = IGF.Builder.CreateCall(IGF.IGM.getGetObjectClassFn(),
+                                         object,
+                                         object->getName() + ".Type");
+  metadata->setCallingConv(llvm::CallingConv::C);
+  metadata->setDoesNotThrow();
+  metadata->addAttribute(llvm::AttributeList::FunctionIndex,
+                         llvm::Attribute::ReadOnly);
+  return metadata;
+}
+
+/// Given an object of class type, produce the type metadata reference
+/// as a %type*.
+llvm::Value *irgen::emitDynamicTypeOfHeapObject(IRGenFunction &IGF,
+                                                llvm::Value *object,
+                                                MetatypeRepresentation repr,
+                                                SILType objectType,
+                                                bool allowArtificialSubclasses){
+  switch (auto isaEncoding =
+            getIsaEncodingForType(IGF.IGM, objectType.getSwiftRValueType())) {
+  case IsaEncoding::Pointer:
+    // Directly load the isa pointer from a pure Swift class.
+    return emitLoadOfHeapMetadataRef(IGF, object, isaEncoding,
+                                     /*suppressCast*/ false);
+  case IsaEncoding::ObjC:
+    // A class defined in Swift that inherits from an Objective-C class may
+    // end up dynamically subclassed by ObjC runtime hackery. The artificial
+    // subclass isn't a formal Swift type, so isn't appropriate as the result
+    // of `type(of:)`, but is still a physical subtype of the real class object,
+    // so can be used for some purposes like satisfying type parameters in
+    // generic signatures.
+    if (allowArtificialSubclasses
+        && hasKnownSwiftMetadata(IGF.IGM, objectType.getSwiftRValueType()))
+      return emitLoadOfHeapMetadataRef(IGF, object, isaEncoding,
+                                       /*suppressCast*/ false);
+   
+    // Ask the Swift runtime to find the dynamic type. This will look through
+    // dynamic subclasses of Swift classes, and use the -class message for
+    // ObjC classes.
+    return emitDynamicTypeOfOpaqueHeapObject(IGF, object, repr);
+  }
+}
+
+static ClassDecl *getRootClass(ClassDecl *theClass) {
+  while (theClass->hasSuperclass()) {
+    theClass = theClass->getSuperclass()->getClassOrBoundGenericClass();
+    assert(theClass && "base type of class not a class?");
+  }
+  return theClass;
+}
+
+/// What isa encoding mechanism does a type have?
+IsaEncoding irgen::getIsaEncodingForType(IRGenModule &IGM,
+                                         CanType type) {
+  if (!IGM.ObjCInterop) return IsaEncoding::Pointer;
+
+  // This needs to be kept up-to-date with hasKnownSwiftMetadata.
+
+  if (auto theClass = type->getClassOrBoundGenericClass()) {
+    // We can access the isas of pure Swift classes directly.
+    if (getRootClass(theClass)->hasKnownSwiftImplementation())
+      return IsaEncoding::Pointer;
+    // For ObjC or mixed classes, we need to use object_getClass.
+    return IsaEncoding::ObjC;
+  }
+  
+  // Existentials use the encoding of the enclosed dynamic type.
+  if (type->isAnyExistentialType()) {
+    return getIsaEncodingForType(IGM, ArchetypeType::getOpened(type));
+  }
+
+  if (auto archetype = dyn_cast<ArchetypeType>(type)) {
+    // If we have a concrete superclass constraint, just recurse.
+    if (auto superclass = archetype->getSuperclass()) {
+      return getIsaEncodingForType(IGM, superclass->getCanonicalType());
+    }
+
+    // Otherwise, we must just have a class constraint.  Use the
+    // conservative answer.
+    return IsaEncoding::ObjC;
+  }
+
+  // Non-class heap objects should be pure Swift, so we can access their isas
+  // directly.
+  return IsaEncoding::Pointer;
+}

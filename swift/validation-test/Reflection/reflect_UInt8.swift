@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift -lswiftSwiftReflectionTest %s -o %t/reflect_UInt8
 // RUN: %target-run %target-swift-reflection-test %t/reflect_UInt8 2>&1 | %FileCheck %s --check-prefix=CHECK-%target-ptrsize
 // REQUIRES: objc_interop
@@ -35,8 +35,8 @@ reflect(object: obj)
 // CHECK-32: (class reflect_UInt8.TestClass)
 
 // CHECK-32: Type info:
-// CHECK-32: (class_instance size=13 alignment=1 stride=13 num_extra_inhabitants=0
-// CHECK-32:   (field name=t offset=12
+// CHECK-32: (class_instance size=9 alignment=1 stride=9 num_extra_inhabitants=0
+// CHECK-32:   (field name=t offset=8
 // CHECK-32:     (struct size=1 alignment=1 stride=1 num_extra_inhabitants=0
 // CHECK-32:       (field name=_value offset=0
 // CHECK-32:         (builtin size=1 alignment=1 stride=1 num_extra_inhabitants=0)))))

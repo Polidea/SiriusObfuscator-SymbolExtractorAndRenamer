@@ -13,18 +13,23 @@
 #include "NinjaBuildCommand.h"
 
 #include "llbuild/Basic/Compiler.h"
+#include "llbuild/Basic/CrossPlatformCompatibility.h"
 #include "llbuild/Basic/FileInfo.h"
 #include "llbuild/Basic/Hashing.h"
 #include "llbuild/Basic/PlatformUtility.h"
 #include "llbuild/Basic/SerialQueue.h"
 #include "llbuild/Basic/Version.h"
+
 #include "llbuild/Commands/Commands.h"
+
 #include "llbuild/Core/BuildDB.h"
 #include "llbuild/Core/BuildEngine.h"
 #include "llbuild/Core/MakefileDepsParser.h"
+
 #include "llbuild/Ninja/ManifestLoader.h"
 
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TimeValue.h"
 
 #include "CommandLineStatusOutput.h"
@@ -38,7 +43,6 @@
 #include <cstdlib>
 #include <deque>
 #include <mutex>
-#include <sstream>
 #include <thread>
 #include <unordered_set>
 
@@ -260,7 +264,7 @@ private:
   } valueData;
 
   /// The command hash, for successful commands.
-  uint64_t commandHash;
+  CommandSignature commandHash;
 
 private:
   BuildValue() {}
@@ -269,13 +273,13 @@ private:
   {
   }
   BuildValue(BuildValueKind kind, const FileInfo& outputInfo,
-             uint64_t commandHash = 0)
+             CommandSignature commandHash = CommandSignature())
     : kind(kind), numOutputInfos(1), commandHash(commandHash)
   {
     valueData.asOutputInfo = outputInfo;
   }
   BuildValue(BuildValueKind kind, const FileInfo* outputInfos,
-             uint32_t numOutputInfos, uint64_t commandHash = 0)
+             uint32_t numOutputInfos, CommandSignature commandHash = CommandSignature())
     : kind(kind), numOutputInfos(numOutputInfos), commandHash(commandHash)
   {
     valueData.asOutputInfos = new FileInfo[numOutputInfos];
@@ -303,13 +307,13 @@ public:
     return BuildValue(BuildValueKind::MissingInput);
   }
   static BuildValue makeSuccessfulCommand(const FileInfo& outputInfo,
-                                          uint64_t commandHash) {
+                                          CommandSignature commandHash) {
     return BuildValue(BuildValueKind::SuccessfulCommand, outputInfo,
                       commandHash);
   }
   static BuildValue makeSuccessfulCommand(const FileInfo* outputInfos,
                                           uint32_t numOutputInfos,
-                                          uint64_t commandHash) {
+                                          CommandSignature commandHash) {
     // This ctor function should only be used for multiple outputs.
     assert(numOutputInfos > 1);
     return BuildValue(BuildValueKind::SuccessfulCommand, outputInfos,
@@ -362,7 +366,7 @@ public:
     }
   }
 
-  uint64_t getCommandHash() const {
+  CommandSignature getCommandHash() const {
     assert(isSuccessfulCommand() && "invalid call for value kind");
     return commandHash;
   }
@@ -484,7 +488,7 @@ public:
   struct sigaction previousSigintHandler;
 
   /// The set of spawned processes to cancel when interrupted.
-  std::unordered_set<pid_t> spawnedProcesses;
+  std::unordered_set<llbuild_pid_t> spawnedProcesses;
   std::mutex spawnedProcessesMutex;
 
   /// Low-level flag for when a SIGINT has been received.
@@ -505,7 +509,7 @@ public:
   void sendSignalToProcesses(int signal) {
     std::unique_lock<std::mutex> lock(spawnedProcessesMutex);
 
-    for (pid_t pid: spawnedProcesses) {
+    for (llbuild_pid_t pid: spawnedProcesses) {
       // We are killing the whole process group here, this depends on us
       // spawning each process in its own group earlier.
       ::kill(-pid, signal);
@@ -520,6 +524,9 @@ public:
     isCancelled = true;
     wasCancelledBySigint = true;
 
+    // Ask the engine to cancel.
+    engine.cancelBuild();
+    
     // FIXME: In our model, we still wait for everything to terminate, which
     // means a process that refuses to respond to SIGINT will cause us to just
     // hang here. We should probably detect and report that and be willing to do
@@ -785,7 +792,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
 
     /// Information on the prior command result, if present.
     bool hasPriorResult = false;
-    uint64_t priorCommandHash;
+    CommandSignature priorCommandHash;
 
     /// The timestamp of the most recently rebuilt input.
     FileTimestamp newestModTime{ 0, 0 };
@@ -897,7 +904,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
     }
 
     /// Compute the output result for the command.
-    BuildValue computeCommandResult(uint64_t commandHash) const {
+    BuildValue computeCommandResult(CommandSignature commandHash) const {
       unsigned numOutputs = command->getOutputs().size();
       if (numOutputs == 1) {
         return BuildValue::makeSuccessfulCommand(
@@ -964,7 +971,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
       //
       // FIXME: Is it right to bring this up-to-date when one of the inputs
       // indicated a failure? It probably doesn't matter.
-      uint64_t commandHash = basic::hashString(command->getCommandString());
+      auto commandHash = CommandSignature(command->getCommandString());
       if (command->getRule() == context.manifest->getPhonyRule()) {
         // Get the result.
         BuildValue result = computeCommandResult(commandHash);
@@ -1152,7 +1159,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
       //
       // We always restat the output, but we honor Ninja's restat flag by
       // forcing downstream propagation if it isn't set.
-      uint64_t commandHash = basic::hashString(command->getCommandString());
+      auto commandHash = CommandSignature(command->getCommandString());
       BuildValue result = computeCommandResult(commandHash);
       return completeTask(std::move(result),
                           /*ForceChange=*/!command->hasRestatFlag());
@@ -1181,7 +1188,7 @@ buildCommand(BuildContext& context, ninja::Command* command) {
 #if defined(__linux__)
       sigset_t mostSignals;
       sigemptyset(&mostSignals);
-      for (int i = 1; i < SIGUNUSED; ++i) {
+      for (int i = 1; i < SIGSYS; ++i) {
         if (i == SIGKILL || i == SIGSTOP) continue;
         sigaddset(&mostSignals, i);
       }
@@ -1251,16 +1258,17 @@ buildCommand(BuildContext& context, ninja::Command* command) {
       args[3] = nullptr;
 
       // Spawn the command.
-      pid_t pid;
+      llbuild_pid_t pid;
       {
         // We need to hold the spawn processes lock when we spawn, to ensure that
         // we don't create a process in between when we are cancelled.
         std::lock_guard<std::mutex> guard(context.spawnedProcessesMutex);
 
-        if (posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
-                        /*attrp=*/&attributes, const_cast<char**>(args),
-                        environ) != 0) {
-          context.emitError("unable to spawn process (%s)", strerror(errno));
+        int result = posix_spawn(&pid, args[0], /*file_actions=*/&fileActions,
+                                 /*attrp=*/&attributes, const_cast<char**>(args),
+                                 environ);
+        if (result != 0) {
+          context.emitError("unable to spawn process (%s)", strerror(result));
           return false;
         }
 
@@ -1489,7 +1497,7 @@ buildTargets(BuildContext& context,
     virtual void inputsAvailable(core::BuildEngine& engine) override {
       // Complete the job.
       engine.taskIsComplete(
-        this, BuildValue::makeSuccessfulCommand({}, 0).toValue());
+        this, BuildValue::makeSuccessfulCommand({}, CommandSignature()).toValue());
       return;
     }
   };
@@ -1593,7 +1601,7 @@ static bool buildCommandIsResultValid(ninja::Command* command,
 
   // For non-generator commands, if the command hash has changed, recompute.
   if (!command->hasGeneratorFlag()) {
-    if (value.getCommandHash() != basic::hashString(
+    if (value.getCommandHash() != CommandSignature(
           command->getCommandString()))
       return false;
   }
@@ -1627,7 +1635,7 @@ static bool selectCompositeIsResultValid(ninja::Command* command,
   // If the command's signature has changed since it was built, rebuild. This is
   // important for ensuring that we properly reevaluate the select rule when
   // it's incoming composite rule no longer exists.
-  if (value.getCommandHash() != basic::hashString(command->getCommandString()))
+  if (value.getCommandHash() != CommandSignature(command->getCommandString()))
     return false;
 
   // Otherwise, this result is always valid.
@@ -1685,17 +1693,19 @@ core::Rule NinjaBuildEngineDelegate::lookupRule(const core::KeyType& key) {
 void NinjaBuildEngineDelegate::cycleDetected(
     const std::vector<core::Rule*>& cycle) {
   // Report the cycle.
-  std::stringstream message;
-  message << "cycle detected among targets:";
+  std::string message;
+  llvm::raw_string_ostream messageStream(message);
+  messageStream << "cycle detected among targets:";
   bool first = true;
   for (const auto* rule: cycle) {
     if (!first)
-      message << " ->";
-    message << " \"" << rule->key << '"';
+      messageStream << " ->";
+    messageStream << " \"" << rule->key << '"';
     first = false;
   }
 
-  context->emitError(message.str());
+  messageStream.flush();
+  context->emitError(message.c_str());
 
   // Cancel the build.
   context->isCancelled = true;

@@ -23,6 +23,7 @@
 #ifndef SWIFT_SYNTAX_SYNTAX_H
 #define SWIFT_SYNTAX_SYNTAX_H
 
+#include "swift/Syntax/SyntaxData.h"
 #include "swift/Syntax/References.h"
 #include "swift/Syntax/RawSyntax.h"
 #include "swift/Syntax/Trivia.h"
@@ -31,14 +32,21 @@
 #include "llvm/Support/raw_ostream.h"
 
 namespace swift {
-namespace sema {
-  class Semantics;
-}
+
+class SyntaxASTMap;
+
 namespace syntax {
 
-const auto NoParent = llvm::None;
+struct SyntaxVisitor;
+class SourceFileSyntax;
 
-class SyntaxData;
+template <typename SyntaxNode>
+SyntaxNode make(RC<RawSyntax> Raw) {
+  auto Data = SyntaxData::make(Raw);
+  return { Data, Data.get() };
+}
+
+const auto NoParent = llvm::None;
 
 /// The main handle for syntax nodes - subclasses contain all public
 /// structured editing APIs.
@@ -49,12 +57,7 @@ class SyntaxData;
 /// their children.
 class Syntax {
   friend struct SyntaxFactory;
-  friend class SyntaxData;
-  friend class LegacyASTTransformer;
-  friend class sema::Semantics;
-
-#define SYNTAX(Id, Parent) friend class Id##Syntax;
-#include "swift/Syntax/SyntaxKinds.def"
+  friend class swift::SyntaxASTMap;
 
 protected:
   /// A strong reference to the root node of the tree in which this piece of
@@ -67,22 +70,26 @@ protected:
   /// lazily created.
   mutable const SyntaxData *Data;
 
-  template <typename SyntaxNode>
-  typename SyntaxNode::DataType *getUnsafeData() const {
-    auto Casted = cast<typename SyntaxNode::DataType>(Data);
-    return const_cast<typename SyntaxNode::DataType *>(Casted);
+public:
+  Syntax(const RC<SyntaxData> Root, const SyntaxData *Data)
+  : Root(Root), Data(Data) {
+    assert(Data != nullptr);
   }
 
-public:
-  using DataType = SyntaxData;
-
-  Syntax(const RC<SyntaxData> Root, const SyntaxData *Data);
+  virtual ~Syntax() {}
 
   /// Get the kind of syntax.
   SyntaxKind getKind() const;
 
   /// Get the shared raw syntax.
   RC<RawSyntax> getRaw() const;
+
+  /// Get the number of child nodes in this piece of syntax, not including
+  /// tokens.
+  size_t getNumChildren() const;
+
+  /// Get the Nth child of this piece of syntax.
+  llvm::Optional<Syntax> getChild(const size_t N) const;
 
   /// Returns true if the syntax node is of the given type.
   template <typename T>
@@ -91,10 +98,8 @@ public:
   }
 
   /// Get the Data for this Syntax node.
-  template <typename T>
-  typename T::DataType &getData() const {
-    assert(is<T>() && "getData<T>() node of incompatible type!");
-    return *reinterpret_cast<typename T::DataType *>(Data);
+  const SyntaxData &getData() const {
+    return *Data;
   }
 
   const SyntaxData *getDataPointer() const {
@@ -106,7 +111,7 @@ public:
   template <typename T>
   T castTo() const {
     assert(is<T>() && "castTo<T>() node of incompatible type!");
-    return T { Root, reinterpret_cast<const typename T::DataType *>(Data) };
+    return T { Root, Data };
   }
 
   /// If this Syntax node is of the right kind, cast and return it,
@@ -122,9 +127,15 @@ public:
   /// Return the parent of this node, if it has one.
   llvm::Optional<Syntax> getParent() const;
 
+  /// Return the root syntax of this node.
+  Syntax getRoot() const;
+
   /// Returns the child index of this node in its parent,
   /// if it has one, otherwise 0.
   CursorIndex getIndexInParent() const;
+
+  /// Returns true if this syntax node represents a token.
+  bool isToken() const;
 
   /// Returns true if this syntax node represents a statement.
   bool isStmt() const;
@@ -135,14 +146,24 @@ public:
   /// Returns true if this syntax node represents an expression.
   bool isExpr() const;
 
+  /// Returns true if this syntax node represents a pattern.
+  bool isPattern() const;
+
   /// Returns true if this syntax node represents a type.
   bool isType() const;
 
   /// Returns true if this syntax is of some "unknown" kind.
   bool isUnknown() const;
 
+  /// Returns true if the node is "missing" in the source (i.e. it was
+  /// expected (or optional) but not written.
+  bool isMissing() const;
+
+  /// Returns true if the node is "present" in the source.
+  bool isPresent() const;
+
   /// Print the syntax node with full fidelity to the given output stream.
-  void print(llvm::raw_ostream &OS) const;
+  void print(llvm::raw_ostream &OS, SyntaxPrintOptions Opts = SyntaxPrintOptions()) const;
 
   /// Print a debug representation of the syntax node to the given output stream
   /// and indentation level.
@@ -154,6 +175,22 @@ public:
   bool hasSameIdentityAs(const Syntax &Other) const {
     return Root == Other.Root && Data == Other.Data;
   }
+
+  static bool kindof(SyntaxKind Kind) {
+    return true;
+  }
+
+  static bool classof(const Syntax *S) {
+    // Trivially true.
+    return true;
+  }
+
+  /// Recursively visit this node.
+  void accept(SyntaxVisitor &Visitor);
+
+  /// Get the absolute position of this raw syntax: its offset, line,
+  /// and column.
+  AbsolutePosition getAbsolutePosition() const;
 
   // TODO: hasSameStructureAs ?
 };

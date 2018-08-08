@@ -65,11 +65,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %2 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3
 
 bb2:
-  %3 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3
 
 bb3:
@@ -90,11 +90,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B, %2 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%1 : $B)
 
 bb2:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb3(%2 : $B)
 
 bb3(%a1 : $B):
@@ -115,11 +115,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B, %2 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%1 : $B)
 
 bb2:
-  %r2 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%2 : $B)
 
 bb3(%a1 : $B):
@@ -140,11 +140,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B, %2 : $B, %3 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%3 : $B, %1 : $B)
 
 bb2:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb3(%3 : $B, %2 : $B)
 
 bb3(%a1 : $B, %a2 : $B):
@@ -166,11 +166,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B, %2 : $B, %3 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%1 : $B)
 
 bb2:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb3(%3 : $B)
 
 bb3(%a1 : $B):
@@ -192,11 +192,11 @@ bb0(%0 : $Builtin.Int1, %1 : $B, %2 : $B, %3 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb3(%1 : $B, %3 : $B)
 
 bb2:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb3(%3 : $B, %2 : $B)
 
 bb3(%a1 : $B, %a2 : $B):
@@ -224,15 +224,15 @@ bb1:
   cond_br %0, bb3, bb4
 
 bb2:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb5(%1 : $B)
 
 bb3:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb5(%2 : $B)
 
 bb4:
-  %r3 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb5(%2 : $B)
 
 bb5(%a1 : $B):
@@ -260,15 +260,15 @@ bb1:
   cond_br %0, bb3, bb4
 
 bb2:
-  %r1 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb5(%2 : $B)
 
 bb3:
-  %r2 = strong_retain %2 : $B
+  strong_retain %2 : $B
   br bb5(%2 : $B)
 
 bb4:
-  %r3 = strong_retain %1 : $B
+  strong_retain %1 : $B
   br bb5(%1 : $B)
 
 bb5(%a1 : $B):
@@ -309,12 +309,12 @@ bb0(%0 : $Builtin.Int1, %1 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %2 = strong_retain %1 : $B
+  strong_retain %1 : $B
   %3 = integer_literal $Builtin.Int32, 9
   br bb3(%3 : $Builtin.Int32)
 
 bb2:
-  %4 = strong_retain %1 : $B
+  strong_retain %1 : $B
   %5 = integer_literal $Builtin.Int32, 7
   br bb3(%5 : $Builtin.Int32)
 
@@ -336,12 +336,12 @@ bb0(%0 : $Builtin.Int1, %1 : $B):
   cond_br %0, bb1, bb2
 
 bb1:
-  %2 = strong_retain %1 : $B
+  strong_retain %1 : $B
   %3 = integer_literal $Builtin.Int32, 7
   br bb3(%3 : $Builtin.Int32)
 
 bb2:
-  %4 = strong_retain %1 : $B
+  strong_retain %1 : $B
   %5 = integer_literal $Builtin.Int32, 7
   br bb3(%5 : $Builtin.Int32)
 
@@ -471,7 +471,7 @@ bb4:
 
 // This test makes sure that we do move ref counts over instructions that cannot reference it.
 // CHECK-LABEL: sil @sink_ref_count_ops_enum_over_switch_enum_4 :
-// CHECK: bb0({{%[0-9]+}} : $FakeOptional<Builtin.Int32>, [[ARG1:%[0-9]+]] : $FakeOptional<Builtin.NativeObject>):
+// CHECK: bb0({{%[0-9]+}} : $FakeOptional<Builtin.NativeObject>, [[ARG1:%[0-9]+]] : $FakeOptional<Builtin.NativeObject>):
 // CHECK-NOT: retain_value [[ARG1]]
 // CHECK: switch_enum
 // CHECK: bb1:
@@ -484,12 +484,12 @@ bb4:
 // CHECK-NOT: unchecked_enum_data
 // CHECK-NOT: retain_value [[ARG1]]
 // CHECK-NOT: strong_retain
-sil @sink_ref_count_ops_enum_over_switch_enum_4 : $@convention(thin) (FakeOptional<Builtin.Int32>, FakeOptional<Builtin.NativeObject>) -> FakeOptional<Builtin.NativeObject> {
-bb0(%0 : $FakeOptional<Builtin.Int32>, %1 : $FakeOptional<Builtin.NativeObject>):
+sil @sink_ref_count_ops_enum_over_switch_enum_4 : $@convention(thin) (FakeOptional<Builtin.NativeObject>, FakeOptional<Builtin.NativeObject>) -> FakeOptional<Builtin.NativeObject> {
+bb0(%0 : $FakeOptional<Builtin.NativeObject>, %1 : $FakeOptional<Builtin.NativeObject>):
   %2 = function_ref @blocker : $@convention(thin) () -> ()
   retain_value %1 : $FakeOptional<Builtin.NativeObject>
   %3 = alloc_stack $FakeOptional<Builtin.Int32>
-  retain_value %0 : $FakeOptional<Builtin.Int32>
+  retain_value %0 : $FakeOptional<Builtin.NativeObject>
   switch_enum %1 : $FakeOptional<Builtin.NativeObject>, case #FakeOptional.some!enumelt.1: bb1, case #FakeOptional.none!enumelt: bb2
 
 bb1:
@@ -506,15 +506,13 @@ bb3:
 
 /// This version does not work since we have a release before the terminator
 /// even though we have the select_enum before it.
-// CHECK-LABEL: sil @sink_ref_count_ops_enum_over_switch_enum_5 : $@convention(thin) (FakeOptional<Builtin.Int32>) -> () {
+// CHECK-LABEL: sil @sink_ref_count_ops_enum_over_switch_enum_5 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 // CHECK: bb0({{.*}}):
 // CHECK: bb1:
 // CHECK-NEXT: function_ref blocker
 // CHECK-NEXT: function_ref @blocker
 // CHECK-NEXT: alloc_stack
 // CHECK-NEXT: dealloc_stack
-// CHECK-NEXT: retain_value
-// CHECK-NEXT: release_value
 // CHECK-NEXT: switch_enum
 // CHECK: bb2:
 // CHECK-NOT: retain_value
@@ -522,17 +520,17 @@ bb3:
 // CHECK-NOT: retain_value
 // CHECK: bb4:
 // CHECK-NOT: retain_value
-sil @sink_ref_count_ops_enum_over_switch_enum_5 : $@convention(thin) (FakeOptional<Builtin.Int32>) -> () {
-bb0(%0 : $FakeOptional<Builtin.Int32>):
+sil @sink_ref_count_ops_enum_over_switch_enum_5 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
+bb0(%0 : $FakeOptional<Builtin.NativeObject>):
   br bb10
 
 bb10:
   %1 = function_ref @blocker : $@convention(thin) () -> ()
-  retain_value %0 : $FakeOptional<Builtin.Int32>
+  retain_value %0 : $FakeOptional<Builtin.NativeObject>
   %3 = alloc_stack $Builtin.Int32
   dealloc_stack %3 : $*Builtin.Int32
-  release_value %0 : $FakeOptional<Builtin.Int32>
-  switch_enum %0 : $FakeOptional<Builtin.Int32>, case #FakeOptional.some!enumelt.1: bb1, case #FakeOptional.none!enumelt: bb2
+  release_value %0 : $FakeOptional<Builtin.NativeObject>
+  switch_enum %0 : $FakeOptional<Builtin.NativeObject>, case #FakeOptional.some!enumelt.1: bb1, case #FakeOptional.none!enumelt: bb2
 
 bb1:
   br bb3
@@ -684,7 +682,7 @@ bb4:
 // CHECK: select_enum
 // CHECK: cond_br
 // CHECK: bb1:
-// CHECK: retain_value
+// CHECK: strong_retain
 // CHECK: bb2:
 // CHECK-NOT: unchecked_enum_data
 // CHECK-NOT: retain_value [[ARG1]]
@@ -714,7 +712,7 @@ bb3:
 
 /// This version does not work since we have a release before the terminator
 /// even though we have the select_enum before it.
-// CHECK-LABEL: sil @sink_ref_count_ops_enum_over_select_enum_5 : $@convention(thin) (FakeOptional<Builtin.Int32>) -> () {
+// CHECK-LABEL: sil @sink_ref_count_ops_enum_over_select_enum_5 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 // CHECK: bb0({{.*}}):
 // CHECK: bb1:
 // CHECK-NEXT: function_ref blocker
@@ -722,8 +720,6 @@ bb3:
 // CHECK-NEXT: alloc_stack
 // CHECK-NEXT: dealloc_stack
 // CHECK-NEXT: select_enum
-// CHECK-NEXT: retain_value
-// CHECK-NEXT: release_value
 // CHECK-NEXT: cond_br
 // CHECK: bb2:
 // CHECK-NOT: retain_value
@@ -731,19 +727,19 @@ bb3:
 // CHECK-NOT: retain_value
 // CHECK: bb4:
 // CHECK-NOT: retain_value
-sil @sink_ref_count_ops_enum_over_select_enum_5 : $@convention(thin) (FakeOptional<Builtin.Int32>) -> () {
-bb0(%0 : $FakeOptional<Builtin.Int32>):
+sil @sink_ref_count_ops_enum_over_select_enum_5 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
+bb0(%0 : $FakeOptional<Builtin.NativeObject>):
   %t = integer_literal $Builtin.Int1, 1
   %f = integer_literal $Builtin.Int1, 0
   br bb10
 
 bb10:
   %1 = function_ref @blocker : $@convention(thin) () -> ()
-  retain_value %0 : $FakeOptional<Builtin.Int32>
+  retain_value %0 : $FakeOptional<Builtin.NativeObject>
   %3 = alloc_stack $Builtin.Int32
   dealloc_stack %3 : $*Builtin.Int32
-  %100 = select_enum %0 : $FakeOptional<Builtin.Int32>, case #FakeOptional.some!enumelt.1: %t, case #FakeOptional.none!enumelt: %f : $Builtin.Int1
-  release_value %0 : $FakeOptional<Builtin.Int32>
+  %100 = select_enum %0 : $FakeOptional<Builtin.NativeObject>, case #FakeOptional.some!enumelt.1: %t, case #FakeOptional.none!enumelt: %f : $Builtin.Int1
+  release_value %0 : $FakeOptional<Builtin.NativeObject>
   cond_br %100, bb1, bb2
 
 bb1:
@@ -836,15 +832,15 @@ bb4:
 
 sil @virtual_callee : $@convention(method) (@guaranteed Test) -> UInt64
 sil_vtable Test {
-  #Test.testing!1: virtual_callee
+  #Test.testing!1: @virtual_callee
 }
 
 sil @arc_user : $@convention(thin) () -> ()
 
 // CHECK-LABEL: sil @enum_simplification_test1 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 // CHECK: bb0
-// CHECK-NEXT: retain_value
-// CHECK-NEXT: release_value
+// CHECK-NEXT: tuple
+// CHECK-NEXT: return
 sil @enum_simplification_test1 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 bb0(%0 : $FakeOptional<Builtin.NativeObject>):
   retain_value %0 : $FakeOptional<Builtin.NativeObject>
@@ -855,8 +851,9 @@ bb0(%0 : $FakeOptional<Builtin.NativeObject>):
 
 // CHECK-LABEL: sil @enum_simplification_test2 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 // CHECK: bb0
-// CHECK: strong_retain
-// CHECK: release_value
+// CHECK-NEXT: unchecked_enum_data
+// CHECK-NEXT: tuple
+// CHECK-NEXT: return
 sil @enum_simplification_test2 : $@convention(thin) (FakeOptional<Builtin.NativeObject>) -> () {
 bb0(%0 : $FakeOptional<Builtin.NativeObject>):
   %1 = unchecked_enum_data %0 : $FakeOptional<Builtin.NativeObject>, #FakeOptional.some!enumelt.1
@@ -887,8 +884,8 @@ bb0:
 // CHECK-NEXT: get_object
 // CHECK-NEXT: function_ref @get_object
 // CHECK-NEXT: apply
-// CHECK: strong_retain
-// CHECK: strong_release
+// CHECK-NEXT: tuple
+// CHECK-NEXT: return
 sil @enum_simplification_test4 : $@convention(thin) () -> () {
 bb0:
   %0 = function_ref @get_object : $@convention(thin) () -> Builtin.NativeObject
@@ -1247,7 +1244,7 @@ bb0(%0 : $F):
   %1 = alloc_stack $F
   store %0 to %1 : $*F
   strong_retain %0 : $F
-  unconditional_checked_cast_addr take_always F in %1 : $*F to G in %1 : $*F
+  unconditional_checked_cast_addr F in %1 : $*F to G in %1 : $*F
   strong_release %0 : $F
   dealloc_stack %1 : $*F
   %2 = tuple ()
@@ -1288,9 +1285,7 @@ bb0(%0 : $Builtin.NativeObject):
 // CHECK: bb0
 // CHECK: cond_br undef, bb1, bb2
 // CHECK: bb1:
-// CHECK: strong_retain
-// CHECK: strong_release
-// CHECK: br bb3
+// CHECK-NEXT: br bb3
 // CHECK: bb2:
 // CHECK: strong_retain
 // CHECK: apply
@@ -1322,8 +1317,7 @@ bb3:
 // Make sure release can be hoisted across memory that do not escape.
 // CHECK-LABEL: sil @hoist_release_across_local_memory_use
 // CHECK: bb1:
-// CHECK: strong_release
-// CHECK: br bb3
+// CHECK-NEXT: br bb3
 // CHECK: bb2:
 // CHECK: strong_release
 // CHECK: br bb3
@@ -1426,11 +1420,12 @@ bb3:
 
 // CHECK-LABEL: sil @hoist_silargument_release
 // CHECK: bb1
-// CHECK: release
+// CHECK: strong_retain
+// CHECK: apply
+// CHECK: strong_release
 // CHECK: br
 // CHECK: bb2
-// CHECK: release
-// CHECK: br
+// CHECK-NEXT: br
 // CHECK: bb3
 sil @hoist_silargument_release : $@convention(thin) (@owned X, @owned X) -> () {
 bb0(%0 : $X, %1 : $X):
@@ -1478,7 +1473,7 @@ bb0(%0 : $Builtin.NativeObject, %1: $Builtin.NativeObject):
   strong_retain %0: $Builtin.NativeObject
   %2 = function_ref @blocker : $@convention(thin) () -> ()
   apply %2() : $@convention(thin) () -> ()
-  %c = unconditional_checked_cast_value take_always %0 : $Builtin.NativeObject to $B
+  %c = unconditional_checked_cast_value %0 : $Builtin.NativeObject to $B
   strong_release %0: $Builtin.NativeObject
   %5 = tuple()
   return %5 : $()

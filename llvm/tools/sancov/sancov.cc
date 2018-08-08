@@ -18,7 +18,6 @@
 #include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDisassembler/MCDisassembler.h"
 #include "llvm/MC/MCInst.h"
-#include "llvm/MC/MCInstPrinter.h"
 #include "llvm/MC/MCInstrAnalysis.h"
 #include "llvm/MC/MCInstrInfo.h"
 #include "llvm/MC/MCObjectFileInfo.h"
@@ -27,7 +26,6 @@
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/COFF.h"
-#include "llvm/Object/ELFObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Casting.h"
@@ -35,7 +33,6 @@
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/ErrorOr.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/LineIterator.h"
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -48,15 +45,10 @@
 #include "llvm/Support/SpecialCaseList.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
-#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/YAMLParser.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <algorithm>
 #include <set>
-#include <stdio.h>
-#include <string>
-#include <utility>
 #include <vector>
 
 using namespace llvm;
@@ -96,7 +88,8 @@ cl::opt<ActionType> Action(
 
 static cl::list<std::string>
     ClInputFiles(cl::Positional, cl::OneOrMore,
-                 cl::desc("(<binary file>|<.sancov file>)..."));
+                 cl::desc("<action> <binary files...> <.sancov files...> "
+                          "<.symcov files...>"));
 
 static cl::opt<bool> ClDemangle("demangle", cl::init(true),
                                 cl::desc("Print demangled function name."));
@@ -179,7 +172,7 @@ struct CoverageStats {
 // --------- ERROR HANDLING ---------
 
 static void fail(const llvm::Twine &E) {
-  errs() << "Error: " << E << "\n";
+  errs() << "ERROR: " << E << "\n";
   exit(1);
 }
 
@@ -191,7 +184,7 @@ static void failIf(bool B, const llvm::Twine &E) {
 static void failIfError(std::error_code Error) {
   if (!Error)
     return;
-  errs() << "Error: " << Error.message() << "(" << Error.value() << ")\n";
+  errs() << "ERROR: " << Error.message() << "(" << Error.value() << ")\n";
   exit(1);
 }
 
@@ -201,7 +194,7 @@ template <typename T> static void failIfError(const ErrorOr<T> &E) {
 
 static void failIfError(Error Err) {
   if (Err) {
-    logAllUnhandledErrors(std::move(Err), errs(), "Error: ");
+    logAllUnhandledErrors(std::move(Err), errs(), "ERROR: ");
     exit(1);
   }
 }
@@ -583,13 +576,16 @@ public:
         UserBlacklist(createUserBlacklist()) {}
 
   bool isBlacklisted(const DILineInfo &I) {
-    if (DefaultBlacklist && DefaultBlacklist->inSection("fun", I.FunctionName))
+    if (DefaultBlacklist &&
+        DefaultBlacklist->inSection("sancov", "fun", I.FunctionName))
       return true;
-    if (DefaultBlacklist && DefaultBlacklist->inSection("src", I.FileName))
+    if (DefaultBlacklist &&
+        DefaultBlacklist->inSection("sancov", "src", I.FileName))
       return true;
-    if (UserBlacklist && UserBlacklist->inSection("fun", I.FunctionName))
+    if (UserBlacklist &&
+        UserBlacklist->inSection("sancov", "fun", I.FunctionName))
       return true;
-    if (UserBlacklist && UserBlacklist->inSection("src", I.FileName))
+    if (UserBlacklist && UserBlacklist->inSection("sancov", "src", I.FileName))
       return true;
     return false;
   }
@@ -946,7 +942,15 @@ symbolize(const RawCoverage &Data, const std::string ObjectFile) {
   Hasher.update((*BufOrErr)->getBuffer());
   Coverage->BinaryHash = toHex(Hasher.final());
 
+  Blacklists B;
+  auto Symbolizer(createSymbolizer());
+
   for (uint64_t Addr : *Data.Addrs) {
+    auto LineInfo = Symbolizer->symbolizeCode(ObjectFile, Addr);
+    failIfError(LineInfo);
+    if (B.isBlacklisted(*LineInfo))
+      continue;
+
     Coverage->CoveredIds.insert(utohexstr(Addr, true));
   }
 
@@ -1077,6 +1081,9 @@ static void readAndPrintRawCoverage(const std::vector<std::string> &FileNames,
 
 static std::unique_ptr<SymbolizedCoverage>
 merge(const std::vector<std::unique_ptr<SymbolizedCoverage>> &Coverages) {
+  if (Coverages.empty())
+    return nullptr;
+
   auto Result = make_unique<SymbolizedCoverage>();
 
   for (size_t I = 0; I < Coverages.size(); ++I) {
@@ -1159,11 +1166,17 @@ readSymbolizeAndMergeCmdArguments(std::vector<std::string> FileNames) {
       CoverageByObjFile[Iter->second].push_back(FileName);
     };
 
+    for (const auto &Pair : ObjFiles) {
+      auto FileName = Pair.second;
+      if (CoverageByObjFile.find(FileName) == CoverageByObjFile.end())
+        errs() << "WARNING: No coverage file for " << FileName << "\n";
+    }
+
     // Read raw coverage and symbolize it.
     for (const auto &Pair : CoverageByObjFile) {
       if (findSanitizerCovFunctions(Pair.first).empty()) {
         errs()
-            << "Ignoring " << Pair.first
+            << "WARNING: Ignoring " << Pair.first
             << " and its coverage because  __sanitizer_cov* functions were not "
                "found.\n";
         continue;
@@ -1192,7 +1205,17 @@ int main(int Argc, char **Argv) {
   llvm::InitializeAllTargetMCs();
   llvm::InitializeAllDisassemblers();
 
-  cl::ParseCommandLineOptions(Argc, Argv, "Sanitizer Coverage Processing Tool");
+  cl::ParseCommandLineOptions(Argc, Argv, 
+      "Sanitizer Coverage Processing Tool (sancov)\n\n"
+      "  This tool can extract various coverage-related information from: \n"
+      "  coverage-instrumented binary files, raw .sancov files and their "
+      "symbolized .symcov version.\n"
+      "  Depending on chosen action the tool expects different input files:\n"
+      "    -print-coverage-pcs     - coverage-instrumented binary files\n"
+      "    -print-coverage         - .sancov files\n"
+      "    <other actions>         - .sancov files & corresponding binary "
+      "files, .symcov files\n"
+      );
 
   // -print doesn't need object files.
   if (Action == PrintAction) {

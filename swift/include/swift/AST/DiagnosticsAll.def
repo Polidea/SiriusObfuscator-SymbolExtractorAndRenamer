@@ -33,6 +33,11 @@
   DIAG(NOTE,ID,Options,Text,Signature)
 #endif
 
+#ifndef REMARK
+#  define REMARK(ID,Options,Text,Signature) \
+  DIAG(REMARK,ID,Options,Text,Signature)
+#endif
+
 #define DIAG_NO_UNDEF
 
 #include "DiagnosticsCommon.def"
@@ -43,6 +48,7 @@
 #include "DiagnosticsIRGen.def"
 #include "DiagnosticsFrontend.def"
 #include "DiagnosticsDriver.def"
+#include "DiagnosticsRefactoring.def"
 
 #undef DIAG_NO_UNDEF
 
@@ -52,3 +58,4 @@
 #undef NOTE
 #undef WARNING
 #undef ERROR
+#undef REMARK

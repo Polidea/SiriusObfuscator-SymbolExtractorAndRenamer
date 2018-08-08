@@ -7,16 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
-
 class TestNSKeyedUnarchiver : XCTestCase {
     static var allTests: [(String, (TestNSKeyedUnarchiver) -> () throws -> Void)] {
         return [
@@ -87,7 +77,7 @@ class TestNSKeyedUnarchiver : XCTestCase {
     }
     
     func test_unarchive_nsrange_value() {
-        let range = NSMakeRange(97345, 98345)
+        let range = NSRange(location: 97345, length: 98345)
         test_unarchive_from_file("NSKeyedUnarchiver-RangeTest", NSValue(range: range))
     }
     

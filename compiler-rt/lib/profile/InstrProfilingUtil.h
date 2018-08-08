@@ -16,6 +16,9 @@
 /*! \brief Create a directory tree. */
 void __llvm_profile_recursive_mkdir(char *Pathname);
 
+int lprofLockFd(int fd);
+int lprofUnlockFd(int fd);
+
 /*! Open file \c Filename for read+write with write
  * lock for exclusive access. The caller will block
  * if the lock is already held by another process. */
@@ -51,6 +54,8 @@ int lprofGetHostName(char *Name, int Len);
 unsigned lprofBoolCmpXchg(void **Ptr, void *OldV, void *NewV);
 void *lprofPtrFetchAdd(void **Mem, long ByteIncr);
 
+void lprofInstallSignalHandler(int sig, void(*handler)(int));
+
 /* Temporarily suspend SIGKILL. Return value of 1 means a restore is needed.
  * Other return values mean no restore is needed.
  */
@@ -58,7 +63,5 @@ int lprofSuspendSigKill();
 
 /* Restore previously suspended SIGKILL. */
 void lprofRestoreSigKill();
-
-void lprofInstallSignalHandler(int sig, void(*handler)(int));
 
 #endif /* PROFILE_INSTRPROFILINGUTIL_H */

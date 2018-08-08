@@ -83,8 +83,8 @@ public:
   }
 };
 
-typedef SmallVector<uint64_t, 64> RecordData;
-typedef SmallVectorImpl<uint64_t> RecordDataImpl;
+using RecordData = SmallVector<uint64_t, 64>;
+using RecordDataImpl = SmallVectorImpl<uint64_t>;
 
 struct SharedState : llvm::RefCountedBase<SharedState> {
   SharedState(StringRef serializedDiagnosticsPath)
@@ -113,8 +113,8 @@ struct SharedState : llvm::RefCountedBase<SharedState> {
   /// \brief The collection of files used.
   llvm::DenseMap<const char *, unsigned> Files;
 
-  typedef llvm::DenseMap<const void *, std::pair<unsigned, StringRef> >
-  DiagFlagsTy;
+  using DiagFlagsTy =
+      llvm::DenseMap<const void *, std::pair<unsigned, StringRef>>;
 
   /// \brief Map for uniquing strings.
   DiagFlagsTy DiagFlags;
@@ -130,6 +130,8 @@ class SerializedDiagnosticConsumer : public DiagnosticConsumer {
   /// \brief State shared among the various clones of this diagnostic consumer.
   llvm::IntrusiveRefCntPtr<SharedState> State;
   bool CalledFinishProcessing = false;
+  bool CompilationWasComplete = true;
+
 public:
   SerializedDiagnosticConsumer(StringRef serializedDiagnosticsPath)
       : State(new SharedState(serializedDiagnosticsPath)) {
@@ -169,9 +171,24 @@ public:
       return true;
     }
 
-    OS->write((char *)&State->Buffer.front(), State->Buffer.size());
-    OS->flush();
+    if (CompilationWasComplete) {
+      OS->write((char *)&State->Buffer.front(), State->Buffer.size());
+      OS->flush();
+    }
     return false;
+  }
+
+  /// In batch mode, if any error occurs, no primaries can be compiled.
+  /// Some primaries will have errors in their diagnostics files and so
+  /// a client (such as Xcode) can see that those primaries failed.
+  /// Other primaries will have no errors in their diagnostics files.
+  /// In order for the driver to distinguish the two cases without parsing
+  /// the diagnostics, the frontend emits a truncated diagnostics file
+  /// for the latter case.
+  /// The unfortunate aspect is that the truncation discards warnings, etc.
+  
+  void informDriverOfIncompleteBatchModeCompilation() override {
+    CompilationWasComplete = false;
   }
 
   void handleDiagnostic(SourceManager &SM, SourceLoc Loc,
@@ -222,9 +239,10 @@ private:
 };
 } // end anonymous namespace
 
-namespace swift { namespace serialized_diagnostics {
-  DiagnosticConsumer *createConsumer(StringRef serializedDiagnosticsPath) {
-    return new SerializedDiagnosticConsumer(serializedDiagnosticsPath);
+namespace swift {
+namespace serialized_diagnostics {
+  std::unique_ptr<DiagnosticConsumer> createConsumer(StringRef outputPath) {
+    return llvm::make_unique<SerializedDiagnosticConsumer>(outputPath);
   }
 } // namespace serialized_diagnostics
 } // namespace swift
@@ -285,7 +303,7 @@ void SerializedDiagnosticConsumer::addRangeToRecord(CharSourceRange Range,
   addLocToRecord(Range.getEnd(), SM, Filename, Record);
 }
 
-/// \brief Map a Swift DiagosticKind to the diagnostic level expected
+/// \brief Map a Swift DiagnosticKind to the diagnostic level expected
 /// for serialized diagnostics.
 static clang::serialized_diags::Level getDiagnosticLevel(DiagnosticKind Kind) {
   switch (Kind) {
@@ -295,6 +313,8 @@ static clang::serialized_diags::Level getDiagnosticLevel(DiagnosticKind Kind) {
     return clang::serialized_diags::Note;
   case DiagnosticKind::Warning:
     return clang::serialized_diags::Warning;
+  case DiagnosticKind::Remark:
+    return clang::serialized_diags::Remark;
   }
 
   llvm_unreachable("Unhandled DiagnosticKind in switch.");
@@ -557,4 +577,3 @@ void SerializedDiagnosticConsumer::handleDiagnostic(
   if (bracketDiagnostic)
     exitDiagBlock();
 }
-

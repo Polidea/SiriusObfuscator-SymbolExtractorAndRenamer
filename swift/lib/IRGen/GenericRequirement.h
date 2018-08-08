@@ -30,6 +30,7 @@ class Value;
 
 namespace swift {
 class CanGenericSignature;
+enum class MetadataState : size_t;
 class ModuleDecl;
 class NominalTypeDecl;
 class ProtocolDecl;
@@ -78,11 +79,13 @@ using GetTypeParameterInContextFn =
 void bindGenericRequirement(IRGenFunction &IGF,
                             GenericRequirement requirement,
                             llvm::Value *requiredValue,
+                            MetadataState metadataState,
                             GetTypeParameterInContextFn getInContext);
 
 void bindFromGenericRequirementsBuffer(IRGenFunction &IGF,
                                        ArrayRef<GenericRequirement> reqts,
                                        Address buffer,
+                                       MetadataState metadataState,
                                        GetTypeParameterInContextFn getInContext);
 
 
@@ -97,7 +100,6 @@ void bindFromGenericRequirementsBuffer(IRGenFunction &IGF,
 /// anything fulfillable from its parent type metadata).
 class GenericTypeRequirements {
   NominalTypeDecl *TheDecl;
-  CanType ParentType;
   llvm::SmallVector<GenericRequirement, 4> Requirements;
 
 public:
@@ -106,15 +108,6 @@ public:
   /// Return the layout chunks.
   ArrayRef<GenericRequirement> getRequirements() const {
     return Requirements;
-  }
-
-  /// Does this generic type have 
-  bool hasParentType() const {
-    return bool(ParentType);
-  }
-
-  CanType getParentType() const {
-    return ParentType;
   }
 
   /// Return the number of entries required in order to store this data.
@@ -154,7 +147,7 @@ public:
   void emitInitOfBuffer(IRGenFunction &IGF, const SubstitutionMap &subs,
                         Address buffer);
 
-  void bindFromBuffer(IRGenFunction &IGF, Address buffer,
+  void bindFromBuffer(IRGenFunction &IGF, Address buffer, MetadataState state,
                       GetTypeParameterInContextFn getInContext);
 };
 

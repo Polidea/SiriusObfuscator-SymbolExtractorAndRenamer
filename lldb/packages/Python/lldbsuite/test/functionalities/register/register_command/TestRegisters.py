@@ -18,6 +18,7 @@ from lldbsuite.test import lldbutil
 class RegisterCommandsTestCase(TestBase):
 
     mydir = TestBase.compute_mydir(__file__)
+    NO_DEBUG_INFO_TESTCASE = True
 
     def setUp(self):
         TestBase.setUp(self)
@@ -30,6 +31,7 @@ class RegisterCommandsTestCase(TestBase):
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
     @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_register_commands(self):
         """Test commands related to registers, in particular vector registers."""
         self.build()
@@ -45,7 +47,7 @@ class RegisterCommandsTestCase(TestBase):
             self.runCmd("register read xmm0")
             self.runCmd("register read ymm15")  # may be available
             self.runCmd("register read bnd0")  # may be available
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm', 'armv7', 'armv7k', 'arm64']:
             self.runCmd("register read s0")
             self.runCmd("register read q15")  # may be available
 
@@ -60,6 +62,7 @@ class RegisterCommandsTestCase(TestBase):
     @skipIfTargetAndroid(archs=["i386"])
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
     @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_fp_register_write(self):
         """Test commands that write to registers, in particular floating-point registers."""
         self.build()
@@ -71,6 +74,8 @@ class RegisterCommandsTestCase(TestBase):
     @skipIfFreeBSD  # llvm.org/pr25057
     @skipIf(archs=no_match(['amd64', 'i386', 'x86_64']))
     @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @expectedFailureDarwin(bugnumber="<rdar://problem/34092153>")  # CI bots need to use updated debugserver to match ftag size change in r311579.
+    @skipIfOutOfTreeDebugserver
     def test_fp_special_purpose_register_read(self):
         """Test commands that read fpu special purpose registers."""
         self.build()
@@ -79,6 +84,7 @@ class RegisterCommandsTestCase(TestBase):
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'arm', 'i386', 'x86_64']))
     @expectedFailureAll(oslist=["linux"], bugnumber="rdar://29054801")
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_register_expressions(self):
         """Test expression evaluation with commands related to registers."""
         self.build()
@@ -87,7 +93,10 @@ class RegisterCommandsTestCase(TestBase):
         if self.getArchitecture() in ['amd64', 'i386', 'x86_64']:
             gpr = "eax"
             vector = "xmm0"
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm64', 'aarch64']:
+            gpr = "w0"
+            vector = "v0"
+        elif self.getArchitecture() in ['arm', 'armv7', 'armv7k']:
             gpr = "r0"
             vector = "q0"
 
@@ -104,6 +113,7 @@ class RegisterCommandsTestCase(TestBase):
 
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'x86_64']))
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_convenience_registers(self):
         """Test convenience registers."""
         self.build()
@@ -111,6 +121,7 @@ class RegisterCommandsTestCase(TestBase):
 
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'x86_64']))
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_convenience_registers_with_process_attach(self):
         """Test convenience registers after a 'process attach'."""
         self.build()
@@ -118,13 +129,14 @@ class RegisterCommandsTestCase(TestBase):
 
     @skipIfiOSSimulator
     @skipIf(archs=no_match(['amd64', 'x86_64']))
+    @skipIfOutOfTreeDebugserver # rdar://38480016
     def test_convenience_registers_16bit_with_process_attach(self):
         """Test convenience registers after a 'process attach'."""
         self.build()
         self.convenience_registers_with_process_attach(test_16bit_regs=True)
 
     def common_setup(self):
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         self.runCmd("file " + exe, CURRENT_EXECUTABLE_SET)
 
@@ -143,20 +155,13 @@ class RegisterCommandsTestCase(TestBase):
         # This intentionally checks the host platform rather than the target
         # platform as logging is host side.
         self.platform = ""
-        if sys.platform.startswith("darwin"):
-            self.platform = ""  # TODO: add support for "log enable darwin registers"
-
-        if sys.platform.startswith("freebsd"):
-            self.platform = "freebsd"
-
-        if sys.platform.startswith("linux"):
-            self.platform = "linux"
-
-        if sys.platform.startswith("netbsd"):
-            self.platform = "netbsd"
+        if (sys.platform.startswith("freebsd") or
+                sys.platform.startswith("linux") or
+                sys.platform.startswith("netbsd")):
+            self.platform = "posix"
 
         if self.platform != "":
-            self.log_file = os.path.join(os.getcwd(), 'TestRegisters.log')
+            self.log_file = self.getBuildArtifact('TestRegisters.log')
             self.runCmd(
                 "log enable " +
                 self.platform +
@@ -192,7 +197,7 @@ class RegisterCommandsTestCase(TestBase):
                 new_value])
 
     def fp_special_purpose_register_read(self):
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Create a target by the debugger.
         target = self.dbg.CreateTarget(exe)
@@ -266,27 +271,31 @@ class RegisterCommandsTestCase(TestBase):
             self.expect(
                 "register read ftag", substrs=[
                     'ftag' + ' = ', str(
-                        "0x%0.2x" %
+                        "0x%0.4x" %
                         (reg_value_ftag_initial | (
                             1 << fstat_top_pointer_initial)))])
             reg_value_ftag_initial = reg_value_ftag_initial | (
                 1 << fstat_top_pointer_initial)
 
     def fp_register_write(self):
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Create a target by the debugger.
         target = self.dbg.CreateTarget(exe)
         self.assertTrue(target, VALID_TARGET)
 
-        lldbutil.run_break_set_by_symbol(
-            self, "main", num_expected_locations=-1)
+        # Launch the process, stop at the entry point.
+        error = lldb.SBError()
+        process = target.Launch(
+                lldb.SBListener(),
+                None, None, # argv, envp
+                None, None, None, # stdin/out/err
+                self.get_process_working_directory(),
+                0, # launch flags
+                True, # stop at entry
+                error)
+        self.assertTrue(error.Success(), "Launch succeeds. Error is :" + str(error))
 
-        # Launch the process, and do not stop at the entry point.
-        process = target.LaunchSimple(
-            None, None, self.get_process_working_directory())
-
-        process = target.GetProcess()
         self.assertTrue(
             process.GetState() == lldb.eStateStopped,
             PROCESS_STOPPED)
@@ -327,7 +336,35 @@ class RegisterCommandsTestCase(TestBase):
                     ("xmm15",
                      "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
                      False))
-        elif self.getArchitecture() in ['arm']:
+        elif self.getArchitecture() in ['arm64', 'aarch64']:
+            reg_list = [
+                # reg      value
+                # must-have
+                ("fpsr", "0xfbf79f9f", True),
+                ("s0", "1.25", True),
+                ("s31", "0.75", True),
+                ("d1", "123", True),
+                ("d17", "987", False),
+                ("v1", "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x2f 0x2f}", True),
+                ("v14",
+                 "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
+                 False),
+            ]
+        elif self.getArchitecture() in ['armv7'] and self.platformIsDarwin():
+            reg_list = [
+                # reg      value
+                # must-have
+                ("fpsr", "0xfbf79f9f", True),
+                ("s0", "1.25", True),
+                ("s31", "0.75", True),
+                ("d1", "123", True),
+                ("d17", "987", False),
+                ("q1", "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x2f 0x2f}", True),
+                ("q14",
+                 "{0x01 0x02 0x03 0x00 0x00 0x00 0x00 0x00 0x09 0x0a 0x2f 0x2f 0x2f 0x2f 0x0e 0x0f}",
+                 False),
+            ]
+        elif self.getArchitecture() in ['arm', 'armv7k']:
             reg_list = [
                 # reg      value
                 # must-have
@@ -416,7 +453,7 @@ class RegisterCommandsTestCase(TestBase):
 
     def convenience_registers_with_process_attach(self, test_16bit_regs):
         """Test convenience registers after a 'process attach'."""
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
 
         # Spawn a new process
         pid = self.spawnSubprocess(exe, ['wait_for_attach']).pid

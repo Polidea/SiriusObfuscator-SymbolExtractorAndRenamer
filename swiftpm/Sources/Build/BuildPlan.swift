@@ -47,6 +47,9 @@ public struct BuildParameters {
     /// The toolchain.
     public let toolchain: Toolchain
 
+    /// Destination triple.
+    public let triple: Triple
+
     /// Extra build flags.
     public let flags: BuildFlags
 
@@ -69,20 +72,48 @@ public struct BuildParameters {
     /// If should link the Swift stdlib statically.
     public let shouldLinkStaticSwiftStdlib: Bool
 
+    /// Which compiler sanitizers should be enabled
+    public let sanitizers: EnabledSanitizers
+
+    /// If should enable llbuild manifest caching.
+    public let shouldEnableManifestCaching: Bool
+
+    /// Checks if stdout stream is tty.
+    fileprivate let isTTY: Bool = {
+        guard let stream = stdoutStream as? LocalFileOutputByteStream else {
+            return false
+        }
+        return TerminalController.isTTY(stream)
+    }()
+    
+    public var regenerateManifestToken: AbsolutePath {
+        return dataPath.appending(components: "..", "regenerate-token")
+    }
+    
+    public var llbuildManifest: AbsolutePath {
+        return dataPath.appending(components: "..", configuration.dirname + ".yaml")
+    }
+
     public init(
         dataPath: AbsolutePath,
         configuration: Configuration,
         toolchain: Toolchain,
+        destinationTriple: Triple = Triple.hostTriple,
         flags: BuildFlags,
         toolsVersion: ToolsVersion = ToolsVersion.currentToolsVersion,
-        shouldLinkStaticSwiftStdlib: Bool = false
+        shouldLinkStaticSwiftStdlib: Bool = false,
+        shouldEnableManifestCaching: Bool = false,
+        sanitizers: EnabledSanitizers = EnabledSanitizers()
     ) {
         self.dataPath = dataPath
         self.configuration = configuration
         self.toolchain = toolchain
+        self.triple = destinationTriple
         self.flags = flags
         self.toolsVersion = toolsVersion
         self.shouldLinkStaticSwiftStdlib = shouldLinkStaticSwiftStdlib
+        self.shouldEnableManifestCaching = shouldEnableManifestCaching
+        self.sanitizers = sanitizers
     }
 }
 
@@ -172,25 +203,27 @@ public final class ClangTargetDescription {
     public func basicArguments() -> [String] {
         var args = [String]()
         args += buildParameters.toolchain.extraCCFlags
-        args += buildParameters.flags.cCompilerFlags
         args += optimizationArguments
-
-        // Add extra C++ flags if this target contains C++ files.
-        if clangTarget.isCXX {
-            args += self.buildParameters.flags.cxxCompilerFlags
-        }
+        args += activeCompilationConditions
 
         // Only enable ARC on macOS.
       #if os(macOS)
         args += ["-fobjc-arc"]
       #endif
+        args += ["-fblocks"]
         args += ["-fmodules", "-fmodule-name=" + target.c99name]
-        if let languageStandard = clangTarget.languageStandard {
-            args += ["-std=\(languageStandard)"]
-        }
         args += ["-I", clangTarget.includeDir.asString]
         args += additionalFlags
         args += moduleCacheArgs
+        args += buildParameters.sanitizers.compileCFlags()
+
+        // User arguments (from -Xcc and -Xcxx below) should follow generated arguments to allow user overrides
+        args += buildParameters.flags.cCompilerFlags
+
+        // Add extra C++ flags if this target contains C++ files.
+        if clangTarget.isCXX {
+            args += self.buildParameters.flags.cxxCompilerFlags
+        }
         return args
     }
 
@@ -204,12 +237,27 @@ public final class ClangTargetDescription {
         }
     }
 
+    /// A list of compilation conditions to enable for conditional compilation expressions.
+    private var activeCompilationConditions: [String] {
+        var compilationConditions = ["-DSWIFT_PACKAGE=1"]
+
+        switch buildParameters.configuration {
+        case .debug:
+            compilationConditions += ["-DDEBUG=1"]
+        case .release:
+            break
+        }
+
+        return compilationConditions
+    }
+
+
     /// Helper function to compute the modulemap path.
     ///
     /// This function either returns path to user provided modulemap or tries to automatically generates it.
     private func computeModulemapPath() throws -> AbsolutePath {
         // If user provided the modulemap, we're done.
-        if localFileSystem.isFile(clangTarget.moduleMapPath) {
+        if fileSystem.isFile(clangTarget.moduleMapPath) {
             return clangTarget.moduleMapPath
         } else {
             // Otherwise try to generate one.
@@ -255,7 +303,7 @@ public final class SwiftTargetDescription {
     fileprivate var additionalFlags: [String] = []
 
     /// The swift version for this target.
-    var swiftVersion: Int {
+    var swiftVersion: SwiftLanguageVersion {
         return (target.underlyingTarget as! SwiftTarget).swiftVersion
     }
 
@@ -274,14 +322,48 @@ public final class SwiftTargetDescription {
     /// The arguments needed to compile this target.
     public func compileArguments() -> [String] {
         var args = [String]()
-        args += ["-swift-version", String(swiftVersion)]
+        args += ["-swift-version", swiftVersion.rawValue]
+
+        // Enable batch mode in debug mode.
+        //
+        // Technically, it should be enabled whenever WMO is off but we
+        // don't currently make that distinction in SwiftPM
+        switch buildParameters.configuration {
+        case .debug:
+            args += ["-enable-batch-mode"]
+        case .release: break
+        }
+
         args += buildParameters.toolchain.extraSwiftCFlags
-        args += buildParameters.swiftCompilerFlags
         args += optimizationArguments
-        args += ["-j\(SwiftCompilerTool.numThreads)", "-DSWIFT_PACKAGE"]
+        args += ["-j\(SwiftCompilerTool.numThreads)"]
+        args += activeCompilationConditions
         args += additionalFlags
         args += moduleCacheArgs
+        args += buildParameters.sanitizers.compileSwiftFlags()
+
+        // Add arguments to colorize output if stdout is tty
+        if buildParameters.isTTY {
+            args += ["-Xfrontend", "-color-diagnostics"]
+        }
+
+        // User arguments (from -Xswiftc) should follow generated arguments to allow user overrides
+        args += buildParameters.swiftCompilerFlags
         return args
+    }
+
+    /// A list of compilation conditions to enable for conditional compilation expressions.
+    private var activeCompilationConditions: [String] {
+        var compilationConditions = ["-DSWIFT_PACKAGE"]
+
+        switch buildParameters.configuration {
+        case .debug:
+            compilationConditions += ["-DDEBUG"]
+        case .release:
+            break
+        }
+
+        return compilationConditions
     }
 
     /// Optimization arguments according to the build configuration.
@@ -329,11 +411,11 @@ public final class ProductBuildDescription {
             fatalError()
         case .test:
             let base = "\(name).xctest"
-            #if os(macOS)
+            if buildParameters.triple.isDarwin() {
                 return RelativePath("\(base)/Contents/MacOS/\(name)")
-            #else
+            } else {
                 return RelativePath(base)
-            #endif
+            }
         }
     }
 
@@ -348,6 +430,16 @@ public final class ProductBuildDescription {
 
     /// Any additional flags to be added. These flags are expected to be computed during build planning.
     fileprivate var additionalFlags: [String] = []
+
+    /// Path to the temporary directory for this product.
+    var tempsPath: AbsolutePath {
+        return buildParameters.buildPath.appending(component: product.name + ".product")
+    }
+
+    /// Path to the link filelist file.
+    var linkFileListPath: AbsolutePath {
+        return tempsPath.appending(component: "Objects.LinkFileList")
+    }
 
     /// Create a build description for a product.
     init(product: ResolvedProduct, buildParameters: BuildParameters) {
@@ -370,8 +462,7 @@ public final class ProductBuildDescription {
     public func linkArguments() -> [String] {
         var args = [buildParameters.toolchain.swiftCompiler.asString]
         args += buildParameters.toolchain.extraSwiftCFlags
-        args += buildParameters.linkerFlags
-        args += stripInvalidArguments(buildParameters.swiftCompilerFlags)
+        args += buildParameters.sanitizers.linkSwiftFlags()
         args += additionalFlags
 
         if buildParameters.configuration == .debug {
@@ -390,11 +481,11 @@ public final class ProductBuildDescription {
             return []
         case .test:
             // Test products are bundle on macOS, executable on linux.
-          #if os(macOS)
-            args += ["-Xlinker", "-bundle"]
-          #else
-            args += ["-emit-executable"]
-          #endif
+            if buildParameters.triple.isDarwin() {
+                args += ["-Xlinker", "-bundle"]
+            } else {
+                args += ["-emit-executable"]
+            }
         case .library(.dynamic):
             args += ["-emit-library"]
         case .executable:
@@ -412,8 +503,24 @@ public final class ProductBuildDescription {
         // adjacent to the product. This happens by default on macOS.
         args += ["-Xlinker", "-rpath=$ORIGIN"]
       #endif
-        args += objects.map({ $0.asString })
+        args += ["@" + linkFileListPath.asString]
+
+        // User arguments (from -Xlinker and -Xswiftc) should follow generated arguments to allow user overrides
+        args += buildParameters.linkerFlags
+        args += stripInvalidArguments(buildParameters.swiftCompilerFlags)
         return args
+    }
+
+    /// Writes link filelist to the filesystem.
+    func writeLinkFilelist(_ fs: FileSystem) throws {
+        let stream = BufferedOutputByteStream()
+
+        for object in objects {
+            stream <<< object.asString.shellEscaped() <<< "\n"
+        }
+
+        try fs.createDirectory(linkFileListPath.parentDirectory, recursive: true)
+        try fs.writeFileContents(linkFileListPath, bytes: stream.bytes)
     }
 }
 
@@ -460,21 +567,26 @@ public class BuildPlan {
     /// The filesystem to operate on.
     let fileSystem: FileSystem
 
+    /// Diagnostics Engine to emit diagnostics
+    let diagnostics: DiagnosticsEngine
+
     /// Create a build plan with build parameters and a package graph.
     public init(
         buildParameters: BuildParameters,
         graph: PackageGraph,
+        diagnostics: DiagnosticsEngine,
         delegate: BuildPlanDelegate? = nil,
         fileSystem: FileSystem = localFileSystem
     ) throws {
-        self.fileSystem = fileSystem
         self.buildParameters = buildParameters
         self.graph = graph
+        self.diagnostics = diagnostics
         self.delegate = delegate
+        self.fileSystem = fileSystem
 
         // Create build target description for each target which we need to plan.
         var targetMap = [ResolvedTarget: TargetDescription]()
-        for target in graph.targets {
+        for target in graph.allTargets {
              switch target.underlyingTarget {
              case is SwiftTarget:
                  targetMap[target] = .swift(SwiftTargetDescription(target: target, buildParameters: buildParameters))
@@ -483,35 +595,32 @@ public class BuildPlan {
                     target: target,
                     buildParameters: buildParameters,
                     fileSystem: fileSystem))
-             case is CTarget:
+             case is SystemLibraryTarget:
                  break
              default:
                  fatalError("unhandled \(target.underlyingTarget)")
              }
         }
 
-      #if os(Linux)
-        // FIXME: Create a target for LinuxMain file on linux.
-        // This will go away once it is possible to auto detect tests.
-        let testProducts = graph.products.filter({ $0.type == .test })
-        if testProducts.count > 1 {
-            fatalError("It is not possible to have multiple test products on linux \(testProducts)")
-        }
+        if buildParameters.triple.isLinux() {
+            // FIXME: Create a target for LinuxMain file on linux.
+            // This will go away once it is possible to auto detect tests.
+            let testProducts = graph.allProducts.filter({ $0.type == .test })
 
-        for product in testProducts {
-            guard let linuxMainTarget = product.linuxMainTarget else {
-                throw Error.missingLinuxMain
+            for product in testProducts {
+                guard let linuxMainTarget = product.linuxMainTarget else {
+                    throw Error.missingLinuxMain
+                }
+                let target = SwiftTargetDescription(
+                        target: linuxMainTarget, buildParameters: buildParameters, isTestTarget: true)
+                targetMap[linuxMainTarget] = .swift(target)
             }
-            let target = SwiftTargetDescription(
-                target: linuxMainTarget, buildParameters: buildParameters, isTestTarget: true)
-            targetMap[linuxMainTarget] = .swift(target)
         }
-      #endif
 
         var productMap: [ResolvedProduct: ProductBuildDescription] = [:]
         // Create product description for each product we have in the package graph except
         // for automatic libraries because they don't produce any output.
-        for product in graph.products where product.type != .library(.automatic) {
+        for product in graph.allProducts where product.type != .library(.automatic) {
             productMap[product] = ProductBuildDescription(
                 product: product, buildParameters: buildParameters)
         }
@@ -536,7 +645,7 @@ public class BuildPlan {
 
         // Plan products.
         for buildProduct in buildProducts {
-            plan(buildProduct)
+            try plan(buildProduct)
         }
         // FIXME: We need to find out if any product has a target on which it depends 
         // both static and dynamically and then issue a suitable diagnostic or auto
@@ -544,12 +653,12 @@ public class BuildPlan {
     }
 
     /// Plan a product.
-    private func plan(_ buildProduct: ProductBuildDescription) {
+    private func plan(_ buildProduct: ProductBuildDescription) throws {
         // Compute the product's dependency.
         let dependencies = computeDependencies(of: buildProduct.product)
         // Add flags for system targets.
         for systemModule in dependencies.systemModules {
-            guard case let target as CTarget = systemModule.underlyingTarget else {
+            guard case let target as SystemLibraryTarget = systemModule.underlyingTarget else {
                 fatalError("This should not be possible.")
             }
             // Add pkgConfig libs arguments.
@@ -567,6 +676,12 @@ public class BuildPlan {
 
         buildProduct.dylibs = dependencies.dylibs.map({ productMap[$0]! })
         buildProduct.objects += dependencies.staticTargets.flatMap({ targetMap[$0]!.objects })
+
+        // Write the link filelist file.
+        //
+        // FIXME: We should write this as a custom llbuild task once we adopt it
+        // as a library.
+        try buildProduct.writeLinkFilelist(fileSystem)
     }
 
     /// Computes the dependencies of a product.
@@ -629,11 +744,11 @@ public class BuildPlan {
             }
         }
 
-      #if os(Linux)
-        if product.type == .test {
-            product.linuxMainTarget.map({ staticTargets.append($0) })
+        if buildParameters.triple.isLinux() {
+            if product.type == .test {
+                product.linuxMainTarget.map({ staticTargets.append($0) })
+            }
         }
-      #endif
 
         return (linkLibraries, staticTargets, systemModules)
     }
@@ -648,7 +763,7 @@ public class BuildPlan {
                 // Add `-I` for dependencies outside the package (#include <...>).
                 let includeFlag = graph.isInRootPackages(dependency) ? "-iquote" : "-I"
                 clangTarget.additionalFlags += [includeFlag, target.includeDir.asString]
-            case let target as CTarget:
+            case let target as SystemLibraryTarget:
                 clangTarget.additionalFlags += ["-fmodule-map-file=\(target.moduleMapPath.asString)"]
                 clangTarget.additionalFlags += pkgConfig(for: target).cFlags
             default: continue
@@ -675,7 +790,7 @@ public class BuildPlan {
                     "-Xcc", "-fmodule-map-file=\(moduleMap.asString)",
                     "-I", target.clangTarget.includeDir.asString,
                 ]
-            case let target as CTarget:
+            case let target as SystemLibraryTarget:
                 swiftTarget.additionalFlags += ["-Xcc", "-fmodule-map-file=\(target.moduleMapPath.asString)"]
                 swiftTarget.additionalFlags += pkgConfig(for: target).cFlags
             default: break
@@ -683,14 +798,14 @@ public class BuildPlan {
         }
     }
 
-    /// Get pkgConfig arguments for a CTarget.
-    private func pkgConfig(for target: CTarget) -> (cFlags: [String], libs: [String]) {
+    /// Get pkgConfig arguments for a system library target.
+    private func pkgConfig(for target: SystemLibraryTarget) -> (cFlags: [String], libs: [String]) {
         // If we already have these flags, we're done.
         if let flags = pkgConfigCache[target] {
             return flags
         }
         // Otherwise, get the result and cache it.
-        guard let result = pkgConfigArgs(for: target) else {
+        guard let result = pkgConfigArgs(for: target, diagnostics: diagnostics) else {
             pkgConfigCache[target] = ([], [])
             return pkgConfigCache[target]!
         }
@@ -706,5 +821,5 @@ public class BuildPlan {
     }
 
     /// Cache for pkgConfig flags.
-    private var pkgConfigCache = [CTarget: (cFlags: [String], libs: [String])]()
+    private var pkgConfigCache = [SystemLibraryTarget: (cFlags: [String], libs: [String])]()
 }

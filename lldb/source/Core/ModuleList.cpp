@@ -8,28 +8,107 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ModuleList.h"
-
-// C Includes
-// C++ Includes
-#include <cstdint>
-#include <mutex>
-
-// Other libraries and framework includes
-// Project includes
-#include "lldb/Core/Log.h"
+#include "lldb/Core/FileSpecList.h" // for FileSpecList
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Host/FileSystem.h"
-#include "lldb/Host/Host.h"
 #include "lldb/Host/Symbols.h"
+#include "lldb/Interpreter/OptionValueProperties.h"
+#include "lldb/Interpreter/OptionValueFileSpec.h"
+#include "lldb/Interpreter/Property.h"
 #include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Symbol/SymbolFile.h"
+#include "lldb/Symbol/SymbolContext.h" // for SymbolContextList, SymbolCon...
 #include "lldb/Symbol/VariableList.h"
+#include "lldb/Utility/ArchSpec.h"    // for ArchSpec
+#include "lldb/Utility/ConstString.h" // for ConstString
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Logging.h" // for GetLogIfAnyCategoriesSet
+#include "lldb/Utility/UUID.h"    // for UUID, operator!=, operator==
+#include "lldb/lldb-defines.h"    // for LLDB_INVALID_INDEX32
+
+#if defined(LLVM_ON_WIN32)
+#include "lldb/Host/windows/PosixApi.h" // for PATH_MAX
+#endif
+
+#include "llvm/ADT/StringRef.h" // for StringRef
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Threading.h"
+#include "llvm/Support/raw_ostream.h" // for fs
+#include "clang/Driver/Driver.h"
+
+#include <chrono> // for operator!=, time_point
+#include <memory> // for shared_ptr
+#include <mutex>
+#include <string>  // for string
+#include <utility> // for distance
+
+namespace lldb_private {
+class Function;
+}
+namespace lldb_private {
+class RegularExpression;
+}
+namespace lldb_private {
+class Stream;
+}
+namespace lldb_private {
+class SymbolFile;
+}
+namespace lldb_private {
+class Target;
+}
+namespace lldb_private {
+class TypeList;
+}
 
 using namespace lldb;
 using namespace lldb_private;
 
 static bool KeepLookingInDylinker(SymbolContextList &sc_list, size_t start_idx);
+
+namespace {
+
+PropertyDefinition g_properties[] = {
+    {"enable-external-lookup", OptionValue::eTypeBoolean, true, true, nullptr,
+     nullptr,
+     "Control the use of external tools or libraries to locate symbol files. "
+     "On macOS, Spotlight is used to locate a matching .dSYM bundle based on "
+     "the UUID of the executable."},
+    {"clang-modules-cache-path", OptionValue::eTypeFileSpec, true, 0, nullptr,
+     nullptr,
+     "The path to the clang modules cache directory (-fmodules-cache-path)."},
+    {nullptr, OptionValue::eTypeInvalid, false, 0, nullptr, nullptr, nullptr}};
+
+enum { ePropertyEnableExternalLookup, ePropertyClangModulesCachePath };
+
+} // namespace
+
+ModuleListProperties::ModuleListProperties() {
+  m_collection_sp.reset(new OptionValueProperties(ConstString("symbols")));
+  m_collection_sp->Initialize(g_properties);
+
+  llvm::SmallString<128> path;
+  clang::driver::Driver::getDefaultModuleCachePath(path);
+  SetClangModulesCachePath(path);
+}
+
+bool ModuleListProperties::GetEnableExternalLookup() const {
+  const uint32_t idx = ePropertyEnableExternalLookup;
+  return m_collection_sp->GetPropertyAtIndexAsBoolean(
+      nullptr, idx, g_properties[idx].default_uint_value != 0);
+}
+
+FileSpec ModuleListProperties::GetClangModulesCachePath() const {
+  return m_collection_sp
+      ->GetPropertyAtIndexAsOptionValueFileSpec(nullptr, false,
+                                                ePropertyClangModulesCachePath)
+      ->GetCurrentValue();
+}
+
+bool ModuleListProperties::SetClangModulesCachePath(llvm::StringRef path) {
+  return m_collection_sp->SetPropertyAtIndexAsString(
+      nullptr, ePropertyClangModulesCachePath, path);
+}
 
 ModuleList::ModuleList()
     : m_modules(), m_modules_mutex(), m_notifier(nullptr) {}
@@ -714,17 +793,32 @@ size_t ModuleList::GetIndexForModule(const Module *module) const {
   return LLDB_INVALID_INDEX32;
 }
 
-static ModuleList &GetSharedModuleList() {
-  static ModuleList *g_shared_module_list = nullptr;
-  static std::once_flag g_once_flag;
-  std::call_once(g_once_flag, []() {
+namespace {
+struct SharedModuleListInfo {
+  ModuleList module_list;
+  ModuleListProperties module_list_properties;
+};
+}
+static SharedModuleListInfo &GetSharedModuleListInfo()
+{
+  static SharedModuleListInfo *g_shared_module_list_info = nullptr;
+  static llvm::once_flag g_once_flag;
+  llvm::call_once(g_once_flag, []() {
     // NOTE: Intentionally leak the module list so a program doesn't have to
     // cleanup all modules and object files as it exits. This just wastes time
     // doing a bunch of cleanup that isn't required.
-    if (g_shared_module_list == nullptr)
-      g_shared_module_list = new ModuleList(); // <--- Intentional leak!!!
+    if (g_shared_module_list_info == nullptr)
+      g_shared_module_list_info = new SharedModuleListInfo();
   });
-  return *g_shared_module_list;
+  return *g_shared_module_list_info;
+}
+
+static ModuleList &GetSharedModuleList() {
+  return GetSharedModuleListInfo().module_list;
+}
+
+ModuleListProperties &ModuleList::GetGlobalModuleListProperties() {
+  return GetSharedModuleListInfo().module_list_properties;
 }
 
 bool ModuleList::ModuleIsInCache(const Module *module_ptr) {
@@ -744,17 +838,17 @@ size_t ModuleList::RemoveOrphanSharedModules(bool mandatory) {
   return GetSharedModuleList().RemoveOrphans(mandatory);
 }
 
-Error ModuleList::GetSharedModule(const ModuleSpec &module_spec,
-                                  ModuleSP &module_sp,
-                                  const FileSpecList *module_search_paths_ptr,
-                                  ModuleSP *old_module_sp_ptr,
-                                  bool *did_create_ptr, bool always_create) {
+Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
+                                   ModuleSP &module_sp,
+                                   const FileSpecList *module_search_paths_ptr,
+                                   ModuleSP *old_module_sp_ptr,
+                                   bool *did_create_ptr, bool always_create) {
   ModuleList &shared_module_list = GetSharedModuleList();
   std::lock_guard<std::recursive_mutex> guard(
       shared_module_list.m_modules_mutex);
   char path[PATH_MAX];
 
-  Error error;
+  Status error;
 
   module_sp.reset();
 
@@ -836,7 +930,8 @@ Error ModuleList::GetSharedModule(const ModuleSpec &module_spec,
       auto search_path_spec = module_search_paths_ptr->GetFileSpecAtIndex(idx);
       if (!search_path_spec.ResolvePath())
         continue;
-      if (!search_path_spec.Exists() || !search_path_spec.IsDirectory())
+      namespace fs = llvm::sys::fs;
+      if (!fs::is_directory(search_path_spec.GetPath()))
         continue;
       search_path_spec.AppendPathComponent(
           module_spec.GetFileSpec().GetFilename().AsCString());
@@ -860,7 +955,7 @@ Error ModuleList::GetSharedModule(const ModuleSpec &module_spec,
               *did_create_ptr = true;
 
             shared_module_list.ReplaceEquivalent(module_sp);
-            return Error();
+            return Status();
           }
         }
       } else {
@@ -994,14 +1089,14 @@ bool ModuleList::RemoveSharedModuleIfOrphaned(const Module *module_ptr) {
 }
 
 bool ModuleList::LoadScriptingResourcesInTarget(Target *target,
-                                                std::list<Error> &errors,
+                                                std::list<Status> &errors,
                                                 Stream *feedback_stream,
                                                 bool continue_on_error) {
   if (!target)
     return false;
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   for (auto module : m_modules) {
-    Error error;
+    Status error;
     if (module) {
       if (!module->LoadScriptingResourceInTarget(target, error,
                                                  feedback_stream)) {

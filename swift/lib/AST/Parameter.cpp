@@ -88,11 +88,12 @@ ParameterList *ParameterList::clone(const ASTContext &C,
   SmallVector<ParamDecl*, 8> params(begin(), end());
 
   // Remap the ParamDecls inside of the ParameterList.
+  bool withTypes = !options.contains(ParameterList::WithoutTypes);
   for (auto &decl : params) {
     bool hadDefaultArgument =
         decl->getDefaultArgumentKind() == DefaultArgumentKind::Normal;
 
-    decl = new (C) ParamDecl(decl);
+    decl = new (C) ParamDecl(decl, withTypes);
     if (options & Implicit)
       decl->setImplicit();
 
@@ -115,41 +116,40 @@ ParameterList *ParameterList::clone(const ASTContext &C,
   return create(C, params);
 }
 
-/// Return a TupleType or ParenType for this parameter list, written in terms
-/// of contextual archetypes.
-Type ParameterList::getType(const ASTContext &C) const {
+/// Return a TupleType or ParenType for this parameter list,
+/// based on types provided by a callback.
+Type ParameterList::getType(
+    const ASTContext &C, llvm::function_ref<Type(ParamDecl *)> getType) const {
   if (size() == 0)
     return TupleType::getEmpty(C);
-  
+
   SmallVector<TupleTypeElt, 8> argumentInfo;
-  
+
   for (auto P : *this) {
+    auto type = getType(P);
     argumentInfo.emplace_back(
-        P->getType(), P->getArgumentName(),
-        ParameterTypeFlags::fromParameterType(P->getType(), P->isVariadic()));
+        type->getInOutObjectType(), P->getArgumentName(),
+        ParameterTypeFlags::fromParameterType(type, P->isVariadic(),
+                                              P->getValueOwnership()));
   }
 
   return TupleType::get(argumentInfo, C);
 }
 
 /// Return a TupleType or ParenType for this parameter list, written in terms
+/// of contextual archetypes.
+Type ParameterList::getType(const ASTContext &C) const {
+  return getType(C, [](ParamDecl *P) { return P->getType(); });
+}
+
+/// Return a TupleType or ParenType for this parameter list, written in terms
 /// of interface types.
 Type ParameterList::getInterfaceType(const ASTContext &C) const {
-  if (size() == 0)
-    return TupleType::getEmpty(C);
-
-  SmallVector<TupleTypeElt, 8> argumentInfo;
-
-  for (auto P : *this) {
+  return getType(C, [](ParamDecl *P) {
     auto type = P->getInterfaceType();
     assert(!type->hasArchetype());
-
-    argumentInfo.emplace_back(
-        type, P->getArgumentName(),
-        ParameterTypeFlags::fromParameterType(type, P->isVariadic()));
-  }
-
-  return TupleType::get(argumentInfo, C);
+    return type;
+  });
 }
 
 

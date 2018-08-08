@@ -63,13 +63,6 @@ private func _handle(_ error: Any) {
         print(error: error)
         parser.printUsage(on: stderrStream)
 
-    case Package.Error.noManifest(let url, let version):
-        var string = "\(url) has no manifest"
-        if let version = version {
-            string += " for version \(version)"
-        }
-        print(error: string)
-
     default:
         print(error: error)
     }
@@ -82,8 +75,20 @@ func print(error: Any) {
     writer.write("\n")
 }
 
-func print(diagnostic: Diagnostic) {
-    let writer = InteractiveWriter.stderr
+func print(diagnostic: Diagnostic, stdoutStream: OutputByteStream) {
+
+    let writer: InteractiveWriter
+
+    if diagnostic.behavior == .note {
+        writer = InteractiveWriter(stream: stdoutStream)
+    } else {
+        writer = InteractiveWriter.stderr
+    }
+
+    if !(diagnostic.location is UnknownLocation) {
+        writer.write(diagnostic.location.localizedDescription)
+        writer.write(": ")
+    }
 
     switch diagnostic.behavior {
     case .error:
@@ -91,7 +96,7 @@ func print(diagnostic: Diagnostic) {
     case .warning:
         writer.write("warning: ", inColor: .yellow, bold: true)
     case .note:
-        writer.write("note: ", inColor: .white, bold: true)
+        break
     case .ignored:
         return
     }
@@ -113,6 +118,9 @@ private final class InteractiveWriter {
 
     /// The standard error writer.
     static let stderr = InteractiveWriter(stream: stderrStream)
+
+    /// The standard output writer.
+    static let stdout = InteractiveWriter(stream: stdoutStream)
 
     /// The terminal controller, if present.
     let term: TerminalController?

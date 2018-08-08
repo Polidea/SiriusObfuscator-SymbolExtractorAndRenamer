@@ -17,46 +17,59 @@ import Utility
 
 public struct XcodeprojOptions {
     /// The build flags.
-    public let flags: BuildFlags
+    public var flags: BuildFlags
 
     /// If provided, a path to an xcconfig file to be included by the project.
     ///
     /// This allows the client to override settings defined in the project itself.
-    public let xcconfigOverrides: AbsolutePath?
+    public var xcconfigOverrides: AbsolutePath?
 
     /// Whether code coverage should be enabled in the generated scheme.
-    public let isCodeCoverageEnabled: Bool
+    public var isCodeCoverageEnabled: Bool
+
+    /// Whether to use legacy scheme generation logic.
+    public var useLegacySchemeGenerator: Bool
+
+    /// Run watchman to auto-generate the project file on changes.
+    public var enableAutogeneration: Bool
 
     public init(
         flags: BuildFlags = BuildFlags(),
         xcconfigOverrides: AbsolutePath? = nil,
-        isCodeCoverageEnabled: Bool? = nil
+        isCodeCoverageEnabled: Bool? = nil,
+        useLegacySchemeGenerator: Bool? = nil,
+        enableAutogeneration: Bool? = nil
     ) {
         self.flags = flags
         self.xcconfigOverrides = xcconfigOverrides
         self.isCodeCoverageEnabled = isCodeCoverageEnabled ?? false
+        self.useLegacySchemeGenerator = useLegacySchemeGenerator ?? false
+        self.enableAutogeneration = enableAutogeneration ?? false
     }
 }
 
+// Determine the path of the .xcodeproj wrapper directory.
+public func buildXcodeprojPath(outputDir: AbsolutePath, projectName: String) -> AbsolutePath {
+    let xcodeprojName = "\(projectName).xcodeproj"
+    return outputDir.appending(RelativePath(xcodeprojName))
+}
+
 /// Generates an Xcode project and all needed support files.  The .xcodeproj
-/// wrapper directory is created in the path specified by `outputDir`, basing
-/// the file name on the project name `projectName`.  Returns the path of the
-/// generated project.  All ancillary files will be generated inside of the
-/// .xcodeproj wrapper directory.
+/// wrapper directory is created to the path specified by `xcodeprojPath`
+/// Returns the generated project.  All ancillary files will
+/// be generated inside of the .xcodeproj wrapper directory.
+@discardableResult
 public func generate(
-    outputDir: AbsolutePath,
     projectName: String,
+    xcodeprojPath: AbsolutePath,
     graph: PackageGraph,
-    options: XcodeprojOptions
-) throws -> AbsolutePath {
+    options: XcodeprojOptions,
+    diagnostics: DiagnosticsEngine
+) throws -> Xcode.Project {
     // Note that the output directory might be completely separate from the
     // path of the root package (which is where the sources live).
 
     let srcroot = graph.rootPackages[0].path
-
-    // Determine the path of the .xcodeproj wrapper directory.
-    let xcodeprojName = "\(projectName).xcodeproj"
-    let xcodeprojPath = outputDir.appending(RelativePath(xcodeprojName))
 
     // Determine the path of the scheme directory (it's inside the .xcodeproj).
     let schemesDir = xcodeprojPath.appending(components: "xcshareddata", "xcschemes")
@@ -70,46 +83,25 @@ public func generate(
     let extraDirs = try findDirectoryReferences(path: srcroot)
 
     /// Generate the contents of project.xcodeproj (inside the .xcodeproj).
+    // FIXME: This could be more efficient by directly writing to a stream
+    // instead of first creating a string.
+    let project = try pbxproj(xcodeprojPath: xcodeprojPath, graph: graph, extraDirs: extraDirs, options: options, diagnostics: diagnostics)
     try open(xcodeprojPath.appending(component: "project.pbxproj")) { stream in
-        // FIXME: This could be more efficient by directly writing to a stream
-        // instead of first creating a string.
-        let str = try pbxproj(xcodeprojPath: xcodeprojPath, graph: graph, extraDirs: extraDirs, options: options)
+        // Serialize the project model we created to a plist, and return
+        // its string description.
+        let str = "// !$*UTF8*$!\n" + project.generatePlist().description
         stream(str)
     }
 
-    // The scheme acts like an aggregate target for all our targets it has all
-    // tests associated so testing works. We suffix the name of this scheme with
-    // -Package so its name doesn't collide with any products or target with
-    // same name.
-    let schemeName = "\(projectName)-Package.xcscheme"
-    try open(schemesDir.appending(RelativePath(schemeName))) { stream in
-        xcscheme(
-            container: xcodeprojPath.relative(to: srcroot).asString,
-            graph: graph,
-            codeCoverageEnabled: options.isCodeCoverageEnabled,
-            printer: stream)
-    }
+    try generateSchemes(
+        graph: graph,
+        container: xcodeprojPath.relative(to: srcroot).asString,
+        schemesDir: schemesDir,
+        options: options,
+        schemeContainer: xcodeprojPath.relative(to: srcroot).asString
+    )
 
-    // We generate this file to ensure our main scheme is listed before any
-    // inferred schemes Xcode may autocreate.
-    try open(schemesDir.appending(component: "xcschememanagement.plist")) { print in
-        print("""
-            <?xml version="1.0" encoding="UTF-8"?>
-            <plist version="1.0">
-            <dict>
-              <key>SchemeUserState</key>
-              <dict>
-                <key>\(schemeName)</key>
-                <dict></dict>
-              </dict>
-              <key>SuppressBuildableAutocreation</key>
-              <dict></dict>
-            </dict>
-            </plist>
-            """)
-    }
-
-    for target in graph.targets where target.type == .library || target.type == .test {
+    for target in graph.reachableTargets where target.type == .library || target.type == .test {
         ///// For framework targets, generate target.c99Name_Info.plist files in the 
         ///// directory that Xcode project is generated
         let name = target.infoPlistFileName
@@ -144,7 +136,7 @@ public func generate(
         }
     }
 
-    return xcodeprojPath
+    return project
 }
 
 /// Writes the contents to the file specified.
@@ -180,4 +172,54 @@ func findDirectoryReferences(path: AbsolutePath) throws -> [AbsolutePath] {
         if PackageBuilder.isReservedDirectory(pathComponent: $0.basename) { return false }
         return isDirectory($0)
     })
+}
+
+func generateSchemes(
+    graph: PackageGraph,
+    container: String,
+    schemesDir: AbsolutePath,
+    options: XcodeprojOptions,
+    schemeContainer: String
+) throws {
+    if options.useLegacySchemeGenerator {
+        // The scheme acts like an aggregate target for all our targets it has all
+        // tests associated so testing works. We suffix the name of this scheme with
+        // -Package so its name doesn't collide with any products or target with
+        // same name.
+        let schemeName = "\(graph.rootPackages[0].name)-Package.xcscheme"
+        try open(schemesDir.appending(RelativePath(schemeName))) { stream in
+            legacySchemeGenerator(
+                container: schemeContainer,
+                graph: graph,
+                codeCoverageEnabled: options.isCodeCoverageEnabled,
+                printer: stream)
+        }
+
+        // We generate this file to ensure our main scheme is listed before any
+        // inferred schemes Xcode may autocreate.
+        try open(schemesDir.appending(component: "xcschememanagement.plist")) { print in
+            print("""
+                  <?xml version="1.0" encoding="UTF-8"?>
+                  <plist version="1.0">
+                  <dict>
+                  <key>SchemeUserState</key>
+                  <dict>
+                  <key>\(schemeName)</key>
+                  <dict></dict>
+                  </dict>
+                  <key>SuppressBuildableAutocreation</key>
+                  <dict></dict>
+                  </dict>
+                  </plist>
+                  """)
+        }
+    } else {
+        try SchemesGenerator(
+            graph: graph,
+            container: schemeContainer,
+            schemesDir: schemesDir,
+            isCodeCoverageEnabled: options.isCodeCoverageEnabled,
+            fs: localFileSystem
+        ).generate()
+    }
 }

@@ -1,7 +1,6 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 
-// XFAIL: linux
+// XFAIL: linux, freebsd
 
 // This file deliberately does not use %clang-importer-sdk for most RUN lines.
 // Instead, it generates custom overlay modules itself, and uses -I %t when it
@@ -22,6 +21,9 @@
 
 // RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=nullability -function-definitions=false -prefer-type-repr=true > %t.printed.txt
 // RUN: %FileCheck %s -check-prefix=CHECK-NULLABILITY -strict-whitespace < %t.printed.txt
+
+// RUN: %target-swift-ide-test(mock-sdk: -sdk %S/../Inputs/clang-importer-sdk -I %t) -print-module -source-filename %s -module-to-print=bridged_typedef -function-definitions=false -prefer-type-repr=true > %t.printed.txt
+// RUN: %FileCheck %s -check-prefix=CHECK-BRIDGED-TYPEDEF -strict-whitespace < %t.printed.txt
 
 // TAG_DECLS_AND_TYPEDEFS: {{^}}struct FooStruct1 {{{$}}
 // TAG_DECLS_AND_TYPEDEFS: {{^}}  var x: Int32{{$}}
@@ -92,6 +94,7 @@
 // FOUNDATION-NEXT: {{^}}enum NSRuncingMode : UInt {{{$}}
 // FOUNDATION-NEXT: {{^}}  init?(rawValue: UInt){{$}}
 // FOUNDATION-NEXT: {{^}}  var rawValue: UInt { get }{{$}}
+// FOUNDATION-NEXT: {{^}}  typealias RawValue = UInt
 // FOUNDATION-NEXT: {{^}}  case mince{{$}}
 // FOUNDATION-NEXT: {{^}}  @available(swift, obsoleted: 3, renamed: "mince"){{$}}
 // FOUNDATION-NEXT: {{^}}  static var Mince: NSRuncingMode { get }{{$}}
@@ -106,6 +109,7 @@
 // FOUNDATION-NEXT: {{^}}  let rawValue: UInt{{$}}
 // FOUNDATION-NEXT: {{^}}  typealias RawValue = UInt
 // FOUNDATION-NEXT: {{^}}  typealias Element = NSRuncingOptions
+// FOUNDATION-NEXT: {{^}}  typealias ArrayLiteralElement = NSRuncingOptions
 // FOUNDATION-NEXT: {{^}}  @available(*, unavailable, message: "use [] to construct an empty option set"){{$}}
 // FOUNDATION-NEXT: {{^}}  static var none: NSRuncingOptions { get }{{$}}
 // FOUNDATION-NEXT: {{^}}  @available(*, unavailable, message: "use [] to construct an empty option set"){{$}}
@@ -152,3 +156,8 @@
 // CHECK-NULLABILITY:   func optArrayMethod() -> [Any]?
 // CHECK-NULLABILITY: }
 // CHECK-NULLABILITY: func compare_classes(_ sc1: SomeClass, _ sc2: SomeClass, _ sc3: SomeClass!)
+
+// CHECK-BRIDGED-TYPEDEF: typealias NSMyAmazingStringAlias = String
+// CHECK-BRIDGED-TYPEDEF: func acceptNSMyAmazingStringAlias(_ param: NSMyAmazingStringAlias?)
+// CHECK-BRIDGED-TYPEDEF: func acceptNSMyAmazingStringAliasArray(_ param: [NSMyAmazingStringAlias])
+// CHECK-BRIDGED-TYPEDEF: func acceptIndirectedAmazingAlias(_ param: AutoreleasingUnsafeMutablePointer<NSString>?)

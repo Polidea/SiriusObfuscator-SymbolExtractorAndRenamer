@@ -19,7 +19,7 @@ import SwiftShims
 /// Unicode [replacement characters][rc].
 ///
 /// [rc]:
-/// http://en.wikipedia.org/wiki/Specials_(Unicode_block)#Replacement_character
+/// https://unicode.org/glossary/#replacement_character
 ///
 /// - Parameter strippingNewline: If `true`, newline characters and character
 ///   combinations are stripped from the result; otherwise, newline characters
@@ -64,15 +64,9 @@ public func readLine(strippingNewline: Bool = true) -> String? {
       }
     }
   }
-  let result = String._fromCodeUnitSequenceWithRepair(UTF8.self,
-    input: UnsafeMutableBufferPointer(
-      start: linePtr,
-      count: readBytes)).0
-  _swift_stdlib_free(linePtr)
+  let result = String._fromUTF8CodeUnitSequence(
+    UnsafeBufferPointer(start: linePtr, count: readBytes),
+    repair: true)!
+  _stdlib_free(linePtr)
   return result
-}
-
-@available(*, unavailable, renamed: "readLine(strippingNewline:)")
-public func readLine(stripNewline: Bool = true) -> String? {
-  Builtin.unreachable()
 }

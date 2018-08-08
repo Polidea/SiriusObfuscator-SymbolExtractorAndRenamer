@@ -103,6 +103,18 @@ public:
     return Hash;
   }
 
+  hash_code VisitUnresolvedUsingTypenameDecl(const UnresolvedUsingTypenameDecl *D) {
+    hash_code Hash = VisitNamedDecl(D);
+    COMBINE_HASH(Hasher.hash(D->getQualifier()));
+    return Hash;
+  }
+
+  hash_code VisitUnresolvedUsingValueDecl(const UnresolvedUsingValueDecl *D) {
+    hash_code Hash = VisitNamedDecl(D);
+    COMBINE_HASH(Hasher.hash(D->getQualifier()));
+    return Hash;
+  }
+
   hash_code VisitDeclContext(const DeclContext *DC) {
     // FIXME: Add location if this is anonymous namespace ?
     DC = DC->getRedeclContext();
@@ -304,7 +316,7 @@ static hash_code computeHash(TemplateName Name, IndexRecordHasher &Hasher) {
       return COMBINE_HASH('t', TTP->getDepth(), TTP->getIndex());
     }
 
-    return COMBINE_HASH(Hasher.hash(Template));
+    return COMBINE_HASH(Hasher.hash(Template->getCanonicalDecl()));
   }
 
   // FIXME: Hash dependent template names.
@@ -420,6 +432,10 @@ hash_code IndexRecordHasher::hashImpl(DeclarationName Name) {
     case DeclarationName::CXXLiteralOperatorName:
       COMBINE_HASH(computeHash(Name.getCXXLiteralIdentifier()));
     case DeclarationName::CXXUsingDirective:
+      break;
+    case DeclarationName::CXXDeductionGuideName:
+      COMBINE_HASH(computeHash(Name.getCXXDeductionGuideTemplate()
+                 ->getDeclName().getAsIdentifierInfo()));
       break;
   }
 

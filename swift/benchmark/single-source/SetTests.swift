@@ -12,6 +12,17 @@
 
 import TestsUtils
 
+public let SetTests = [
+  BenchmarkInfo(name: "SetExclusiveOr", runFunction: run_SetExclusiveOr, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetExclusiveOr_OfObjects", runFunction: run_SetExclusiveOr_OfObjects, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetIntersect", runFunction: run_SetIntersect, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetIntersect_OfObjects", runFunction: run_SetIntersect_OfObjects, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetIsSubsetOf", runFunction: run_SetIsSubsetOf, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetIsSubsetOf_OfObjects", runFunction: run_SetIsSubsetOf_OfObjects, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetUnion", runFunction: run_SetUnion, tags: [.validation, .api, .Set]),
+  BenchmarkInfo(name: "SetUnion_OfObjects", runFunction: run_SetUnion_OfObjects, tags: [.validation, .api, .Set]),
+]
+
 @inline(never)
 public func run_SetIsSubsetOf(_ N: Int) {
   let size = 200
@@ -22,8 +33,8 @@ public func run_SetIsSubsetOf(_ N: Int) {
   var otherSet = Set<Int>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Int(truncatingBitPattern: Random()))
-    otherSet.insert(Int(truncatingBitPattern: Random()))
+    set.insert(Int(truncatingIfNeeded: Random()))
+    otherSet.insert(Int(truncatingIfNeeded: Random()))
   }
 
   var isSubset = false
@@ -51,8 +62,8 @@ public func run_SetExclusiveOr(_ N: Int) {
   var otherSet = Set<Int>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Int(truncatingBitPattern: Random()))
-    otherSet.insert(Int(truncatingBitPattern: Random()))
+    set.insert(Int(truncatingIfNeeded: Random()))
+    otherSet.insert(Int(truncatingIfNeeded: Random()))
   }
 
   var xor = Set<Int>()
@@ -72,8 +83,8 @@ public func run_SetUnion(_ N: Int) {
   var otherSet = Set<Int>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Int(truncatingBitPattern: Random()))
-    otherSet.insert(Int(truncatingBitPattern: Random()))
+    set.insert(Int(truncatingIfNeeded: Random()))
+    otherSet.insert(Int(truncatingIfNeeded: Random()))
   }
 
   var or = Set<Int>()
@@ -93,8 +104,8 @@ public func run_SetIntersect(_ N: Int) {
   var otherSet = Set<Int>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Int(truncatingBitPattern: Random()))
-    otherSet.insert(Int(truncatingBitPattern: Random()))
+    set.insert(Int(truncatingIfNeeded: Random()))
+    otherSet.insert(Int(truncatingIfNeeded: Random()))
   }
 
   var and = Set<Int>()
@@ -111,8 +122,8 @@ class Box<T : Hashable> : Hashable {
     value = v
   }
 
-  var hashValue: Int {
-    return value.hashValue
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(value)
   }
 
   static func ==(lhs: Box, rhs: Box) -> Bool {
@@ -130,8 +141,8 @@ public func run_SetIsSubsetOf_OfObjects(_ N: Int) {
   var otherSet = Set<Box<Int>>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Box(Int(truncatingBitPattern: Random())))
-    otherSet.insert(Box(Int(truncatingBitPattern: Random())))
+    set.insert(Box(Int(truncatingIfNeeded: Random())))
+    otherSet.insert(Box(Int(truncatingIfNeeded: Random())))
   }
 
   var isSubset = false
@@ -159,8 +170,8 @@ public func run_SetExclusiveOr_OfObjects(_ N: Int) {
   var otherSet = Set<Box<Int>>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Box(Int(truncatingBitPattern: Random())))
-    otherSet.insert(Box(Int(truncatingBitPattern: Random())))
+    set.insert(Box(Int(truncatingIfNeeded: Random())))
+    otherSet.insert(Box(Int(truncatingIfNeeded: Random())))
   }
 
   var xor = Set<Box<Int>>()
@@ -180,8 +191,8 @@ public func run_SetUnion_OfObjects(_ N: Int) {
   var otherSet = Set<Box<Int>>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Box(Int(truncatingBitPattern: Random())))
-    otherSet.insert(Box(Int(truncatingBitPattern: Random())))
+    set.insert(Box(Int(truncatingIfNeeded: Random())))
+    otherSet.insert(Box(Int(truncatingIfNeeded: Random())))
   }
 
   var or = Set<Box<Int>>()
@@ -201,8 +212,8 @@ public func run_SetIntersect_OfObjects(_ N: Int) {
   var otherSet = Set<Box<Int>>(minimumCapacity: size)
 
   for _ in 0 ..< size {
-    set.insert(Box(Int(truncatingBitPattern: Random())))
-    otherSet.insert(Box(Int(truncatingBitPattern: Random())))
+    set.insert(Box(Int(truncatingIfNeeded: Random())))
+    otherSet.insert(Box(Int(truncatingIfNeeded: Random())))
   }
 
   var and = Set<Box<Int>>()

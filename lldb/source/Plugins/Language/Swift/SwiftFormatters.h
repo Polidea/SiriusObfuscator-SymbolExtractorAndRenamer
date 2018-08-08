@@ -16,7 +16,7 @@
 #include "lldb/lldb-forward.h"
 #include <stdint.h>
 
-#include "lldb/Core/ConstString.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/DataFormatters/FormatClasses.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/Target/Target.h"
@@ -39,10 +39,10 @@ bool Character_SummaryProvider(ValueObject &valobj, Stream &stream,
 bool UnicodeScalar_SummaryProvider(ValueObject &valobj, Stream &stream,
                                    const TypeSummaryOptions &options);
 
-bool StringCore_SummaryProvider(ValueObject &valobj, Stream &stream,
+bool StringGuts_SummaryProvider(ValueObject &valobj, Stream &stream,
                                 const TypeSummaryOptions &options);
 
-bool StringCore_SummaryProvider(
+bool StringGuts_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &,
     StringPrinter::ReadStringAndDumpToStreamOptions);
 
@@ -83,6 +83,9 @@ bool CountableClosedRange_SummaryProvider(ValueObject &valobj, Stream &stream,
 
 bool StridedRangeGenerator_SummaryProvider(ValueObject &valobj, Stream &stream,
                                            const TypeSummaryOptions &options);
+
+bool AccelerateSIMD_SummaryProvider(ValueObject &valobj, Stream &stream,
+                                    const TypeSummaryOptions &options);
 
 // TODO: this is a transient workaround for the fact that
 // ObjC types are totally opaque in Swift for LLDB

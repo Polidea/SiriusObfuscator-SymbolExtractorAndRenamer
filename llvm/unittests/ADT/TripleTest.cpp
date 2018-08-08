@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "gtest/gtest.h"
 #include "llvm/ADT/Triple.h"
+#include "gtest/gtest.h"
 
 using namespace llvm;
 
@@ -200,6 +200,12 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
   EXPECT_EQ(Triple::UnknownOS, T.getOS());
 
+  T = Triple("x86_64-unknown-ananas");
+  EXPECT_EQ(Triple::x86_64, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::Ananas, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
   T = Triple("x86_64-unknown-cloudabi");
   EXPECT_EQ(Triple::x86_64, T.getArch());
   EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
@@ -266,6 +272,12 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::AMDHSA, T.getOS());
   EXPECT_EQ(Triple::OpenCL, T.getEnvironment());
 
+  T = Triple("amdgcn-amd-amdpal");
+  EXPECT_EQ(Triple::amdgcn, T.getArch());
+  EXPECT_EQ(Triple::AMD, T.getVendor());
+  EXPECT_EQ(Triple::AMDPAL, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
   T = Triple("riscv32-unknown-unknown");
   EXPECT_EQ(Triple::riscv32, T.getArch());
   EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
@@ -283,6 +295,60 @@ TEST(TripleTest, ParsedIDs) {
   EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
   EXPECT_EQ(Triple::FreeBSD, T.getOS());
   EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
+  T = Triple("armv7hl-suse-linux-gnueabi");
+  EXPECT_EQ(Triple::arm, T.getArch());
+  EXPECT_EQ(Triple::SUSE, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNUEABI, T.getEnvironment());
+
+  T = Triple("i586-pc-haiku");
+  EXPECT_EQ(Triple::x86, T.getArch());
+  EXPECT_EQ(Triple::PC, T.getVendor());
+  EXPECT_EQ(Triple::Haiku, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
+  T = Triple("x86_64-unknown-haiku");
+  EXPECT_EQ(Triple::x86_64, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::Haiku, T.getOS());
+  EXPECT_EQ(Triple::UnknownEnvironment, T.getEnvironment());
+
+  T = Triple("mips-mti-linux-gnu");
+  EXPECT_EQ(Triple::mips, T.getArch());
+  EXPECT_EQ(Triple::MipsTechnologies, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+
+  T = Triple("mipsel-img-linux-gnu");
+  EXPECT_EQ(Triple::mipsel, T.getArch());
+  EXPECT_EQ(Triple::ImaginationTechnologies, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+
+  T = Triple("mips64-mti-linux-gnu");
+  EXPECT_EQ(Triple::mips64, T.getArch());
+  EXPECT_EQ(Triple::MipsTechnologies, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+
+  T = Triple("mips64el-img-linux-gnu");
+  EXPECT_EQ(Triple::mips64el, T.getArch());
+  EXPECT_EQ(Triple::ImaginationTechnologies, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNU, T.getEnvironment());
+
+  T = Triple("mips64el-img-linux-gnuabin32");
+  EXPECT_EQ(Triple::mips64el, T.getArch());
+  EXPECT_EQ(Triple::ImaginationTechnologies, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNUABIN32, T.getEnvironment());
+
+  T = Triple("mips64el-unknown-linux-gnuabi64");
+  EXPECT_EQ(Triple::mips64el, T.getArch());
+  EXPECT_EQ(Triple::UnknownVendor, T.getVendor());
+  EXPECT_EQ(Triple::Linux, T.getOS());
+  EXPECT_EQ(Triple::GNUABI64, T.getEnvironment());
 
   T = Triple("huh");
   EXPECT_EQ(Triple::UnknownArch, T.getArch());
@@ -685,6 +751,54 @@ TEST(TripleTest, BitWidthArchVariants) {
   T.setArch(Triple::riscv64);
   EXPECT_EQ(Triple::riscv32, T.get32BitArchVariant().getArch());
   EXPECT_EQ(Triple::riscv64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::thumbeb);
+  EXPECT_EQ(Triple::thumbeb, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64_be, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::thumb);
+  EXPECT_EQ(Triple::thumb, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::aarch64);
+  EXPECT_EQ(Triple::arm, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::aarch64_be);
+  EXPECT_EQ(Triple::armeb, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64_be, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::renderscript32);
+  EXPECT_EQ(Triple::renderscript32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::renderscript64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::renderscript64);
+  EXPECT_EQ(Triple::renderscript32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::renderscript64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::le32);
+  EXPECT_EQ(Triple::le32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::le64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::le64);
+  EXPECT_EQ(Triple::le32, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::le64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::armeb);
+  EXPECT_EQ(Triple::armeb, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64_be, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::arm);
+  EXPECT_EQ(Triple::arm, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::aarch64, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::systemz);
+  EXPECT_EQ(Triple::UnknownArch, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::systemz, T.get64BitArchVariant().getArch());
+
+  T.setArch(Triple::xcore);
+  EXPECT_EQ(Triple::xcore, T.get32BitArchVariant().getArch());
+  EXPECT_EQ(Triple::UnknownArch, T.get64BitArchVariant().getArch());
 }
 
 TEST(TripleTest, EndianArchVariants) {
@@ -775,6 +889,22 @@ TEST(TripleTest, EndianArchVariants) {
   T.setArch(Triple::lanai);
   EXPECT_EQ(Triple::lanai, T.getBigEndianArchVariant().getArch());
   EXPECT_EQ(Triple::UnknownArch, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::tcele);
+  EXPECT_EQ(Triple::tce, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::tcele, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::tce);
+  EXPECT_EQ(Triple::tce, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::tcele, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::le32);
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::le32, T.getLittleEndianArchVariant().getArch());
+
+  T.setArch(Triple::le64);
+  EXPECT_EQ(Triple::UnknownArch, T.getBigEndianArchVariant().getArch());
+  EXPECT_EQ(Triple::le64, T.getLittleEndianArchVariant().getArch());
 }
 
 TEST(TripleTest, getOSVersion) {
@@ -870,6 +1000,15 @@ TEST(TripleTest, getOSVersion) {
   EXPECT_EQ((unsigned)7, Major);
   EXPECT_EQ((unsigned)0, Minor);
   EXPECT_EQ((unsigned)0, Micro);
+  EXPECT_FALSE(T.isSimulatorEnvironment());
+
+  T = Triple("x86_64-apple-ios10.3-simulator");
+  EXPECT_TRUE(T.isiOS());
+  T.getiOSVersion(Major, Minor, Micro);
+  EXPECT_EQ((unsigned)10, Major);
+  EXPECT_EQ((unsigned)3, Minor);
+  EXPECT_EQ((unsigned)0, Micro);
+  EXPECT_TRUE(T.isSimulatorEnvironment());
 }
 
 TEST(TripleTest, FileFormat) {
@@ -906,6 +1045,9 @@ TEST(TripleTest, FileFormat) {
   Triple T = Triple("");
   T.setObjectFormat(Triple::ELF);
   EXPECT_EQ(Triple::ELF, T.getObjectFormat());
+
+  T.setObjectFormat(Triple::MachO);
+  EXPECT_EQ(Triple::MachO, T.getObjectFormat());
 }
 
 TEST(TripleTest, NormalizeWindows) {
@@ -1017,11 +1159,16 @@ TEST(TripleTest, NormalizeARM) {
   EXPECT_EQ("armv6eb--netbsd-eabihf", Triple::normalize("armv6eb-netbsd-eabihf"));
   EXPECT_EQ("armv7eb--netbsd-eabihf", Triple::normalize("armv7eb-netbsd-eabihf"));
 
+  EXPECT_EQ("armv7-suse-linux-gnueabihf",
+            Triple::normalize("armv7-suse-linux-gnueabi"));
+
   Triple T;
   T = Triple("armv6--netbsd-eabi");
   EXPECT_EQ(Triple::arm, T.getArch());
   T = Triple("armv6eb--netbsd-eabi");
   EXPECT_EQ(Triple::armeb, T.getArch());
+  T = Triple("armv7-suse-linux-gnueabihf");
+  EXPECT_EQ(Triple::GNUEABIHF, T.getEnvironment());
 }
 
 TEST(TripleTest, ParseARMArch) {

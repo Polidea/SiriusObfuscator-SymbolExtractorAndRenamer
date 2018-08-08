@@ -10,6 +10,7 @@
 #include "gtest/gtest.h"
 
 #include "lldb/Interpreter/Args.h"
+#include "lldb/Utility/StringList.h"
 
 #include <limits>
 #include <sstream>
@@ -117,6 +118,16 @@ TEST(ArgsTest, TestArgv) {
   EXPECT_EQ(nullptr, args.GetArgumentVector()[5]);
 }
 
+TEST(ArgsTest, StringListConstructor) {
+  StringList list;
+  list << "foo" << "bar" << "baz";
+  Args args(list);
+  ASSERT_EQ(3u, args.GetArgumentCount());
+  EXPECT_EQ("foo", args[0].ref);
+  EXPECT_EQ("bar", args[1].ref);
+  EXPECT_EQ("baz", args[2].ref);
+}
+
 TEST(ArgsTest, GetQuotedCommandString) {
   Args args;
   const char *str = "process launch -o stdout.txt -- \"a b c\"";
@@ -167,6 +178,14 @@ TEST(ArgsTest, AppendArguments) {
   EXPECT_STREQ("2", args.GetArgumentAtIndex(1));
   EXPECT_STREQ("3", args.GetArgumentAtIndex(2));
   EXPECT_STREQ("4", args.GetArgumentAtIndex(3));
+}
+
+TEST(ArgsTest, GetArgumentArrayRef) {
+  Args args("foo bar");
+  auto ref = args.GetArgumentArrayRef();
+  ASSERT_EQ(2u, ref.size());
+  EXPECT_STREQ("foo", ref[0]);
+  EXPECT_STREQ("bar", ref[1]);
 }
 
 TEST(ArgsTest, StringToBoolean) {

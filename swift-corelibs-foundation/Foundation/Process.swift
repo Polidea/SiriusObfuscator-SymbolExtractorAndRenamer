@@ -10,7 +10,7 @@
 #if !os(Android) // not available
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
     import Darwin
 #elseif os(Linux) || CYGWIN
     import Glibc
@@ -47,7 +47,7 @@ private var managerThreadRunLoop : RunLoop? = nil
 private var managerThreadRunLoopIsRunning = false
 private var managerThreadRunLoopIsRunningCondition = NSCondition()
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 internal let kCFSocketDataCallBack = CFSocketCallBackType.dataCallBack.rawValue
 #endif
 
@@ -114,6 +114,7 @@ open class Process: NSObject {
             static var done = false
             static let lock = NSLock()
         }
+        
         Once.lock.synchronized {
             if !Once.done {
                 let thread = Thread {
@@ -164,26 +165,52 @@ open class Process: NSObject {
     
     }
     
-    // these methods can only be set before a launch
+    // These methods can only be set before a launch.
+    
     open var launchPath: String?
     open var arguments: [String]?
     open var environment: [String : String]? // if not set, use current
     
     open var currentDirectoryPath: String = FileManager.default.currentDirectoryPath
     
-    // standard I/O channels; could be either a FileHandle or a Pipe
+    open var executableURL: URL? {
+        get {
+            guard let launchPath = self.launchPath else {
+                return nil
+            }
+            
+            return URL(fileURLWithPath: launchPath)
+        }
+        set {
+            self.launchPath = newValue?.path
+        }
+    }
+    
+    open var currentDirectoryURL: URL {
+        get {
+            return URL(fileURLWithPath: self.currentDirectoryPath)
+        }
+        set {
+            self.currentDirectoryPath = newValue.path
+        }
+    }
+    
+    // Standard I/O channels; could be either a FileHandle or a Pipe
+    
     open var standardInput: Any? {
         willSet {
             precondition(newValue is Pipe || newValue is FileHandle,
                          "standardInput must be either Pipe or FileHandle")
         }
     }
+    
     open var standardOutput: Any? {
         willSet {
             precondition(newValue is Pipe || newValue is FileHandle,
                          "standardOutput must be either Pipe or FileHandle")
         }
     }
+    
     open var standardError: Any? {
         willSet {
             precondition(newValue is Pipe || newValue is FileHandle,
@@ -198,7 +225,8 @@ open class Process: NSObject {
     
     private var processLaunchedCondition = NSCondition()
     
-    // actions
+    // Actions
+    
     open func launch() {
         
         self.processLaunchedCondition.lock()
@@ -233,7 +261,7 @@ open class Process: NSObject {
                 free(UnsafeMutableRawPointer(arg.pointee))
             }
             
-            argv.deallocate(capacity: args.count + 1)
+            argv.deallocate()
         }
         
         let envp: UnsafeMutablePointer<UnsafeMutablePointer<Int8>?>
@@ -252,12 +280,12 @@ open class Process: NSObject {
                 for pair in envp ..< envp + env.count {
                     free(UnsafeMutableRawPointer(pair.pointee))
                 }
-                envp.deallocate(capacity: env.count + 1)
+                envp.deallocate()
             }
         }
 
         var taskSocketPair : [Int32] = [0, 0]
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
         socketpair(AF_UNIX, SOCK_STREAM, 0, &taskSocketPair)
 #else
         socketpair(AF_UNIX, Int32(SOCK_STREAM.rawValue), 0, &taskSocketPair)
@@ -308,9 +336,9 @@ open class Process: NSObject {
             
             // If a termination handler has been set, invoke it on a background thread
             
-            if process.terminationHandler != nil {
+            if let terminationHandler = process.terminationHandler {
                 let thread = Thread {
-                    process.terminationHandler!(process)
+                    terminationHandler(process)
                 }
                 thread.start()
             }
@@ -336,7 +364,7 @@ open class Process: NSObject {
         CFRunLoopAddSource(managerThreadRunLoop?._cfRunLoop, source, kCFRunLoopDefaultMode)
 
         // file_actions
-        #if os(OSX) || os(iOS) || CYGWIN
+        #if os(macOS) || os(iOS) || CYGWIN
             var fileActions: posix_spawn_file_actions_t? = nil
         #else
             var fileActions: posix_spawn_file_actions_t = posix_spawn_file_actions_t()
@@ -456,8 +484,8 @@ open class Process: NSObject {
         
         self.processIdentifier = pid
         
-        self.processLaunchedCondition.unlock()
         self.processLaunchedCondition.broadcast()
+        self.processLaunchedCondition.unlock()
     }
     
     open func interrupt() { NSUnimplemented() } // Not always possible. Sends SIGINT.

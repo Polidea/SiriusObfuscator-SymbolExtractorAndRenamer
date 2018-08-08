@@ -374,10 +374,17 @@ func test_guard(_ x : Int, y : Int??, cond : Bool) {
     markUsed(g)  // expected-error {{variable declared in 'guard' condition is not usable in its body}}
   }
 
-  guard let h = y, cond {}  // expected-error {{expected 'else' after 'guard' condition}}
+  guard let h = y, cond {}  // expected-error {{expected 'else' after 'guard' condition}} {{25-25=else }}
 
 
   guard case _ = x else {}  // expected-warning {{'guard' condition is always true, body is unreachable}}
+
+  // SR-7567
+  guard let outer = y else {
+    guard true else {
+      print(outer) // expected-error {{variable declared in 'guard' condition is not usable in its body}}
+    }
+  }
 }
 
 func test_is_as_patterns() {

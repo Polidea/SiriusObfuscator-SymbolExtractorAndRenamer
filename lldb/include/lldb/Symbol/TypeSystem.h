@@ -94,6 +94,9 @@ public:
                                            Target *target,
                                            const char *compiler_options);
 
+  static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
+                                           Target *target);
+
   // Free up any resources associated with this TypeSystem.  Done before
   // removing
   // all the TypeSystems from the TypeSystemMap.
@@ -210,7 +213,7 @@ public:
   // with this type system. For such cases, languages can check and return
   // an error.
   //----------------------------------------------------------------------
-  virtual Error IsCompatible();
+  virtual Status IsCompatible();
 
   //----------------------------------------------------------------------
   // Type Completion
@@ -380,9 +383,15 @@ public:
 
   virtual size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type) = 0;
 
-  virtual CompilerType
-  GetTemplateArgument(lldb::opaque_compiler_type_t type, size_t idx,
-                      lldb::TemplateArgumentKind &kind) = 0;
+  virtual lldb::TemplateArgumentKind
+  GetTemplateArgumentKind(lldb::opaque_compiler_type_t type, size_t idx);
+  virtual CompilerType GetTypeTemplateArgument(lldb::opaque_compiler_type_t type,
+                                           size_t idx);
+  virtual llvm::Optional<CompilerType::IntegralTemplateArgument>
+  GetIntegralTemplateArgument(lldb::opaque_compiler_type_t type, size_t idx);
+
+  virtual lldb::GenericKind GetGenericArgumentKind(void *type, size_t idx);
+  virtual CompilerType GetGenericArgumentType(void *type, size_t idx);
 
   //----------------------------------------------------------------------
   // Dumping types

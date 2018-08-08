@@ -16,6 +16,7 @@
 #include "BuildDescription.h"
 
 #include "llbuild/Basic/LLVM.h"
+#include "llbuild/Basic/StringList.h"
 #include "llbuild/BuildSystem/BuildFile.h"
 
 #include "llvm/ADT/StringRef.h"
@@ -32,11 +33,16 @@ namespace buildsystem {
   
 // FIXME: Figure out how this is going to be organized.
 class BuildNode : public Node {
-  /// Whether or not this node is a directory.
+  /// Whether or not this node represents a full directory.
   //
   // FIXME: We need a type enumeration here.
   bool directory;
 
+  /// Whether or not this node represents the full directory structure.
+  //
+  // FIXME: We need a type enumeration here.
+  bool directoryStructure;
+  
   /// Whether or not this node is "virtual" (i.e., not a filesystem path).
   bool virtualNode;
 
@@ -52,10 +58,18 @@ class BuildNode : public Node {
   /// cannot be safely used to track *output* file state.
   bool mutated;
 
+  /// Exclusion filters for directory listings
+  ///
+  /// Items matching these filter strings are not considered as part of the
+  /// signature for directory and directory structure nodes.
+  basic::StringList exclusionPatterns;
+
 public:
-  explicit BuildNode(StringRef name, bool isDirectory, bool isVirtual,
+  explicit BuildNode(StringRef name, bool isDirectory,
+                     bool isDirectoryStructure, bool isVirtual,
                      bool isCommandTimestamp, bool isMutated)
-      : Node(name), directory(isDirectory), virtualNode(isVirtual),
+      : Node(name), directory(isDirectory),
+        directoryStructure(isDirectoryStructure), virtualNode(isVirtual),
         commandTimestamp(isCommandTimestamp), mutated(isMutated) {}
 
   /// Check whether this is a "virtual" (non-filesystem related) node.
@@ -65,9 +79,17 @@ public:
   /// recursively.
   bool isDirectory() const { return directory; }
 
+  /// Check whether this node is intended to represent a directory's structure
+  /// recursively.
+  bool isDirectoryStructure() const { return directoryStructure; }
+
   bool isCommandTimestamp() const { return commandTimestamp; }
 
   bool isMutated() const { return mutated; }
+
+  const basic::StringList& contentExclusionPatterns() const {
+    return exclusionPatterns;
+  }
 
   virtual bool configureAttribute(const ConfigureContext& ctx, StringRef name,
                                   StringRef value) override;

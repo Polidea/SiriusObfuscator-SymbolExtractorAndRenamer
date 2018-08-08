@@ -14,13 +14,14 @@
 #include "SwiftExpressionVariable.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Log.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Core/Value.h"
 
 #include "lldb/Symbol/SwiftASTContext.h" // Needed for llvm::isa<SwiftASTContext>(...)
 #include "lldb/Symbol/TypeSystem.h"
+
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/StreamString.h"
 
 #include "swift/AST/Decl.h"
 #include "swift/AST/ParameterList.h"
@@ -82,25 +83,6 @@ void SwiftPersistentExpressionState::RemovePersistentVariable(
     if (value == m_next_persistent_variable_id - 1)
       m_next_persistent_variable_id--;
   }
-}
-
-ConstString
-SwiftPersistentExpressionState::GetNextPersistentVariableName(bool is_error) {
-  char name_cstr[256];
-
-  const char *prefix = nullptr;
-
-  if (is_error)
-    prefix = "$E";
-  else
-    prefix = "$R";
-
-  ::snprintf(name_cstr, sizeof(name_cstr), "%s%u", prefix,
-             is_error ? m_next_persistent_error_id++
-                      : m_next_persistent_variable_id++);
-
-  ConstString name(name_cstr);
-  return name;
 }
 
 bool SwiftPersistentExpressionState::SwiftDeclMap::DeclsAreEquivalent(

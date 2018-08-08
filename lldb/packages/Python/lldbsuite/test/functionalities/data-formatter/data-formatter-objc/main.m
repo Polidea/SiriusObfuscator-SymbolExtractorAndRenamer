@@ -169,7 +169,11 @@ int main (int argc, const char * argv[])
 	    NSNumber* num_at3 = @12.5;
 	    NSNumber* num_at4 = @-12.5;
 
-		NSDecimalNumber* decimal_one = [NSDecimalNumber one];
+	    NSDecimalNumber* decimal_number = [NSDecimalNumber decimalNumberWithMantissa:123456 exponent:-10 isNegative:NO];
+	    NSDecimalNumber* decimal_number_neg = [NSDecimalNumber decimalNumberWithMantissa:123456 exponent:10 isNegative:YES];
+	    NSDecimalNumber* decimal_one = [NSDecimalNumber one];
+	    NSDecimalNumber* decimal_zero = [NSDecimalNumber zero];
+	    NSDecimalNumber* decimal_nan = [NSDecimalNumber notANumber];
 
 	    NSString *str0 = [num6 stringValue];
 
@@ -398,6 +402,12 @@ int main (int argc, const char * argv[])
 	    NSData *immutableData = [[NSData alloc] initWithBytes:"HELLO" length:4];
 	    NSData *mutableData = [[NSMutableData alloc] initWithBytes:"NODATA" length:6];
 
+	    // No-copy versions of NSData initializers use NSConcreteData if over 2^16 elements are specified.
+	    unsigned concreteLength = 100000;
+	    void *zeroes = calloc(1, concreteLength);
+	    NSData *concreteData = [[NSData alloc] initWithBytesNoCopy:zeroes length:concreteLength];
+	    NSMutableData *concreteMutableData = [[NSMutableData alloc] initWithBytesNoCopy:zeroes length:concreteLength];
+
 	    [mutableData appendBytes:"MOREDATA" length:8];
 
 	    [immutableData length];
@@ -612,6 +622,7 @@ int main (int argc, const char * argv[])
     [molecule setAtoms:nil];
     [molecule setAtoms:[NSMutableArray new]];
 
+    free(zeroes);
     [pool drain];
     return 0;
 }

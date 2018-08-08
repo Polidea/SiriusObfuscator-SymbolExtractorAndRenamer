@@ -1,5 +1,4 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 //
 // RUN: %target-swift-frontend -emit-module -o %t %S/Inputs/foo_swift_module.swift
 //
@@ -65,7 +64,6 @@ func testCompleteModuleQualified3() {
 // MODULE_QUALIFIED_3: Begin completions
 // MODULE_QUALIFIED_3-NEXT: Decl[Constructor]/CurrNominal: ({#t: _#})[#BarGenericSwiftStruct1<_>#]; name=(t: _)
 // MODULE_QUALIFIED_3-NEXT: Decl[InstanceMethod]/CurrNominal: .bar1InstanceFunc({#self: BarGenericSwiftStruct1<_>#})[#() -> Void#]; name=bar1InstanceFunc(BarGenericSwiftStruct1<_>)
-// MODULE_QUALIFIED_3: Decl[InfixOperatorFunction]/OtherModule[Swift]: != {#Any.Type?#}[#Bool#];
 // MODULE_QUALIFIED_3: End completions
 
 func testCompleteModuleQualified4() {
@@ -74,7 +72,6 @@ func testCompleteModuleQualified4() {
 // MODULE_QUALIFIED_4: Begin completions
 // MODULE_QUALIFIED_4-NEXT: Decl[Constructor]/CurrNominal: ({#t: _#}, {#u: _#})[#BarGenericSwiftStruct2<_, _>#]; name=(t: _, u: _)
 // MODULE_QUALIFIED_4-NEXT: Decl[InstanceMethod]/CurrNominal: .bar2InstanceFunc({#self: BarGenericSwiftStruct2<_, _>#})[#() -> Void#]; name=bar2InstanceFunc(BarGenericSwiftStruct2<_, _>)
-// MODULE_QUALIFIED_4: Decl[InfixOperatorFunction]/OtherModule[Swift]: != {#Any.Type?#}[#Bool#];
 // MODULE_QUALIFIED_4-NEXT: End completions
 
 func testCompleteModuleQualified5() {

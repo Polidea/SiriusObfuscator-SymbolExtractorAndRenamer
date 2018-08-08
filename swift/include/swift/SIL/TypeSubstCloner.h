@@ -31,10 +31,10 @@ namespace swift {
 /// TypeSubstCloner - a utility class for cloning code while remapping types.
 template<typename ImplClass>
 class TypeSubstCloner : public SILClonerWithScopes<ImplClass> {
-  friend class SILVisitor<ImplClass>;
+  friend class SILInstructionVisitor<ImplClass>;
   friend class SILCloner<ImplClass>;
 
-  typedef SILClonerWithScopes<ImplClass> super;
+  using super = SILClonerWithScopes<ImplClass>;
 
   void postProcess(SILInstruction *Orig, SILInstruction *Cloned) {
     llvm_unreachable("Clients need to explicitly call a base class impl!");
@@ -170,7 +170,11 @@ public:
 
 protected:
   SILType remapType(SILType Ty) {
-    return Ty.subst(Original.getModule(), SubsMap);
+    SILType &Sty = TypeCache[Ty];
+    if (!Sty) {
+      Sty = Ty.subst(Original.getModule(), SubsMap);
+    }
+    return Sty;
   }
 
   CanType remapASTType(CanType ty) {
@@ -185,31 +189,37 @@ protected:
   }
 
   void visitApplyInst(ApplyInst *Inst) {
-    ApplySiteCloningHelper Helper(ApplySite::isa(Inst), *this);
+    ApplySiteCloningHelper Helper(ApplySite(Inst), *this);
     ApplyInst *N =
         getBuilder().createApply(getOpLocation(Inst->getLoc()),
                                  Helper.getCallee(), Helper.getSubstitutions(),
-                                 Helper.getArguments(), Inst->isNonThrowing());
+                                 Helper.getArguments(), Inst->isNonThrowing(),
+                                 GenericSpecializationInformation::create(
+                                   Inst, getBuilder()));
     doPostProcess(Inst, N);
   }
 
   void visitTryApplyInst(TryApplyInst *Inst) {
-    ApplySiteCloningHelper Helper(ApplySite::isa(Inst), *this);
+    ApplySiteCloningHelper Helper(ApplySite(Inst), *this);
     TryApplyInst *N = getBuilder().createTryApply(
         getOpLocation(Inst->getLoc()), Helper.getCallee(),
         Helper.getSubstitutions(), Helper.getArguments(),
         getOpBasicBlock(Inst->getNormalBB()),
-        getOpBasicBlock(Inst->getErrorBB()));
+        getOpBasicBlock(Inst->getErrorBB()),
+        GenericSpecializationInformation::create(
+          Inst, getBuilder()));
     doPostProcess(Inst, N);
   }
 
   void visitPartialApplyInst(PartialApplyInst *Inst) {
-    ApplySiteCloningHelper Helper(ApplySite::isa(Inst), *this);
+    ApplySiteCloningHelper Helper(ApplySite(Inst), *this);
     auto ParamConvention =
         Inst->getType().getAs<SILFunctionType>()->getCalleeConvention();
     PartialApplyInst *N = getBuilder().createPartialApply(
         getOpLocation(Inst->getLoc()), Helper.getCallee(),
-        Helper.getSubstitutions(), Helper.getArguments(), ParamConvention);
+        Helper.getSubstitutions(), Helper.getArguments(), ParamConvention,
+        GenericSpecializationInformation::create(
+          Inst, getBuilder()));
     doPostProcess(Inst, N);
   }
 
@@ -226,14 +236,15 @@ protected:
     SILBuilderWithPostProcess<TypeSubstCloner, 16> B(this, inst);
     B.setCurrentDebugScope(super::getOpScope(inst->getDebugScope()));
 
+    auto TrueCount = inst->getTrueBBCount();
+    auto FalseCount = inst->getFalseBBCount();
+
     // Try to use the scalar cast instruction.
     if (canUseScalarCheckedCastInstructions(B.getModule(),
                                             sourceType, targetType)) {
-      emitIndirectConditionalCastWithScalar(B, SwiftMod, loc,
-                                            inst->getConsumptionKind(),
-                                            src, sourceType,
-                                            dest, targetType,
-                                            succBB, failBB);
+      emitIndirectConditionalCastWithScalar(
+          B, SwiftMod, loc, inst->getConsumptionKind(), src, sourceType, dest,
+          targetType, succBB, failBB, TrueCount, FalseCount);
       return;
     }
 
@@ -256,10 +267,31 @@ protected:
     super::visitUpcastInst(Upcast);
   }
 
+  void visitCopyValueInst(CopyValueInst *Copy) {
+    // If the substituted type is trivial, ignore the copy.
+    SILType copyTy = getOpType(Copy->getType());
+    if (copyTy.isTrivial(Copy->getModule())) {
+      ValueMap.insert({SILValue(Copy), getOpValue(Copy->getOperand())});
+      return;
+    }
+    super::visitCopyValueInst(Copy);
+  }
+
+  void visitDestroyValueInst(DestroyValueInst *Destroy) {
+    // If the substituted type is trivial, ignore the destroy.
+    SILType destroyTy = getOpType(Destroy->getOperand()->getType());
+    if (destroyTy.isTrivial(Destroy->getModule())) {
+      return;
+    }
+    super::visitDestroyValueInst(Destroy);
+  }
+
   /// The Swift module that the cloned function belongs to.
   ModuleDecl *SwiftMod;
   /// The substitutions list for the specialization.
   SubstitutionMap SubsMap;
+  /// Cache for substituted types.
+  llvm::DenseMap<SILType, SILType> TypeCache;
   /// The original function to specialize.
   SILFunction &Original;
   /// The substitutions used at the call site.

@@ -29,6 +29,8 @@ private:
   using LoadedModulePair = std::pair<std::unique_ptr<ModuleFile>, unsigned>;
   std::vector<LoadedModulePair> LoadedModuleFiles;
 
+  SmallVector<std::unique_ptr<llvm::MemoryBuffer>, 2> OrphanedMemoryBuffers;
+
   explicit SerializedModuleLoader(ASTContext &ctx, DependencyTracker *tracker);
 
 public:
@@ -193,7 +195,11 @@ public:
 
   bool hasEntryPoint() const override;
 
-  virtual const clang::Module *getUnderlyingClangModule() override;
+  virtual const clang::Module *getUnderlyingClangModule() const override;
+
+  virtual bool getAllGenericSignatures(
+                   SmallVectorImpl<GenericSignature*> &genericSignatures)
+                override;
 
   static bool classof(const FileUnit *file) {
     return file->getKind() == FileUnitKind::SerializedAST;

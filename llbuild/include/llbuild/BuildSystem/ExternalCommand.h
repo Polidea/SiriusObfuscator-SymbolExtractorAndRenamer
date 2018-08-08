@@ -19,6 +19,7 @@
 #include "llbuild/BuildSystem/CommandResult.h"
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/StringRef.h"
 
 #include <string>
@@ -66,14 +67,14 @@ class ExternalCommand : public Command {
   // it is never used when initialized incorrectly.
 
   /// The previous build result command signature, if available.
-  uint64_t priorResultCommandSignature;
+  basic::CommandSignature priorResultCommandSignature;
   
   /// If not None, the command should be skipped with the provided BuildValue.
   llvm::Optional<BuildValue> skipValue;
 
-  /// If true, the command had a missing input (this implies ShouldSkip is
-  /// true).
-  bool hasMissingInput = false;
+  /// If there are any elements, the command had missing input nodes
+  /// (this implies ShouldSkip is true).
+  SmallPtrSet<Node*, 1> missingInputNodes;
 
   /// If true, the command can legally be updated if the output state allows it.
   bool canUpdateIfNewer = true;
@@ -96,7 +97,7 @@ protected:
   StringRef getDescription() { return description; }
 
   /// This function must be overriden by subclasses for any additional keys.
-  virtual uint64_t getSignature();
+  virtual basic::CommandSignature getSignature();
 
   /// Extension point for subclasses, to actually execute the command.
   virtual CommandResult executeExternalCommand(BuildSystemCommandInterface& bsci,

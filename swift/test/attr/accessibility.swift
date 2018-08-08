@@ -90,7 +90,9 @@ private enum TestEnum {
 private protocol TestProtocol {
   private associatedtype Foo // expected-error {{'private' modifier cannot be applied to this declaration}} {{3-11=}}
   internal var Bar: Int { get } // expected-error {{'internal' modifier cannot be used in protocols}} {{3-12=}}
+  // expected-note@-1 {{protocol requirements implicitly have the same access as the protocol itself}}
   public func baz() // expected-error {{'public' modifier cannot be used in protocols}} {{3-10=}}
+  // expected-note@-1 {{protocol requirements implicitly have the same access as the protocol itself}}
 }
 
 public(set) func publicSetFunc() {} // expected-error {{'public' modifier cannot be applied to this declaration}} {{1-13=}}
@@ -212,29 +214,41 @@ public protocol ProtoWithReqs {
 }
 
 public struct Adopter<T> : ProtoWithReqs {}
+// expected-error@-1 {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
+// expected-error@-2 {{type alias 'Assoc' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
 extension Adopter {
-  typealias Assoc = Int // expected-error {{type alias 'Assoc' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
-  func foo() {} // expected-error {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
+  typealias Assoc = Int
+  // expected-note@-1 {{mark the type alias as 'public' to satisfy the requirement}} {{3-3=public }}
+  func foo() {}
+  // expected-note@-1 {{mark the instance method as 'public' to satisfy the requirement}} {{3-3=public }}
 }
 
 public class AnotherAdopterBase {
-  typealias Assoc = Int // expected-error {{type alias 'Assoc' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
-  func foo() {} // expected-error {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
+  typealias Assoc = Int
+  // expected-note@-1 {{mark the type alias as 'public' to satisfy the requirement}} {{3-3=public }}
+  func foo() {}
+  // expected-note@-1 {{mark the instance method as 'public' to satisfy the requirement}} {{3-3=public }}
 }
 public class AnotherAdopterSub : AnotherAdopterBase, ProtoWithReqs {}
+// expected-error@-1 {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
+// expected-error@-2 {{type alias 'Assoc' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
 
 public protocol ReqProvider {}
 extension ReqProvider {
-  func foo() {} // expected-error {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
+  func foo() {}
+  // expected-note@-1 {{mark the instance method as 'public' to satisfy the requirement}} {{3-3=public }}
 }
 public struct AdoptViaProtocol : ProtoWithReqs, ReqProvider {
+  // expected-error@-1 {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
   public typealias Assoc = Int
 }
 
 public protocol ReqProvider2 {}
 extension ProtoWithReqs where Self : ReqProvider2 {
-  func foo() {} // expected-error {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{3-3=public }}
+  func foo() {}
+  // expected-note@-1 {{mark the instance method as 'public' to satisfy the requirement}} {{3-3=public }}
 }
 public struct AdoptViaCombinedProtocol : ProtoWithReqs, ReqProvider2 {
+  // expected-error@-1 {{method 'foo()' must be declared public because it matches a requirement in public protocol 'ProtoWithReqs'}} {{none}}
   public typealias Assoc = Int
 }

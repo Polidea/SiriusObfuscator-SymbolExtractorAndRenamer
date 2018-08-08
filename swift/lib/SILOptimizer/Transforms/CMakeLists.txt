@@ -15,13 +15,14 @@ set(TRANSFORMS_SOURCES
   Transforms/GenericSpecializer.cpp
   Transforms/MergeCondFail.cpp
   Transforms/MarkUninitializedFixup.cpp
+  Transforms/Outliner.cpp
+  Transforms/ObjectOutliner.cpp
   Transforms/OwnershipModelEliminator.cpp
   Transforms/PerformanceInliner.cpp
   Transforms/RedundantLoadElimination.cpp
   Transforms/RedundantOverflowCheckRemoval.cpp
   Transforms/ReleaseDevirtualizer.cpp
   Transforms/RemovePin.cpp
-  Transforms/SILCleanup.cpp
   Transforms/SILCodeMotion.cpp
   Transforms/SILLowerAggregateInstrs.cpp
   Transforms/SILMem2Reg.cpp

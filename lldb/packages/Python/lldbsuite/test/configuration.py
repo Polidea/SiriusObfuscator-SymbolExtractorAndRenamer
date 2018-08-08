@@ -24,40 +24,6 @@ import unittest2
 import lldbsuite
 
 
-def __setCrashInfoHook_Mac(text):
-    from . import crashinfo
-    crashinfo.setCrashReporterDescription(text)
-
-
-def setupCrashInfoHook():
-    if platform.system() == "Darwin":
-        from . import lock
-        test_dir = os.environ['LLDB_TEST']
-        if not test_dir or not os.path.exists(test_dir):
-            return
-        dylib_lock = os.path.join(test_dir, "crashinfo.lock")
-        dylib_src = os.path.join(test_dir, "crashinfo.c")
-        dylib_dst = os.path.join(test_dir, "crashinfo.so")
-        try:
-            compile_lock = lock.Lock(dylib_lock)
-            compile_lock.acquire()
-            if not os.path.isfile(dylib_dst) or os.path.getmtime(
-                    dylib_dst) < os.path.getmtime(dylib_src):
-                # we need to compile
-                cmd = "SDKROOT= xcrun clang %s -o %s -framework Python -Xlinker -dylib" % (
-                    dylib_src, dylib_dst)
-                if subprocess.call(
-                        cmd, shell=True) != 0 or not os.path.isfile(dylib_dst):
-                    raise Exception('command failed: "{}"'.format(cmd))
-        finally:
-            compile_lock.release()
-            del compile_lock
-
-        setCrashInfoHook = __setCrashInfoHook_Mac
-
-    else:
-        pass
-
 # The test suite.
 suite = unittest2.TestSuite()
 
@@ -79,11 +45,9 @@ lldbFrameworkPath = None
 # Test suite repeat count.  Can be overwritten with '-# count'.
 count = 1
 
-# The 'archs' and 'compilers' can be specified via command line.  The corresponding
-# options can be specified more than once. For example, "-A x86_64 -A i386"
-# => archs=['x86_64', 'i386'] and "-C gcc -C clang" => compilers=['gcc', 'clang'].
-archs = None        # Must be initialized after option parsing
-compilers = None    # Must be initialized after option parsing
+# The 'arch' and 'compiler' can be specified via command line.
+arch = None        # Must be initialized after option parsing
+compiler = None    # Must be initialized after option parsing
 swiftCompiler = None
 swiftLibrary = None
 
@@ -148,6 +112,9 @@ lldb_platform_name = None
 lldb_platform_url = None
 lldb_platform_working_dir = None
 
+# The base directory in which the tests are being built.
+test_build_dir = None
+
 # Parallel execution settings
 is_inferior_test_runner = False
 multiprocess_test_subdir = None
@@ -170,10 +137,6 @@ rerun_max_file_threhold = 0
 # The names of all tests. Used to assert we don't have two tests with the
 # same base name.
 all_tests = set()
-
-# safe default
-setCrashInfoHook = lambda x: None
-
 
 def shouldSkipBecauseOfCategories(test_categories):
     if useCategories:

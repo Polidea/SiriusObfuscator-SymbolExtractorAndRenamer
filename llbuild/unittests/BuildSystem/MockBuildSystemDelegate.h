@@ -17,6 +17,7 @@
 #include "llbuild/Basic/FileSystem.h"
 #include "llbuild/Basic/LLVM.h"
 
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/SourceMgr.h"
 
@@ -48,13 +49,10 @@ private:
                                        StringRef data) {}
   
   virtual void commandProcessFinished(Command*, ProcessHandle handle,
-                                      CommandResult result,
-                                      int exitStatus) {}
+                                      const CommandExtendedResult& result) {}
 };
   
 class MockBuildSystemDelegate : public BuildSystemDelegate {
-  std::unique_ptr<basic::FileSystem> fileSystem =
-    basic::createLocalFileSystem();
   std::vector<std::string> messages;
   std::mutex messagesMutex;
   
@@ -63,7 +61,7 @@ class MockBuildSystemDelegate : public BuildSystemDelegate {
   bool trackAllMessages;
   
 public:
-  MockBuildSystemDelegate(bool trackAllMessages = false);
+    MockBuildSystemDelegate(bool trackAllMessages = false);
 
   std::vector<std::string> getMessages() {
     {
@@ -71,8 +69,6 @@ public:
       return messages;
     }
   }
-  
-  virtual basic::FileSystem& getFileSystem() { return *fileSystem; }
   
   virtual void setFileContentsBeingParsed(StringRef buffer) {}
 
@@ -150,6 +146,28 @@ public:
       std::unique_lock<std::mutex> lock(messagesMutex);
       messages.push_back(
           ("commandFinished(" + command->getName() + ": " + std::to_string((int)result) + ")").str());
+    }
+  }
+
+  virtual void commandCannotBuildOutputDueToMissingInputs(Command * command, Node *output,
+                                                          SmallPtrSet<Node *, 1> inputs) {
+    std::string message = "cannot build '" + output->getName().str() + "' due to missing input: '" +
+      (*inputs.begin())->getName().str() + "'";
+    llvm::errs() << "error: " << command->getName() << ": " << message << "\n";
+    {
+      std::unique_lock<std::mutex> lock(messagesMutex);
+      messages.push_back(message);
+    }
+  }
+
+  virtual void cannotBuildNodeDueToMultipleProducers(Node *output,
+                                                     std::vector<Command*> commands) {
+    std::string message = "cannot build '" + output->getName().str() + "' node is produced "
+    "by multiple commands; e.g. '" + (*commands.begin())->getName().str() + "'";
+    llvm::errs() << "error: " << message << "\n";
+    {
+      std::unique_lock<std::mutex> lock(messagesMutex);
+      messages.push_back(message);
     }
   }
 };

@@ -21,33 +21,44 @@
 #include "swift/AST/DiagnosticEngine.h"
 #include "swift/AST/DiagnosticsFrontend.h"
 #include "swift/Basic/LangOptions.h"
+#include "swift/Basic/LLVMInitialize.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Frontend/Frontend.h"
 #include "swift/Frontend/PrintingDiagnosticConsumer.h"
+#include "swift/Syntax/Serialization/SyntaxDeserialization.h"
 #include "swift/Parse/Lexer.h"
+#include "swift/Parse/Parser.h"
 #include "swift/Subsystems.h"
-#include "swift/Syntax/LegacyASTTransformer.h"
+#include "swift/Syntax/Serialization/SyntaxSerialization.h"
 #include "swift/Syntax/SyntaxData.h"
+#include "swift/Syntax/SyntaxNodes.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace swift;
+using namespace swift::syntax;
 using llvm::StringRef;
 
 enum class ActionType {
-  DumpTokenSyntax,
+  DumpRawTokenSyntax,
   FullLexRoundTrip,
   FullParseRoundTrip,
+  SerializeRawTree,
+  DeserializeRawTree,
+  ParseOnly,
+  ParserGen,
+  EOFPos,
   None
 };
 
 namespace options {
+static llvm::cl::OptionCategory Category("swift-syntax-test Options");
 static llvm::cl::opt<ActionType>
 Action(llvm::cl::desc("Action (required):"),
        llvm::cl::init(ActionType::None),
        llvm::cl::values(
-        clEnumValN(ActionType::DumpTokenSyntax,
+        clEnumValN(ActionType::DumpRawTokenSyntax,
                    "dump-full-tokens",
                    "Lex the source file and dump the tokens "
                    "and their absolute line/column locations"),
@@ -58,21 +69,72 @@ Action(llvm::cl::desc("Action (required):"),
         clEnumValN(ActionType::FullParseRoundTrip,
                    "round-trip-parse",
                    "Parse the source file and print it back out for "
-                   "comparing against the input")));
+                   "comparing against the input"),
+        clEnumValN(ActionType::ParseOnly,
+                   "parse-only",
+                   "Parse the source file with syntax nodes and exit"),
+        clEnumValN(ActionType::ParserGen,
+                   "parse-gen",
+                   "Parse the source file and print it back out for "
+                   "comparing against the input"),
+        clEnumValN(ActionType::SerializeRawTree,
+                   "serialize-raw-tree",
+                   "Parse the source file and serialize the raw tree"
+                   "to JSON"),
+        clEnumValN(ActionType::DeserializeRawTree,
+                   "deserialize-raw-tree",
+                   "Parse the JSON file from the serialized raw tree"
+                   "to the original"),
+        clEnumValN(ActionType::EOFPos,
+                   "eof",
+                   "Parse the source file, calculate the absolute position"
+                   "of the EOF token, and dump the buffer from the start of the"
+                   "file to the EOF token")));
 
 static llvm::cl::opt<std::string>
 InputSourceFilename("input-source-filename",
                     llvm::cl::desc("Path to the input .swift file"));
+
+static llvm::cl::opt<std::string>
+OutputFilename("output-filename",
+               llvm::cl::desc("Path to the output file"));
+
+static llvm::cl::opt<bool>
+PrintNodeKind("print-node-kind",
+              llvm::cl::desc("To print syntax node kind"),
+              llvm::cl::cat(Category),
+              llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+PrintTrivialNodeKind("print-trivial-node-kind",
+                     llvm::cl::desc("To print trivial syntax node kind"),
+                     llvm::cl::cat(Category),
+                     llvm::cl::init(false));
+
+static llvm::cl::opt<bool>
+VerifySyntaxTree("verify-syntax-tree",
+                 llvm::cl::desc("Emit warnings for unknown nodes"),
+                 llvm::cl::cat(Category),
+                 llvm::cl::init(true));
+
+static llvm::cl::opt<bool>
+Visual("v",
+       llvm::cl::desc("Print visually"),
+       llvm::cl::cat(Category),
+       llvm::cl::init(false));
 } // end namespace options
 
+namespace {
 int getTokensFromFile(unsigned BufferID,
                       LangOptions &LangOpts,
                       SourceManager &SourceMgr,
-                      DiagnosticEngine &Diags,
-                      std::vector<std::pair<RC<syntax::TokenSyntax>,
+                      swift::DiagnosticEngine &Diags,
+                      std::vector<std::pair<RC<syntax::RawSyntax>,
                       syntax::AbsolutePosition>> &Tokens) {
-  Tokens = tokenizeWithTrivia(LangOpts, SourceMgr, BufferID);
-  return Diags.hadAnyError() ? EXIT_FAILURE : EXIT_SUCCESS;
+  Tokens = tokenizeWithTrivia(LangOpts, SourceMgr, BufferID,
+                              /*Offset=*/0, /*EndOffset=*/0,
+                              &Diags);
+  return EXIT_SUCCESS;
 }
 
 
@@ -81,7 +143,7 @@ getTokensFromFile(const StringRef InputFilename,
                   LangOptions &LangOpts,
                   SourceManager &SourceMgr,
                   DiagnosticEngine &Diags,
-                  std::vector<std::pair<RC<syntax::TokenSyntax>,
+                  std::vector<std::pair<RC<syntax::RawSyntax>,
                                         syntax::AbsolutePosition>> &Tokens) {
   auto Buffer = llvm::MemoryBuffer::getFile(InputFilename);
   if (!Buffer) {
@@ -94,6 +156,41 @@ getTokensFromFile(const StringRef InputFilename,
   return getTokensFromFile(BufferID, LangOpts, SourceMgr, Diags, Tokens);
 }
 
+void anchorForGetMainExecutable() {}
+
+
+SourceFile *getSourceFile(CompilerInstance &Instance,
+                          StringRef InputFileName,
+                          const char *MainExecutablePath) {
+  CompilerInvocation Invocation;
+  Invocation.getLangOptions().BuildSyntaxTree = true;
+  Invocation.getLangOptions().VerifySyntaxTree = options::VerifySyntaxTree;
+  Invocation.getFrontendOptions().InputsAndOutputs.addInputFile(InputFileName);
+  Invocation.setMainExecutablePath(
+    llvm::sys::fs::getMainExecutable(MainExecutablePath,
+      reinterpret_cast<void *>(&anchorForGetMainExecutable)));
+
+  Invocation.setModuleName("Test");
+  PrintingDiagnosticConsumer DiagPrinter;
+  Instance.addDiagnosticConsumer(&DiagPrinter);
+  if (Instance.setup(Invocation)) {
+    return nullptr;
+  }
+
+  // First, parse the file normally and get the regular old AST.
+  Instance.performParseOnly();
+
+  SourceFile *SF = nullptr;
+  for (auto Unit : Instance.getMainModule()->getFiles()) {
+    SF = dyn_cast<SourceFile>(Unit);
+    if (SF != nullptr) {
+      break;
+    }
+  }
+  assert(SF && "No source file");
+  return SF;
+}
+
 int doFullLexRoundTrip(const StringRef InputFilename) {
   LangOptions LangOpts;
   SourceManager SourceMgr;
@@ -101,7 +198,7 @@ int doFullLexRoundTrip(const StringRef InputFilename) {
   PrintingDiagnosticConsumer DiagPrinter;
   Diags.addConsumer(DiagPrinter);
 
-  std::vector<std::pair<RC<syntax::TokenSyntax>,
+  std::vector<std::pair<RC<syntax::RawSyntax>,
                                    syntax::AbsolutePosition>> Tokens;
   if (getTokensFromFile(InputFilename, LangOpts, SourceMgr,
                         Diags, Tokens) == EXIT_FAILURE) {
@@ -109,21 +206,20 @@ int doFullLexRoundTrip(const StringRef InputFilename) {
   }
 
   for (auto TokAndPos : Tokens) {
-    TokAndPos.first->print(llvm::outs());
+    TokAndPos.first->print(llvm::outs(), {});
   }
 
-  return Diags.hadAnyError() ? EXIT_FAILURE : EXIT_SUCCESS;
+  return EXIT_SUCCESS;
 }
 
-int doDumpTokenSyntax(const StringRef InputFilename) {
+int doDumpRawTokenSyntax(const StringRef InputFilename) {
   LangOptions LangOpts;
   SourceManager SourceMgr;
   DiagnosticEngine Diags(SourceMgr);
   PrintingDiagnosticConsumer DiagPrinter;
   Diags.addConsumer(DiagPrinter);
 
-
-  std::vector<std::pair<RC<syntax::TokenSyntax>,
+  std::vector<std::pair<RC<syntax::RawSyntax>,
                         syntax::AbsolutePosition>> Tokens;
   if (getTokensFromFile(InputFilename, LangOpts, SourceMgr,
                         Diags, Tokens) == EXIT_FAILURE) {
@@ -137,74 +233,88 @@ int doDumpTokenSyntax(const StringRef InputFilename) {
     llvm::outs() << "\n";
   }
 
-  return Diags.hadAnyError() ? EXIT_FAILURE : EXIT_SUCCESS;
+  return EXIT_SUCCESS;
 }
 
-int doFullParseRoundTrip(const StringRef InputFilename) {
-  CompilerInvocation Invocation;
-  Invocation.addInputFilename(InputFilename);
-  Invocation.setModuleName("Test");
+int doFullParseRoundTrip(const char *MainExecutablePath,
+                         const StringRef InputFileName) {
   CompilerInstance Instance;
+  SourceFile *SF = getSourceFile(Instance, InputFileName, MainExecutablePath);
+  SF->getSyntaxRoot().print(llvm::outs(), {});
+  return EXIT_SUCCESS;
+}
 
-  auto &SourceMgr = Instance.getSourceMgr();
+int doSerializeRawTree(const char *MainExecutablePath,
+                       const StringRef InputFileName) {
+  CompilerInstance Instance;
+  SourceFile *SF = getSourceFile(Instance, InputFileName, MainExecutablePath);
 
-  PrintingDiagnosticConsumer DiagPrinter;
-  Instance.addDiagnosticConsumer(&DiagPrinter);
-  if (Instance.setup(Invocation)) {
-    return EXIT_FAILURE;
-  }
-
-  // First, parse the file normally and get the regular old AST.
-  Instance.performParseOnly();
-
-  if (Instance.getDiags().hadAnyError()) {
-    return EXIT_FAILURE;
-  }
-
-  auto BufferID = Instance.getInputBufferIDs().back();
-  SourceFile *SF = nullptr;
-  for (auto Unit : Instance.getMainModule()->getFiles()) {
-    SF = dyn_cast<SourceFile>(Unit);
-    if (SF != nullptr) {
-      break;
-    }
-  }
-  assert(SF && "No source file");
-
-  // Retokenize the buffer with full fidelity
-  std::vector<std::pair<RC<syntax::TokenSyntax>,
-                        syntax::AbsolutePosition>> Tokens;
-  if (getTokensFromFile(BufferID, Invocation.getLangOptions(),
-                        SourceMgr,
-                        Instance.getDiags(), Tokens) == EXIT_FAILURE) {
-    return EXIT_FAILURE;
-  }
-
-  SmallVector<Decl *, 256> FileDecls;
-  SF->getTopLevelDecls(FileDecls);
-  sema::Semantics Sema;
-  // Convert the old ASTs to the new full-fidelity syntax tree and print
-  // them out.
-  for (auto *Decl : FileDecls) {
-    if (Decl->escapedFromIfConfig()) {
-      continue;
-    }
-    auto NewNode = transformAST(ASTNode(Decl), Sema, SourceMgr,
-                                BufferID, Tokens);
-    if (NewNode.hasValue()) {
-      NewNode.getValue().print(llvm::outs());
-      auto Symbol = Sema.getNodeForSyntax(NewNode.getValue());
-    }
-  }
-
-  if (Tokens.back().first->getTokenKind() == tok::eof) {
-    Tokens.back().first->print(llvm::outs());
-  }
+  auto Root = SF->getSyntaxRoot().getRaw();
+  swift::json::Output out(llvm::outs());
+  out << *Root;
+  llvm::outs() << "\n";
 
   return EXIT_SUCCESS;
 }
 
+int doDeserializeRawTree(const char *MainExecutablePath,
+                         const StringRef InputFileName,
+                         const StringRef OutputFileName) {
+
+  auto Buffer = llvm::MemoryBuffer::getFile(InputFileName);
+  std::error_code errorCode;
+  auto os = llvm::make_unique<llvm::raw_fd_ostream>(
+              OutputFileName, errorCode, llvm::sys::fs::F_None);
+  swift::json::SyntaxDeserializer deserializer(llvm::MemoryBufferRef(*(Buffer.get())));
+  swift::SyntaxPrintOptions opt;
+  deserializer.getSourceFileSyntax()->print(*os);
+  return EXIT_SUCCESS;
+}
+
+int doParseOnly(const char *MainExecutablePath,
+                  const StringRef InputFileName) {
+  CompilerInstance Instance;
+  SourceFile *SF = getSourceFile(Instance, InputFileName, MainExecutablePath);
+  return SF ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
+int dumpParserGen(const char *MainExecutablePath,
+                  const StringRef InputFileName) {
+  CompilerInstance Instance;
+  SourceFile *SF = getSourceFile(Instance, InputFileName, MainExecutablePath);
+  SyntaxPrintOptions Opts;
+  Opts.PrintSyntaxKind = options::PrintNodeKind;
+  Opts.Visual = options::Visual;
+  Opts.PrintTrivialNodeKind = options::PrintTrivialNodeKind;
+  SF->getSyntaxRoot().print(llvm::outs(), Opts);
+  return 0;
+}
+
+int dumpEOFSourceLoc(const char *MainExecutablePath,
+                     const StringRef InputFileName) {
+  CompilerInstance Instance;
+  SourceFile *SF = getSourceFile(Instance, InputFileName, MainExecutablePath);
+  auto BufferId = *SF->getBufferID();
+  SyntaxPrintOptions Opts;
+  auto Root = SF->getSyntaxRoot();
+  auto AbPos = Root.getEOFToken().getAbsolutePosition();
+
+  SourceManager &SourceMgr = SF->getASTContext().SourceMgr;
+  auto StartLoc = SourceMgr.getLocForBufferStart(BufferId);
+  auto EndLoc = SourceMgr.getLocForOffset(BufferId, AbPos.getOffset());
+
+  // To ensure the correctness of position when translated to line & column pair.
+  if (SourceMgr.getLineAndColumn(EndLoc) != AbPos.getLineAndColumn()) {
+    llvm::outs() << "locations should be identical";
+    return EXIT_FAILURE;
+  }
+  llvm::outs() << CharSourceRange(SourceMgr, StartLoc, EndLoc).str();
+  return 0;
+}
+}// end of anonymous namespace
+
 int main(int argc, char *argv[]) {
+  PROGRAM_START(argc, argv);
   llvm::cl::ParseCommandLineOptions(argc, argv, "Swift Syntax Test\n");
 
   int ExitCode = EXIT_SUCCESS;
@@ -220,14 +330,29 @@ int main(int argc, char *argv[]) {
   }
 
   switch (options::Action) {
-  case ActionType::DumpTokenSyntax:
-    ExitCode = doDumpTokenSyntax(options::InputSourceFilename);
+  case ActionType::DumpRawTokenSyntax:
+    ExitCode = doDumpRawTokenSyntax(options::InputSourceFilename);
     break;
   case ActionType::FullLexRoundTrip:
     ExitCode = doFullLexRoundTrip(options::InputSourceFilename);
     break;
   case ActionType::FullParseRoundTrip:
-    ExitCode = doFullParseRoundTrip(options::InputSourceFilename);
+    ExitCode = doFullParseRoundTrip(argv[0], options::InputSourceFilename);
+    break;
+  case ActionType::SerializeRawTree:
+    ExitCode = doSerializeRawTree(argv[0], options::InputSourceFilename);
+    break;
+  case ActionType::DeserializeRawTree:
+    ExitCode = doDeserializeRawTree(argv[0], options::InputSourceFilename, options::OutputFilename);
+    break;
+  case ActionType::ParseOnly:
+    ExitCode = doParseOnly(argv[0], options::InputSourceFilename);
+    break;
+  case ActionType::ParserGen:
+    ExitCode = dumpParserGen(argv[0], options::InputSourceFilename);
+    break;
+  case ActionType::EOFPos:
+    ExitCode = dumpEOFSourceLoc(argv[0], options::InputSourceFilename);
     break;
   case ActionType::None:
     llvm::errs() << "an action is required\n";

@@ -20,7 +20,6 @@
 #endif
 
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/Timer.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Initialization/SystemInitializerCommon.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
@@ -29,6 +28,7 @@
 #include "lldb/Symbol/JavaASTContext.h"
 #include "lldb/Symbol/OCamlASTContext.h"
 #include "lldb/Symbol/SwiftASTContext.h"
+#include "lldb/Utility/Timer.h"
 
 #include "Plugins/ABI/MacOSX-arm/ABIMacOSX_arm.h"
 #include "Plugins/ABI/MacOSX-arm64/ABIMacOSX_arm64.h"
@@ -43,6 +43,7 @@
 #include "Plugins/ABI/SysV-ppc64/ABISysV_ppc64.h"
 #include "Plugins/ABI/SysV-s390x/ABISysV_s390x.h"
 #include "Plugins/ABI/SysV-x86_64/ABISysV_x86_64.h"
+#include "Plugins/Architecture/Arm/ArchitectureArm.h"
 #include "Plugins/Disassembler/llvm/DisassemblerLLVMC.h"
 #include "Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOS.h"
 #include "Plugins/DynamicLoader/MacOSX-DYLD/DynamicLoaderMacOSXDYLD.h"
@@ -50,10 +51,10 @@
 #include "Plugins/DynamicLoader/Static/DynamicLoaderStatic.h"
 #include "Plugins/DynamicLoader/Windows-DYLD/DynamicLoaderWindowsDYLD.h"
 #include "Plugins/Instruction/ARM64/EmulateInstructionARM64.h"
-#include "Plugins/InstrumentationRuntime/AddressSanitizer/AddressSanitizerRuntime.h"
-#include "Plugins/InstrumentationRuntime/ThreadSanitizer/ThreadSanitizerRuntime.h"
-#include "Plugins/InstrumentationRuntime/UndefinedBehaviorSanitizer/UndefinedBehaviorSanitizerRuntime.h"
+#include "Plugins/InstrumentationRuntime/ASan/ASanRuntime.h"
 #include "Plugins/InstrumentationRuntime/MainThreadChecker/MainThreadCheckerRuntime.h"
+#include "Plugins/InstrumentationRuntime/TSan/TSanRuntime.h"
+#include "Plugins/InstrumentationRuntime/UBSan/UBSanRuntime.h"
 #include "Plugins/InstrumentationRuntime/SwiftRuntimeReporting/SwiftRuntimeReporting.h"
 #include "Plugins/JITLoader/GDB/JITLoaderGDB.h"
 #include "Plugins/Language/CPlusPlus/CPlusPlusLanguage.h"
@@ -78,6 +79,7 @@
 #include "Plugins/Platform/MacOSX/PlatformMacOSX.h"
 #include "Plugins/Platform/MacOSX/PlatformRemoteiOS.h"
 #include "Plugins/Platform/NetBSD/PlatformNetBSD.h"
+#include "Plugins/Platform/OpenBSD/PlatformOpenBSD.h"
 #include "Plugins/Platform/Windows/PlatformWindows.h"
 #include "Plugins/Platform/gdb-server/PlatformRemoteGDBServer.h"
 #include "Plugins/Process/elf-core/ProcessElfCore.h"
@@ -289,6 +291,7 @@ void SystemInitializerFull::Initialize() {
   platform_freebsd::PlatformFreeBSD::Initialize();
   platform_linux::PlatformLinux::Initialize();
   platform_netbsd::PlatformNetBSD::Initialize();
+  platform_openbsd::PlatformOpenBSD::Initialize();
   PlatformWindows::Initialize();
   PlatformKalimba::Initialize();
   platform_android::PlatformAndroid::Initialize();
@@ -324,6 +327,9 @@ void SystemInitializerFull::Initialize() {
   ABISysV_mips::Initialize();
   ABISysV_mips64::Initialize();
   ABISysV_s390x::Initialize();
+
+  ArchitectureArm::Initialize();
+
   DisassemblerLLVMC::Initialize();
 
   JITLoaderGDB::Initialize();
@@ -426,7 +432,8 @@ void SystemInitializerFull::InitializeSWIG() {
 }
 
 void SystemInitializerFull::Terminate() {
-  Timer scoped_timer(LLVM_PRETTY_FUNCTION, LLVM_PRETTY_FUNCTION);
+  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
+  Timer scoped_timer(func_cat, LLVM_PRETTY_FUNCTION);
 
   Debugger::SettingsTerminate();
 
@@ -521,6 +528,7 @@ void SystemInitializerFull::Terminate() {
   platform_freebsd::PlatformFreeBSD::Terminate();
   platform_linux::PlatformLinux::Terminate();
   platform_netbsd::PlatformNetBSD::Terminate();
+  platform_openbsd::PlatformOpenBSD::Terminate();
   PlatformWindows::Terminate();
   PlatformKalimba::Terminate();
   platform_android::PlatformAndroid::Terminate();

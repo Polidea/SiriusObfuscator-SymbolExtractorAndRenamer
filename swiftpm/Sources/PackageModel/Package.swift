@@ -86,9 +86,20 @@ public final class Package {
         self.testTargetSearchPath = testTargetSearchPath
     }
 
-    public enum Error: Swift.Error {
+    public enum Error: Swift.Error, Equatable {
         case noManifest(baseURL: String, version: String?)
-        case noOrigin(String)
+    }
+}
+extension Package.Error: CustomStringConvertible {
+   public var description: String {
+        switch self {
+        case .noManifest(let baseURL, let version):
+            var string = "\(baseURL) has no manifest"
+            if let version = version {
+                string += " for version \(version)"
+            }
+            return string
+        }
     }
 }
 
@@ -103,20 +114,5 @@ extension Package: Hashable, Equatable {
     
     public static func == (lhs: Package, rhs: Package) -> Bool {
         return ObjectIdentifier(lhs) == ObjectIdentifier(rhs)
-    }
-}
-
-extension Package.Error: Equatable {
-    public static func == (lhs: Package.Error, rhs: Package.Error) -> Bool {
-        switch (lhs, rhs) {
-        case let (.noManifest(lhs), .noManifest(rhs)):
-            return lhs.baseURL == rhs.baseURL && lhs.version == rhs.version
-        case (.noManifest, _):
-            return false
-        case let (.noOrigin(lhs), .noOrigin(rhs)):
-            return lhs == rhs
-        case (.noOrigin, _):
-            return false
-        }
     }
 }

@@ -10,6 +10,7 @@
 #ifndef LLVM_CLANG_LIB_CODEGEN_ABIINFO_H
 #define LLVM_CLANG_LIB_CODEGEN_ABIINFO_H
 
+#include "clang/AST/CharUnits.h"
 #include "clang/AST/Type.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Type.h"
@@ -23,6 +24,7 @@ namespace llvm {
 
 namespace clang {
   class ASTContext;
+  class CodeGenOptions;
   class TargetInfo;
 
 namespace CodeGen {
@@ -67,6 +69,7 @@ namespace swiftcall {
     llvm::LLVMContext &getVMContext() const;
     const llvm::DataLayout &getDataLayout() const;
     const TargetInfo &getTarget() const;
+    const CodeGenOptions &getCodeGenOpts() const;
 
     /// Return the calling convention to use for system runtime
     /// functions.
@@ -134,8 +137,7 @@ namespace swiftcall {
 
     bool supportsSwift() const final override { return true; }
 
-    virtual bool shouldPassIndirectlyForSwift(CharUnits totalSize,
-                                              ArrayRef<llvm::Type*> types,
+    virtual bool shouldPassIndirectlyForSwift(ArrayRef<llvm::Type*> types,
                                               bool asReturnValue) const = 0;
 
     virtual bool isLegalVectorTypeForSwift(CharUnits totalSize,
@@ -148,7 +150,6 @@ namespace swiftcall {
       return info->supportsSwift();
     }
   };
-
 }  // end namespace CodeGen
 }  // end namespace clang
 

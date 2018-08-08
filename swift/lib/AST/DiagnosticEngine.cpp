@@ -24,12 +24,13 @@
 #include "swift/AST/PrintOptions.h"
 #include "swift/AST/TypeRepr.h"
 #include "swift/Basic/SourceManager.h"
-#include "swift/Parse/Lexer.h" // bad dependency
 #include "swift/Config.h"
+#include "swift/Parse/Lexer.h" // bad dependency
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Twine.h"
-#include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace swift;
 
@@ -79,6 +80,8 @@ static StoredDiagnosticInfo storedDiagnosticInfos[] = {
   StoredDiagnosticInfo(DiagnosticKind::Warning, DiagnosticOptions::Options),
 #define NOTE(ID, Options, Text, Signature)                                     \
   StoredDiagnosticInfo(DiagnosticKind::Note, DiagnosticOptions::Options),
+#define REMARK(ID, Options, Text, Signature)                                   \
+  StoredDiagnosticInfo(DiagnosticKind::Remark, DiagnosticOptions::Options),
 #include "swift/AST/DiagnosticsAll.def"
 };
 static_assert(sizeof(storedDiagnosticInfos) / sizeof(StoredDiagnosticInfo) ==
@@ -89,6 +92,7 @@ static const char *diagnosticStrings[] = {
 #define ERROR(ID, Options, Text, Signature) Text,
 #define WARNING(ID, Options, Text, Signature) Text,
 #define NOTE(ID, Options, Text, Signature) Text,
+#define REMARK(ID, Options, Text, Signature) Text,
 #include "swift/AST/DiagnosticsAll.def"
     "<not a diagnostic>",
 };
@@ -323,27 +327,33 @@ static void formatSelectionArgument(StringRef ModifierArguments,
 }
 
 static bool isInterestingTypealias(Type type) {
-  auto aliasTy = dyn_cast<NameAliasType>(type.getPointer());
-  if (!aliasTy)
-    return false;
-  if (aliasTy->getDecl() == type->getASTContext().getVoidDecl())
-    return false;
-  if (type->is<BuiltinType>())
+  // Dig out the typealias declaration, if there is one.
+  TypeAliasDecl *aliasDecl = nullptr;
+  if (auto aliasTy = dyn_cast<NameAliasType>(type.getPointer()))
+    aliasDecl = aliasTy->getDecl();
+  else
     return false;
 
-  auto aliasDecl = aliasTy->getDecl();
+  if (aliasDecl == type->getASTContext().getVoidDecl())
+    return false;
 
   // The 'Swift.AnyObject' typealias is not 'interesting'.
   if (aliasDecl->getName() ==
-      aliasDecl->getASTContext().getIdentifier("AnyObject") &&
-      aliasDecl->getParentModule()->isStdlibModule()) {
+        aliasDecl->getASTContext().getIdentifier("AnyObject") &&
+      (aliasDecl->getParentModule()->isStdlibModule() ||
+       aliasDecl->getParentModule()->isBuiltinModule())) {
     return false;
   }
 
-  auto underlyingTy = aliasDecl->getUnderlyingTypeLoc().getType();
-
-  if (aliasDecl->isCompatibilityAlias())
+  // Compatibility aliases are only interesting insofar as their underlying
+  // types are interesting.
+  if (aliasDecl->isCompatibilityAlias()) {
+    auto underlyingTy = aliasDecl->getUnderlyingTypeLoc().getType();
     return isInterestingTypealias(underlyingTy);
+  }
+
+  // Builtin types are never interesting typealiases.
+  if (type->is<BuiltinType>()) return false;
 
   return true;
 }
@@ -462,6 +472,19 @@ static void formatDiagnosticArgument(StringRef Modifier,
     assert(Modifier.empty() && "Improper modifier for PatternKind argument");
     Out << Arg.getAsPatternKind();
     break;
+
+  case DiagnosticArgumentKind::ReferenceOwnership:
+    if (Modifier == "select") {
+      formatSelectionArgument(ModifierArguments, Args,
+                              unsigned(Arg.getAsReferenceOwnership()),
+                              FormatOpts, Out);
+    } else {
+      assert(Modifier.empty() &&
+             "Improper modifier for ReferenceOwnership argument");
+      Out << Arg.getAsReferenceOwnership();
+    }
+    break;
+
   case DiagnosticArgumentKind::StaticSpellingKind:
     if (Modifier == "select") {
       formatSelectionArgument(ModifierArguments, Args,
@@ -578,10 +601,17 @@ static DiagnosticKind toDiagnosticKind(DiagnosticState::Behavior behavior) {
     return DiagnosticKind::Note;
   case DiagnosticState::Behavior::Warning:
     return DiagnosticKind::Warning;
+  case DiagnosticState::Behavior::Remark:
+    return DiagnosticKind::Remark;
   }
 
   llvm_unreachable("Unhandled DiagnosticKind in switch.");
 }
+
+/// A special option only for compiler writers that causes Diagnostics to assert
+/// when a failure diagnostic is emitted. Intended for use in the debugger.
+llvm::cl::opt<bool> AssertOnError("swift-diagnostics-assert-on-error",
+                                  llvm::cl::init(false));
 
 DiagnosticState::Behavior DiagnosticState::determineBehavior(DiagID id) {
   auto set = [this](DiagnosticState::Behavior lvl) {
@@ -592,6 +622,7 @@ DiagnosticState::Behavior DiagnosticState::determineBehavior(DiagID id) {
       anyErrorOccurred = true;
     }
 
+    assert((!AssertOnError || !anyErrorOccurred) && "We emitted an error?!");
     previousBehavior = lvl;
     return lvl;
   };
@@ -641,6 +672,8 @@ DiagnosticState::Behavior DiagnosticState::determineBehavior(DiagID id) {
     return set(diagInfo.isFatal ? Behavior::Fatal : Behavior::Error);
   case DiagnosticKind::Warning:
     return set(Behavior::Warning);
+  case DiagnosticKind::Remark:
+    return set(Behavior::Remark);
   }
 
   llvm_unreachable("Unhandled DiagnosticKind in switch.");
@@ -752,7 +785,7 @@ void DiagnosticEngine::emitDiagnostic(const Diagnostic &diagnostic) {
           }
 
           if (auto value = dyn_cast<ValueDecl>(ppDecl)) {
-            bufferName += value->getNameStr();
+            bufferName += value->getBaseName().userFacingName();
           } else if (auto ext = dyn_cast<ExtensionDecl>(ppDecl)) {
             bufferName += ext->getExtendedType().getString();
           }
@@ -789,9 +822,11 @@ void DiagnosticEngine::emitDiagnostic(const Diagnostic &diagnostic) {
   Info.FixIts = diagnostic.getFixIts();
   for (auto &Consumer : Consumers) {
     Consumer->handleDiagnostic(SourceMgr, loc, toDiagnosticKind(behavior),
-                               diagnosticStrings[(unsigned)Info.ID],
-                               diagnostic.getArgs(),
-                               Info);
+                               diagnosticStringFor(Info.ID),
+                               diagnostic.getArgs(), Info);
   }
 }
 
+const char *DiagnosticEngine::diagnosticStringFor(const DiagID id) {
+  return diagnosticStrings[(unsigned)id];
+}

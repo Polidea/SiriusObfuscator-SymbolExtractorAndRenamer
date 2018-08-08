@@ -9,7 +9,7 @@
 
 #include "gtest/gtest.h"
 
-#include "lldb/Host/FileSpec.h"
+#include "lldb/Utility/FileSpec.h"
 
 using namespace lldb_private;
 
@@ -107,6 +107,28 @@ TEST(FileSpecTest, CopyByAppendingPathComponent) {
   EXPECT_STREQ("/foo/bar", fs.GetCString());
   EXPECT_STREQ("/foo", fs.GetDirectory().GetCString());
   EXPECT_STREQ("bar", fs.GetFilename().GetCString());
+}
+
+TEST(FileSpecTest, PrependPathComponent) {
+  FileSpec fs_posix("foo", false, FileSpec::ePathSyntaxPosix);
+  fs_posix.PrependPathComponent("/bar");
+  EXPECT_STREQ("/bar/foo", fs_posix.GetCString());
+
+  FileSpec fs_posix_2("foo/bar", false, FileSpec::ePathSyntaxPosix);
+  fs_posix_2.PrependPathComponent("/baz");
+  EXPECT_STREQ("/baz/foo/bar", fs_posix_2.GetCString());
+
+  FileSpec fs_windows("baz", false, FileSpec::ePathSyntaxWindows);
+  fs_windows.PrependPathComponent("F:\\bar");
+  EXPECT_STREQ("F:\\bar\\baz", fs_windows.GetCString());
+
+  FileSpec fs_posix_root("bar", false, FileSpec::ePathSyntaxPosix);
+  fs_posix_root.PrependPathComponent("/");
+  EXPECT_STREQ("/bar", fs_posix_root.GetCString());
+
+  FileSpec fs_windows_root("bar", false, FileSpec::ePathSyntaxWindows);
+  fs_windows_root.PrependPathComponent("F:\\");
+  EXPECT_STREQ("F:\\bar", fs_windows_root.GetCString());
 }
 
 static void Compare(const FileSpec &one, const FileSpec &two, bool full_match,
@@ -285,4 +307,46 @@ TEST(FileSpecTest, FormatFileSpec) {
   EXPECT_EQ("foo", llvm::formatv("{0}", F).str());
   EXPECT_EQ("foo", llvm::formatv("{0:F}", F).str());
   EXPECT_EQ("(empty)", llvm::formatv("{0:D}", F).str());
+}
+
+TEST(FileSpecTest, RemoveLastPathComponent) {
+  FileSpec fs_posix("/foo/bar/baz", false, FileSpec::ePathSyntaxPosix);
+  EXPECT_STREQ("/foo/bar/baz", fs_posix.GetCString());
+  EXPECT_TRUE(fs_posix.RemoveLastPathComponent());
+  EXPECT_STREQ("/foo/bar", fs_posix.GetCString());
+  EXPECT_TRUE(fs_posix.RemoveLastPathComponent());
+  EXPECT_STREQ("/foo", fs_posix.GetCString());
+  EXPECT_TRUE(fs_posix.RemoveLastPathComponent());
+  EXPECT_STREQ("/", fs_posix.GetCString());
+  EXPECT_FALSE(fs_posix.RemoveLastPathComponent());
+  EXPECT_STREQ("/", fs_posix.GetCString());
+
+  FileSpec fs_posix_relative("./foo/bar/baz", false, FileSpec::ePathSyntaxPosix);
+  EXPECT_STREQ("./foo/bar/baz", fs_posix_relative.GetCString());
+  EXPECT_TRUE(fs_posix_relative.RemoveLastPathComponent());
+  EXPECT_STREQ("./foo/bar", fs_posix_relative.GetCString());
+  EXPECT_TRUE(fs_posix_relative.RemoveLastPathComponent());
+  EXPECT_STREQ("./foo", fs_posix_relative.GetCString());
+  EXPECT_TRUE(fs_posix_relative.RemoveLastPathComponent());
+  EXPECT_STREQ(".", fs_posix_relative.GetCString());
+
+  FileSpec fs_posix_relative2("./", false, FileSpec::ePathSyntaxPosix);
+  EXPECT_STREQ("./.", fs_posix_relative2.GetCString());
+  EXPECT_TRUE(fs_posix_relative2.RemoveLastPathComponent());
+  EXPECT_STREQ(".", fs_posix_relative2.GetCString());
+  EXPECT_FALSE(fs_posix_relative.RemoveLastPathComponent());
+  EXPECT_STREQ(".", fs_posix_relative2.GetCString());
+
+  FileSpec fs_windows("C:\\foo\\bar\\baz", false, FileSpec::ePathSyntaxWindows);
+  EXPECT_STREQ("C:\\foo\\bar\\baz", fs_windows.GetCString());
+  EXPECT_TRUE(fs_windows.RemoveLastPathComponent());
+  EXPECT_STREQ("C:\\foo\\bar", fs_windows.GetCString());
+  EXPECT_TRUE(fs_windows.RemoveLastPathComponent());
+  EXPECT_STREQ("C:\\foo", fs_windows.GetCString());
+  EXPECT_TRUE(fs_windows.RemoveLastPathComponent());
+  EXPECT_STREQ("C:\\", fs_windows.GetCString());
+  EXPECT_TRUE(fs_windows.RemoveLastPathComponent());
+  EXPECT_STREQ("C:", fs_windows.GetCString());
+  EXPECT_FALSE(fs_windows.RemoveLastPathComponent());
+  EXPECT_STREQ("C:", fs_windows.GetCString());
 }

@@ -213,8 +213,14 @@ Command-line parameters
 ``-fno-implicit-modules``
   All modules used by the build must be specified with ``-fmodule-file``.
 
-``-fmodule-file=<file>``
-  Load the given precompiled module file.
+``-fmodule-file=[<name>=]<file>``
+  Specify the mapping of module names to precompiled module files. If the
+  name is omitted, then the module file is loaded whether actually required
+  or not. If the name is specified, then the mapping is treated as another
+  prebuilt module search mechanism (in addition to ``-fprebuilt-module-path``)
+  and the module is only loaded if required. Note that in this case the
+  specified file also overrides this module's paths that might be embedded
+  in other precompiled module files.
 
 ``-fprebuilt-module-path=<directory>``
   Specify the path to the prebuilt modules. If specified, we will look for modules in this directory for a given top-level module name. We don't need a module map for loading prebuilt modules in this directory and the compiler will not try to rebuild these modules. This can be specified multiple times.
@@ -317,11 +323,12 @@ Module map files use a simplified form of the C99 lexer, with the same rules for
 
 .. parsed-literal::
 
-  ``config_macros`` ``export``     ``private``
+  ``config_macros`` ``export_as``  ``private``
   ``conflict``      ``framework``  ``requires``
   ``exclude``       ``header``     ``textual``
   ``explicit``      ``link``       ``umbrella``
   ``extern``        ``module``     ``use``
+  ``export``
 
 Module map file
 ---------------
@@ -381,6 +388,7 @@ Modules can have a number of different kinds of members, each of which is descri
     *umbrella-dir-declaration*
     *submodule-declaration*
     *export-declaration*
+    *export-as-declaration*
     *use-declaration*
     *link-declaration*
     *config-macros-declaration*
@@ -403,7 +411,7 @@ A *requires-declaration* specifies the requirements that an importing translatio
   *feature*:
     ``!``:sub:`opt` *identifier*
 
-The requirements clause allows specific modules or submodules to specify that they are only accessible with certain language dialects or on certain platforms. The feature list is a set of identifiers, defined below. If any of the features is not available in a given translation unit, that translation unit shall not import the module. The optional ``!`` indicates that a feature is incompatible with the module.
+The requirements clause allows specific modules or submodules to specify that they are only accessible with certain language dialects or on certain platforms. The feature list is a set of identifiers, defined below. If any of the features is not available in a given translation unit, that translation unit shall not import the module. When building a module for use by a compilation, submodules requiring unavailable features are ignored. The optional ``!`` indicates that a feature is incompatible with the module.
 
 The following features are defined:
 
@@ -413,11 +421,29 @@ altivec
 blocks
   The "blocks" language feature is available.
 
+coroutines
+  Support for the coroutines TS is available.
+
 cplusplus
   C++ support is available.
 
 cplusplus11
   C++11 support is available.
+
+cplusplus14
+  C++14 support is available.
+
+cplusplus17
+  C++17 support is available.
+
+c99
+  C99 support is available.
+
+c11
+  C11 support is available.
+
+c17
+  C17 support is available.
 
 freestanding
   A freestanding environment is available.
@@ -466,9 +492,16 @@ A header declaration specifies that a particular header is associated with the e
 .. parsed-literal::
 
   *header-declaration*:
-    ``private``:sub:`opt` ``textual``:sub:`opt` ``header`` *string-literal*
-    ``umbrella`` ``header`` *string-literal*
-    ``exclude`` ``header`` *string-literal*
+    ``private``:sub:`opt` ``textual``:sub:`opt` ``header`` *string-literal* *header-attrs*:sub:`opt`
+    ``umbrella`` ``header`` *string-literal* *header-attrs*:sub:`opt`
+    ``exclude`` ``header`` *string-literal* *header-attrs*:sub:`opt`
+
+  *header-attrs*:
+    '{' *header-attr** '}'
+
+  *header-attr*:
+    ``size`` *integer-literal*
+    ``mtime`` *integer-literal*
 
 A header declaration that does not contain ``exclude`` nor ``textual`` specifies a header that contributes to the enclosing module. Specifically, when the module is built, the named header will be parsed and its declarations will be (logically) placed into the enclosing submodule.
 
@@ -500,6 +533,18 @@ A header with the ``exclude`` specifier is excluded from the module. It will not
   }
 
 A given header shall not be referenced by more than one *header-declaration*.
+
+Two *header-declaration*\s, or a *header-declaration* and a ``#include``, are
+considered to refer to the same file if the paths resolve to the same file
+and the specified *header-attr*\s (if any) match the attributes of that file,
+even if the file is named differently (for instance, by a relative path or
+via symlinks).
+
+.. note::
+    The use of *header-attr*\s avoids the need for Clang to speculatively
+    ``stat`` every header referenced by a module map. It is recommended that
+    *header-attr*\s only be used in machine-generated module maps, to avoid
+    mismatches between attribute values and the corresponding files.
 
 Umbrella directory declaration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -637,6 +682,30 @@ Note that, if ``Derived.h`` includes ``Base.h``, one can simply use a wildcard e
   Therefore, liberal use of ``export *`` provides excellent backward
   compatibility for programs that rely on transitive inclusion (i.e.,
   all of them).
+
+Re-export Declaration
+~~~~~~~~~~~~~~~~~~~~~
+An *export-as-declaration* specifies that the current module will have
+its interface re-exported by the named module.
+
+.. parsed-literal::
+
+  *export-as-declaration*:
+    ``export_as`` *identifier*
+
+The *export-as-declaration* names the module that the current
+module will be re-exported through. Only top-level modules
+can be re-exported, and any given module may only be re-exported
+through a single module.
+
+**Example:** In the following example, the module ``MyFrameworkCore``
+will be re-exported via the module ``MyFramework``:
+
+.. parsed-literal::
+
+  module MyFrameworkCore {
+    export_as MyFramework
+  }
 
 Use declaration
 ~~~~~~~~~~~~~~~
@@ -805,10 +874,12 @@ express this with a single module map file in the library:
 
   module Foo {
     header "Foo.h"
-    
-    explicit module Private {
-      header "Foo_Private.h"
-    }
+    ...
+  }
+
+  module Foo_Private {
+    header "Foo_Private.h"
+    ...
   }
 
 
@@ -819,7 +890,7 @@ build machinery.
 
 Private module map files, which are named ``module.private.modulemap``
 (or, for backward compatibility, ``module_private.map``), allow one to
-augment the primary module map file with an additional submodule. For
+augment the primary module map file with an additional modules. For
 example, we would split the module map file above into two module map
 files:
 
@@ -829,9 +900,9 @@ files:
   module Foo {
     header "Foo.h"
   }
-  
+
   /* module.private.modulemap */
-  explicit module Foo.Private {
+  module Foo_Private {
     header "Foo_Private.h"
   }
 
@@ -845,13 +916,12 @@ boundaries.
 
 When writing a private module as part of a *framework*, it's recommended that:
 
-* Headers for this module are present in the ``PrivateHeaders``
-  framework subdirectory.
-* The private module is defined as a *submodule* of the public framework (if
-  there's one), similar to how ``Foo.Private`` is defined in the example above.
-* The ``explicit`` keyword should be used to guarantee that its content will
-  only be available when the submodule itself is explicitly named (through a
-  ``@import`` for example).
+* Headers for this module are present in the ``PrivateHeaders`` framework
+  subdirectory.
+* The private module is defined as a *top level module* with the name of the
+  public framework prefixed, like ``Foo_Private`` above. Clang has extra logic
+  to work with this naming, using ``FooPrivate`` or ``Foo.Private`` (submodule)
+  trigger warnings and might not work as expected.
 
 Modularizing a Platform
 =======================
@@ -923,4 +993,3 @@ PCHInternals_
 .. [#] The preprocessing context in which the modules are parsed is actually dependent on the command-line options provided to the compiler, including the language dialect and any ``-D`` options. However, the compiled modules for different command-line options are kept distinct, and any preprocessor directives that occur within the translation unit are ignored. See the section on the `Configuration macros declaration`_ for more information.
 
 .. _PCHInternals: PCHInternals.html
- 

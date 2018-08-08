@@ -17,13 +17,16 @@ import SwiftShims
 ///
 /// This is a magic entry point known to the compiler. It is called in
 /// generated code for API availability checking.
+/// Note: It is important not to make this function inlinable. There is a pass
+/// that relies on being able to tell whether this function is called. It does
+/// this using the semantics attribute.
 @_semantics("availability.osversion")
 public func _stdlib_isOSVersionAtLeast(
   _ major: Builtin.Word,
   _ minor: Builtin.Word,
   _ patch: Builtin.Word
 ) -> Builtin.Int1 {
-#if os(OSX) || os(iOS) || os(tvOS) || os(watchOS)
+#if os(macOS) || os(iOS) || os(tvOS) || os(watchOS)
   let runningVersion = _swift_stdlib_operatingSystemVersion()
   let queryVersion = _SwiftNSOperatingSystemVersion(
     majorVersion: Int(major),
@@ -44,6 +47,7 @@ public func _stdlib_isOSVersionAtLeast(
 
 extension _SwiftNSOperatingSystemVersion : Comparable {
 
+  @inlinable // FIXME(sil-serialize-all)
   public static func == (
     lhs: _SwiftNSOperatingSystemVersion,
     rhs: _SwiftNSOperatingSystemVersion
@@ -54,6 +58,7 @@ extension _SwiftNSOperatingSystemVersion : Comparable {
   }
 
   /// Lexicographic comparison of version components.
+  @inlinable // FIXME(sil-serialize-all)
   public static func < (
     lhs: _SwiftNSOperatingSystemVersion,
     rhs: _SwiftNSOperatingSystemVersion
@@ -69,6 +74,7 @@ extension _SwiftNSOperatingSystemVersion : Comparable {
     return lhs.patchVersion < rhs.patchVersion
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   public static func >= (
     lhs: _SwiftNSOperatingSystemVersion,
     rhs: _SwiftNSOperatingSystemVersion

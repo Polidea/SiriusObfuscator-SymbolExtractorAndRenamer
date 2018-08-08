@@ -204,8 +204,48 @@ For example, the following code creates two sections named ``.text``.
 The unique number is not present in the resulting object at all. It is just used
 in the assembler to differentiate the sections.
 
+The 'o' flag is mapped to SHF_LINK_ORDER. If it is present, a symbol
+must be given that identifies the section to be placed is the
+.sh_link.
+
+.. code-block:: gas
+
+        .section .foo,"a",@progbits
+        .Ltmp:
+        .section .bar,"ao",@progbits,.Ltmp
+
+which is equivalent to just
+
+.. code-block:: gas
+
+        .section .foo,"a",@progbits
+        .section .bar,"ao",@progbits,.foo
+
+
 Target Specific Behaviour
 =========================
+
+X86
+---
+
+Relocations
+^^^^^^^^^^^
+
+``@ABS8`` can be applied to symbols which appear as immediate operands to
+instructions that have an 8-bit immediate form for that operand. It causes
+the assembler to use the 8-bit form and an 8-bit relocation (e.g. ``R_386_8``
+or ``R_X86_64_8``) for the symbol.
+
+For example:
+
+.. code-block:: gas
+
+  cmpq $foo@ABS8, %rdi
+
+This causes the assembler to select the form of the 64-bit ``cmpq`` instruction
+that takes an 8-bit immediate operand that is sign extended to 64 bits, as
+opposed to ``cmpq $foo, %rdi`` which takes a 32-bit immediate operand. This
+is also not the same as ``cmpb $foo, %dil``, which is an 8-bit comparison.
 
 Windows on ARM
 --------------
@@ -247,4 +287,32 @@ properly.  The emission of this stack probe emission is handled similar to the
 standard stack probe emission.
 
 The MSVC environment does not emit code for VLAs currently.
+
+Windows on ARM64
+----------------
+
+Stack Probe Emission
+^^^^^^^^^^^^^^^^^^^^
+
+The reference implementation (Microsoft Visual Studio 2017) emits stack probes
+in the following fashion:
+
+.. code-block:: gas
+
+  mov x15, #constant
+  bl __chkstk
+  sub sp, sp, x15, lsl #4
+
+However, this has the limitation of 256 MiB (±128MiB).  In order to accommodate
+larger binaries, LLVM supports the use of ``-mcode-model=large`` to allow a 8GiB
+(±4GiB) range via a slight deviation.  It will generate an indirect jump as
+follows:
+
+.. code-block:: gas
+
+  mov x15, #constant
+  adrp x16, __chkstk
+  add x16, x16, :lo12:__chkstk
+  blr x16
+  sub sp, sp, x15, lsl #4
 

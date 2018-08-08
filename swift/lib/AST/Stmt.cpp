@@ -130,8 +130,9 @@ SourceLoc Stmt::getEndLoc() const {
 BraceStmt::BraceStmt(SourceLoc lbloc, ArrayRef<ASTNode> elts,
                      SourceLoc rbloc, Optional<bool> implicit)
   : Stmt(StmtKind::Brace, getDefaultImplicitFlag(implicit, lbloc)),
-    NumElements(elts.size()), LBLoc(lbloc), RBLoc(rbloc)
+    LBLoc(lbloc), RBLoc(rbloc)
 {
+  Bits.BraceStmt.NumElements = elts.size();
   std::uninitialized_copy(elts.begin(), elts.end(),
                           getTrailingObjects<ASTNode>());
 }
@@ -187,7 +188,6 @@ bool LabeledStmt::isPossibleContinueTarget() const {
   case StmtKind::Do:
   case StmtKind::DoCatch:
   case StmtKind::RepeatWhile:
-  case StmtKind::For:
   case StmtKind::ForEach:
   case StmtKind::While:
     return true;
@@ -209,7 +209,6 @@ bool LabeledStmt::requiresLabelOnJump() const {
     return true;
 
   case StmtKind::RepeatWhile:
-  case StmtKind::For:
   case StmtKind::ForEach:
   case StmtKind::Switch:
   case StmtKind::While:
@@ -282,20 +281,6 @@ SourceLoc PoundAvailableInfo::getEndLoc() const {
   }
   return RParenLoc;
 }
-
-void PoundAvailableInfo::
-getPlatformKeywordLocs(SmallVectorImpl<SourceLoc> &PlatformLocs) {
-  for (unsigned i = 0; i < NumQueries; i++) {
-    auto *VersionSpec =
-      dyn_cast<PlatformVersionConstraintAvailabilitySpec>(getQueries()[i]);
-    if (!VersionSpec)
-      continue;
-    
-    PlatformLocs.push_back(VersionSpec->getPlatformLoc());
-  }
-}
-
-
 
 SourceRange StmtConditionElement::getSourceRange() const {
   switch (getKind()) {
@@ -383,17 +368,18 @@ SourceLoc CaseLabelItem::getEndLoc() const {
 }
 
 CaseStmt::CaseStmt(SourceLoc CaseLoc, ArrayRef<CaseLabelItem> CaseLabelItems,
-                   bool HasBoundDecls, SourceLoc ColonLoc, Stmt *Body,
-                   Optional<bool> Implicit)
+                   bool HasBoundDecls, SourceLoc UnknownAttrLoc,
+                   SourceLoc ColonLoc, Stmt *Body, Optional<bool> Implicit)
     : Stmt(StmtKind::Case, getDefaultImplicitFlag(Implicit, CaseLoc)),
-      CaseLoc(CaseLoc), ColonLoc(ColonLoc),
-      BodyAndHasBoundDecls(Body, HasBoundDecls),
-      NumPatterns(CaseLabelItems.size()) {
-  assert(NumPatterns > 0 && "case block must have at least one pattern");
+      UnknownAttrLoc(UnknownAttrLoc), CaseLoc(CaseLoc), ColonLoc(ColonLoc),
+      BodyAndHasBoundDecls(Body, HasBoundDecls) {
+  Bits.CaseStmt.NumPatterns = CaseLabelItems.size();
+  assert(Bits.CaseStmt.NumPatterns > 0 &&
+         "case block must have at least one pattern");
   MutableArrayRef<CaseLabelItem> Items{ getTrailingObjects<CaseLabelItem>(),
-                                        NumPatterns };
+                                        Bits.CaseStmt.NumPatterns };
 
-  for (unsigned i = 0; i < NumPatterns; ++i) {
+  for (unsigned i = 0; i < Bits.CaseStmt.NumPatterns; ++i) {
     new (&Items[i]) CaseLabelItem(CaseLabelItems[i]);
     Items[i].getPattern()->markOwnedByStatement(this);
   }
@@ -401,26 +387,35 @@ CaseStmt::CaseStmt(SourceLoc CaseLoc, ArrayRef<CaseLabelItem> CaseLabelItems,
 
 CaseStmt *CaseStmt::create(ASTContext &C, SourceLoc CaseLoc,
                            ArrayRef<CaseLabelItem> CaseLabelItems,
-                           bool HasBoundDecls, SourceLoc ColonLoc, Stmt *Body,
+                           bool HasBoundDecls, SourceLoc UnknownAttrLoc,
+                           SourceLoc ColonLoc, Stmt *Body,
                            Optional<bool> Implicit) {
   void *Mem = C.Allocate(totalSizeToAlloc<CaseLabelItem>(CaseLabelItems.size()),
                          alignof(CaseStmt));
-  return ::new (Mem) CaseStmt(CaseLoc, CaseLabelItems, HasBoundDecls, ColonLoc,
-                              Body, Implicit);
+  return ::new (Mem) CaseStmt(CaseLoc, CaseLabelItems, HasBoundDecls,
+                              UnknownAttrLoc, ColonLoc, Body, Implicit);
 }
 
 SwitchStmt *SwitchStmt::create(LabeledStmtInfo LabelInfo, SourceLoc SwitchLoc,
                                Expr *SubjectExpr,
                                SourceLoc LBraceLoc,
-                               ArrayRef<CaseStmt *> Cases,
+                               ArrayRef<ASTNode> Cases,
                                SourceLoc RBraceLoc,
                                ASTContext &C) {
-  void *p = C.Allocate(totalSizeToAlloc<CaseStmt *>(Cases.size()),
+#ifndef NDEBUG
+  for (auto N : Cases)
+    assert((N.is<Stmt*>() && isa<CaseStmt>(N.get<Stmt*>())) ||
+           (N.is<Decl*>() && (isa<IfConfigDecl>(N.get<Decl*>()) ||
+                              isa<PoundDiagnosticDecl>(N.get<Decl*>()))));
+#endif
+
+  void *p = C.Allocate(totalSizeToAlloc<ASTNode>(Cases.size()),
                        alignof(SwitchStmt));
   SwitchStmt *theSwitch = ::new (p) SwitchStmt(LabelInfo, SwitchLoc,
                                                SubjectExpr, LBraceLoc,
                                                Cases.size(), RBraceLoc);
+
   std::uninitialized_copy(Cases.begin(), Cases.end(),
-                          theSwitch->getTrailingObjects<CaseStmt *>());
+                          theSwitch->getTrailingObjects<ASTNode>());
   return theSwitch;
 }

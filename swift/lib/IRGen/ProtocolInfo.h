@@ -19,6 +19,7 @@
 #define SWIFT_IRGEN_PROTOCOLINFO_H
 
 #include "swift/AST/Decl.h"
+#include "swift/AST/ProtocolAssociations.h"
 
 #include "swift/IRGen/ValueWitness.h"
 #include "WitnessIndex.h"
@@ -28,9 +29,7 @@
 
 namespace swift {
   class CanType;
-  class Decl;
   class ProtocolConformance;
-  class ProtocolDecl;
 
 namespace irgen {
   class ConformanceInfo; // private to GenProto.cpp
@@ -42,10 +41,11 @@ namespace irgen {
 /// introduced by the protocol.
 class WitnessTableEntry {
 public:
-  void *MemberOrAssociatedType;
+  llvm::PointerUnion<Decl *, TypeBase *> MemberOrAssociatedType;
   ProtocolDecl *Protocol;
 
-  WitnessTableEntry(void *member, ProtocolDecl *protocol)
+  WitnessTableEntry(llvm::PointerUnion<Decl *, TypeBase *> member,
+                    ProtocolDecl *protocol)
     : MemberOrAssociatedType(member), Protocol(protocol) {}
 
 public:
@@ -53,15 +53,15 @@ public:
 
   static WitnessTableEntry forOutOfLineBase(ProtocolDecl *proto) {
     assert(proto != nullptr);
-    return WitnessTableEntry(nullptr, proto);
+    return WitnessTableEntry({}, proto);
   }
 
   /// Is this a base-protocol entry?
-  bool isBase() const { return MemberOrAssociatedType == nullptr; }
+  bool isBase() const { return MemberOrAssociatedType.isNull(); }
 
   bool matchesBase(ProtocolDecl *proto) const {
     assert(proto != nullptr);
-    return MemberOrAssociatedType == nullptr && Protocol == proto;
+    return MemberOrAssociatedType.isNull() && Protocol == proto;
   }
 
   /// Given that this is a base-protocol entry, is the table
@@ -82,61 +82,65 @@ public:
   }
   
   bool isFunction() const {
-    return Protocol == nullptr &&
-           isa<AbstractFunctionDecl>(
-             static_cast<Decl*>(MemberOrAssociatedType));
+    auto decl = MemberOrAssociatedType.get<Decl*>();
+    return Protocol == nullptr && isa<AbstractFunctionDecl>(decl);
   }
 
   bool matchesFunction(AbstractFunctionDecl *func) const {
     assert(func != nullptr);
-    return MemberOrAssociatedType == func && Protocol == nullptr;
+    if (auto decl = MemberOrAssociatedType.dyn_cast<Decl*>())
+      return decl == func && Protocol == nullptr;
+    return false;
   }
 
   AbstractFunctionDecl *getFunction() const {
     assert(isFunction());
-    return static_cast<AbstractFunctionDecl*>(MemberOrAssociatedType);
+    auto decl = MemberOrAssociatedType.get<Decl*>();
+    return static_cast<AbstractFunctionDecl*>(decl);
   }
 
-  static WitnessTableEntry forAssociatedType(AssociatedTypeDecl *ty) {
-    return WitnessTableEntry(ty, nullptr);
+  static WitnessTableEntry forAssociatedType(AssociatedType ty) {
+    return WitnessTableEntry(ty.getAssociation(), nullptr);
   }
   
   bool isAssociatedType() const {
-    return Protocol == nullptr &&
-           isa<AssociatedTypeDecl>(
-             static_cast<Decl*>(MemberOrAssociatedType));
+    if (auto decl = MemberOrAssociatedType.dyn_cast<Decl*>())
+      return Protocol == nullptr && isa<AssociatedTypeDecl>(decl);
+    return false;
   }
 
-  bool matchesAssociatedType(AssociatedTypeDecl *assocType) const {
-    assert(assocType != nullptr);
-    return MemberOrAssociatedType == assocType && Protocol == nullptr;
+  bool matchesAssociatedType(AssociatedType assocType) const {
+    if (auto decl = MemberOrAssociatedType.dyn_cast<Decl*>())
+      return decl == assocType.getAssociation() && Protocol == nullptr;
+    return false;
   }
 
   AssociatedTypeDecl *getAssociatedType() const {
     assert(isAssociatedType());
-    return static_cast<AssociatedTypeDecl*>(MemberOrAssociatedType);
+    auto decl = MemberOrAssociatedType.get<Decl*>();
+    return static_cast<AssociatedTypeDecl*>(decl);
   }
 
-  static WitnessTableEntry forAssociatedConformance(CanType path,
-                                                    ProtocolDecl *requirement) {
-    assert(path && requirement != nullptr);
-    return WitnessTableEntry(path.getPointer(), requirement);
+  static WitnessTableEntry forAssociatedConformance(AssociatedConformance conf){
+    return WitnessTableEntry(conf.getAssociation().getPointer(),
+                             conf.getAssociatedRequirement());
   }
 
   bool isAssociatedConformance() const {
-    return Protocol != nullptr && MemberOrAssociatedType != nullptr;
+    return Protocol != nullptr && !MemberOrAssociatedType.isNull();
   }
 
-  bool matchesAssociatedConformance(CanType path,
-                                    ProtocolDecl *requirement) const {
-    assert(path && requirement != nullptr);
-    return MemberOrAssociatedType == path.getPointer() &&
-           Protocol == requirement;
+  bool matchesAssociatedConformance(const AssociatedConformance &conf) const {
+    if (auto type = MemberOrAssociatedType.dyn_cast<TypeBase*>())
+      return type == conf.getAssociation().getPointer() &&
+             Protocol == conf.getAssociatedRequirement();
+    return false;
   }
 
   CanType getAssociatedConformancePath() const {
     assert(isAssociatedConformance());
-    return CanType(static_cast<TypeBase *>(MemberOrAssociatedType));
+    auto type = MemberOrAssociatedType.get<TypeBase*>();
+    return CanType(type);
   }
 
   ProtocolDecl *getAssociatedConformanceRequirement() const {
@@ -234,7 +238,7 @@ public:
 
   /// Return the witness index for the type metadata access function
   /// for the given associated type.
-  WitnessIndex getAssociatedTypeIndex(AssociatedTypeDecl *assocType) const {
+  WitnessIndex getAssociatedTypeIndex(AssociatedType assocType) const {
     for (auto &witness : getWitnessEntries()) {
       if (witness.matchesAssociatedType(assocType))
         return getNonBaseWitnessIndex(&witness);
@@ -244,10 +248,10 @@ public:
 
   /// Return the witness index for the protocol witness table access
   /// function for the given associated protocol conformance.
-  WitnessIndex getAssociatedConformanceIndex(CanType path,
-                                             ProtocolDecl *requirement) const {
+  WitnessIndex
+  getAssociatedConformanceIndex(const AssociatedConformance &conf) const {
     for (auto &witness : getWitnessEntries()) {
-      if (witness.matchesAssociatedConformance(path, requirement))
+      if (witness.matchesAssociatedConformance(conf))
         return getNonBaseWitnessIndex(&witness);
     }
     llvm_unreachable("didn't find entry for associated conformance");

@@ -14,15 +14,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-/// PASS(Id, Tag, Name)
+/// PASS(Id, Tag, Description)
 ///   Id is a pass "identifier", used for its enum case, PassKind::Id,
 ///   and type name, as returned by the global function swift::create##Id().
 ///
 ///   Tag identifies the pass as a command-line compatible option string.
 ///
-///   Name is the descriptive, human readable pass name.
+///   Description is a short description of the pass.
 ///
-///   All three if these fields are unique identifiers which may be used in test
+///   Id and Tag are unique identifiers which may be used in test
 ///   cases and tools to specify a pass by string. Different tools simply prefer
 ///   different identifier formats. Changing any of one these strings may change
 ///   the functionality of some tests.
@@ -32,15 +32,15 @@
 #error "Macro must be defined by includer"
 #endif
 
-/// IRGEN_PASS(Id, Tag, Name)
-///   This macro follows the same conventions as PASS(Id, Tag, Name),
+/// IRGEN_PASS(Id, Tag, Description)
+///   This macro follows the same conventions as PASS(Id, Tag, Description),
 ///   but is used for IRGen passes which are built outside of the
 ///   SILOptimizer library.
 ///   
 ///   An IRGen pass is created by IRGen and needs to be registered with the pass
 ///   manager dynamically.
 #ifndef IRGEN_PASS
-#define IRGEN_PASS(Id, Tag, Name) PASS(Id, Tag, Name)
+#define IRGEN_PASS(Id, Tag, Description) PASS(Id, Tag, Description)
 #endif
 
 /// PASS_RANGE(RANGE_ID, START, END)
@@ -58,10 +58,8 @@ PASS(AccessEnforcementSelection, "access-enforcement-selection",
      "Access Enforcement Selection")
 PASS(AccessSummaryDumper, "access-summary-dump",
      "Dump Address Parameter Access Summary")
-PASS(InactiveAccessMarkerElimination, "inactive-access-marker-elim",
-     "Inactive Access Marker Elimination.")
-PASS(FullAccessMarkerElimination, "full-access-marker-elim",
-     "Full Access Marker Elimination.")
+PASS(AccessMarkerElimination, "access-marker-elim",
+     "Access Marker Elimination.")
 PASS(AddressLowering, "address-lowering",
      "SIL Address Lowering")
 PASS(AllocBoxToStack, "allocbox-to-stack",
@@ -92,6 +90,8 @@ PASS(CapturePropagation, "capture-prop",
      "Captured Constant Propagation")
 PASS(ClosureSpecializer, "closure-specialize",
      "Closure Specialization on Constant Function Arguments")
+PASS(ClosureLifetimeFixup, "closure-lifetime-fixup",
+     "Closure Lifetime Fixup")
 PASS(CodeSinking, "code-sinking",
      "Code Sinking")
 PASS(ComputeDominanceInfo, "compute-dominance-info",
@@ -120,6 +120,8 @@ PASS(DefiniteInitialization, "definite-init",
      "Definite Initialization for Diagnostics")
 PASS(Devirtualizer, "devirtualizer",
      "Indirect Call Devirtualization")
+PASS(DiagnoseInfiniteRecursion, "diagnose-infinite-recursion",
+     "Diagnose Infinitely-Recursive Code")
 PASS(DiagnoseStaticExclusivity, "diagnose-static-exclusivity",
      "Static Enforcement of Law of Exclusivity")
 PASS(DiagnoseUnreachable, "diagnose-unreachable",
@@ -136,10 +138,6 @@ PASS(EmitDFDiagnostics, "dataflow-diagnostics",
      "Emit SIL Diagnostics")
 PASS(EscapeAnalysisDumper, "escapes-dump",
      "Dump Escape Analysis Results")
-PASS(ExternalDefsToDecls, "external-defs-to-decls",
-     "External Definition To Declaration Conversion")
-PASS(ExternalFunctionDefinitionsElimination, "external-func-definition-elim",
-     "External Function Definition Elimination")
 PASS(FunctionOrderPrinter, "function-order-printer",
      "Print Function Order for Testing")
 PASS(FunctionSignatureOpts, "function-signature-opts",
@@ -168,7 +166,7 @@ PASS(IVInfoPrinter, "iv-info-printer",
      "Print Induction Variable Information for Testing")
 PASS(InstCount, "inst-count",
      "Record SIL Instruction, Block, and Function Counts as LLVM Statistics")
-PASS(JumpThreadSimplifyCFG, "simplify-cfg",
+PASS(JumpThreadSimplifyCFG, "jumpthread-simplify-cfg",
      "Simplify CFG via Jump Threading")
 PASS(LetPropertiesOpt, "let-properties-opt",
      "Let Property Optimization")
@@ -206,6 +204,10 @@ PASS(MoveCondFailToPreds, "move-cond-fail-to-preds",
      "Move SIL cond_fail by Hoisting Checks")
 PASS(NoReturnFolding, "noreturn-folding",
      "Prune Control Flow at No-Return Calls Using SIL unreachable")
+PASS(ObjectOutliner, "object-outliner",
+     "Outlining of Global Objects")
+PASS(Outliner, "outliner",
+     "Function Outlining Optimization")
 PASS(OwnershipModelEliminator, "ownership-model-eliminator",
      "Eliminate Ownership Annotation of SIL")
 PASS(RCIdentityDumper, "rc-id-dumper",
@@ -226,28 +228,31 @@ PASS(LateReleaseHoisting, "late-release-hoisting",
      "Late SIL release Hoisting Preserving Epilogues")
 IRGEN_PASS(LoadableByAddress, "loadable-address",
      "SIL Large Loadable type by-address lowering.")
+PASS(MandatorySILLinker, "mandatory-linker",
+     "Deserialize all referenced SIL functions that are shared or transparent")
+PASS(PerformanceSILLinker, "performance-linker",
+     "Deserialize all referenced SIL functions")
+PASS(RawSILInstLowering, "raw-sil-inst-lowering",
+     "Lower all raw SIL instructions to canonical equivalents.")
 PASS(RemovePins, "remove-pins",
      "Remove SIL pin/unpin pairs")
 PASS(TempRValueOpt, "temp-rvalue-opt",
      "Remove short-lived immutable temporary copies")
 PASS(SideEffectsDumper, "side-effects-dump",
      "Print Side-Effect Information for all Functions")
-PASS(SILCleanup, "cleanup",
-     "SIL Cleanup Preparation for IRGen")
+PASS(IRGenPrepare, "irgen-prepare",
+     "Cleanup SIL in preparation for IRGen")
 PASS(SILCombine, "sil-combine",
      "Combine SIL Instructions via Peephole Optimization")
 PASS(SILDebugInfoGenerator, "sil-debuginfo-gen",
      "Generate Debug Information with Source Locations into Textual SIL")
-PASS(SILLinker, "linker",
-     "Link all SIL Referenced within the Module via Deserialization")
 PASS(SROA, "sroa",
      "Scalar Replacement of Aggregate Stack Objects")
 PASS(SROABBArgs, "sroa-bb-args",
      "Scalar Replacement of Aggregate SIL Block Arguments")
 PASS(SimplifyBBArgs, "simplify-bb-args",
      "SIL Block Argument Simplification")
-// TODO: Rename this command line string.
-PASS(SimplifyCFG, "normal-simplify-cfg",
+PASS(SimplifyCFG, "-simplify-cfg",
      "SIL CFG Simplification")
 PASS(SpeculativeDevirtualization, "specdevirt",
      "Speculative Devirtualization via Guarded Calls")
@@ -273,6 +278,8 @@ PASS(MarkUninitializedFixup, "mark-uninitialized-fixup",
      "Temporary pass for staging in mark_uninitialized changes.")
 PASS(SimplifyUnreachableContainingBlocks, "simplify-unreachable-containing-blocks",
      "Utility pass. Removes all non-term insts from blocks with unreachable terms")
+PASS(SerializeSILPass, "serialize-sil",
+     "Utility pass. Serializes the current SILModule")
 PASS(BugReducerTester, "bug-reducer-tester",
      "sil-bug-reducer Tool Testing by Asserting on a Sentinel Function")
 PASS_RANGE(AllPasses, AADumper, BugReducerTester)

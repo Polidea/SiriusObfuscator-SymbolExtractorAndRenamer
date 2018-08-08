@@ -14,8 +14,8 @@
 #define TSAN_REPORT_H
 
 #include "sanitizer_common/sanitizer_symbolizer.h"
+#include "sanitizer_common/sanitizer_vector.h"
 #include "tsan_defs.h"
-#include "tsan_vector.h"
 
 namespace __tsan {
 
@@ -25,7 +25,6 @@ enum ReportType {
   ReportTypeUseAfterFree,
   ReportTypeVptrUseAfterFree,
   ReportTypeExternalRace,
-  ReportTypeSwiftAccessRace,
   ReportTypeThreadLeak,
   ReportTypeMutexDestroyLocked,
   ReportTypeMutexDoubleLock,
@@ -41,7 +40,6 @@ enum ReportType {
 struct ReportStack {
   SymbolizedStack *frames;
   bool suppressable;
-  SymbolizedStack *responsible_frame;
   static ReportStack *New();
 
  private:
@@ -92,7 +90,7 @@ struct ReportLocation {
 
 struct ReportThread {
   int id;
-  uptr os_id;
+  tid_t os_id;
   bool running;
   bool workerthread;
   char *name;
@@ -110,6 +108,7 @@ struct ReportMutex {
 class ReportDesc {
  public:
   ReportType typ;
+  uptr tag;
   Vector<ReportStack*> stacks;
   Vector<ReportMop*> mops;
   Vector<ReportLocation*> locs;
@@ -129,7 +128,7 @@ class ReportDesc {
 
 // Format and output the report to the console/log. No additional logic.
 void PrintReport(const ReportDesc *rep);
-void PrintStack(const ReportStack *ent, bool mark_frames = false);
+void PrintStack(const ReportStack *stack);
 
 }  // namespace __tsan
 

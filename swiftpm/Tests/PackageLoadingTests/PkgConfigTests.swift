@@ -16,7 +16,7 @@ import PackageLoading
 import Utility
 import TestSupport
 
-extension CTarget {
+extension SystemLibraryTarget {
     convenience init(pkgConfig: String, providers: [SystemPackageProvider] = []) {
         self.init(
             name: "Foo",
@@ -29,24 +29,25 @@ extension CTarget {
 class PkgConfigTests: XCTestCase {
 
     let inputsDir = AbsolutePath(#file).parentDirectory.appending(components: "Inputs")
+    let diagnostics = DiagnosticsEngine()
     
     func testBasics() throws {
         // No pkgConfig name.
         do {
-            let result = pkgConfigArgs(for: CTarget(pkgConfig: ""))
+            let result = pkgConfigArgs(for: SystemLibraryTarget(pkgConfig: ""), diagnostics: diagnostics)
             XCTAssertNil(result)
         }
 
         // No pc file.
         do {
-            let target = CTarget(
+            let target = SystemLibraryTarget(
                 pkgConfig: "Foo",
                 providers: [
                     .brew(["libFoo"]),
                     .apt(["libFoo-dev"]),
                 ]
             )
-            let result = pkgConfigArgs(for: target)!
+            let result = pkgConfigArgs(for: target, diagnostics: diagnostics)!
             XCTAssertEqual(result.pkgConfigName, "Foo")
             XCTAssertEqual(result.cFlags, [])
             XCTAssertEqual(result.libs, [])
@@ -68,9 +69,9 @@ class PkgConfigTests: XCTestCase {
 
         // Pc file.
         try withCustomEnv(["PKG_CONFIG_PATH": inputsDir.asString]) {
-            let result = pkgConfigArgs(for: CTarget(pkgConfig: "Foo"))!
+            let result = pkgConfigArgs(for: SystemLibraryTarget(pkgConfig: "Foo"), diagnostics: diagnostics)!
             XCTAssertEqual(result.pkgConfigName, "Foo")
-            XCTAssertEqual(result.cFlags, ["-I/path/to/inc"])
+            XCTAssertEqual(result.cFlags, ["-I/path/to/inc", "-I" + inputsDir.asString])
             XCTAssertEqual(result.libs, ["-L/usr/da/lib", "-lSystemModule", "-lok"])
             XCTAssertNil(result.provider)
             XCTAssertNil(result.error)
@@ -79,7 +80,7 @@ class PkgConfigTests: XCTestCase {
 
         // Pc file with non whitelisted flags.
         try withCustomEnv(["PKG_CONFIG_PATH": inputsDir.asString]) {
-            let result = pkgConfigArgs(for: CTarget(pkgConfig: "Bar"))!
+            let result = pkgConfigArgs(for: SystemLibraryTarget(pkgConfig: "Bar"), diagnostics: diagnostics)!
             XCTAssertEqual(result.pkgConfigName, "Bar")
             XCTAssertEqual(result.cFlags, [])
             XCTAssertEqual(result.libs, [])
@@ -97,7 +98,7 @@ class PkgConfigTests: XCTestCase {
     func testDependencies() throws {
         // Use additionalSearchPaths instead of pkgConfigArgs to test handling
         // of search paths when loading dependencies.
-        let result = try PkgConfig(name: "Dependent", additionalSearchPaths: [inputsDir])
+        let result = try PkgConfig(name: "Dependent", additionalSearchPaths: [inputsDir], diagnostics: diagnostics)
 
         XCTAssertEqual(result.name, "Dependent")
         XCTAssertEqual(result.cFlags, ["-I/path/to/dependent/include", "-I/path/to/dependency/include"])

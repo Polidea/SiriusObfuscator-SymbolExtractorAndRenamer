@@ -21,6 +21,9 @@ import re
 import subprocess
 
 
+BENCHMARK_OUTPUT_RE = re.compile('([^,]+),')
+
+
 class Result(object):
 
     def __init__(self, name, status, output, xfail_list):
@@ -54,11 +57,29 @@ class Result(object):
         print(fmt.format(self.get_name(), self.get_result()))
 
 
+def run_with_timeout(func, args):
+    # We timeout after 10 minutes.
+    timeout_seconds = 10 * 60
+
+    # We just use this to create a timeout since we use an older python. Once
+    # we update to use python >= 3.3, use the timeout API on communicate
+    # instead.
+    import multiprocessing.dummy
+    fakeThreadPool = multiprocessing.dummy.Pool(1)
+    try:
+        result = fakeThreadPool.apply_async(func, args=args)
+        return result.get(timeout_seconds)
+    except multiprocessing.TimeoutError:
+        fakeThreadPool.terminate()
+        raise RuntimeError("Child process aborted due to timeout. "
+                           "Timeout: %s seconds" % timeout_seconds)
+
+
 def _unwrap_self(args):
     return type(args[0]).process_input(*args)
 
 
-BenchmarkDriver_OptLevels = ['Onone', 'O', 'Ounchecked']
+BenchmarkDriver_OptLevels = ['Onone', 'O', 'Osize']
 
 
 class BenchmarkDriver(object):
@@ -83,8 +104,12 @@ class BenchmarkDriver(object):
 
     def run_for_opt_level(self, binary, opt_level, test_filter):
         print("testing driver at path: %s" % binary)
-        names = [n.strip() for n in subprocess.check_output(
-            [binary, "--list"]).split()[2:]]
+        names = []
+        for l in subprocess.check_output([binary, "--list"]).split("\n")[1:]:
+            m = BENCHMARK_OUTPUT_RE.match(l)
+            if m is None:
+                continue
+            names.append(m.group(1))
         if test_filter:
             regex = re.compile(test_filter)
             names = [n for n in names if regex.match(n)]

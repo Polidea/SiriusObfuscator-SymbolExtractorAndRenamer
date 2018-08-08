@@ -123,7 +123,7 @@ func test004() {
 func test005() {
   do {} catch Error4.E2#^CATCH3^#
 // CATCH3: Begin completions
-// CATCH3: Pattern/ExprSpecific:               ({#Int32#})[#Error4#]{{; name=.+$}}
+// CATCH3: Pattern/CurrModule:               ({#Int32#})[#Error4#]{{; name=.+$}}
 // CATCH3: End completions
 }
 
@@ -227,8 +227,8 @@ func test015() {
 }
 // Check that we can complete on the bound value; Not exhaustive..
 // INT_DOT: Begin completions
-// INT_DOT-DAG: Decl[InstanceVar]/Super:      bigEndian[#(Int32)#]; name=bigEndian
-// INT_DOT-DAG: Decl[InstanceVar]/Super:      littleEndian[#(Int32)#]; name=littleEndian
+// INT_DOT-DAG: Decl[InstanceVar]/Super:            bigEndian[#(Int32)#]; name=bigEndian
+// INT_DOT-DAG: Decl[InstanceVar]/Super:            littleEndian[#(Int32)#]; name=littleEndian
 // INT_DOT: End completions
 
 //===--- Inside catch body top-level

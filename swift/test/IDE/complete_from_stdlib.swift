@@ -93,7 +93,7 @@ func protocolExtCollection1a<C : Collection>(_ a: C) {
 // PRIVATE_NOMINAL_MEMBERS_2A: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_2A-DAG: map({#(transform): (C.Element) throws -> T##(C.Element) throws -> T#})[' rethrows'][#[T]#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_2A: End completions
-// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_2A-NOT: Decl{{.*}}: last
+// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_2A-NOT: Decl{{.*}}: index({#before: Comparable#})
 
 func protocolExtCollection1b(_ a: Collection) {
   a.#^PRIVATE_NOMINAL_MEMBERS_2B^#
@@ -102,7 +102,7 @@ func protocolExtCollection1b(_ a: Collection) {
 // PRIVATE_NOMINAL_MEMBERS_2B: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_2B-DAG: map({#(transform): (Collection.Element) throws -> T##(Collection.Element) throws -> T#})[' rethrows'][#[T]#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_2B: End completions
-// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_2B-NOT: Decl{{.*}}: last
+// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_2B-NOT: Decl{{.*}}: index({#before: Comparable#})
 
 func protocolExtCollection2<C : Collection where C.Index : BidirectionalIndex>(_ a: C) {
   a.#^PRIVATE_NOMINAL_MEMBERS_3^#
@@ -111,9 +111,9 @@ func protocolExtCollection2<C : Collection where C.Index : BidirectionalIndex>(_
 // PRIVATE_NOMINAL_MEMBERS_3: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_3-DAG: Decl[InstanceMethod]/Super:         map({#(transform): (C.Element) throws -> T##(C.Element) throws -> T#})[' rethrows'][#[T]#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_3-DAG: Decl[InstanceVar]/Super:            lazy[#LazySequence<Collection>#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_3-DAG: index({#where: (C.Element) throws -> Bool##(C.Element) throws -> Bool#})[' rethrows'][#Comparable?#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_3-DAG: firstIndex({#where: (C.Element) throws -> Bool##(C.Element) throws -> Bool#})[' rethrows'][#Comparable?#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_3: End completions
-// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_3-NOT: Decl{{.*}}:         index({#({{.*}}): Self.Iterator.Element
+// NEGATIVE_PRIVATE_NOMINAL_MEMBERS_3-NOT: Decl{{.*}}:         firstIndex({#({{.*}}): Self.Iterator.Element
 
 func protocolExtArray<T : Equatable>(_ a: [T]) {
   a.#^PRIVATE_NOMINAL_MEMBERS_4^#
@@ -121,8 +121,8 @@ func protocolExtArray<T : Equatable>(_ a: [T]) {
 // PRIVATE_NOMINAL_MEMBERS_4: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceMethod]/Super:         map({#(transform): (Equatable) throws -> T##(Equatable) throws -> T#})[' rethrows'][#[T]#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceVar]/Super:            last[#Equatable?#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceMethod]/Super:         index({#of: Equatable#})[#Int?#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceMethod]/Super:         index({#where: (Equatable) throws -> Bool##(Equatable) throws -> Bool#})[' rethrows'][#Int?#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceMethod]/Super:         firstIndex({#of: Equatable#})[#Int?#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_4-DAG: Decl[InstanceMethod]/Super:         firstIndex({#where: (Equatable) throws -> Bool##(Equatable) throws -> Bool#})[' rethrows'][#Int?#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_4: End completions
 
 func testArchetypeReplacement1<FOO : Equatable>(_ a: [FOO]) {
@@ -132,11 +132,10 @@ func testArchetypeReplacement1<FOO : Equatable>(_ a: [FOO]) {
 // PRIVATE_NOMINAL_MEMBERS_5: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/CurrNominal:   append({#(newElement): Equatable#})[#Void#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/CurrNominal:   insert({#(newElement): Equatable#}, {#at: Int#})[#Void#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/CurrNominal:   popLast()[#Equatable?#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceVar]/Super:            isEmpty[#Bool#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceVar]/Super:            first[#Equatable?#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         dropFirst({#(n): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         dropLast({#(n): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         dropFirst({#(k): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         dropLast({#(k): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         prefix({#(maxLength): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_5-DAG: Decl[InstanceMethod]/Super:         suffix({#(maxLength): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
 
@@ -148,7 +147,6 @@ func testArchetypeReplacement2<BAR : Equatable>(_ a: [BAR]) {
 // PRIVATE_NOMINAL_MEMBERS_6: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/CurrNominal:   append({#(newElement): Equatable#})[#Void#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/CurrNominal:   insert({#(newElement): Equatable#}, {#at: Int#})[#Void#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/CurrNominal:   popLast()[#Equatable?#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         dropFirst()[#ArraySlice<Equatable>#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         dropLast()[#ArraySlice<Equatable>#]{{; name=.+}}
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         enumerated()[#EnumeratedSequence<[Equatable]>#]{{; name=.+}}
@@ -156,7 +154,7 @@ func testArchetypeReplacement2<BAR : Equatable>(_ a: [BAR]) {
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         max({#by: (Equatable, Equatable) throws -> Bool##(Equatable, Equatable) throws -> Bool#})[' rethrows'][#Equatable?#]{{; name=.+}}
 // FIXME: The following should include 'partialResult' as local parameter name: "(nextPartialResult): (_ partialResult: Result, Equatable)"
 // PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         reduce({#(initialResult): Result#}, {#(nextPartialResult): (Result, Equatable) throws -> Result##(Result, Equatable) throws -> Result#})[' rethrows'][#Result#]{{; name=.+}}
-// PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         dropFirst({#(n): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
+// PRIVATE_NOMINAL_MEMBERS_6-DAG: Decl[InstanceMethod]/Super:         dropFirst({#(k): Int#})[#ArraySlice<Equatable>#]{{; name=.+}}
 // FIXME: restore Decl[InstanceMethod]/Super:         flatMap({#(transform): (Equatable) throws -> Sequence##(Equatable) throws -> Sequence#})[' rethrows'][#[IteratorProtocol.Element]#]{{; name=.+}}
 
 func testArchetypeReplacement3 (_ a : [Int]) {
@@ -166,13 +164,11 @@ func testArchetypeReplacement3 (_ a : [Int]) {
 // PRIVATE_NOMINAL_MEMBERS_7: Begin completions
 // PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/CurrNominal:   append({#(newElement): Int#})[#Void#]
 // PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         removeLast()[#Int#]
-// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/CurrNominal:   popLast()[#Int?#]
 // PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceVar]/Super:            first[#Int?#]
 // PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         map({#(transform): (Int) throws -> T##(Int) throws -> T#})[' rethrows'][#[T]#]
-// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         dropLast({#(n): Int#})[#ArraySlice<Int>#]
-// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         dropFirst({#(n): Int#})[#AnySequence<Int>#]
-// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         prefix({#(maxLength): Int#})[#AnySequence<Int>#]
-// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         elementsEqual({#(other): Sequence#}, {#by: (Int, Int) throws -> Bool##(Int, Int) throws -> Bool#})[' rethrows'][#Bool#]
+// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         dropLast({#(k): Int#})[#ArraySlice<Int>#]
+// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         elementsEqual({#(other): Sequence#}, {#by: (Int, Sequence.Element) throws -> Bool##(Int, Sequence.Element) throws -> Bool#})[' rethrows'][#Bool#]; name=elementsEqual(other: Sequence, by: (Int, Sequence.Element) throws -> Bool) rethrows
+// PRIVATE_NOMINAL_MEMBERS_7-DAG: Decl[InstanceMethod]/Super:         elementsEqual({#(other): Sequence#})[#Bool#]; name=elementsEqual(other: Sequence)
 
 
 protocol P2 {
@@ -224,7 +220,7 @@ func testArchetypeReplacement6() {
 struct Test1000 : Sequence {
   func #^RETURNS_ANY_SEQUENCE^#
 }
-// RETURNS_ANY_SEQUENCE: Decl[InstanceMethod]/Super:         dropFirst(_ n: Int)
+// RETURNS_ANY_SEQUENCE: Decl[InstanceMethod]/Super:         dropFirst(_ k: Int)
 
 func testPostfixOperator1(_ x: Int) {
   x#^POSTFIX_INT_1^#
@@ -247,7 +243,7 @@ func testInfixOperator1(_ x: Int) {
   x#^INFIX_INT_1^#
 }
 // INFIX_INT: Begin completions
-// INFIX_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  ... {#Int#}[#CountableClosedRange<Int>#]
+// INFIX_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  ... {#Int#}[#ClosedRange<Int>#]
 // INFIX_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  &+ {#Int#}[#Int#]
 // INFIX_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  + {#Int#}[#Int#]
 // INFIX_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  &<< {#Int#}[#Int#]
@@ -260,7 +256,7 @@ func testInfixOperator2(_ x: inout Int) {
   x#^INFIX_INT_2^#
 }
 // INFIX_LVALUE_INT: Begin completions
-// INFIX_LVALUE_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  ... {#Int#}[#CountableClosedRange<Int>#]
+// INFIX_LVALUE_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  ... {#Int#}[#ClosedRange<Int>#]
 // INFIX_LVALUE_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  &+ {#Int#}[#Int#]
 // INFIX_LVALUE_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  + {#Int#}[#Int#]
 // INFIX_LVALUE_INT-DAG: Decl[InfixOperatorFunction]/OtherModule[Swift]:  &<< {#Int#}[#Int#]

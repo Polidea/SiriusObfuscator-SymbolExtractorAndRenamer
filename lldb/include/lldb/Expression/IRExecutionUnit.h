@@ -23,10 +23,10 @@
 #include "llvm/IR/Module.h"
 
 // Project includes
-#include "lldb/Core/DataBufferHeap.h"
 #include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private.h"
 
@@ -40,7 +40,7 @@ class ObjectCache;
 
 namespace lldb_private {
 
-class Error;
+class Status;
 
 //----------------------------------------------------------------------
 /// @class IRExecutionUnit IRExecutionUnit.h "lldb/Expression/IRExecutionUnit.h"
@@ -87,7 +87,7 @@ public:
                                   : nullptr);
   }
 
-  void GetRunnableInfo(Error &error, lldb::addr_t &func_addr,
+  void GetRunnableInfo(Status &error, lldb::addr_t &func_addr,
                        lldb::addr_t &func_end);
 
   //------------------------------------------------------------------
@@ -96,7 +96,7 @@ public:
   /// IRExecutionUnit unless the client explicitly chooses to free it.
   //------------------------------------------------------------------
 
-  lldb::addr_t WriteNow(const uint8_t *bytes, size_t size, Error &error);
+  lldb::addr_t WriteNow(const uint8_t *bytes, size_t size, Status &error);
 
   void FreeNow(lldb::addr_t allocation);
 
@@ -251,7 +251,7 @@ private:
   //------------------------------------------------------------------
   bool WriteData(lldb::ProcessSP &process_sp);
 
-  Error DisassembleFunction(Stream &stream, lldb::ProcessSP &process_sp);
+  Status DisassembleFunction(Stream &stream, lldb::ProcessSP &process_sp);
 
   struct SearchSpec;
 
@@ -346,8 +346,7 @@ private:
     void registerEHFrames(uint8_t *Addr, uint64_t LoadAddr,
                           size_t Size) override {}
 
-    virtual void deregisterEHFrames(uint8_t *Addr, uint64_t LoadAddr,
-                                    size_t Size) override {
+    virtual void deregisterEHFrames() override {
       return;
     }
 
@@ -407,7 +406,7 @@ private:
     void dump(Log *log);
   };
 
-  bool CommitOneAllocation(lldb::ProcessSP &process_sp, Error &error,
+  bool CommitOneAllocation(lldb::ProcessSP &process_sp, Status &error,
                            AllocationRecord &record);
 
   typedef std::vector<AllocationRecord> RecordVector;
@@ -438,8 +437,8 @@ private:
   lldb::addr_t m_function_load_addr;
   lldb::addr_t m_function_end_load_addr;
 
-  bool m_strip_underscore; ///< True for platforms where global symbols have a _
-                           ///prefix
+  bool m_strip_underscore = true; ///< True for platforms where global symbols
+                                  ///  have a _ prefix
   bool m_reported_allocations; ///< True after allocations have been reported.
                                ///It is possible that
   ///< sections will be allocated when this is true, in which case they weren't

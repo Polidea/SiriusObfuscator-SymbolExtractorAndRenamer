@@ -1,6 +1,7 @@
 // RUN: %clang_cc1 -std=c++14 -verify -fexceptions -fcxx-exceptions %s
-// RUN: %clang_cc1 -std=c++1z -verify -fexceptions -fcxx-exceptions %s -Wno-dynamic-exception-spec
+// RUN: %clang_cc1 -std=c++17 -verify -fexceptions -fcxx-exceptions %s -Wno-dynamic-exception-spec
 // RUN: %clang_cc1 -std=c++14 -verify -fexceptions -fcxx-exceptions -Wno-c++1z-compat-mangling -DNO_COMPAT_MANGLING %s
+// RUN: %clang_cc1 -std=c++14 -verify -fexceptions -fcxx-exceptions -Wno-noexcept-type -DNO_COMPAT_MANGLING %s
 
 #if __cplusplus > 201402L
 
@@ -17,7 +18,7 @@ template<typename A, typename B> void redecl3() throw(B); // expected-error {{do
 
 typedef int I;
 template<bool B> void redecl4(I) noexcept(B);
-template<bool B> void redecl4(I) noexcept(B); // expected-note {{failed template argument deduction}}
+template<bool B> void redecl4(I) noexcept(B); // expected-note {{could not match 'void (I) noexcept(false)' (aka 'void (int) noexcept(false)') against 'void (int) noexcept'}}
 
 void (*init_with_exact_type_a)(int) noexcept = redecl4<true>;
 void (*init_with_mismatched_type_a)(int) = redecl4<true>;

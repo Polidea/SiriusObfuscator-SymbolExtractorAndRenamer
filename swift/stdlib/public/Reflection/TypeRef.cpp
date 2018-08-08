@@ -15,6 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "swift/Basic/Range.h"
 #include "swift/Demangling/Demangle.h"
 #include "swift/Reflection/TypeRef.h"
 #include "swift/Reflection/TypeRefBuilder.h"
@@ -66,15 +67,22 @@ public:
   }
 
   void visitNominalTypeRef(const NominalTypeRef *N) {
+    StringRef mangledName = N->getMangledName();
     if (N->isStruct())
       printHeader("struct");
     else if (N->isEnum())
       printHeader("enum");
     else if (N->isClass())
       printHeader("class");
+    else if (N->isProtocol()) {
+      printHeader("protocol");
+      mangledName = Demangle::dropSwiftManglingPrefix(mangledName);
+    }
+    else if (N->isAlias())
+      printHeader("alias");
     else
       printHeader("nominal");
-    auto demangled = Demangle::demangleTypeAsString(N->getMangledName());
+    auto demangled = Demangle::demangleTypeAsString(mangledName);
     printField("", demangled);
     if (auto parent = N->getParent())
       printRec(parent);
@@ -124,26 +132,64 @@ public:
       break;
     }
 
-    for (auto Arg : F->getArguments())
-      printRec(Arg);
+    OS << '\n';
+    Indent += 2;
+    printHeader("parameters");
+
+    auto &parameters = F->getParameters();
+    for (const auto &param : parameters) {
+      auto flags = param.getFlags();
+
+      if (!flags.isNone()) {
+        Indent += 2;
+        OS << '\n';
+      }
+
+      switch (flags.getValueOwnership()) {
+      case ValueOwnership::Default:
+        /* nothing */
+        break;
+      case ValueOwnership::InOut:
+        printHeader("inout");
+        break;
+      case ValueOwnership::Shared:
+        printHeader("shared");
+        break;
+      case ValueOwnership::Owned:
+        printHeader("owned");
+        break;
+      }
+
+      if (flags.isVariadic())
+        printHeader("variadic");
+
+      printRec(param.getType());
+
+      if (!flags.isNone()) {
+        Indent -= 2;
+        OS << ')';
+      }
+    }
+
+    if (parameters.empty())
+      OS << ')';
+
+    OS << '\n';
+    printHeader("result");
     printRec(F->getResult());
-
     OS << ')';
-  }
 
-  void visitProtocolTypeRef(const ProtocolTypeRef *P) {
-    printHeader("protocol");
-    auto demangled = Demangle::demangleTypeAsString(P->getMangledName());
-    printField("", demangled);
-    OS << ')';
+    Indent -= 2;
   }
 
   void visitProtocolCompositionTypeRef(const ProtocolCompositionTypeRef *PC) {
     printHeader("protocol_composition");
     if (PC->hasExplicitAnyObject())
       OS << " any_object";
-    for (auto member : PC->getMembers())
-      printRec(member);
+    if (auto superclass = PC->getSuperclass())
+      printRec(superclass);
+    for (auto protocol : PC->getProtocols())
+      printRec(protocol);
     OS << ')';
   }
 
@@ -170,7 +216,7 @@ public:
 
   void visitDependentMemberTypeRef(const DependentMemberTypeRef *DM) {
     printHeader("dependent_member");
-    printRec(DM->getProtocol());
+    printField("protocol", DM->getProtocol());
     printRec(DM->getBase());
     printField("member", DM->getMember());
     OS << ')';
@@ -255,20 +301,19 @@ struct TypeRefIsConcrete
   }
 
   bool visitFunctionTypeRef(const FunctionTypeRef *F) {
-    for (auto Argument : F->getArguments())
-      if (!visit(Argument))
+    for (const auto &Param : F->getParameters())
+      if (!visit(Param.getType()))
         return false;
     return visit(F->getResult());
   }
 
-  bool visitProtocolTypeRef(const ProtocolTypeRef *P) {
-    return true;
-  }
-
   bool
   visitProtocolCompositionTypeRef(const ProtocolCompositionTypeRef *PC) {
-    for (auto Member : PC->getMembers())
-      if (!visit(Member))
+    for (auto Protocol : PC->getProtocols())
+      if (!visit(Protocol))
+        return false;
+    if (auto Superclass = PC->getSuperclass())
+      if (!visit(Superclass))
         return false;
     return true;
   }
@@ -357,7 +402,7 @@ unsigned NominalTypeTrait::getDepth() const {
   return 0;
 }
 
-GenericArgumentMap TypeRef::getSubstMap() const {
+llvm::Optional<GenericArgumentMap> TypeRef::getSubstMap() const {
   GenericArgumentMap Substitutions;
   switch (getKind()) {
     case TypeRefKind::Nominal: {
@@ -370,11 +415,16 @@ GenericArgumentMap TypeRef::getSubstMap() const {
       auto BG = cast<BoundGenericTypeRef>(this);
       auto Depth = BG->getDepth();
       unsigned Index = 0;
-      for (auto Param : BG->getGenericParams())
+      for (auto Param : BG->getGenericParams()) {
+        if (!Param->isConcrete())
+          return None;
         Substitutions.insert({{Depth, Index++}, Param});
+      }
       if (auto Parent = BG->getParent()) {
         auto ParentSubs = Parent->getSubstMap();
-        Substitutions.insert(ParentSubs.begin(), ParentSubs.end());
+        if (!ParentSubs)
+          return None;
+        Substitutions.insert(ParentSubs->begin(), ParentSubs->end());
       }
       break;
     }
@@ -384,60 +434,22 @@ GenericArgumentMap TypeRef::getSubstMap() const {
   return Substitutions;
 }
 
-namespace {
-bool isStruct(Demangle::NodePointer Node) {
-  switch (Node->getKind()) {
-    case Demangle::Node::Kind::Type:
-      return isStruct(Node->getChild(0));
-    case Demangle::Node::Kind::Structure:
-    case Demangle::Node::Kind::BoundGenericStructure:
-      return true;
-    default:
-      return false;
-  }
-}
-bool isEnum(Demangle::NodePointer Node) {
-  switch (Node->getKind()) {
-    case Demangle::Node::Kind::Type:
-      return isEnum(Node->getChild(0));
-    case Demangle::Node::Kind::Enum:
-    case Demangle::Node::Kind::BoundGenericEnum:
-      return true;
-    default:
-      return false;
-  }
-}
-bool isClass(Demangle::NodePointer Node) {
-  switch (Node->getKind()) {
-    case Demangle::Node::Kind::Type:
-      return isClass(Node->getChild(0));
-    case Demangle::Node::Kind::Class:
-    case Demangle::Node::Kind::BoundGenericClass:
-      return true;
-    default:
-      return false;
-  }
-}
-} // end anonymous namespace
-
 bool NominalTypeTrait::isStruct() const {
-  Demangle::Demangler Dem;
-  Demangle::NodePointer Demangled = Dem.demangleType(MangledName);
-  return ::isStruct(Demangled);
+  return Demangle::isStruct(MangledName);
 }
 
-
-bool NominalTypeTrait::isEnum() const {
-  Demangle::Demangler Dem;
-  Demangle::NodePointer Demangled = Dem.demangleType(MangledName);
-  return ::isEnum(Demangled);
-}
-
+bool NominalTypeTrait::isEnum() const { return Demangle::isEnum(MangledName); }
 
 bool NominalTypeTrait::isClass() const {
-  Demangle::Demangler Dem;
-  Demangle::NodePointer Demangled = Dem.demangleType(MangledName);
-  return ::isClass(Demangled);
+  return Demangle::isClass(MangledName);
+}
+
+bool NominalTypeTrait::isProtocol() const {
+  return Demangle::isProtocol(MangledName);
+}
+
+bool NominalTypeTrait::isAlias() const {
+  return Demangle::isAlias(MangledName);
 }
 
 /// Visitor class to set the WasAbstract flag of any MetatypeTypeRefs
@@ -474,18 +486,16 @@ public:
   }
 
   const TypeRef *visitFunctionTypeRef(const FunctionTypeRef *F) {
-    std::vector<const TypeRef *> SubstitutedArguments;
-    for (auto Argument : F->getArguments())
-      SubstitutedArguments.push_back(visit(Argument));
+    std::vector<remote::FunctionParam<const TypeRef *>> SubstitutedParams;
+    for (const auto &Param : F->getParameters()) {
+      auto typeRef = Param.getType();
+      SubstitutedParams.push_back(Param.withType(visit(typeRef)));
+    }
 
     auto SubstitutedResult = visit(F->getResult());
 
-    return FunctionTypeRef::create(Builder, SubstitutedArguments,
+    return FunctionTypeRef::create(Builder, SubstitutedParams,
                                    SubstitutedResult, F->getFlags());
-  }
-
-  const TypeRef *visitProtocolTypeRef(const ProtocolTypeRef *P) {
-    return P;
   }
 
   const TypeRef *
@@ -587,20 +597,16 @@ public:
   }
 
   const TypeRef *visitFunctionTypeRef(const FunctionTypeRef *F) {
-    std::vector<const TypeRef *> SubstitutedArguments;
-    for (auto Argument : F->getArguments())
-      SubstitutedArguments.push_back(visit(Argument));
+    std::vector<remote::FunctionParam<const TypeRef *>> SubstitutedParams;
+    for (const auto &Param : F->getParameters()) {
+      auto typeRef = Param.getType();
+      SubstitutedParams.push_back(Param.withType(visit(typeRef)));
+    }
 
     auto SubstitutedResult = visit(F->getResult());
 
-    return FunctionTypeRef::create(Builder, SubstitutedArguments,
+    return FunctionTypeRef::create(Builder, SubstitutedParams,
                                    SubstitutedResult, F->getFlags());
-  }
-
-  const TypeRef *visitProtocolTypeRef(const ProtocolTypeRef *P) {
-    // Protocol compositions do not contain type parameters.
-    assert(P->isConcrete());
-    return P;
   }
 
   const TypeRef *
@@ -652,14 +658,13 @@ public:
 
     while (TypeWitness == nullptr) {
       auto &Member = DM->getMember();
-      auto *Protocol = DM->getProtocol();
+      const auto &Protocol = DM->getProtocol();
 
       // Get the original type of the witness from the conformance.
       if (auto *Nominal = dyn_cast<NominalTypeRef>(SubstBase)) {
         TypeWitness = Builder.lookupTypeWitness(Nominal->getMangledName(),
                                                 Member, Protocol);
-      } else {
-        auto BG = cast<BoundGenericTypeRef>(SubstBase);
+      } else if (auto *BG = dyn_cast<BoundGenericTypeRef>(SubstBase)) {
         TypeWitness = Builder.lookupTypeWitness(BG->getMangledName(),
                                                 Member, Protocol);
       }
@@ -682,8 +687,15 @@ public:
                                                SubstBase,
                                                DM->getProtocol());
 
+    // Likewise if we can't get the substitution map.
+    auto SubstMap = SubstBase->getSubstMap();
+    if (!SubstMap)
+      return Builder.createDependentMemberType(DM->getMember(),
+                                               SubstBase,
+                                               DM->getProtocol());
+
     // Apply base type substitutions to get the fully-substituted nested type.
-    auto *Subst = TypeWitness->subst(Builder, SubstBase->getSubstMap());
+    auto *Subst = TypeWitness->subst(Builder, *SubstMap);
 
     // Same as above.
     return thickenMetatypes(Builder, Subst);
@@ -787,17 +799,18 @@ bool TypeRef::deriveSubstitutions(GenericArgumentMap &Subs,
     }
   }
 
-  // Decompose argument and result types in parallel.
+  // Decompose parameter and result types in parallel.
   if (auto *O = dyn_cast<FunctionTypeRef>(OrigTR)) {
     if (auto *S = dyn_cast<FunctionTypeRef>(SubstTR)) {
+      auto oParams = O->getParameters();
+      auto sParams = S->getParameters();
 
-      if (O->getArguments().size() != S->getArguments().size())
+      if (oParams.size() != sParams.size())
         return false;
 
-      for (unsigned i = 0, e = O->getArguments().size(); i < e; i++) {
-        if (!deriveSubstitutions(Subs,
-                                 O->getArguments()[i],
-                                 S->getArguments()[i]))
+      for (auto index : indices(oParams)) {
+        if (!deriveSubstitutions(Subs, oParams[index].getType(),
+                                 sParams[index].getType()))
           return false;
       }
 

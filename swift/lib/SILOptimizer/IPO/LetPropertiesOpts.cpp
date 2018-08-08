@@ -19,9 +19,10 @@
 //===----------------------------------------------------------------------===//
 
 #define DEBUG_TYPE "let-properties-opt"
-#include "swift/SIL/SILInstruction.h"
-#include "swift/SIL/SILBasicBlock.h"
 #include "swift/SIL/DebugUtils.h"
+#include "swift/SIL/InstructionUtils.h"
+#include "swift/SIL/SILBasicBlock.h"
+#include "swift/SIL/SILInstruction.h"
 #include "swift/SIL/SILLinkage.h"
 #include "swift/SILOptimizer/PassManager/Passes.h"
 #include "swift/SILOptimizer/PassManager/Transforms.h"
@@ -32,6 +33,18 @@
 using namespace swift;
 
 namespace {
+
+using InstructionList = SmallVector<SILInstruction *, 8>;
+
+struct InitSequence {
+  InstructionList Instructions;
+  SILValue Result;
+
+  bool isValid() const {
+    return (bool) Result;
+  }
+};
+
 /// Promote values of non-static let properties initialized by means
 /// of constant values of simple types into their uses.
 ///
@@ -44,15 +57,14 @@ namespace {
 class LetPropertiesOpt {
   SILModule *Module;
 
-  typedef SmallVector<SILInstruction *, 8> Instructions;
   typedef SmallVector<VarDecl *, 4> Properties;
 
   llvm::SetVector<SILFunction *> ChangedFunctions;
 
   // Map each let property to a set of instructions accessing it.
-  llvm::MapVector<VarDecl *, Instructions> AccessMap;
+  llvm::MapVector<VarDecl *, InstructionList> AccessMap;
   // Map each let property to the instruction sequence which initializes it.
-  llvm::MapVector<VarDecl *, Instructions> InitMap;
+  llvm::MapVector<VarDecl *, InitSequence> InitMap;
   // Properties in this set should not be processed by this pass
   // anymore.
   llvm::SmallPtrSet<VarDecl *, 16> SkipProcessing;
@@ -76,51 +88,44 @@ protected:
   bool isConstantLetProperty(VarDecl *Property);
   void collectPropertyAccess(SILInstruction *I, VarDecl *Property, bool NonRemovable);
   void collectStructPropertiesAccess(StructInst *SI, bool NonRemovable);
-  void optimizeLetPropertyAccess(VarDecl *SILG,
-                                 SmallVectorImpl<SILInstruction *> &Init);
+  void optimizeLetPropertyAccess(VarDecl *SILG, const InitSequence &Init);
   bool analyzeInitValue(SILInstruction *I, VarDecl *Prop);
 };
 
 /// Helper class to copy only a set of SIL instructions providing in the
 /// constructor.
-class InstructionsCloner : public SILClonerWithScopes<InstructionsCloner> {
-  friend class SILVisitor<InstructionsCloner>;
-  friend class SILCloner<InstructionsCloner>;
+class InitSequenceCloner : public SILClonerWithScopes<InitSequenceCloner> {
+  friend class SILInstructionVisitor<InitSequenceCloner>;
+  friend class SILCloner<InitSequenceCloner>;
 
-  ArrayRef<SILInstruction *> Insns;
+  const InitSequence &Init;
+  SILInstruction *DestIP;
 
-  protected:
-  SILBasicBlock *FromBB;
-  SILInstruction *Dest;
-
-  public:
-  // A map of old to new available values.
-  SmallVector<std::pair<ValueBase *, SILValue>, 16> AvailVals;
-
-  InstructionsCloner(SILFunction &F, ArrayRef<SILInstruction *> Insns,
-                     SILInstruction *Dest = nullptr)
-      : SILClonerWithScopes(Dest ? *Dest->getFunction() : F), Insns(Insns),
-        FromBB(nullptr), Dest(Dest) {}
+public:
+  InitSequenceCloner(const InitSequence &init, SILInstruction *destIP)
+    : SILClonerWithScopes(*destIP->getFunction()), Init(init), DestIP(destIP) {}
 
   void process(SILInstruction *I) { visit(I); }
 
   SILBasicBlock *remapBasicBlock(SILBasicBlock *BB) { return BB; }
 
   SILValue remapValue(SILValue Value) {
-    return SILCloner<InstructionsCloner>::remapValue(Value);
+    return SILCloner<InitSequenceCloner>::remapValue(Value);
   }
 
-  void postProcess(SILInstruction *Orig, SILInstruction *Cloned) {
-    Dest->getParent()->push_front(Cloned);
-    Cloned->moveBefore(Dest);
-    SILClonerWithScopes<InstructionsCloner>::postProcess(Orig, Cloned);
-    AvailVals.push_back(std::make_pair(Orig, Cloned));
+  void postProcess(SILInstruction *orig, SILInstruction *cloned) {
+    DestIP->getParent()->push_front(cloned);
+    cloned->moveBefore(DestIP);
+    SILClonerWithScopes<InitSequenceCloner>::postProcess(orig, cloned);
   }
 
-  // Clone all instructions from Insns into DestBB
-  void clone() {
-    for (auto I : Insns)
+  /// Clone all the instructions from Insns into the destination function,
+  /// immediately before the destination block, and return the value of
+  /// the result.
+  SILValue clone() {
+    for (auto I : Init.Instructions)
       process(I);
+    return remapValue(Init.Result);
   }
 };
 
@@ -141,12 +146,10 @@ static raw_ostream &operator<<(raw_ostream &OS, const VarDecl &decl) {
 /// to have a constant value. Replace all loads from the
 /// property by its constant value.
 void LetPropertiesOpt::optimizeLetPropertyAccess(VarDecl *Property,
-    SmallVectorImpl<SILInstruction *> &Init) {
+                                                 const InitSequence &init) {
+  assert(init.isValid());
 
   if (SkipProcessing.count(Property))
-    return;
-
-  if (Init.empty())
     return;
 
   auto *Ty = dyn_cast<NominalTypeDecl>(Property->getDeclContext());
@@ -163,10 +166,10 @@ void LetPropertiesOpt::optimizeLetPropertyAccess(VarDecl *Property,
   // Check if a given let property can be removed, because it
   // is not accessible elsewhere. This can happen if this property
   // is private or if it is internal and WMO mode is used.
-  if (TypeAccess <= Accessibility::FilePrivate ||
-      PropertyAccess <= Accessibility::FilePrivate
-      || ((TypeAccess <= Accessibility::Internal ||
-          PropertyAccess <= Accessibility::Internal) &&
+  if (TypeAccess <= AccessLevel::FilePrivate ||
+      PropertyAccess <= AccessLevel::FilePrivate
+      || ((TypeAccess <= AccessLevel::Internal ||
+          PropertyAccess <= AccessLevel::Internal) &&
           Module->isWholeModule())) {
     CanRemove = true;
     DEBUG(llvm::dbgs() << "Storage for property '" << *Property
@@ -191,59 +194,54 @@ void LetPropertiesOpt::optimizeLetPropertyAccess(VarDecl *Property,
   for (auto Load: Loads) {
     SILFunction *F = Load->getFunction();
 
+    // A helper function to copy the initializer into the target function
+    // at the target insertion point.
+    auto cloneInitAt = [&](SILInstruction *insertionPoint) -> SILValue {
+      InitSequenceCloner cloner(init, insertionPoint);
+      return cloner.clone();
+    };
+
     // Look for any instructions accessing let properties.
-    if (isa<RefElementAddrInst>(Load)) {
+    if (isa<RefElementAddrInst>(Load) || isa<StructElementAddrInst>(Load)
+        || isa<BeginAccessInst>(Load)) {
+      auto proj = cast<SingleValueInstruction>(Load);
+
       // Copy the initializer into the function
       // Replace the access to a let property by the value
       // computed by this initializer.
-      InstructionsCloner Cloner(*F, Init, Load);
-      Cloner.clone();
-      SILInstruction *I = &*std::prev(Load->getIterator());
-      SILBuilderWithScope B(Load);
-      for (auto UI = Load->use_begin(), E = Load->use_end(); UI != E;) {
+      SILValue clonedInit = cloneInitAt(proj);
+      SILBuilderWithScope B(proj);
+      for (auto UI = proj->use_begin(), E = proj->use_end(); UI != E;) {
         auto *User = UI->getUser();
         ++UI;
+
+        if (isIncidentalUse(User))
+          continue;
+
+        // A nested begin_access will be mapped as a separate "Load".
+        if (isa<BeginAccessInst>(User))
+          continue;
+
         if (isa<StoreInst>(User))
           continue;
 
-        replaceLoadSequence(User, I, B);
+        replaceLoadSequence(User, clonedInit, B);
         eraseUsesOfInstruction(User);
         User->eraseFromParent();
         ++NumReplaced;
       }
       ChangedFunctions.insert(F);
-    } else if (isa<StructExtractInst>(Load)) {
+    } else if (auto proj = dyn_cast<StructExtractInst>(Load)) {
       // Copy the initializer into the function
       // Replace the access to a let property by the value
       // computed by this initializer.
-      InstructionsCloner Cloner(*F, Init, Load);
-      Cloner.clone();
-      SILInstruction *I = &*std::prev(Load->getIterator());
-      Load->replaceAllUsesWith(I);
+      SILValue clonedInit = cloneInitAt(proj);
+      proj->replaceAllUsesWith(clonedInit);
       DEBUG(llvm::dbgs() << "Access to " << *Property << " was replaced:\n";
-            I->dumpInContext());
+            clonedInit->dumpInContext());
 
-      Load->eraseFromParent();
+      proj->eraseFromParent();
       ++NumReplaced;
-      ChangedFunctions.insert(F);
-    }  else if (isa<StructElementAddrInst>(Load)) {
-      // Copy the initializer into the function
-      // Replace the access to a let property by the value
-      // computed by this initializer.
-      InstructionsCloner Cloner(*F, Init, Load);
-      Cloner.clone();
-      SILInstruction *I = &*std::prev(Load->getIterator());
-      SILBuilderWithScope B(Load);
-      for (auto UI = Load->use_begin(), E = Load->use_end(); UI != E;) {
-        auto *User = UI->getUser();
-        ++UI;
-        if (isa<StoreInst>(User))
-          continue;
-        replaceLoadSequence(User, I, B);
-        eraseUsesOfInstruction(User);
-        User->eraseFromParent();
-        ++NumReplaced;
-      }
       ChangedFunctions.insert(F);
     }
   }
@@ -256,43 +254,50 @@ void LetPropertiesOpt::optimizeLetPropertyAccess(VarDecl *Property,
   }
 }
 
-/// Compare to SILValues structurally.
-static bool CmpSILValues(SILValue LHS, SILValue RHS) {
+/// Compare two SILValues structurally.
+static bool isStructurallyIdentical(SILValue LHS, SILValue RHS) {
+  if (LHS == RHS)
+    return true;
+
   if (LHS->getType() != RHS->getType())
     return false;
 
-  auto L = dyn_cast<SILInstruction>(LHS);
-  return L->isIdenticalTo(dyn_cast<SILInstruction>(RHS), CmpSILValues);
+  auto lResult = LHS->getDefiningInstructionResult();
+  auto rResult = RHS->getDefiningInstructionResult();
+  assert(lResult && rResult &&
+         "operands of instructions approved by analyzeStaticInitializer "
+         "should always be defined by instructions");
+  return (lResult->ResultIndex == rResult->ResultIndex &&
+          lResult->Instruction->isIdenticalTo(rResult->Instruction,
+                                              isStructurallyIdentical));
 };
 
-/// Compare two sequences of SIL instructions. They should be structurally equivalent.
-static bool compareInsnSequences(SmallVectorImpl<SILInstruction *> &LHS,
-                                 SmallVectorImpl<SILInstruction *> &RHS) {
-  if (LHS.size() != RHS.size())
-    return false;
-
-  for (int i=0, e=LHS.size(); i < e; ++i)
-    if (!LHS[i]->isIdenticalTo(RHS[i], CmpSILValues))
-      return false;
-  return true;
+/// Compare two sequences of SIL instructions. They should be structurally
+/// equivalent.
+static bool isSameInitSequence(const InitSequence &LHS,
+                               const InitSequence &RHS) {
+  assert(LHS.isValid() && RHS.isValid());
+  // This will recursively check all the instructions.  It's possible
+  // that they'll be composed slightly differently, but it shouldn't matter.
+  return isStructurallyIdentical(LHS.Result, RHS.Result);
 }
 
 /// Check if a given let property can be assigned externally.
 static bool isAssignableExternally(VarDecl *Property, SILModule *Module) {
-  Accessibility accessibility = Property->getEffectiveAccess();
+  AccessLevel access = Property->getEffectiveAccess();
   SILLinkage linkage;
-  switch (accessibility) {
-  case Accessibility::Private:
-  case Accessibility::FilePrivate:
+  switch (access) {
+  case AccessLevel::Private:
+  case AccessLevel::FilePrivate:
     linkage = SILLinkage::Private;
     DEBUG(llvm::dbgs() << "Property " << *Property << " has private access\n");
     break;
-  case Accessibility::Internal:
+  case AccessLevel::Internal:
     linkage = SILLinkage::Hidden;
     DEBUG(llvm::dbgs() << "Property " << *Property << " has internal access\n");
     break;
-  case Accessibility::Public:
-  case Accessibility::Open:
+  case AccessLevel::Public:
+  case AccessLevel::Open:
     linkage = SILLinkage::Public;
     DEBUG(llvm::dbgs() << "Property " << *Property << " has public access\n");
     break;
@@ -321,9 +326,9 @@ static bool isAssignableExternally(VarDecl *Property, SILModule *Module) {
     // it is a whole module compilation. In this case, no external initializer
     // may exist.
     for (auto SP : Ty->getStoredProperties()) {
-      auto storedPropertyAccessibility = SP->getEffectiveAccess();
-      if (storedPropertyAccessibility <= Accessibility::FilePrivate ||
-          (storedPropertyAccessibility <= Accessibility::Internal &&
+      auto storedPropertyAccess = SP->getEffectiveAccess();
+      if (storedPropertyAccess <= AccessLevel::FilePrivate ||
+          (storedPropertyAccess <= AccessLevel::Internal &&
            Module->isWholeModule())) {
        DEBUG(llvm::dbgs() << "Property " << *Property
                        << " cannot be set externally\n");
@@ -407,13 +412,12 @@ bool LetPropertiesOpt::isConstantLetProperty(VarDecl *Property) {
 // Analyze the init value being stored by the instruction into a property.
 bool
 LetPropertiesOpt::analyzeInitValue(SILInstruction *I, VarDecl *Property) {
-  SmallVector<SILInstruction *, 8> Insns;
   SmallVector<SILInstruction *, 8> ReverseInsns;
-  SILValue ValueOfProperty;
+  SILValue value;
   if (auto SI = dyn_cast<StructInst>(I)) {
-    ValueOfProperty = SI->getFieldValue(Property);
+    value = SI->getFieldValue(Property);
   } else if (auto SI = dyn_cast<StoreInst>(I)) {
-    auto Dest = SI->getDest();
+    auto Dest = stripAddressAccess(SI->getDest());
 
     assert(((isa<RefElementAddrInst>(Dest) &&
              cast<RefElementAddrInst>(Dest)->getField() == Property) ||
@@ -421,27 +425,31 @@ LetPropertiesOpt::analyzeInitValue(SILInstruction *I, VarDecl *Property) {
              cast<StructElementAddrInst>(Dest)->getField() == Property)) &&
            "Store instruction should store into a proper let property");
     (void) Dest;
-    ValueOfProperty = SI->getSrc();
+    value = SI->getSrc();
   }
 
   // Bail if a value of a property is not a statically known constant init.
-  if (!analyzeStaticInitializer(ValueOfProperty, ReverseInsns))
+  if (!analyzeStaticInitializer(value, ReverseInsns))
     return false;
 
-  // Produce a correct order of instructions.
+  // Fill in the InitSequence by reversing the instructions and
+  // setting the result index.
+  InitSequence sequence;
   while (!ReverseInsns.empty()) {
-    Insns.push_back(ReverseInsns.pop_back_val());
+    sequence.Instructions.push_back(ReverseInsns.pop_back_val());
   }
+  sequence.Result = value;
 
-  auto &InitInsns = InitMap[Property];
-  if (!InitInsns.empty() && !compareInsnSequences(InitInsns, Insns)) {
+  auto &cachedSequence = InitMap[Property];
+  if (cachedSequence.isValid() &&
+      !isSameInitSequence(cachedSequence, sequence)) {
     // The found init value is different from the already seen init value.
     return false;
   } else {
     DEBUG(llvm::dbgs() << "The value of property '" << *Property
                        << "' is statically known so far\n");
     // Remember the statically known value.
-    InitInsns = Insns;
+    cachedSequence = std::move(sequence);
     return true;
   }
 }
@@ -510,9 +518,13 @@ static bool isValidPropertyLoad(SILInstruction *I) {
     return true;
 
   if (isa<StructElementAddrInst>(I) || isa<TupleElementAddrInst>(I)) {
-    for (auto Use : getNonDebugUses(I))
+    auto projection = cast<SingleValueInstruction>(I);
+    for (auto Use : getNonDebugUses(projection)) {
+      if (isIncidentalUse(Use->getUser()))
+        continue;
       if (!isValidPropertyLoad(Use->getUser()))
         return false;
+    }
     return true;
   }
 
@@ -531,16 +543,25 @@ void LetPropertiesOpt::collectPropertyAccess(SILInstruction *I,
                      << "':\n";
         llvm::dbgs() << "The instructions are:\n"; I->dumpInContext());
 
-  if (isa<RefElementAddrInst>(I) || isa<StructElementAddrInst>(I)) {
+  if (isa<RefElementAddrInst>(I) || isa<StructElementAddrInst>(I)
+      || isa<BeginAccessInst>(I)) {
     // Check if there is a store to this property.
-    for (auto Use : getNonDebugUses(I)) {
+    auto projection = cast<SingleValueInstruction>(I);
+    for (auto Use : getNonDebugUses(projection)) {
       auto *User = Use->getUser();
+      if (isIncidentalUse(User))
+        continue;
+
+      // Each begin_access is analyzed as a separate property access. Do not
+      // consider a begin_access a use of the current projection.
+      if (isa<BeginAccessInst>(User))
+        continue;
 
       if (auto *SI = dyn_cast<StoreInst>(User)) {
         // There is a store into this property.
         // Analyze the assigned value and check if it is a constant
         // statically known initializer.
-        if (SI->getDest() != I || !analyzeInitValue(SI, Property)) {
+        if (SI->getDest() != projection || !analyzeInitValue(SI, Property)) {
           SkipProcessing.insert(Property);
           return;
         }
@@ -580,7 +601,12 @@ void LetPropertiesOpt::run(SILModuleTransform *T) {
         // It includes referencing this specific property (both reads and
         // stores), as well as implicit stores by means of e.g.
         // a struct instruction.
-        if (auto *REAI = dyn_cast<RefElementAddrInst>(&I)) {
+        if (auto *BAI = dyn_cast<BeginAccessInst>(&I)) {
+          if (auto *REAI =
+                  dyn_cast<RefElementAddrInst>(stripAddressAccess(BAI))) {
+            collectPropertyAccess(BAI, REAI->getField(), NonRemovable);
+          }
+        } else if (auto *REAI = dyn_cast<RefElementAddrInst>(&I)) {
           collectPropertyAccess(REAI, REAI->getField(), NonRemovable);
         } else if (auto *SEI = dyn_cast<StructExtractInst>(&I)) {
           collectPropertyAccess(SEI, SEI->getField(), NonRemovable);

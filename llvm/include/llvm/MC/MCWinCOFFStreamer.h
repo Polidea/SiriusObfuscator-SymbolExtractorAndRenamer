@@ -14,22 +14,21 @@
 #include "llvm/MC/MCObjectStreamer.h"
 
 namespace llvm {
+
 class MCAsmBackend;
 class MCContext;
 class MCCodeEmitter;
-class MCExpr;
 class MCInst;
 class MCSection;
 class MCSubtargetInfo;
 class MCSymbol;
 class StringRef;
-class raw_ostream;
 class raw_pwrite_stream;
 
 class MCWinCOFFStreamer : public MCObjectStreamer {
 public:
-  MCWinCOFFStreamer(MCContext &Context, MCAsmBackend &MAB, MCCodeEmitter &CE,
-                    raw_pwrite_stream &OS);
+  MCWinCOFFStreamer(MCContext &Context, std::unique_ptr<MCAsmBackend> MAB,
+                    std::unique_ptr<MCCodeEmitter> CE, raw_pwrite_stream &OS);
 
   /// state management
   void reset() override {
@@ -61,21 +60,21 @@ public:
                     unsigned ByteAlignment) override;
   void EmitTBSSSymbol(MCSection *Section, MCSymbol *Symbol, uint64_t Size,
                       unsigned ByteAlignment) override;
-  void EmitFileDirective(StringRef Filename) override;
   void EmitIdent(StringRef IdentString) override;
-  void EmitWinEHHandlerData() override;
+  void EmitWinEHHandlerData(SMLoc Loc) override;
   void FinishImpl() override;
 
   /// \}
 
 protected:
   const MCSymbol *CurSymbol;
+
   void EmitInstToData(const MCInst &Inst, const MCSubtargetInfo &STI) override;
 
 private:
   void Error(const Twine &Msg) const;
 };
-}
 
-#endif
+} // end namespace llvm
 
+#endif // LLVM_MC_MCWINCOFFSTREAMER_H

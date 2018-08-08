@@ -25,7 +25,7 @@ using namespace lldb;
 using namespace lldb_private;
 
 ABISP
-ABI::FindPlugin(const ArchSpec &arch) {
+ABI::FindPlugin(lldb::ProcessSP process_sp, const ArchSpec &arch) {
   ABISP abi_sp;
   ABICreateInstance create_callback;
 
@@ -33,7 +33,7 @@ ABI::FindPlugin(const ArchSpec &arch) {
        (create_callback = PluginManager::GetABICreateCallbackAtIndex(idx)) !=
        nullptr;
        ++idx) {
-    abi_sp = create_callback(arch);
+    abi_sp = create_callback(process_sp, arch);
 
     if (abi_sp)
       return abi_sp;
@@ -41,8 +41,6 @@ ABI::FindPlugin(const ArchSpec &arch) {
   abi_sp.reset();
   return abi_sp;
 }
-
-ABI::ABI() = default;
 
 ABI::~ABI() = default;
 
@@ -104,15 +102,23 @@ ValueObjectSP ABI::GetReturnValueObject(Thread &thread, CompilerType &ast_type,
   // work.
 
   if (persistent) {
-    PersistentExpressionState *persistent_expression_state =
-        thread.CalculateTarget()->GetPersistentExpressionStateForLanguage(
-            ast_type.GetMinimumLanguage());
-
+    lldb::LanguageType lang = ast_type.GetMinimumLanguage();
+    PersistentExpressionState *persistent_expression_state;
+    Target &target = *thread.CalculateTarget();
+    if (lang == lldb::eLanguageTypeSwift)
+      persistent_expression_state = 
+        target.GetSwiftPersistentExpressionState(thread);
+    else
+      persistent_expression_state =
+         target.GetPersistentExpressionStateForLanguage(lang);
+    
     if (!persistent_expression_state)
       return ValueObjectSP();
 
-    ConstString persistent_variable_name(
-        persistent_expression_state->GetNextPersistentVariableName());
+    auto prefix = persistent_expression_state->GetPersistentVariablePrefix();
+    ConstString persistent_variable_name =
+        persistent_expression_state->GetNextPersistentVariableName(target,
+                                                                   prefix);
 
     lldb::ValueObjectSP const_valobj_sp;
 

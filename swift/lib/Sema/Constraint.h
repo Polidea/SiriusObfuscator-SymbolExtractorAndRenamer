@@ -200,8 +200,6 @@ enum class ConversionRestrictionKind {
   ValueToOptional,
   /// T? -> U? optional to optional conversion (or unchecked to unchecked).
   OptionalToOptional,
-  /// Implicit forces of implicitly unwrapped optionals to their presumed values
-  ForceUnchecked,
   /// Implicit upcast conversion of array types.
   ArrayUpcast,
   /// Implicit upcast conversion of dictionary types, which includes
@@ -232,24 +230,25 @@ enum RememberChoice_t : bool {
 /// Describes the kind of fix to apply to the given constraint before
 /// visiting it.
 enum class FixKind : uint8_t {
-  /// No fix, which is used as a placeholder indicating that future processing
-  /// of this constraint should not attempt fixes.
-  None,
-
   /// Introduce a '!' to force an optional unwrap.
   ForceOptional,
-    
-  /// Introduce a '?.' to begin optional chaining.
-  OptionalChaining,
+
+  /// Unwrap an optional base when we have a member access.
+  UnwrapOptionalBase,
 
   /// Append 'as! T' to force a downcast to the specified type.
   ForceDowncast,
 
   /// Introduce a '&' to take the address of an lvalue.
   AddressOf,
-  
+
   /// Replace a coercion ('as') with a forced checked cast ('as!').
   CoerceToCheckedCast,
+
+  /// Mark function type as explicitly '@escaping'.
+  ExplicitlyEscaping,
+  /// Mark function type as explicitly '@escaping' to be convertable to 'Any'.
+  ExplicitlyEscapingToAny,
 };
 
 /// Describes a fix that can be applied to a constraint before visiting it.
@@ -264,20 +263,27 @@ class Fix {
   friend class Constraint;
 
 public:
-  Fix() : Kind(FixKind::None), Data(0) { }
-  
-  Fix(FixKind kind) : Kind(kind), Data(0) { 
+  Fix(FixKind kind) : Kind(kind), Data(0) {
     assert(kind != FixKind::ForceDowncast && "Use getForceDowncast()");
+    assert(kind != FixKind::UnwrapOptionalBase &&
+           "Use getUnwrapOptionalBase()");
   }
 
   /// Produce a new fix that performs a forced downcast to the given type.
   static Fix getForcedDowncast(ConstraintSystem &cs, Type toType);
+
+  /// Produce a new fix that unwraps an optional base for an access to a member
+  /// with the given name.
+  static Fix getUnwrapOptionalBase(ConstraintSystem &cs, DeclName memberName);
 
   /// Retrieve the kind of fix.
   FixKind getKind() const { return Kind; }
 
   /// If this fix has a type argument, retrieve it.
   Type getTypeArgument(ConstraintSystem &cs) const;
+
+  /// If this fix has a name argument, retrieve it.
+  DeclName getDeclNameArgument(ConstraintSystem &cs) const;
 
   /// Return a string representation of a fix.
   static llvm::StringRef getName(FixKind kind);
@@ -287,6 +293,8 @@ public:
   LLVM_ATTRIBUTE_DEPRECATED(void dump(ConstraintSystem *cs) const 
                               LLVM_ATTRIBUTE_USED,
                             "only for use within the debugger");
+
+  bool operator==(Fix const &b) { return Kind == b.Kind && Data == b.Data; }
 };
 
 
@@ -436,6 +444,13 @@ public:
                             Type First, Type Second, Type Third,
                             ConstraintLocator *locator);
 
+  /// Create a new member constraint, or a disjunction of that with the outer
+  /// alternatives.
+  static Constraint *createMemberOrOuterDisjunction(
+      ConstraintSystem &cs, ConstraintKind kind, Type first, Type second,
+      DeclName member, DeclContext *useDC, FunctionRefKind functionRefKind,
+      ArrayRef<OverloadChoice> outerAlternatives, ConstraintLocator *locator);
+
   /// Create a new member constraint.
   static Constraint *createMember(ConstraintSystem &cs, ConstraintKind kind,
                                   Type first, Type second, DeclName member,
@@ -503,6 +518,11 @@ public:
   void setDisabled() {
     assert(!isActive() && "Cannot disable constraint marked as active!");
     IsDisabled = true;
+  }
+
+  void setEnabled() {
+    assert(isDisabled() && "Can't re-enable already active constraint!");
+    IsDisabled = false;
   }
 
   /// Mark or retrieve whether this constraint should be favored in the system.
@@ -700,7 +720,7 @@ namespace llvm {
 template<>
 struct ilist_traits<swift::constraints::Constraint>
          : public ilist_default_traits<swift::constraints::Constraint> {
-  typedef swift::constraints::Constraint Element;
+  using Element = swift::constraints::Constraint;
 
   static Element *createNode(const Element &V) = delete;
   static void deleteNode(Element *V) { /* never deleted */ }

@@ -13,11 +13,12 @@
 #include "SwiftREPLMaterializer.h"
 #include "SwiftASTManipulator.h"
 
-#include "lldb/Core/Log.h"
+#include "lldb/Core/DumpDataExtractor.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/Expression/IRExecutionUnit.h"
 #include "lldb/Expression/IRMemoryMap.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/Log.h"
 
 #include "swift/Demangling/Demangle.h"
 
@@ -62,11 +63,11 @@ public:
   }
 
   void Materialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
-                   lldb::addr_t process_address, Error &err) {
+                   lldb::addr_t process_address, Status &err) {
     // no action required
   }
 
-  void MakeREPLResult(IRExecutionUnit &execution_unit, Error &err,
+  void MakeREPLResult(IRExecutionUnit &execution_unit, Status &err,
                       const IRExecutionUnit::JittedGlobalVariable *variable) {
     err.Clear();
 
@@ -99,9 +100,11 @@ public:
                          "doesn't have persistent state");
     }
 
+    auto prefix = persistent_state->GetPersistentVariablePrefix();
     ConstString name =
         m_delegate ? m_delegate->GetName()
-                   : persistent_state->GetNextPersistentVariableName(false);
+                   : persistent_state->GetNextPersistentVariableName(*target_sp,
+                                                                     prefix);
 
     lldb::ExpressionVariableSP ret;
 
@@ -132,7 +135,7 @@ public:
       const size_t pvar_byte_size = ret->GetByteSize();
       uint8_t *pvar_data = ret->GetValueBytes();
 
-      Error read_error;
+      Status read_error;
 
       execution_unit.ReadMemory(pvar_data, variable->m_remote_addr,
                                 pvar_byte_size, read_error);
@@ -161,7 +164,7 @@ public:
 
   void Dematerialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
                      lldb::addr_t process_address, lldb::addr_t frame_top,
-                     lldb::addr_t frame_bottom, Error &err) {
+                     lldb::addr_t frame_bottom, Status &err) {
     IRExecutionUnit *execution_unit =
         llvm::cast<SwiftREPLMaterializer>(m_parent)->GetExecutionUnit();
 
@@ -203,7 +206,7 @@ public:
 
     dump_stream.Printf("0x%" PRIx64 ": EntityResultVariable\n", load_addr);
 
-    Error err;
+    Status err;
 
     lldb::addr_t ptr = LLDB_INVALID_ADDRESS;
 
@@ -220,7 +223,7 @@ public:
         DataExtractor extractor(data.GetBytes(), data.GetByteSize(),
                                 map.GetByteOrder(), map.GetAddressByteSize());
 
-        extractor.DumpHexBytes(&dump_stream, data.GetBytes(),
+        DumpHexBytes(&dump_stream, data.GetBytes(),
                                data.GetByteSize(), 16, load_addr);
 
         lldb::offset_t offset;
@@ -248,10 +251,7 @@ public:
       if (!err.Success()) {
         dump_stream.Printf("  <could not be read>\n");
       } else {
-        DataExtractor extractor(data.GetBytes(), data.GetByteSize(),
-                                map.GetByteOrder(), map.GetAddressByteSize());
-
-        extractor.DumpHexBytes(&dump_stream, data.GetBytes(),
+        DumpHexBytes(&dump_stream, data.GetBytes(),
                                data.GetByteSize(), 16, m_temporary_allocation);
 
         dump_stream.PutChar('\n');
@@ -280,7 +280,7 @@ private:
 
 uint32_t SwiftREPLMaterializer::AddREPLResultVariable(
     const CompilerType &type, swift::ValueDecl *decl,
-    PersistentVariableDelegate *delegate, Error &err) {
+    PersistentVariableDelegate *delegate, Status &err) {
   EntityVector::iterator iter = m_entities.insert(m_entities.end(), EntityUP());
 
   iter->reset(new EntityREPLResultVariable(type, decl, this, delegate));
@@ -305,13 +305,13 @@ public:
   }
 
   void Materialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
-                   lldb::addr_t process_address, Error &err) {
+                   lldb::addr_t process_address, Status &err) {
     // no action required
   }
 
   void Dematerialize(lldb::StackFrameSP &frame_sp, IRMemoryMap &map,
                      lldb::addr_t process_address, lldb::addr_t frame_top,
-                     lldb::addr_t frame_bottom, Error &err) {
+                     lldb::addr_t frame_bottom, Status &err) {
     if (llvm::cast<SwiftExpressionVariable>(m_persistent_variable_sp.get())
             ->GetIsComputed())
       return;
@@ -360,7 +360,7 @@ public:
 
         m_persistent_variable_sp->ValueUpdated();
 
-        Error read_error;
+        Status read_error;
 
         execution_unit->ReadMemory(
             m_persistent_variable_sp->GetValueBytes(), variable.m_remote_addr,
@@ -391,7 +391,7 @@ public:
   void DumpToLog(IRMemoryMap &map, lldb::addr_t process_address, Log *log) {
     StreamString dump_stream;
 
-    Error err;
+    Status err;
 
     const lldb::addr_t load_addr = process_address + m_offset;
 
@@ -409,10 +409,7 @@ public:
       if (!err.Success()) {
         dump_stream.Printf("  <could not be read>\n");
       } else {
-        DataExtractor extractor(data.GetBytes(), data.GetByteSize(),
-                                map.GetByteOrder(), map.GetAddressByteSize());
-
-        extractor.DumpHexBytes(&dump_stream, data.GetBytes(),
+        DumpHexBytes(&dump_stream, data.GetBytes(),
                                data.GetByteSize(), 16, load_addr);
 
         dump_stream.PutChar('\n');
@@ -437,10 +434,7 @@ public:
         if (!err.Success()) {
           dump_stream.Printf("  <could not be read>\n");
         } else {
-          DataExtractor extractor(data.GetBytes(), data.GetByteSize(),
-                                  map.GetByteOrder(), map.GetAddressByteSize());
-
-          extractor.DumpHexBytes(&dump_stream, data.GetBytes(),
+          DumpHexBytes(&dump_stream, data.GetBytes(),
                                  data.GetByteSize(), 16, target_address);
 
           dump_stream.PutChar('\n');
@@ -461,7 +455,7 @@ private:
 
 uint32_t SwiftREPLMaterializer::AddPersistentVariable(
     lldb::ExpressionVariableSP &persistent_variable_sp,
-    PersistentVariableDelegate *delegate, Error &err) {
+    PersistentVariableDelegate *delegate, Status &err) {
   EntityVector::iterator iter = m_entities.insert(m_entities.end(), EntityUP());
   iter->reset(
       new EntityREPLPersistentVariable(persistent_variable_sp, this, delegate));

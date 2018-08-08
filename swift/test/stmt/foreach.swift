@@ -27,7 +27,7 @@ func bad_containers_3(bc: BadContainer3) {
 struct BadIterator1 {}
 
 struct BadContainer4 : Sequence { // expected-error{{type 'BadContainer4' does not conform to protocol 'Sequence'}}
-  typealias Iterator = BadIterator1 // expected-note{{possibly intended match 'BadContainer4.Iterator' (aka 'BadIterator1') does not conform to 'IteratorProtocol'}}
+  typealias Iterator = BadIterator1 // expected-note{{possibly intended match 'Iterator' (aka 'BadIterator1') does not conform to 'IteratorProtocol'}}
   func makeIterator() -> BadIterator1 { }
 }
 
@@ -168,7 +168,9 @@ func testMatchingPatterns() {
 // <rdar://problem/21662365> QoI: diagnostic for for-each over an optional sequence isn't great
 func testOptionalSequence() {
   let array : [Int]?
-  for x in array {  // expected-error {{value of optional type '[Int]?' not unwrapped; did you mean to use '!' or '?'?}} {{17-17=!}}
+  for x in array {  // expected-error {{value of optional type '[Int]?' must be unwrapped}}
+    // expected-note@-1{{coalesce}}
+    // expected-note@-2{{force-unwrap}}
   }
 }
 
@@ -177,4 +179,43 @@ func testExistentialSequence(s: Sequence) { // expected-error {{protocol 'Sequen
   for x in s { // expected-error {{using 'Sequence' as a concrete type conforming to protocol 'Sequence' is not supported}}
     _ = x
   }
+}
+
+// Conditional conformance to Sequence and IteratorProtocol.
+protocol P { }
+
+struct RepeatedSequence<T> {
+  var value: T
+  var count: Int
+}
+
+struct RepeatedIterator<T> {
+  var value: T
+  var count: Int
+}
+
+extension RepeatedIterator: IteratorProtocol where T: P {
+  typealias Element = T
+
+  mutating func next() -> T? {
+    if count == 0 { return nil }
+    count = count - 1
+    return value
+  }
+}
+
+extension RepeatedSequence: Sequence where T: P {
+  typealias Element = T
+  typealias Iterator = RepeatedIterator<T>
+  typealias SubSequence = AnySequence<T>
+
+  func makeIterator() -> RepeatedIterator<T> {
+    return Iterator(value: value, count: count)
+  }
+}
+
+extension Int : P { }
+
+func testRepeated(ri: RepeatedSequence<Int>) {
+  for x in ri { _ = x }
 }

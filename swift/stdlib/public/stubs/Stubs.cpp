@@ -26,40 +26,49 @@
 #define NOMINMAX
 #include <windows.h>
 #else
-#include <sys/resource.h>
+#if !defined(__HAIKU__)
 #include <sys/errno.h>
+#else
+#include <errno.h>
+#endif
+#include <sys/resource.h>
 #include <unistd.h>
 #endif
 #include <climits>
+#include <clocale>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#if defined(__CYGWIN__) || defined(_WIN32)
+#if defined(__CYGWIN__) || defined(_WIN32) || defined(__HAIKU__)
 #include <sstream>
 #include <cmath>
-#define fmodl(lhs, rhs) std::fmod(lhs, rhs)
 #elif defined(__ANDROID__)
-// Android's libc implementation Bionic currently only supports the "C" locale
-// (https://android.googlesource.com/platform/bionic/+/ndk-r11c/libc/bionic/locale.cpp#40).
-// As such, we have no choice but to map functions like strtod_l, which should
-// respect the given locale_t parameter, to functions like strtod, which do not.
 #include <locale.h>
+
+#include <android/api-level.h>
+
+#if __ANDROID_API__ < 21 // Introduced in Android API 21 - L
+static inline long double swift_strtold_l(const char *nptr, char **endptr,
+                                          locale_t) {
+  return strtod(nptr, endptr);
+}
+#define strtold_l swift_strtold_l
+#endif
+
+#if __ANDROID_API__ < 26 // Introduced in Android API 26 - O
 static double swift_strtod_l(const char *nptr, char **endptr, locale_t loc) {
   return strtod(nptr, endptr);
 }
 static float swift_strtof_l(const char *nptr, char **endptr, locale_t loc) {
   return strtof(nptr, endptr);
 }
-static long double swift_strtold_l(const char *nptr,
-                                   char **endptr,
-                                   locale_t loc) {
-  return strtod(nptr, endptr);
-}
 #define strtod_l swift_strtod_l
 #define strtof_l swift_strtof_l
-#define strtold_l swift_strtold_l
+#endif
+#elif defined(__linux__)
+#include <locale.h>
 #else
 #include <xlocale.h>
 #endif
@@ -68,8 +77,10 @@ static long double swift_strtold_l(const char *nptr,
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/Compiler.h"
 #include "swift/Runtime/Debug.h"
+#include "swift/Runtime/SwiftDtoa.h"
 #include "swift/Basic/Lazy.h"
 
+#include "../SwiftShims/LibcShims.h"
 #include "../SwiftShims/RuntimeShims.h"
 #include "../SwiftShims/RuntimeStubs.h"
 
@@ -144,7 +155,7 @@ static inline locale_t getCLocale() {
   // as C locale.
   return nullptr;
 }
-#elif defined(__CYGWIN__) || defined(_WIN32)
+#elif defined(__CYGWIN__) || defined(_WIN32) || defined(__HAIKU__)
 // In Cygwin, getCLocale() is not used.
 #else
 static locale_t makeCLocale() {
@@ -160,10 +171,11 @@ static locale_t getCLocale() {
 }
 #endif
 
+#if !SWIFT_DTOA_FLOAT80_SUPPORT
 #if defined(__APPLE__)
 #define swift_snprintf_l snprintf_l
-#elif defined(__CYGWIN__) || defined(_WIN32)
-// In Cygwin, swift_snprintf_l() is not used.
+#elif defined(__CYGWIN__) || defined(_WIN32) || defined(__HAIKU__)
+// swift_snprintf_l() is not used.
 #else
 static int swift_snprintf_l(char *Str, size_t StrSize, locale_t Locale,
                             const char *Format, ...) {
@@ -195,7 +207,7 @@ static uint64_t swift_floatingPointToString(char *Buffer, size_t BufferLength,
     Precision = std::numeric_limits<T>::max_digits10;
   }
 
-#if defined(__CYGWIN__) || defined(_WIN32)
+#if defined(__CYGWIN__) || defined(_WIN32) || defined(__HAIKU__)
   // Cygwin does not support uselocale(), but we can use the locale feature 
   // in stringstream object.
   std::ostringstream ValueStream;
@@ -235,26 +247,31 @@ static uint64_t swift_floatingPointToString(char *Buffer, size_t BufferLength,
 
   return i;
 }
+#endif
 
 SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 uint64_t swift_float32ToString(char *Buffer, size_t BufferLength,
                                float Value, bool Debug) {
-  return swift_floatingPointToString<float>(Buffer, BufferLength, Value,
-                                            "%0.*g", Debug);
+  return swift_format_float(Value, Buffer, BufferLength);
 }
 
 SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 uint64_t swift_float64ToString(char *Buffer, size_t BufferLength,
                                double Value, bool Debug) {
-  return swift_floatingPointToString<double>(Buffer, BufferLength, Value,
-                                             "%0.*g", Debug);
+  return swift_format_double(Value, Buffer, BufferLength);
 }
 
 SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
 uint64_t swift_float80ToString(char *Buffer, size_t BufferLength,
                                long double Value, bool Debug) {
+#if SWIFT_DTOA_FLOAT80_SUPPORT
+  return swift_format_float80(Value, Buffer, BufferLength);
+#else
+  // Use this when 'long double' is not true Float80
   return swift_floatingPointToString<long double>(Buffer, BufferLength, Value,
                                                   "%0.*Lg", Debug);
+#endif
+
 }
 
 /// \param[out] LinePtr Replaced with the pointer to the malloc()-allocated
@@ -263,7 +280,8 @@ uint64_t swift_float80ToString(char *Buffer, size_t BufferLength,
 ///
 /// \returns Size of character data returned in \c LinePtr, or -1
 /// if an error occurred, or EOF was reached.
-ssize_t swift::swift_stdlib_readLine_stdin(unsigned char **LinePtr) {
+swift::__swift_ssize_t
+swift::swift_stdlib_readLine_stdin(unsigned char **LinePtr) {
 #if defined(_WIN32)
   if (LinePtr == nullptr)
     return -1;
@@ -315,135 +333,6 @@ ssize_t swift::swift_stdlib_readLine_stdin(unsigned char **LinePtr) {
 #endif
 }
 
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
-float _swift_fmodf(float lhs, float rhs) {
-    return fmodf(lhs, rhs);
-}
-
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
-double _swift_fmod(double lhs, double rhs) {
-    return fmod(lhs, rhs);
-}
-
-SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
-long double _swift_fmodl(long double lhs, long double rhs) {
-    return fmodl(lhs, rhs);
-}
-
-
-// Although this builtin is provided by clang rt builtins,
-// it isn't provided by libgcc, which is the default
-// runtime library on Linux, even when compiling with clang.
-// This implementation is copied here to avoid a new dependency
-// on compiler-rt on Linux.
-// FIXME: rdar://14883575 Libcompiler_rt omits muloti4
-#if (defined(__linux__) && defined(__x86_64__)) || \
-    (defined(__linux__) && defined(__aarch64__)) || \
-    (defined(__linux__) && defined(__powerpc64__)) || \
-    (defined(__linux__) && defined(__s390x__)) || \
-    (defined(__ANDROID__) && defined(__arm64__))
-
-typedef int ti_int __attribute__((__mode__(TI)));
-SWIFT_RUNTIME_STDLIB_INTERFACE
-ti_int
-__muloti4(ti_int a, ti_int b, int* overflow)
-{
-    const int N = (int)(sizeof(ti_int) * CHAR_BIT);
-    const ti_int MIN = (ti_int)1 << (N-1);
-    const ti_int MAX = ~MIN;
-    *overflow = 0;
-    ti_int result = a * b;
-    if (a == MIN)
-    {
-        if (b != 0 && b != 1)
-            *overflow = 1;
-        return result;
-    }
-    if (b == MIN)
-    {
-        if (a != 0 && a != 1)
-            *overflow = 1;
-        return result;
-    }
-    ti_int sa = a >> (N - 1);
-    ti_int abs_a = (a ^ sa) - sa;
-    ti_int sb = b >> (N - 1);
-    ti_int abs_b = (b ^ sb) - sb;
-    if (abs_a < 2 || abs_b < 2)
-        return result;
-    if (sa == sb)
-    {
-        if (abs_a > MAX / abs_b)
-            *overflow = 1;
-    }
-    else
-    {
-        if (abs_a > MIN / -abs_b)
-            *overflow = 1;
-    }
-    return result;
-}
-
-#endif
-
-// FIXME: ideally we would have a slow path here for Windows which would be
-// lowered to instructions as though MSVC had generated.  There does not seem to
-// be a MSVC provided multiply with overflow detection that I can see, but this
-// avoids an unnecessary dependency on compiler-rt for a single function.
-#if (defined(__linux__) && defined(__arm__)) || defined(_WIN32)
-// Similar to above, but with mulodi4.  Perhaps this is
-// something that shouldn't be done, and is a bandaid over
-// some other lower-level architecture issue that I'm
-// missing.  Perhaps relevant bug report:
-// FIXME: https://llvm.org/bugs/show_bug.cgi?id=14469
-#if __has_attribute(__mode__)
-#define SWIFT_MODE_DI __attribute__((__mode__(DI)))
-#else
-#define SWIFT_MODE_DI
-#endif
-
-typedef int di_int SWIFT_MODE_DI;
-SWIFT_RUNTIME_STDLIB_INTERFACE
-di_int
-__mulodi4(di_int a, di_int b, int* overflow)
-{
-    const int N = (int)(sizeof(di_int) * CHAR_BIT);
-    const di_int MIN = (di_int)1 << (N-1);
-    const di_int MAX = ~MIN;
-    *overflow = 0;
-    di_int result = a * b;
-    if (a == MIN)
-    {
-        if (b != 0 && b != 1)
-            *overflow = 1;
-        return result;
-    }
-    if (b == MIN)
-    {
-        if (a != 0 && a != 1)
-            *overflow = 1;
-        return result;
-    }
-    di_int sa = a >> (N - 1);
-    di_int abs_a = (a ^ sa) - sa;
-    di_int sb = b >> (N - 1);
-    di_int abs_b = (b ^ sb) - sb;
-    if (abs_a < 2 || abs_b < 2)
-        return result;
-    if (sa == sb)
-    {
-        if (abs_a > MAX / abs_b)
-            *overflow = 1;
-    }
-    else
-    {
-        if (abs_a > MIN / -abs_b)
-            *overflow = 1;
-    }
-    return result;
-}
-#endif
-
 #if defined(__CYGWIN__) || defined(_WIN32)
   #define strcasecmp _stricmp
 #endif
@@ -456,7 +345,7 @@ static bool swift_stringIsSignalingNaN(const char *nptr) {
   return strcasecmp(nptr, "snan") == 0;
 }
 
-#if defined(__CYGWIN__) || defined(_WIN32)
+#if defined(__CYGWIN__) || defined(_WIN32) || defined(__HAIKU__)
 // Cygwin does not support uselocale(), but we can use the locale feature 
 // in stringstream object.
 template <typename T>
@@ -473,7 +362,9 @@ static const char *_swift_stdlib_strtoX_clocale_impl(
   ValueStream >> ParsedValue;
   *outResult = ParsedValue;
 
-  int pos = ValueStream.tellg();
+  std::streamoff pos = ValueStream.tellg();
+  if (ValueStream.eof())
+    pos = static_cast<std::streamoff>(strlen(nptr));
   if (pos <= 0)
     return nullptr;
 

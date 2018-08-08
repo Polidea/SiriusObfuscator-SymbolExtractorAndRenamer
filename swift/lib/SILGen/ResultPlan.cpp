@@ -12,6 +12,7 @@
 
 #include "ResultPlan.h"
 #include "Callee.h"
+#include "Conversion.h"
 #include "Initialization.h"
 #include "LValue.h"
 #include "RValue.h"
@@ -37,7 +38,7 @@ public:
   RValue finish(SILGenFunction &SGF, SILLocation loc, CanType substType,
                 ArrayRef<ManagedValue> &directResults) override {
     init->finishInitialization(SGF);
-    return RValue();
+    return RValue::forInContext();
   }
   void
   gatherIndirectResultAddrs(SILGenFunction &SGF, SILLocation loc,
@@ -92,21 +93,37 @@ public:
 
     // Reabstract the value if the types don't match.  This can happen
     // due to either substitution reabstractions or bridging.
-    if (value.getType().hasAbstractionDifference(rep,
-                                                 substTL.getLoweredType())) {
-      // Assume that a C-language API doesn't have substitution
-      // reabstractions.  This shouldn't be necessary, but
-      // emitOrigToSubstValue can get upset.
-      if (getSILFunctionLanguage(rep) == SILFunctionLanguage::C) {
-        value = SGF.emitBridgedToNativeValue(loc, value, rep, substType);
+    SILType loweredResultTy = substTL.getLoweredType();
+    if (value.getType().hasAbstractionDifference(rep, loweredResultTy)) {
+      Conversion conversion = [&] {
+        // Assume that a C-language API doesn't have substitution
+        // reabstractions.  This shouldn't be necessary, but
+        // emitOrigToSubstValue can get upset.
+        if (getSILFunctionLanguage(rep) == SILFunctionLanguage::C) {
+          return Conversion::getBridging(Conversion::BridgeResultFromObjC,
+                                         origType.getType(), substType,
+                                         loweredResultTy);
+        } else {
+          return Conversion::getOrigToSubst(origType, substType);
+        }
+      }();
 
-      } else {
-        value = SGF.emitOrigToSubstValue(loc, value, origType, substType,
-                                         SGFContext(init));
+      // Attempt to peephole this conversion into the context.
+      if (init) {
+        if (auto outerConversion = init->getAsConversion()) {
+          if (outerConversion->tryPeephole(SGF, loc, value, conversion)) {
+            outerConversion->finishInitialization(SGF);
+            return RValue::forInContext();
+          }
+        }
+      }
 
-        // If that successfully emitted into the initialization, we're done.
-        if (value.isInContext())
-          return RValue();
+      // If that wasn't possible, just apply the conversion.
+      value = conversion.emit(SGF, loc, value, SGFContext(init));
+
+      // If that successfully emitted into the initialization, we're done.
+      if (value.isInContext()) {
+        return RValue::forInContext();
       }
     }
 
@@ -114,7 +131,7 @@ public:
     if (init) {
       init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
       init->finishInitialization(SGF);
-      return RValue();
+      return RValue::forInContext();
 
       // Otherwise, we've got the r-value we want.
     } else {
@@ -148,14 +165,14 @@ public:
   RValue finish(SILGenFunction &SGF, SILLocation loc, CanType substType,
                 ArrayRef<ManagedValue> &directResults) override {
     RValue subResult = subPlan->finish(SGF, loc, substType, directResults);
-    assert(subResult.isUsed() && "sub-plan didn't emit into context?");
+    assert(subResult.isInContext() && "sub-plan didn't emit into context?");
     (void)subResult;
 
     ManagedValue value = temporary->getManagedAddress();
     init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
     init->finishInitialization(SGF);
 
-    return RValue();
+    return RValue::forInContext();
   }
 
   void
@@ -183,7 +200,7 @@ public:
     init->copyOrInitValueInto(SGF, loc, value, /*init*/ true);
     init->finishInitialization(SGF);
 
-    return RValue();
+    return RValue::forInContext();
   }
 
   void
@@ -271,12 +288,12 @@ public:
     for (auto i : indices(substTupleType.getElementTypes())) {
       auto eltType = substTupleType.getElementType(i);
       RValue eltRV = eltPlans[i]->finish(SGF, loc, eltType, directResults);
-      assert(eltRV.isUsed());
+      assert(eltRV.isInContext());
       (void)eltRV;
     }
     tupleInit->finishInitialization(SGF);
 
-    return RValue();
+    return RValue::forInContext();
   }
 
   void
@@ -295,7 +312,7 @@ class ForeignErrorInitializationPlan : public ResultPlan {
   ManagedValue managedErrorTemp;
   CanType unwrappedPtrType;
   PointerTypeKind ptrKind;
-  OptionalTypeKind optKind;
+  bool isOptional;
   CanType errorPtrType;
 
 public:
@@ -311,7 +328,10 @@ public:
     // of optional.
     errorPtrType = errorParameter.getType();
     unwrappedPtrType = errorPtrType;
-    if (Type unwrapped = errorPtrType->getAnyOptionalObjectType(optKind))
+    Type unwrapped = errorPtrType->getOptionalObjectType();
+    isOptional = (bool) unwrapped;
+
+    if (unwrapped)
       unwrappedPtrType = unwrapped->getCanonicalType();
 
     auto errorType =
@@ -354,7 +374,7 @@ public:
         SGF.emitLValueToPointer(loc, std::move(lvalue), pointerInfo);
 
     // Wrap up in an Optional if called for.
-    if (optKind != OTK_None) {
+    if (isOptional) {
       auto &optTL = SGF.getTypeLowering(errorPtrType);
       pointerValue = SGF.getOptionalSomeValue(loc, pointerValue, optTL);
     }
@@ -378,7 +398,7 @@ ResultPlanPtr ResultPlanBuilder::buildTopLevelResult(Initialization *init,
   // build.
   auto foreignError = calleeTypeInfo.foreignError;
   if (!foreignError) {
-    return build(init, calleeTypeInfo.origResultType,
+    return build(init, calleeTypeInfo.origResultType.getValue(),
                  calleeTypeInfo.substResultType);
   }
 
@@ -403,7 +423,7 @@ ResultPlanPtr ResultPlanBuilder::buildTopLevelResult(Initialization *init,
   // need to make our own make SILResultInfo array.
   case ForeignErrorConvention::NilResult: {
     assert(allResults.size() == 1);
-    CanType objectType = allResults[0].getType().getAnyOptionalObjectType();
+    CanType objectType = allResults[0].getType().getOptionalObjectType();
     SILResultInfo optResult = allResults[0].getWithType(objectType);
     allResults.clear();
     allResults.push_back(optResult);
@@ -411,7 +431,7 @@ ResultPlanPtr ResultPlanBuilder::buildTopLevelResult(Initialization *init,
   }
   }
 
-  ResultPlanPtr subPlan = build(init, calleeTypeInfo.origResultType,
+  ResultPlanPtr subPlan = build(init, calleeTypeInfo.origResultType.getValue(),
                                 calleeTypeInfo.substResultType);
   return ResultPlanPtr(new ForeignErrorInitializationPlan(
       SGF, loc, calleeTypeInfo, std::move(subPlan)));

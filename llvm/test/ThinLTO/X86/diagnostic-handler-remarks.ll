@@ -2,6 +2,7 @@
 ; RUN: opt -module-summary %p/Inputs/diagnostic-handler-remarks.ll -o %t2.bc
 
 ; Optimization records are collected regardless of the diagnostic handler
+; RUN: rm -f %t.yaml.thin.0.yaml %t.yaml.thin.1.yaml
 ; RUN: llvm-lto -thinlto-action=run \
 ; RUN:          -lto-pass-remarks-output=%t.yaml \
 ; RUN:          -exported-symbol _func2 \
@@ -21,6 +22,11 @@
 ; YAML1-NEXT:   - Callee:          foo
 ; YAML1-NEXT:   - String:          ' inlined into '
 ; YAML1-NEXT:   - Caller:          main
+; YAML1-NEXT:   - String:          ' with cost='
+; YAML1-NEXT:   - Cost:            '-30'
+; YAML1-NEXT:   - String:          ' (threshold='
+; YAML1-NEXT:   - Threshold:       '337'
+; YAML1-NEXT:   - String:          ')'
 ; YAML1-NEXT: ...
 
 
@@ -34,6 +40,11 @@
 ; YAML2-NEXT:   - Callee:          bar
 ; YAML2-NEXT:   - String:          ' inlined into '
 ; YAML2-NEXT:   - Caller:          foo
+; YAML2-NEXT:   - String:          ' with cost='
+; YAML2-NEXT:   - Cost:            '-30'
+; YAML2-NEXT:   - String:          ' (threshold='
+; YAML2-NEXT:   - Threshold:       '337'
+; YAML2-NEXT:   - String:          ')'
 ; YAML2-NEXT: ...
 
 

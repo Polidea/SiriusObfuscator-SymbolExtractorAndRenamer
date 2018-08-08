@@ -8,13 +8,13 @@ class AClass : AProtocol {
 }
 
 // CHECK: define hidden {{.*}}void @{{.*}}aFunction
-// CHECK:  call void @llvm.dbg.declare(metadata %swift.type** %{{.*}}, metadata ![[TYPEARG:.*]], metadata !{{[0-9]+}}),
+// CHECK:  call void @llvm.dbg.declare(metadata %swift.type** %{{.*}}, metadata ![[TYPEARG:.*]], metadata !DIExpression()),
 // CHECK: ![[TYPEARG]] = !DILocalVariable(name: "$swift.type.T"
 // CHECK-SAME:                            type: ![[SWIFTMETATYPE:[^,)]+]]
 // CHECK-SAME:                            flags: DIFlagArtificial
 // CHECK: ![[SWIFTMETATYPE]] = !DIDerivedType(tag: DW_TAG_typedef, name: "$swift.type",
 // CHECK-SAME:                                baseType: ![[VOIDPTR:[0-9]+]]
-// CHECK: ![[VOIDPTR]] = !DIDerivedType(tag: DW_TAG_pointer_type, name: "_T0BpD", baseType: null
+// CHECK: ![[VOIDPTR]] = !DIDerivedType(tag: DW_TAG_pointer_type, name: "$SBpD", baseType: null
 func aFunction<T : AProtocol>(_ x: T) {
     print("I am in aFunction: \(x.f())")
 }
@@ -36,7 +36,7 @@ class Foo<Bar> {
 // Verify that the backend doesn't elide the debug intrinsics.
 // RUN: %target-swift-frontend %s -c -g -o %t.o
 // RUN: %llvm-dwarfdump %t.o | %FileCheck %s --check-prefix=CHECK-LLVM
-// CHECK-LLVM-DAG:  .debug_str[{{.*}}] = "x"
-// CHECK-LLVM-DAG:  .debug_str[{{.*}}] = "$swift.type.T"
-// CHECK- FIXME -LLVM-DAG:  .debug_str[{{.*}}] = "$swift.type.Bar"
-// CHECK-LLVM-DAG:  .debug_str[{{.*}}] = "$swift.type.Baz"
+// CHECK-LLVM-DAG:  DW_AT_name ("x")
+// CHECK-LLVM-DAG:  DW_AT_name ("$swift.type.T")
+// CHECK- FIXME -LLVM-DAG:  DW_AT_name ("$swift.type.Bar")
+// CHECK-LLVM-DAG:  DW_AT_name ("$swift.type.Baz")

@@ -89,6 +89,17 @@ These are the supported node types:
   dependency is missing, the build system will typically end up scanning the
   directory before all content is produced, and this will result in the first
   build being incomplete, and the next build redoing the remainder of the work.
+
+* Directory Tree Structure Nodes: These are like directory tree nodes, but
+  instead of tracking all attributes of the directory, they will change only
+  when the *structure* of the directory (recursively) changes. That is, they
+  will not rerun when the contents of files in the directory are modified, only
+  when files are added or removed, or files change type.
+
+  This is useful for clients which infer properties based purely on a directory
+  structure. Such clients can use this node type to track when to redo that
+  computation, and use additional dependencies on particular files for any items
+  within the structure whose content are relevant to the task.
   
 * Virtual Nodes: Nodes matching the name ``'<.*>'``, e.g. ``<gate-task>``, are
   *assumed* to be virtual nodes, and are used for adding arbitrary edges to the
@@ -215,6 +226,11 @@ present.
 
   The version field is optional, and defaults to 0.
 
+  A file-system field may be supplied that toggles how the build system handles
+  file system use. The `default` mode uses detailed stat information for
+  detecting file changes. The `device-agnostic` mode will ignore device and
+  inode values.
+
   Additional string keys and values may be specified here, and are passed to the
   client to handle.
 
@@ -331,6 +347,22 @@ The following attributes are currently supported:
        directory instead of a file path. By default, the build system assumes
        that nodes matching the pattern ``'.*/'`` (e.g., ``/tmp/``) are directory
        nodes. This attribute can be used to override that default.
+
+   * - is-directory-structure
+     - A boolean value, indicating whether the node should represent the
+       directory structure of a file path. Such nodes should be named as
+       '<path>/' (which would normally be a directory node), and then this
+       attribute used to change the type.
+
+       Directory structure nodes are affected by change tracking differently
+       than normal directory nodes. A normal directory node computes its
+       signatures effectively as the sum of the signatures of all its contained
+       files, recursively. A directory *structure* node's signature, by
+       contrast, is effectively the sum of the filenames of its contained files,
+       not taking into account their attributes or contents (except for the
+       attributes of the directory itself). Thus, this tracks when the
+       "structure" of the directory changes (for example, files are added or
+       removed), but not every modification to the files under the directory.
 
    * - is-virtual
      - A boolean value, indicating whether or not the node is "virtual". By
@@ -467,6 +499,12 @@ attributes on commands, and not at the tool level.
      - A string or string list indicating the command line to be executed. If a
        single string is provided, it will be executed using ``/bin/sh -c``.
 
+   * - signature
+     - An arbitrary string used to compute the task signature. If defined, this
+       will be used instead of the built-in signature computation strategy,
+       which takes into account `args`, `env`, `deps`, `deps-style`,
+       `inherit-env` and `can-safely-interrupt`.
+
    * - env
      - A mapping of keys and values defining the environment to pass to the
        launched process. See also `inherit-env`.
@@ -503,6 +541,14 @@ attributes on commands, and not at the tool level.
    * - always-out-of-date
      - A boolean value, indicating whether the commands should be treated as
        being always out-of-date. The default is false.
+
+   * - can-safely-interrupt
+     - A boolean flag controlling whether this command is allowed to be sent a
+       SIGINT to cancel it during build cancellation. If false, the command will
+       not be interrupted, and the build system will wait for the default
+       timeout (10 seconds) before sending a SIGKILL. This is intended to give
+       tools which can leave an inconsistent file system state an opportunity to
+       clean up, before exiting. The default is true.
           
    * - deps
      - The path to an output file of the command which will contain information

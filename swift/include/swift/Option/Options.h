@@ -34,12 +34,14 @@ namespace options {
     AutolinkExtractOption = (1 << 9),
     ModuleWrapOption = (1 << 10),
     SwiftFormatOption = (1 << 11),
+    ArgumentIsPath = (1 << 12),
   };
 
   enum ID {
     OPT_INVALID = 0, // This is not an option ID.
-#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM, \
-               HELPTEXT, METAVAR) OPT_##ID,
+#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
+               HELPTEXT, METAVAR, VALUES)                                      \
+  OPT_##ID,
 #include "swift/Option/Options.inc"
     LastOption
 #undef OPTION

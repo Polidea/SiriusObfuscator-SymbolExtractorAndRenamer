@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift %s -o %t/a.out3 -swift-version 3 && %target-run %t/a.out3
 // RUN: %target-build-swift %s -o %t/a.out4 -swift-version 4 && %target-run %t/a.out4
 // REQUIRES: executable_test
@@ -24,7 +24,7 @@ if #available(OSX 10.12, iOS 10.0, watchOS 3.2, *) {
   }
 
   IntentsTestSuite.test("extension/\(swiftVersion)") {
-    expectEqual("IntentsErrorDomain", INIntentError._nsErrorDomain)
+    expectEqual("IntentsErrorDomain", INIntentError.errorDomain)
   }
 }
 
@@ -72,6 +72,79 @@ if #available(iOS 10.0, watchOS 3.2, *) {
     }
   }
 
+}
+#endif
+
+#if os(iOS)
+if #available(iOS 11.0, *) {
+  IntentsTestSuite.test("INSetProfileInCarIntent Initializers/\(swiftVersion)") {
+#if swift(>=4)
+    _ = INSetProfileInCarIntent()
+    _ = INSetProfileInCarIntent(isDefaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileName: nil)
+    _ = INSetProfileInCarIntent(profileName: nil, isDefaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil, isDefaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil, profileName: nil)
+    _ = INSetProfileInCarIntent(
+      profileNumber: nil, profileName: nil, isDefaultProfile: nil)
+#else
+    _ = INSetProfileInCarIntent()
+    _ = INSetProfileInCarIntent(defaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileName: nil)
+    _ = INSetProfileInCarIntent(profileName: nil, defaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil, defaultProfile: nil)
+    _ = INSetProfileInCarIntent(profileNumber: nil, profileName: nil)
+    _ = INSetProfileInCarIntent(
+      profileNumber: nil, profileName: nil, defaultProfile: nil)
+#endif
+  }
+}
+#endif
+
+#if os(iOS) || os(watchOS)
+if #available(iOS 12.0, watchOS 5.0, *) {
+    
+  IntentsTestSuite.test("INPlayMediaIntent Initializer/\(swiftVersion)") {
+    let intent = INPlayMediaIntent(mediaItems: nil, mediaContainer: nil, playShuffled: false, playbackRepeatMode: .unknown, resumePlayback: true)
+    expectFalse(intent.playShuffled ?? true)
+    expectTrue(intent.resumePlayback ?? false)
+  }
+    
+}
+#endif
+
+#if os(iOS)
+
+    
+    IntentsTestSuite.test("Car Commands Intents Initializer/\(swiftVersion)") {
+        if #available(iOS 12.0, *) {
+            _ = INSetProfileInCarIntent(profileNumber: nil, profileName: nil, isDefaultProfile: nil, carName: nil)
+            _ = INSetClimateSettingsInCarIntent(enableFan: nil, enableAirConditioner: nil, enableClimateControl: nil, enableAutoMode: nil, airCirculationMode: .unknown, fanSpeedIndex: nil, fanSpeedPercentage: nil, relativeFanSpeedSetting: .unknown, temperature: nil, relativeTemperatureSetting: .unknown, climateZone: .unknown, carName: nil)
+            _ = INSetDefrosterSettingsInCarIntent(enable: nil, defroster: .unknown, carName: nil)
+            _ = INSetSeatSettingsInCarIntent(enableHeating: nil, enableCooling: nil, enableMassage: nil, seat: .unknown, level: nil, relativeLevel: .unknown, carName: nil)
+        }
+        
+        if #available(iOS 11.0, *) {
+            _ = INSetProfileInCarIntent(profileNumber: nil, profileName: nil, isDefaultProfile: nil)
+            _ = INSetClimateSettingsInCarIntent(enableFan: nil, enableAirConditioner: nil, enableClimateControl: nil, enableAutoMode: nil, airCirculationMode: .unknown, fanSpeedIndex: nil, fanSpeedPercentage: nil, relativeFanSpeedSetting: .unknown, temperature: nil, relativeTemperatureSetting: .unknown, climateZone: .unknown)
+            _ = INSetDefrosterSettingsInCarIntent(enable: nil, defroster: .unknown)
+            _ = INSetSeatSettingsInCarIntent(enableHeating: nil, enableCooling: nil, enableMassage: nil, seat: .unknown, level: nil, relativeLevel: .unknown)
+        }
+    }
+
+#endif
+
+#if os(iOS) || os(watchOS)
+if #available(iOS 12.0, watchOS 5.0, *) {
+
+    IntentsTestSuite.test("INIntent Images/\(swiftVersion)") {
+        let intent = INSendPaymentIntent(payee: nil, currencyAmount: nil, note: nil)
+        intent.setImage(nil, forParameterNamed: \INSendPaymentIntent.payee)
+        intent.setImage(nil, forParameterNamed: \.payee)
+    }
+    
 }
 #endif
 

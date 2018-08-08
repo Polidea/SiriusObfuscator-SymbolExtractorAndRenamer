@@ -148,9 +148,7 @@
 #include <dispatch/semaphore.h>
 #include <dispatch/once.h>
 #include <dispatch/data.h>
-#if !TARGET_OS_WIN32
 #include <dispatch/io.h>
-#endif
 
 #if defined(__OBJC__) || defined(__cplusplus)
 #define DISPATCH_PURE_C 0
@@ -159,7 +157,9 @@
 #endif
 
 /* private.h must be included last to avoid picking up installed headers. */
+#if !defined(_WIN32)
 #include <pthread.h>
+#endif
 #include "os/object_private.h"
 #include "queue_private.h"
 #include "source_private.h"
@@ -167,16 +167,14 @@
 #include "data_private.h"
 #include "os/voucher_private.h"
 #include "os/voucher_activity_private.h"
-#if !TARGET_OS_WIN32
 #include "io_private.h"
-#endif
 #include "layout_private.h"
 #include "benchmark.h"
 #include "private.h"
 
 /* SPI for Libsystem-internal use */
 DISPATCH_EXPORT DISPATCH_NOTHROW void libdispatch_init(void);
-#if !TARGET_OS_WIN32
+#if !defined(_WIN32)
 DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_prepare(void);
 DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_parent(void);
 DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_child(void);
@@ -244,10 +242,12 @@ DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_child(void);
 #endif
 
 #include <sys/stat.h>
-
-#if !TARGET_OS_WIN32
-#include <sys/mount.h>
 #include <sys/queue.h>
+
+#if defined(_WIN32)
+#include <time.h>
+#else
+#include <sys/mount.h>
 #ifdef __ANDROID__
 #include <linux/sysctl.h>
 #else
@@ -283,13 +283,19 @@ DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_child(void);
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#if defined(_WIN32)
+#define _CRT_RAND_S
+#endif
 #include <stdlib.h>
 #include <string.h>
-#if HAVE_UNISTD_H
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
 #endif
+#if defined(_WIN32)
+#include <io.h>
+#endif
 
-#if __GNUC__
+#if defined(__GNUC__) || defined(__clang__)
 #define DISPATCH_NOINLINE __attribute__((__noinline__))
 #define DISPATCH_USED __attribute__((__used__))
 #define DISPATCH_UNUSED __attribute__((__unused__))
@@ -354,11 +360,11 @@ DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_child(void);
 /* I wish we had __builtin_expect_range() */
 #if __GNUC__
 #define _safe_cast_to_long(x) \
-		({ _Static_assert(sizeof(typeof(x)) <= sizeof(long), \
+		({ _Static_assert(sizeof(__typeof__(x)) <= sizeof(long), \
 				"__builtin_expect doesn't support types wider than long"); \
 				(long)(x); })
-#define fastpath(x) ((typeof(x))__builtin_expect(_safe_cast_to_long(x), ~0l))
-#define slowpath(x) ((typeof(x))__builtin_expect(_safe_cast_to_long(x), 0l))
+#define fastpath(x) ((__typeof__(x))__builtin_expect(_safe_cast_to_long(x), ~0l))
+#define slowpath(x) ((__typeof__(x))__builtin_expect(_safe_cast_to_long(x), 0l))
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #else
@@ -373,15 +379,11 @@ DISPATCH_EXPORT DISPATCH_NOTHROW void dispatch_atfork_child(void);
 #define _TAILQ_MARK_NOT_ENQUEUED(elm, field) \
 		do { (elm)->field.tqe_prev = NULL; } while (0)
 
-#if DISPATCH_DEBUG
 // sys/queue.h debugging
-#if defined(__linux__)
-#define QUEUE_MACRO_DEBUG 1
-#else
-#undef TRASHIT
+#ifndef TRASHIT
 #define TRASHIT(x) do {(x) = (void *)-1;} while (0)
 #endif
-#endif // DISPATCH_DEBUG
+
 #define _TAILQ_TRASH_ENTRY(elm, field) do { \
 			TRASHIT((elm)->field.tqe_next); \
 			TRASHIT((elm)->field.tqe_prev); \
@@ -424,7 +426,7 @@ void _dispatch_abort(size_t line, long val);
 #endif
 #endif // DISPATCH_USE_SIMPLE_ASL
 
-#if !DISPATCH_USE_SIMPLE_ASL && !DISPATCH_USE_OS_DEBUG_LOG && !TARGET_OS_WIN32
+#if !DISPATCH_USE_SIMPLE_ASL && !DISPATCH_USE_OS_DEBUG_LOG && !defined(_WIN32)
 #include <syslog.h>
 #endif
 
@@ -459,7 +461,7 @@ void _dispatch_log(const char *msg, ...);
 		if (__builtin_constant_p(e)) { \
 			dispatch_static_assert(e); \
 		} else { \
-			typeof(e) _e = (e); /* always eval 'e' */ \
+			__typeof__(e) _e = (e); /* always eval 'e' */ \
 			if (unlikely(DISPATCH_DEBUG && !_e)) { \
 				_dispatch_abort(__LINE__, (long)_e); \
 			} \
@@ -483,7 +485,7 @@ _dispatch_assert(long e, size_t line)
 		if (__builtin_constant_p(e)) { \
 			dispatch_static_assert(e); \
 		} else { \
-			typeof(e) _e = (e); /* always eval 'e' */ \
+			__typeof__(e) _e = (e); /* always eval 'e' */ \
 			if (unlikely(DISPATCH_DEBUG && _e)) { \
 				_dispatch_abort(__LINE__, (long)_e); \
 			} \
@@ -506,7 +508,7 @@ _dispatch_assert_zero(long e, size_t line)
  */
 #if __GNUC__
 #define dispatch_assume(e) ({ \
-		typeof(e) _e = (e); /* always eval 'e' */ \
+		__typeof__(e) _e = (e); /* always eval 'e' */ \
 		if (unlikely(!_e)) { \
 			if (__builtin_constant_p(e)) { \
 				dispatch_static_assert(e); \
@@ -517,7 +519,7 @@ _dispatch_assert_zero(long e, size_t line)
 	})
 #else
 static inline long
-_dispatch_assume(long e, long line)
+_dispatch_assume(long e, unsigned long line)
 {
 	if (!e) _dispatch_bug(line, e);
 	return e;
@@ -531,7 +533,7 @@ _dispatch_assume(long e, long line)
  */
 #if __GNUC__
 #define dispatch_assume_zero(e) ({ \
-		typeof(e) _e = (e); /* always eval 'e' */ \
+		__typeof__(e) _e = (e); /* always eval 'e' */ \
 		if (unlikely(_e)) { \
 			if (__builtin_constant_p(e)) { \
 				dispatch_static_assert(e); \
@@ -542,7 +544,7 @@ _dispatch_assume(long e, long line)
 	})
 #else
 static inline long
-_dispatch_assume_zero(long e, long line)
+_dispatch_assume_zero(long e, unsigned long line)
 {
 	if (e) _dispatch_bug(line, e);
 	return e;
@@ -558,7 +560,7 @@ _dispatch_assume_zero(long e, long line)
 		if (__builtin_constant_p(e)) { \
 			dispatch_static_assert(e); \
 		} else { \
-			typeof(e) _e = (e); /* always eval 'e' */ \
+			__typeof__(e) _e = (e); /* always eval 'e' */ \
 			if (unlikely(DISPATCH_DEBUG && !_e)) { \
 				_dispatch_log("%s() 0x%lx: " msg, __func__, (long)_e, ##args); \
 				abort(); \
@@ -567,7 +569,7 @@ _dispatch_assume_zero(long e, long line)
 	} while (0)
 #else
 #define dispatch_debug_assert(e, msg, args...) do { \
-	typeof(e) _e = (e); /* always eval 'e' */ \
+	__typeof__(e) _e = (e); /* always eval 'e' */ \
 	if (unlikely(DISPATCH_DEBUG && !_e)) { \
 		_dispatch_log("%s() 0x%lx: " msg, __FUNCTION__, _e, ##args); \
 		abort(); \
@@ -598,7 +600,7 @@ _dispatch_object_debug(dispatch_object_t object, const char *message, ...);
 		((dispatch_function_t)((struct Block_layout *)bb)->invoke)
 void *_dispatch_Block_copy(void *block);
 #if __GNUC__
-#define _dispatch_Block_copy(x) ((typeof(x))_dispatch_Block_copy(x))
+#define _dispatch_Block_copy(x) ((__typeof__(x))_dispatch_Block_copy(x))
 #endif
 void _dispatch_call_block_and_release(void *block);
 #endif /* __BLOCKS__ */
@@ -608,7 +610,9 @@ void *_dispatch_calloc(size_t num_items, size_t size);
 const char *_dispatch_strdup_if_mutable(const char *str);
 void _dispatch_vtable_init(void);
 char *_dispatch_get_build(void);
+#if !defined(_WIN32)
 int _dispatch_sigmask(void);
+#endif
 
 uint64_t _dispatch_timeout(dispatch_time_t when);
 uint64_t _dispatch_time_nanoseconds_since_epoch(dispatch_time_t when);
@@ -917,6 +921,18 @@ _dispatch_ktrace_impl(uint32_t code, uint64_t a, uint64_t b,
 		_dispatch_hardware_crash(); \
 	} while (0)
 
+#if defined(_WIN32)
+#define _dispatch_client_assert_fail(fmt, ...)  do { \
+		char *_msg = NULL; \
+		int _length = _scprintf("%s" fmt, DISPATCH_ASSERTION_FAILED_MESSAGE, ##__VA_ARGS__); \
+		dispatch_assert(_length != -1); \
+		_msg = (char *)malloc((unsigned)_length + 1); \
+		dispatch_assert(_msg); \
+		_snprintf(_msg, (unsigned)_length, "%s" fmt, DISPATCH_ASSERTION_FAILED_MESSAGE, ##__VA_ARGS__); \
+		_dispatch_assert_crash(_msg); \
+		free(_msg); \
+	} while (0)
+#else
 #define _dispatch_client_assert_fail(fmt, ...)  do { \
 		char *_msg = NULL; \
 		asprintf(&_msg, "%s" fmt, DISPATCH_ASSERTION_FAILED_MESSAGE, \
@@ -924,6 +940,7 @@ _dispatch_ktrace_impl(uint32_t code, uint64_t a, uint64_t b,
 		_dispatch_assert_crash(_msg); \
 		free(_msg); \
 	} while (0)
+#endif
 
 #define DISPATCH_NO_VOUCHER ((voucher_t)(void*)~0ul)
 #define DISPATCH_NO_PRIORITY ((pthread_priority_t)~0ul)
@@ -971,9 +988,7 @@ extern int _dispatch_kevent_workqueue_enabled;
 #include "mach_internal.h"
 #include "voucher_internal.h"
 #include "data_internal.h"
-#if !TARGET_OS_WIN32
 #include "io_internal.h"
-#endif
 #include "inline_internal.h"
 #include "firehose/firehose_internal.h"
 

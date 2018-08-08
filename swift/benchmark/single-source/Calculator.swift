@@ -13,6 +13,11 @@
 import TestsUtils
 import Foundation
 
+public let Calculator = BenchmarkInfo(
+  name: "Calculator",
+  runFunction: run_Calculator,
+  tags: [.validation])
+
 @inline(never)
 func my_atoi_impl(_ input : String) -> Int {
   switch input {
@@ -34,7 +39,7 @@ func my_atoi_impl(_ input : String) -> Int {
 public func run_Calculator(_ N: Int) {
   var c = 0
   for _ in 1...N*5000 {
-      c += my_atoi_impl("10")
+      c += my_atoi_impl(identity("10"))
   }
   CheckResults(c == 0)
 }

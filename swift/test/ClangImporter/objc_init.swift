@@ -1,13 +1,12 @@
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -emit-sil -I %S/Inputs/custom-modules %s -verify
 
 // REQUIRES: objc_interop
-// REQUIRES: OS=macosx
-// FIXME: <rdar://problem/19452886> test/ClangModules/objc_init.swift should not require REQUIRES: OS=macosx
 
 import AppKit
 import objc_ext
 import TestProtocols
 import ObjCParseExtras
+import ObjCParseExtrasInitHelper
 
 // rdar://problem/18500201
 extension NSSet {
@@ -59,7 +58,10 @@ class MyDocument3 : NSAwesomeDocument {
 
 func createMyDocument3(_ url: NSURL) {
   var md = MyDocument3()
+#if os(macOS)
+  // Limit this particular test to macOS; it depends on availability.
   md = try! MyDocument3(contentsOf: url as URL, ofType:"")
+#endif
   _ = md
 }
 
@@ -163,6 +165,29 @@ class DesignatedInitSub : DesignatedInitBase {
 class DesignedInitSubSub : DesignatedInitSub {
   init(double: Double) { super.init(int: 0) } // okay
   init(string: String) { super.init() } // expected-error {{must call a designated initializer of the superclass 'DesignatedInitSub'}}
+}
+
+class DesignatedInitWithClassExtensionSubImplicit : DesignatedInitWithClassExtension {}
+
+class DesignatedInitWithClassExtensionSub : DesignatedInitWithClassExtension {
+  override init(int: Int) { super.init(int: 0) }
+  override init(float: Float) { super.init(float: 0) }
+}
+
+class DesignatedInitWithClassExtensionInAnotherModuleSub : DesignatedInitWithClassExtensionInAnotherModule {}
+
+func testInitializerInheritance() {
+  _ = DesignatedInitWithClassExtensionSubImplicit(int: 0)
+  _ = DesignatedInitWithClassExtensionSubImplicit(convenienceInt: 0)
+  _ = DesignatedInitWithClassExtensionSubImplicit(float: 0)
+
+  _ = DesignatedInitWithClassExtensionSub(int: 0)
+  _ = DesignatedInitWithClassExtensionSub(convenienceInt: 0)
+  _ = DesignatedInitWithClassExtensionSub(float: 0)
+
+  _ = DesignatedInitWithClassExtensionInAnotherModuleSub(int: 0)
+  _ = DesignatedInitWithClassExtensionInAnotherModuleSub(convenienceInt: 0)
+  _ = DesignatedInitWithClassExtensionInAnotherModuleSub(float: 0)
 }
 
 // Make sure that our magic doesn't think the class property with the type name is an init

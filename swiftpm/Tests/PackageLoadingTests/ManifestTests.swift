@@ -56,7 +56,7 @@ class ManifestTests: XCTestCase {
         // Check a trivial manifest.
         loadManifest("trivial-manifest.swift") { manifest in
             XCTAssertEqual(manifest.name, "Trivial")
-            XCTAssertEqual(manifest.manifestVersion, .three)
+            XCTAssertEqual(manifest.manifestVersion, .v3)
             XCTAssertEqual(manifest.package.targets, [])
             XCTAssertEqual(manifest.package.dependencies, [])
         }
@@ -105,6 +105,8 @@ class ManifestTests: XCTestCase {
         XCTAssertThrows(PackageModel.Package.Error.noManifest(baseURL: "/bar", version: "1.0.0")) {
             _ = try manifestLoader.loadFile(path: AbsolutePath("/non-existent-file"), baseURL: "/bar", version: "1.0.0", fileSystem: InMemoryFileSystem())
         }
+
+        XCTAssertEqual(PackageModel.Package.Error.noManifest(baseURL: "/bar", version: "1.0.0").description,"/bar has no manifest for version 1.0.0")
     }
 
     func testNonexistentBaseURL() {
@@ -172,7 +174,7 @@ class ManifestTests: XCTestCase {
                     bytes: bogusManifest)
             }
             // Check we can load the repository.
-            let manifest = try manifestLoader.load(package: root, baseURL: root.asString, manifestVersion: .three, fileSystem: fs)
+            let manifest = try manifestLoader.load(package: root, baseURL: root.asString, manifestVersion: .v3, fileSystem: fs)
             XCTAssertEqual(manifest.name, "Trivial")
         }
     }
@@ -199,7 +201,7 @@ class ManifestTests: XCTestCase {
         stream <<< "   swiftLanguageVersions: [3, 4]" <<< "\n"
         stream <<< ")" <<< "\n"
         var manifest = try loadManifest(stream.bytes)
-        XCTAssertEqual(manifest.package.swiftLanguageVersions ?? [], [3, 4])
+        XCTAssertEqual(manifest.package.swiftLanguageVersions?.map({ $0.rawValue }), ["3", "4"])
 
         stream = BufferedOutputByteStream()
         stream <<< "import PackageDescription" <<< "\n"
@@ -208,14 +210,14 @@ class ManifestTests: XCTestCase {
         stream <<< "   swiftLanguageVersions: []" <<< "\n"
         stream <<< ")" <<< "\n"
         manifest = try loadManifest(stream.bytes)
-        XCTAssertEqual(manifest.package.swiftLanguageVersions!, [])
+        XCTAssertEqual(manifest.package.swiftLanguageVersions, [])
 
         stream = BufferedOutputByteStream()
         stream <<< "import PackageDescription" <<< "\n"
         stream <<< "let package = Package(" <<< "\n"
         stream <<< "   name: \"Foo\")" <<< "\n"
         manifest = try loadManifest(stream.bytes)
-        XCTAssert(manifest.package.swiftLanguageVersions == nil)
+        XCTAssertEqual(manifest.package.swiftLanguageVersions, nil)
     }
 
     func testRuntimeManifestErrors() throws {

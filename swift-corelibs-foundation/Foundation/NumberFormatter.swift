@@ -9,7 +9,7 @@
 
 import CoreFoundation
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 internal let kCFNumberFormatterNoStyle = CFNumberFormatterStyle.noStyle
 internal let kCFNumberFormatterDecimalStyle = CFNumberFormatterStyle.decimalStyle
 internal let kCFNumberFormatterCurrencyStyle = CFNumberFormatterStyle.currencyStyle
@@ -62,7 +62,7 @@ open class NumberFormatter : Formatter {
         if let obj = _currentCfFormatter {
             return obj
         } else {
-            #if os(OSX) || os(iOS)
+            #if os(macOS) || os(iOS)
                 let numberStyle = CFNumberFormatterStyle(rawValue: CFIndex(self.numberStyle.rawValue))!
             #else
                 let numberStyle = CFNumberFormatterStyle(self.numberStyle.rawValue)
@@ -103,7 +103,7 @@ open class NumberFormatter : Formatter {
         var range = CFRange(location: 0, length: string.length)
         let number = withUnsafeMutablePointer(to: &range) { (rangePointer: UnsafeMutablePointer<CFRange>) -> NSNumber? in
 
-            #if os(OSX) || os(iOS)
+            #if os(macOS) || os(iOS)
                 let parseOption = allowsFloats ? 0 : CFNumberFormatterOptionFlags.parseIntegersOnly.rawValue
             #else
                 let parseOption = allowsFloats ? 0 : CFOptionFlags(kCFNumberFormatterParseIntegersOnly)
@@ -195,7 +195,12 @@ open class NumberFormatter : Formatter {
             case .decimal:
                 _usesGroupingSeparator = true
                 _maximumFractionDigits = 3
-                _minimumIntegerDigits = 1
+                if _minimumIntegerDigits == 0 {
+                    _minimumIntegerDigits = 1
+                }
+                if _groupingSize == 0 {
+                    _groupingSize = 3
+                }
                 
             default:
                 _usesSignificantDigits = true
@@ -586,7 +591,7 @@ open class NumberFormatter : Formatter {
     
     //
     
-    internal var _groupingSize: Int = 3
+    internal var _groupingSize: Int = 0
     open var groupingSize: Int {
         get {
             return _groupingSize

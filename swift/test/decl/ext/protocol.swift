@@ -221,7 +221,7 @@ func testP4(_ s4a: S4a, s4b: S4b, s4c: S4c, s4d: S4d) {
   s4c.extP4Int() // okay
   var b1 = s4d.extP4a() // okay, "Bool" version
   b1 = true // checks type above
-  s4d.extP4Int() // expected-error{{'Bool' is not convertible to 'Int'}}
+  s4d.extP4Int() // expected-error{{'S4d' requires the types 'Bool' and 'Int' be equivalent to use 'extP4Int'}}
   _ = b1
 }
 
@@ -236,6 +236,8 @@ protocol ConformedProtocol {
 
 class BaseWithAlias<T> : ConformedProtocol {
   typealias ConcreteAlias = T
+
+  struct NestedNominal {}
 
   func baseMethod(_: T) {}
 }
@@ -260,6 +262,24 @@ extension ExtendedProtocol where Self : DerivedWithAlias {
 
   func f3(x: AbstractConformanceAlias) {
     let _: DerivedWithAlias = x
+  }
+
+  func f4(x: NestedNominal) {}
+}
+
+// rdar://problem/21991470 & https://bugs.swift.org/browse/SR-5022
+class NonPolymorphicInit {
+  init() { } // expected-note {{selected non-required initializer 'init()'}}
+}
+
+protocol EmptyProtocol { }
+
+// The diagnostic is not very accurate, but at least we reject this.
+
+extension EmptyProtocol where Self : NonPolymorphicInit {
+  init(string: String) {
+    self.init()
+    // expected-error@-1 {{constructing an object of class type 'Self' with a metatype value must use a 'required' initializer}}
   }
 }
 
@@ -531,7 +551,7 @@ func testSConforms8b() {
 }
 
 struct SConforms8c : PConforms8 { 
-  func method() -> String { return "" }
+  func method() -> String { return "" } // no warning in type definition
 }
 
 func testSConforms8c() {
@@ -951,4 +971,44 @@ typealias B = BadProto1
 
 extension A & B { // okay
 
+}
+
+// Suppress near-miss warning for unlabeled initializers.
+protocol P9 {
+  init(_: Int)
+  init(_: Double)
+}
+
+extension P9 {
+  init(_ i: Int) {
+    self.init(Double(i))
+  }
+}
+
+struct X9 : P9 {
+  init(_: Float) { }
+}
+
+extension X9 {
+  init(_: Double) { }
+}
+
+// Suppress near-miss warning for unlabeled subscripts.
+protocol P10 {
+  subscript (_: Int) -> Int { get }
+  subscript (_: Double) -> Double { get }
+}
+
+extension P10 {
+  subscript(i: Int) -> Int {
+    return Int(self[Double(i)])
+  }
+}
+
+struct X10 : P10 {
+  subscript(f: Float) -> Float { return f }
+}
+
+extension X10 {
+  subscript(d: Double) -> Double { return d }
 }

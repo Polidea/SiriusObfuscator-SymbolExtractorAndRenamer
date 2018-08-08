@@ -553,9 +553,11 @@ open class NSKeyedArchiver : NSCoder {
         }
         
         // check replacement cache
-        objectToEncode = self._replacementMap[object as! AnyHashable]
-        if objectToEncode != nil {
-            return objectToEncode
+        if let hashable = object as? AnyHashable {
+            objectToEncode = self._replacementMap[hashable]
+            if objectToEncode != nil {
+                return objectToEncode
+            }
         }
         
         // object replaced by NSObject.replacementObject(for:)
@@ -595,9 +597,7 @@ open class NSKeyedArchiver : NSCoder {
         object = _replacementObject(objv)
         
         // bridge value types
-        if let bridgedObject = object as? _ObjectBridgeable {
-            object = bridgedObject._bridgeToAnyObject()
-        }
+        object = _SwiftValue.store(object)
         
         objectRef = _referenceObject(object, conditional: conditional)
         guard let unwrappedObjectRef = objectRef else {

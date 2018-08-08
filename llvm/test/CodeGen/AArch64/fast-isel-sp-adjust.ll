@@ -1,5 +1,5 @@
-; RUN: llc -O0 -mtriple=aarch64-apple-ios -o - %s | FileCheck %s
-; RUN: not llc -O0 -mtriple=aarch64-apple-ios -o /dev/null -fast-isel-abort=3 %s 2> %t
+; RUN: llc -O0 -fast-isel -mtriple=aarch64-apple-ios -o - %s | FileCheck %s
+; RUN: not llc -O0 -mtriple=aarch64-apple-ios -o /dev/null -fast-isel -fast-isel-abort=3 %s 2> %t
 ; RUN: FileCheck %s --check-prefix=CHECK-ERRORS < %t
 
 ; The issue here is that FastISel cannot emit an ADDrr where one of the inputs
@@ -10,7 +10,7 @@
 ; critical to check the encoding as well as the textual assembly. An ADDXrs with
 ; SP as an operand will still print with SP, but will actually mean XZR.
 
-; CHECK-ERRORS: FastISel missed call
+; CHECK-ERRORS: LLVM ERROR: FastISel missed call
 
 ; CHECK-LABEL: foo:
 ; CHECK-DAG: mov x[[SP:[0-9]+]], sp

@@ -23,6 +23,8 @@
 #include "swift/AST/Module.h"
 #include "swift/AST/ParameterList.h"
 #include "swift/AST/ProtocolConformance.h"
+#include "swift/AST/ProtocolConformanceRef.h"
+#include "swift/Basic/Defer.h"
 #include "swift/Demangling/ManglingUtils.h"
 #include "swift/Demangling/Demangler.h"
 #include "swift/Strings.h"
@@ -40,6 +42,52 @@
 
 using namespace swift;
 using namespace swift::Mangle;
+
+static StringRef getCodeForAccessorKind(AccessorKind kind,
+                                        AddressorKind addressorKind) {
+  switch (kind) {
+  case AccessorKind::IsGetter:
+    return "g";
+  case AccessorKind::IsSetter:
+    return "s";
+  case AccessorKind::IsWillSet:
+    return "w";
+  case AccessorKind::IsDidSet:
+    return "W";
+  case AccessorKind::IsAddressor:
+    // 'l' is for location. 'A' was taken.
+    switch (addressorKind) {
+    case AddressorKind::NotAddressor:
+      llvm_unreachable("bad combo");
+    case AddressorKind::Unsafe:
+      return "lu";
+    case AddressorKind::Owning:
+      return "lO";
+    case AddressorKind::NativeOwning:
+      return "lo";
+    case AddressorKind::NativePinning:
+      return "lp";
+    }
+    llvm_unreachable("bad addressor kind");
+  case AccessorKind::IsMutableAddressor:
+    switch (addressorKind) {
+    case AddressorKind::NotAddressor:
+      llvm_unreachable("bad combo");
+    case AddressorKind::Unsafe:
+      return "au";
+    case AddressorKind::Owning:
+      return "aO";
+    case AddressorKind::NativeOwning:
+      return "ao";
+    case AddressorKind::NativePinning:
+      return "aP";
+    }
+    llvm_unreachable("bad addressor kind");
+  case AccessorKind::IsMaterializeForSet:
+    return "m";
+  }
+  llvm_unreachable("bad accessor kind");
+}
 
 std::string ASTMangler::mangleClosureEntity(const AbstractClosureExpr *closure,
                                             SymbolKind SKind) {
@@ -92,19 +140,21 @@ std::string ASTMangler::mangleIVarInitDestroyEntity(const ClassDecl *decl,
 
 std::string ASTMangler::mangleAccessorEntity(AccessorKind kind,
                                              AddressorKind addressorKind,
-                                             const ValueDecl *decl,
+                                             const AbstractStorageDecl *decl,
                                              bool isStatic,
                                              SymbolKind SKind) {
   beginMangling();
-  appendAccessorEntity(kind, addressorKind, decl, isStatic);
+  appendAccessorEntity(getCodeForAccessorKind(kind, addressorKind), decl,
+                       isStatic);
   appendSymbolKind(SKind);
   return finalize();
 }
 
 std::string ASTMangler::mangleGlobalGetterEntity(const ValueDecl *decl,
                                                  SymbolKind SKind) {
+  assert(isa<VarDecl>(decl) && "Only variables can have global getters");
   beginMangling();
-  appendEntity(decl, "fG", false);
+  appendEntity(decl, "vG", /*isStatic*/false);
   appendSymbolKind(SKind);
   return finalize();
 }
@@ -338,7 +388,12 @@ std::string ASTMangler::mangleTypeForDebugger(Type Ty, const DeclContext *DC,
     bindGenericParameters(DC);
   DeclCtx = DC;
 
-  appendType(Ty);
+  if (auto *fnType = Ty->getAs<AnyFunctionType>()) {
+    appendFunction(fnType, false);
+  } else {
+    appendType(Ty);
+  }
+
   appendOperator("D");
   return finalize();
 }
@@ -354,8 +409,8 @@ std::string ASTMangler::mangleDeclType(const ValueDecl *decl) {
 
 #ifdef USE_NEW_MANGLING_FOR_OBJC_RUNTIME_NAMES
 static bool isPrivate(const NominalTypeDecl *Nominal) {
-  return Nominal->hasAccessibility() &&
-         Nominal->getFormalAccess() <= Accessibility::FilePrivate;
+  return Nominal->hasAccess() &&
+         Nominal->getFormalAccess() <= AccessLevel::FilePrivate;
 }
 #endif
 
@@ -448,6 +503,7 @@ std::string ASTMangler::mangleDeclAsUSR(const ValueDecl *Decl,
   } else if (isa<AssociatedTypeDecl>(Decl)) {
     appendContextOf(Decl);
     appendDeclName(Decl);
+    appendOperator("Qa");
   } else {
     appendEntity(Decl);
   }
@@ -459,12 +515,13 @@ std::string ASTMangler::mangleDeclAsUSR(const ValueDecl *Decl,
 
 std::string ASTMangler::mangleAccessorEntityAsUSR(AccessorKind kind,
                                                   AddressorKind addressorKind,
-                                                  const ValueDecl *decl,
+                                                  const AbstractStorageDecl *decl,
                                                   StringRef USRPrefix) {
   beginManglingWithoutPrefix();
   llvm::SaveAndRestore<bool> allowUnnamedRAII(AllowNamelessEntities, true);
   Buffer << USRPrefix;
-  appendAccessorEntity(kind, addressorKind, decl, /*isStatic*/ false);
+  appendAccessorEntity(getCodeForAccessorKind(kind, addressorKind), decl,
+                       /*isStatic*/ false);
   // We have a custom prefix, so finalize() won't verify for us. Do it manually.
   verify(Storage.str().drop_front(USRPrefix.size()));
   return finalize();
@@ -475,30 +532,11 @@ void ASTMangler::appendSymbolKind(SymbolKind SKind) {
   switch (SKind) {
     case SymbolKind::Default: return;
     case SymbolKind::DynamicThunk: return appendOperator("TD");
+    case SymbolKind::SwiftDispatchThunk: return appendOperator("Tj");
     case SymbolKind::SwiftAsObjCThunk: return appendOperator("To");
     case SymbolKind::ObjCAsSwiftThunk: return appendOperator("TO");
     case SymbolKind::DirectMethodReferenceThunk: return appendOperator("Td");
   }
-}
-
-/// Returns true if one of the ancestor DeclContexts of \p D is either marked
-/// private or is a local context.
-static bool isInPrivateOrLocalContext(const ValueDecl *D) {
-  const DeclContext *DC = D->getDeclContext();
-  if (!DC->isTypeContext()) {
-    assert((DC->isModuleScopeContext() || DC->isLocalContext()) &&
-           "unexpected context kind");
-    return DC->isLocalContext();
-  }
-
-  auto declaredType = DC->getDeclaredTypeOfContext();
-  if (!declaredType || declaredType->hasError())
-    return false;
-
-  auto *nominal = declaredType->getAnyNominal();
-  if (nominal->getFormalAccess() <= Accessibility::FilePrivate)
-    return true;
-  return isInPrivateOrLocalContext(nominal);
 }
 
 static bool getUnnamedParamIndex(const ParameterList *ParamList,
@@ -542,11 +580,8 @@ static unsigned getUnnamedParamIndex(const ParamDecl *D) {
 }
 
 static StringRef getPrivateDiscriminatorIfNecessary(const ValueDecl *decl) {
-  if (!decl->hasAccessibility() ||
-      decl->getFormalAccess() > Accessibility::FilePrivate ||
-      isInPrivateOrLocalContext(decl)) {
+  if (!decl->isOutermostPrivateOrFilePrivateScope())
     return StringRef();
-  }
 
   // Mangle non-local private declarations with a textual discriminator
   // based on their enclosing file.
@@ -565,9 +600,18 @@ static StringRef getPrivateDiscriminatorIfNecessary(const ValueDecl *decl) {
 }
 
 void ASTMangler::appendDeclName(const ValueDecl *decl) {
-  if (decl->isOperator()) {
-    auto name = decl->getBaseName().getIdentifier().str();
-    appendIdentifier(translateOperator(name));
+  DeclBaseName name = decl->getBaseName();
+  assert(!name.isSpecial() && "Cannot print special names");
+
+  auto *synthesizedTypeAttr =
+      decl->getAttrs().getAttribute<ClangImporterSynthesizedTypeAttr>();
+
+  if (synthesizedTypeAttr) {
+    assert(!isDigit(synthesizedTypeAttr->originalTypeName[0]) &&
+           "synthesized type's original name must be a valid Swift identifier");
+    appendIdentifier(synthesizedTypeAttr->originalTypeName);
+  } else if (name.isOperator()) {
+    appendIdentifier(translateOperator(name.getIdentifier().str()));
     switch (decl->getAttrs().getUnaryOperatorKind()) {
       case UnaryOperatorKind::Prefix:
         appendOperator("op");
@@ -579,9 +623,8 @@ void ASTMangler::appendDeclName(const ValueDecl *decl) {
         appendOperator("oi");
         break;
     }
-  } else if (decl->hasName()) {
-    // TODO: Handle special names
-    appendIdentifier(decl->getBaseName().getIdentifier().str());
+  } else if (!name.empty()) {
+    appendIdentifier(name.getIdentifier().str());
   } else {
     assert(AllowNamelessEntities && "attempt to mangle unnamed decl");
     // Fall back to an unlikely name, so that we still generate a valid
@@ -598,6 +641,16 @@ void ASTMangler::appendDeclName(const ValueDecl *decl) {
     }
     // Mangle local declarations with a numeric discriminator.
     return appendOperator("L", Index(decl->getLocalDiscriminator()));
+  }
+
+  if (synthesizedTypeAttr) {
+    StringRef relatedEntityKind = synthesizedTypeAttr->getManglingName();
+    assert(relatedEntityKind.size() == 1 &&
+           "'L' operator only supports a single letter payload");
+    assert(((relatedEntityKind[0] >= 'a' && relatedEntityKind[0] <= 'j') ||
+            (relatedEntityKind[0] >= 'A' && relatedEntityKind[0] <= 'J')) &&
+           "Only [a-jA-J] are reserved for related entity kinds");
+    return appendOperatorParam("L", synthesizedTypeAttr->getManglingName());
   }
 
   StringRef privateDiscriminator = getPrivateDiscriminatorIfNecessary(decl);
@@ -675,18 +728,26 @@ void ASTMangler::appendType(Type type) {
       return appendOperator("BO");
     case TypeKind::BuiltinUnsafeValueBuffer:
       return appendOperator("BB");
+    case TypeKind::SILToken:
+      return appendOperator("Bt");
     case TypeKind::BuiltinVector:
       appendType(cast<BuiltinVectorType>(tybase)->getElementType());
       return appendOperator("Bv",
                             cast<BuiltinVectorType>(tybase)->getNumElements());
     case TypeKind::NameAlias: {
       assert(DWARFMangling && "sugared types are only legal for the debugger");
-      auto NameAliasTy = cast<NameAliasType>(tybase);
-      TypeAliasDecl *decl = NameAliasTy->getDecl();
+      auto aliasTy = cast<NameAliasType>(tybase);
+
+      // It's not possible to mangle the context of the builtin module.
+      TypeAliasDecl *decl = aliasTy->getDecl();
       if (decl->getModuleContext() == decl->getASTContext().TheBuiltinModule) {
-        // It's not possible to mangle the context of the builtin module.
-        return appendType(NameAliasTy->getSinglyDesugaredType());
+        return appendType(aliasTy->getSinglyDesugaredType());
       }
+
+      // FIXME: We also cannot yet mangle references to typealiases that
+      // involve generics.
+      if (decl->getGenericSignature())
+        return appendSugaredType<NameAliasType>(type);
 
       // For the DWARF output we want to mangle the type alias + context,
       // unless the type alias references a builtin type.
@@ -697,17 +758,8 @@ void ASTMangler::appendType(Type type) {
       return appendSugaredType<ParenType>(type);
     case TypeKind::ArraySlice: /* fallthrough */
     case TypeKind::Optional:
-      return appendSugaredType<SyntaxSugarType>(type);
     case TypeKind::Dictionary:
-      return appendSugaredType<DictionaryType>(type);
-
-    case TypeKind::ImplicitlyUnwrappedOptional: {
-      assert(DWARFMangling && "sugared types are only legal for the debugger");
-      auto *IUO = cast<ImplicitlyUnwrappedOptionalType>(tybase);
-      auto implDecl = tybase->getASTContext().getImplicitlyUnwrappedOptionalDecl();
-      auto GenTy = BoundGenericType::get(implDecl, Type(), IUO->getBaseType());
-      return appendType(GenTy);
-    }
+      return appendSugaredType<SyntaxSugarType>(type);
 
     case TypeKind::ExistentialMetatype: {
       ExistentialMetatypeType *EMT = cast<ExistentialMetatypeType>(tybase);
@@ -788,29 +840,34 @@ void ASTMangler::appendType(Type type) {
     case TypeKind::Struct:
     case TypeKind::BoundGenericClass:
     case TypeKind::BoundGenericEnum:
-    case TypeKind::BoundGenericStruct:
+    case TypeKind::BoundGenericStruct: {
+      // We can't use getAnyNominal here because this can be TypeAliasDecl only
+      // in case of UnboundGenericType. Such mangling happens in, for instance,
+      // SourceKit 'cursorinfo' request.
+      auto *Decl = type->getAnyGeneric();
       if (type->isSpecialized()) {
         // Try to mangle the entire name as a substitution.
-        if (tryMangleSubstitution(type.getPointer()))
+        if (tryMangleSubstitution(tybase))
           return;
 
-        NominalTypeDecl *NDecl = type->getAnyNominal();
-        if (isStdlibType(NDecl) && NDecl->getName().str() == "Optional") {
+        if (isStdlibType(Decl) && Decl->getName().str() == "Optional") {
           auto GenArgs = type->castTo<BoundGenericType>()->getGenericArgs();
           assert(GenArgs.size() == 1);
           appendType(GenArgs[0]);
           appendOperator("Sg");
         } else {
-          appendAnyGenericType(NDecl);
+          appendAnyGenericType(Decl);
           bool isFirstArgList = true;
           appendBoundGenericArgs(type, isFirstArgList);
+          appendRetroactiveConformances(type);
           appendOperator("G");
         }
         addSubstitution(type.getPointer());
         return;
       }
-      appendAnyGenericType(tybase->getAnyNominal());
+      appendAnyGenericType(Decl);
       return;
+    }
 
     case TypeKind::SILFunction:
       return appendImplFunctionType(cast<SILFunctionType>(tybase));
@@ -841,8 +898,7 @@ void ASTMangler::appendType(Type type) {
 
       // Find the archetype information.
       const DeclContext *DC = DeclCtx;
-      auto GTPT = GenericEnvironment::mapTypeOutOfContext(GenericEnv, archetype)
-                      ->castTo<GenericTypeParamType>();
+      auto GTPT = archetype->getInterfaceType()->castTo<GenericTypeParamType>();
 
       // The DWARF output created by Swift is intentionally flat,
       // therefore archetypes are emitted with their DeclContext if
@@ -872,7 +928,7 @@ void ASTMangler::appendType(Type type) {
 
     case TypeKind::GenericFunction: {
       auto genFunc = cast<GenericFunctionType>(tybase);
-      appendFunctionType(genFunc, /*forceSingleParam*/ false);
+      appendFunctionType(genFunc);
       appendGenericSignature(genFunc->getGenericSignature());
       appendOperator("u");
       return;
@@ -915,7 +971,7 @@ void ASTMangler::appendType(Type type) {
     }
       
     case TypeKind::Function:
-      appendFunctionType(cast<FunctionType>(tybase), /*forceSingleParam*/ false);
+      appendFunctionType(cast<FunctionType>(tybase));
       return;
       
     case TypeKind::SILBox: {
@@ -925,9 +981,8 @@ void ASTMangler::appendType(Type type) {
       for (auto &field : layout->getFields()) {
         auto fieldTy = field.getLoweredType();
         // Use the `inout` mangling to represent a mutable field.
-        if (field.isMutable())
-          fieldTy = CanInOutType::get(fieldTy);
-        fieldsList.push_back(TupleTypeElt(fieldTy));
+        auto fieldFlag = ParameterTypeFlags().withInOut(field.isMutable());
+        fieldsList.push_back(TupleTypeElt(fieldTy, Identifier(), fieldFlag));
       }
       appendTypeList(TupleType::get(fieldsList, tybase->getASTContext())
                        ->getCanonicalType());
@@ -1038,6 +1093,44 @@ void ASTMangler::appendBoundGenericArgs(Type type, bool &isFirstArgList) {
   }
 }
 
+void ASTMangler::appendRetroactiveConformances(Type type) {
+  auto nominal = type->getAnyNominal();
+  if (!nominal) return;
+
+  auto genericSig = nominal->getGenericSignatureOfContext();
+  if (!genericSig) return;
+
+  auto module = Mod ? Mod : nominal->getModuleContext();
+  auto subMap = type->getContextSubstitutionMap(module, nominal);
+  if (subMap.empty()) return;
+
+  unsigned numProtocolRequirements = 0;
+  for (const auto &req: genericSig->getRequirements()) {
+    if (req.getKind() != RequirementKind::Conformance)
+      continue;
+
+    SWIFT_DEFER {
+      ++numProtocolRequirements;
+    };
+
+    // Fast path: we're in the module of the protocol.
+    auto proto = req.getSecondType()->castTo<ProtocolType>()->getDecl();
+    if (proto->getModuleContext() == module)
+      continue;
+
+    auto conformance =
+      subMap.lookupConformance(req.getFirstType()->getCanonicalType(), proto);
+    if (!conformance || !conformance->isConcrete()) continue;
+
+    auto normal = conformance->getConcrete()->getRootNormalConformance();
+    if (!normal->isRetroactive() || normal->isSynthesizedNonUnique())
+      continue;
+
+    appendProtocolConformance(normal);
+    appendOperator("g", Index(numProtocolRequirements));
+  }
+}
+
 static char getParamConvention(ParameterConvention conv) {
   // @in and @out are mangled the same because they're put in
   // different places.
@@ -1072,6 +1165,9 @@ void ASTMangler::appendImplFunctionType(SILFunctionType *fn) {
 
   if (fn->isPolymorphic() && fn->isPseudogeneric())
     OpArgs.push_back('P');
+
+  if (!fn->isNoEscape())
+    OpArgs.push_back('e');
 
   // <impl-callee-convention>
   if (fn->getExtInfo().hasContext()) {
@@ -1131,31 +1227,54 @@ void ASTMangler::appendImplFunctionType(SILFunctionType *fn) {
   appendOperator("I", StringRef(OpArgs.data(), OpArgs.size()));
 }
 
+Optional<ASTMangler::SpecialContext>
+ASTMangler::getSpecialManglingContext(const ValueDecl *decl) {
+  // Declarations provided by a C module have a special context mangling.
+  //   known-context ::= 'So'
+  //
+  // Also handle top-level imported declarations that don't have corresponding
+  // Clang decls. Check getKind() directly to avoid a layering dependency.
+  //   known-context ::= 'SC'
+  if (auto file = dyn_cast<FileUnit>(decl->getDeclContext())) {
+    if (file->getKind() == FileUnitKind::ClangModule) {
+      if (decl->getClangDecl())
+        return ASTMangler::ObjCContext;
+      return ASTMangler::ClangImporterContext;
+    }
+  }
+
+  // Nested types imported from C should also get use the special "So" context.
+  if (isa<TypeDecl>(decl)) {
+    if (auto *clangDecl = cast_or_null<clang::NamedDecl>(decl->getClangDecl())){
+      bool hasNameForLinkage;
+      if (auto *tagDecl = dyn_cast<clang::TagDecl>(clangDecl))
+        hasNameForLinkage = tagDecl->hasNameForLinkage();
+      else
+        hasNameForLinkage = !clangDecl->getDeclName().isEmpty();
+      if (hasNameForLinkage) {
+        auto *clangDC = clangDecl->getDeclContext();
+        assert(clangDC->getRedeclContext()->isTranslationUnit() &&
+               "non-top-level Clang types not supported yet");
+        (void)clangDC;
+        return ASTMangler::ObjCContext;
+      }
+    }
+  }
+
+  return None;
+}
+
 /// Mangle the context of the given declaration as a <context.
 /// This is the top-level entrypoint for mangling <context>.
 void ASTMangler::appendContextOf(const ValueDecl *decl) {
-  auto clangDecl = decl->getClangDecl();
-
-  // Classes and protocols implemented in Objective-C have a special context
-  // mangling.
-  //   known-context ::= 'So'
-  if (isa<ClassDecl>(decl) && clangDecl) {
-    assert(isa<clang::ObjCInterfaceDecl>(clangDecl) ||
-           isa<clang::TypedefDecl>(clangDecl));
-    return appendOperator("So");
-  }
-
-  if (isa<ProtocolDecl>(decl) && clangDecl) {
-    assert(isa<clang::ObjCProtocolDecl>(clangDecl));
-    return appendOperator("So");
-  }
-
-  // Declarations provided by a C module have a special context mangling.
-  //   known-context ::= 'SC'
-  // Do a dance to avoid a layering dependency.
-  if (auto file = dyn_cast<FileUnit>(decl->getDeclContext())) {
-    if (file->getKind() == FileUnitKind::ClangModule)
+  // Check for a special mangling context.
+  if (auto context = getSpecialManglingContext(decl)) {
+    switch (*context) {
+    case ClangImporterContext:
       return appendOperator("SC");
+    case ObjCContext:
+      return appendOperator("So");
+    }
   }
 
   // Just mangle the decl's DC.
@@ -1265,18 +1384,16 @@ void ASTMangler::appendContext(const DeclContext *ctx) {
 
     auto decl = ExtTy->getAnyNominal();
     assert(decl && "extension of non-nominal type?");
-    // Mangle the module name if:
-    // - the extension is defined in a different module from the actual nominal
-    //   type decl,
+    if (!ExtD->isEquivalentToExtendedContext()) {
+    // Mangle the extension if:
+    // - the extension is defined in a different module from the original
+    //   nominal type decl,
     // - the extension is constrained, or
     // - the extension is to a protocol.
     // FIXME: In a world where protocol extensions are dynamically dispatched,
     // "extension is to a protocol" would no longer be a reason to use the
     // extension mangling, because an extension method implementation could be
     // resiliently moved into the original protocol itself.
-    if (ExtD->getParentModule() != decl->getParentModule()
-        || ExtD->isConstrainedExtension()
-        || ExtD->getDeclaredInterfaceType()->isExistentialType()) {
       auto sig = ExtD->getGenericSignature();
       // If the extension is constrained, mangle the generic signature that
       // constrains it.
@@ -1284,7 +1401,9 @@ void ASTMangler::appendContext(const DeclContext *ctx) {
       appendModule(ExtD->getParentModule());
       if (sig && ExtD->isConstrainedExtension()) {
         Mod = ExtD->getModuleContext();
-        appendGenericSignature(sig);
+        auto nominalSig = ExtD->getAsNominalTypeOrNominalTypeExtensionContext()
+                            ->getGenericSignatureOfContext();
+        appendGenericSignature(sig, nominalSig);
       }
       return appendOperator("E");
     }
@@ -1353,16 +1472,51 @@ void ASTMangler::appendModule(const ModuleDecl *module) {
   StringRef ModName = module->getName().str();
   if (ModName == MANGLING_MODULE_OBJC)
     return appendOperator("So");
-  if (ModName == MANGLING_MODULE_C)
+  if (ModName == MANGLING_MODULE_CLANG_IMPORTER)
     return appendOperator("SC");
 
   appendIdentifier(ModName);
 }
 
 /// Mangle the name of a protocol as a substitution candidate.
-void ASTMangler::appendProtocolName(const ProtocolDecl *protocol) {
+void ASTMangler::appendProtocolName(const ProtocolDecl *protocol,
+                                    bool allowStandardSubstitution) {
+  if (allowStandardSubstitution && tryAppendStandardSubstitution(protocol))
+    return;
+
   appendContextOf(protocol);
-  appendDeclName(protocol);
+  auto *clangDecl = protocol->getClangDecl();
+  if (auto *clangProto = cast_or_null<clang::ObjCProtocolDecl>(clangDecl))
+    appendIdentifier(clangProto->getName());
+  else
+    appendDeclName(protocol);
+}
+
+const clang::NamedDecl *ASTMangler::getClangDeclForMangling(const ValueDecl *vd) {
+  auto namedDecl =  dyn_cast_or_null<clang::NamedDecl>(vd->getClangDecl());
+  if (!namedDecl)
+    return nullptr;
+  
+  // Use an anonymous enum's enclosing typedef for the mangled name, if
+  // present. This matches C++'s rules for linkage names of tag declarations.
+  if (namedDecl->getDeclName().isEmpty())
+    if (auto *tagDecl = dyn_cast<clang::TagDecl>(namedDecl))
+      if (auto *typedefDecl = tagDecl->getTypedefNameForAnonDecl())
+        namedDecl = typedefDecl;
+
+  if (namedDecl->getDeclName().isEmpty())
+    return nullptr;
+
+  return namedDecl;
+}
+
+void ASTMangler::appendSymbolicReference(const DeclContext *context) {
+  // Drop in a placeholder. The real reference value has to be filled in during
+  // lowering to IR.
+  Buffer << '\1';
+  auto offset = Buffer.str().size();
+  Buffer << StringRef("\0\0\0\0", 4);
+  SymbolicReferences.emplace_back(context, offset);
 }
 
 void ASTMangler::appendAnyGenericType(const GenericTypeDecl *decl) {
@@ -1384,39 +1538,108 @@ void ASTMangler::appendAnyGenericType(const GenericTypeDecl *decl) {
   // Try to mangle the entire name as a substitution.
   if (tryMangleSubstitution(key.getPointer()))
     return;
+  
+  // Try to mangle a symbolic reference.
+  if (CanSymbolicReference
+      && CanSymbolicReference(key->getAnyNominal())) {
+    appendSymbolicReference(key->getAnyNominal());
+    // Substitutions can refer back to the symbolic reference.
+    addSubstitution(key.getPointer());
+    return;
+  }
 
   appendContextOf(decl);
-  appendDeclName(decl);
 
-  switch (decl->getKind()) {
-  default:
-    llvm_unreachable("not a nominal type");
+  // Always use Clang names for imported Clang declarations, unless they don't
+  // have one.
+  auto tryAppendClangName = [this, decl]() -> bool {
+    auto namedDecl = getClangDeclForMangling(decl);
+    if (!namedDecl)
+      return false;
 
-  case DeclKind::TypeAlias:
-    appendOperator("a");
-    break;
-  case DeclKind::Protocol:
-    appendOperator("P");
-    break;
-  case DeclKind::Class:
-    appendOperator("C");
-    break;
-  case DeclKind::Enum:
-    appendOperator("O");
-    break;
-  case DeclKind::Struct:
-    appendOperator("V");
-    break;
+    appendIdentifier(namedDecl->getName());
+
+    // The important distinctions to maintain here are Objective-C's various
+    // namespaces: protocols, tags (struct/enum/union), and unqualified names.
+    // We continue to mangle "class" the standard Swift way because it feels
+    // weird to call that an alias, but they're really in the same namespace.
+    if (isa<clang::ObjCInterfaceDecl>(namedDecl)) {
+      appendOperator("C");
+    } else if (isa<clang::ObjCProtocolDecl>(namedDecl)) {
+      appendOperator("P");
+    } else if (isa<clang::TagDecl>(namedDecl)) {
+      // Note: This includes enums, but that's okay. A Clang enum is not always
+      // imported as a Swift enum.
+      appendOperator("V");
+    } else if (isa<clang::TypedefNameDecl>(namedDecl) ||
+               isa<clang::ObjCCompatibleAliasDecl>(namedDecl)) {
+      appendOperator("a");
+    } else {
+      llvm_unreachable("unknown imported Clang type");
+    }
+
+    return true;
+  };
+
+  if (!tryAppendClangName()) {
+    appendDeclName(decl);
+
+    switch (decl->getKind()) {
+    default:
+      llvm_unreachable("not a nominal type");
+
+    case DeclKind::TypeAlias:
+      appendOperator("a");
+      break;
+    case DeclKind::Protocol:
+      appendOperator("P");
+      break;
+    case DeclKind::Class:
+      appendOperator("C");
+      break;
+    case DeclKind::Enum:
+      appendOperator("O");
+      break;
+    case DeclKind::Struct:
+      appendOperator("V");
+      break;
+    }
   }
+
   addSubstitution(key.getPointer());
 }
 
-void ASTMangler::appendFunctionType(AnyFunctionType *fn,
-                                    bool forceSingleParam) {
+void ASTMangler::appendFunction(AnyFunctionType *fn, bool isFunctionMangling) {
+  // Append parameter labels right before the signature/type.
+  auto parameters = fn->getParams();
+  auto firstLabel = std::find_if(
+                  parameters.begin(), parameters.end(),
+                  [&](AnyFunctionType::Param param) { return param.hasLabel(); });
+
+  if (firstLabel != parameters.end()) {
+    for (auto param : parameters) {
+      auto label = param.getLabel();
+      if (!label.empty())
+        appendIdentifier(label.str());
+      else
+        appendOperator("_");
+    }
+  } else if (!parameters.empty()) {
+    appendOperator("y");
+  }
+
+  if (isFunctionMangling) {
+    appendFunctionSignature(fn);
+  } else {
+    appendFunctionType(fn);
+  }
+}
+
+void ASTMangler::appendFunctionType(AnyFunctionType *fn) {
   assert((DWARFMangling || fn->isCanonical()) &&
          "expecting canonical types when not mangling for the debugger");
 
-  appendFunctionSignature(fn, forceSingleParam);
+  appendFunctionSignature(fn);
 
   // Note that we do not currently use thin representations in the AST
   // for the types of function decls.  This may need to change at some
@@ -1434,8 +1657,14 @@ void ASTMangler::appendFunctionType(AnyFunctionType *fn,
   case AnyFunctionType::Representation::Thin:
     return appendOperator("Xf");
   case AnyFunctionType::Representation::Swift:
-    if (fn->isAutoClosure())
-      return appendOperator("XK");
+    if (fn->isAutoClosure()) {
+      if (fn->isNoEscape())
+        return appendOperator("XK");
+      else
+        return appendOperator("XA");
+    } else if (fn->isNoEscape()) {
+      return appendOperator("XE");
+    }
     return appendOperator("c");
 
   case AnyFunctionType::Representation::CFunctionPointer:
@@ -1443,36 +1672,52 @@ void ASTMangler::appendFunctionType(AnyFunctionType *fn,
   }
 }
 
-void ASTMangler::appendFunctionSignature(AnyFunctionType *fn,
-                                         bool forceSingleParam) {
-  appendParams(fn->getResult(), /*forceSingleParam*/ false);
-  appendParams(fn->getInput(), forceSingleParam);
+void ASTMangler::appendFunctionSignature(AnyFunctionType *fn) {
+  appendFunctionResultType(fn->getResult());
+  appendFunctionInputType(fn->getParams());
   if (fn->throws())
     appendOperator("K");
 }
 
-void ASTMangler::appendParams(Type ParamsTy, bool forceSingleParam) {
-  if (TupleType *Tuple = ParamsTy->getAs<TupleType>()) {
-    if (Tuple->getNumElements() == 0) {
-      if (forceSingleParam) {
-        // A tuple containing a single empty tuple.
-        appendOperator("y");
-        appendOperator("t");
-        appendListSeparator();
-        appendOperator("t");
-      } else {
-        appendOperator("y");
-      }
-      return;
+void ASTMangler::appendFunctionInputType(
+    ArrayRef<AnyFunctionType::Param> params) {
+  switch (params.size()) {
+  case 0:
+    appendOperator("y");
+    break;
+
+  case 1: {
+    const auto &param = params.front();
+    auto type = param.getType();
+
+    // If this is just a single parenthesized type,
+    // to save space in the mangled name, let's encode
+    // it as a single type dropping sugar.
+    if (!param.hasLabel() && !param.isVariadic() &&
+        !isa<TupleType>(type.getPointer())) {
+      appendTypeListElement(Identifier(), type, param.getParameterFlags());
+      break;
     }
-    if (forceSingleParam && Tuple->getNumElements() > 1) {
-      appendType(ParamsTy);
-      appendListSeparator();
-      appendOperator("t");
-      return;
-    }
+
+    // If this is a tuple type with a single labeled element
+    // let's handle it as a general case.
+    LLVM_FALLTHROUGH;
   }
-  appendType(ParamsTy);
+
+  default:
+    bool isFirstParam = true;
+    for (auto &param : params) {
+      appendTypeListElement(Identifier(), param.getType(),
+                            param.getParameterFlags());
+      appendListSeparator(isFirstParam);
+    }
+    appendOperator("t");
+    break;
+  }
+}
+
+void ASTMangler::appendFunctionResultType(Type resultType) {
+  return resultType->isVoid() ? appendOperator("y") : appendType(resultType);
 }
 
 void ASTMangler::appendTypeList(Type listTy) {
@@ -1481,11 +1726,8 @@ void ASTMangler::appendTypeList(Type listTy) {
       return appendOperator("y");
     bool firstField = true;
     for (auto &field : tuple->getElements()) {
-      appendType(field.getType());
-      if (field.hasName())
-        appendIdentifier(field.getName().str());
-      if (field.isVararg())
-        appendOperator("d");
+      appendTypeListElement(field.getName(), field.getType(),
+                            field.getParameterFlags());
       appendListSeparator(firstField);
     }
   } else {
@@ -1494,11 +1736,84 @@ void ASTMangler::appendTypeList(Type listTy) {
   }
 }
 
-void ASTMangler::appendGenericSignature(const GenericSignature *sig) {
+void ASTMangler::appendTypeListElement(Identifier name, Type elementType,
+                                       ParameterTypeFlags flags) {
+  appendType(elementType->getInOutObjectType());
+  switch (flags.getValueOwnership()) {
+  case ValueOwnership::Default:
+    /* nothing */
+    break;
+  case ValueOwnership::InOut:
+    appendOperator("z");
+    break;
+  case ValueOwnership::Shared:
+    appendOperator("h");
+    break;
+  case ValueOwnership::Owned:
+    appendOperator("n");
+    break;
+  }
+  if (!name.empty())
+    appendIdentifier(name.str());
+  if (flags.isVariadic())
+    appendOperator("d");
+}
+
+bool ASTMangler::appendGenericSignature(const GenericSignature *sig,
+                                        GenericSignature *contextSig) {
   auto canSig = sig->getCanonicalSignature();
   CurGenericSignature = canSig;
-  appendGenericSignatureParts(canSig->getGenericParams(), 0,
-                              canSig->getRequirements());
+
+  unsigned initialParamDepth;
+  TypeArrayView<GenericTypeParamType> genericParams;
+  ArrayRef<Requirement> requirements;
+  SmallVector<Requirement, 4> requirementsBuffer;
+  if (contextSig) {
+    // If the signature is the same as the context signature, there's nothing
+    // to do.
+    if (contextSig->getCanonicalSignature() == canSig) {
+      return false;
+    }
+
+    // The signature depth starts above the depth of the context signature.
+    if (!contextSig->getGenericParams().empty()) {
+      initialParamDepth = contextSig->getGenericParams().back()->getDepth() + 1;
+    }
+
+    // Find the parameters at this depth (or greater).
+    genericParams = canSig->getGenericParams();
+    unsigned firstParam = genericParams.size();
+    while (firstParam > 1 &&
+           genericParams[firstParam-1]->getDepth() >= initialParamDepth)
+      --firstParam;
+    genericParams = genericParams.slice(firstParam);
+
+    // Special case: if we would be mangling zero generic parameters, but
+    // the context signature is a single, unconstrained generic parameter,
+    // it's better to mangle the complete canonical signature because we
+    // have a special-case mangling for that.
+    if (genericParams.empty() &&
+        contextSig->getGenericParams().size() == 1 &&
+        contextSig->getRequirements().empty()) {
+      initialParamDepth = 0;
+      genericParams = canSig->getGenericParams();
+      requirements = canSig->getRequirements();
+    } else {
+      requirementsBuffer = canSig->requirementsNotSatisfiedBy(contextSig);
+      requirements = requirementsBuffer;
+    }
+  } else {
+    // Use the complete canonical signature.
+    initialParamDepth = 0;
+    genericParams = canSig->getGenericParams();
+    requirements = canSig->getRequirements();
+  }
+
+  if (genericParams.empty() && requirements.empty())
+    return false;
+
+  appendGenericSignatureParts(genericParams, initialParamDepth, requirements);
+  return true;
 }
 
 void ASTMangler::appendRequirement(const Requirement &reqt) {
@@ -1573,9 +1888,9 @@ void ASTMangler::appendRequirement(const Requirement &reqt) {
 }
 
 void ASTMangler::appendGenericSignatureParts(
-                                        ArrayRef<GenericTypeParamType*> params,
-                                        unsigned initialParamDepth,
-                                        ArrayRef<Requirement> requirements) {
+                                     TypeArrayView<GenericTypeParamType> params,
+                                     unsigned initialParamDepth,
+                                     ArrayRef<Requirement> requirements) {
   // Mangle the requirements.
   for (const Requirement &reqt : requirements) {
     appendRequirement(reqt);
@@ -1637,8 +1952,8 @@ void ASTMangler::appendAssociatedTypeName(DependentMemberType *dmt) {
   // dependent type, but can't yet. Shouldn't need this side channel.
 
   appendIdentifier(assocTy->getName().str());
-  if (!OptimizeProtocolNames || !CurGenericSignature || !Mod
-      || CurGenericSignature->getConformsTo(dmt->getBase(), *Mod).size() > 1) {
+  if (!OptimizeProtocolNames || !CurGenericSignature
+      || CurGenericSignature->getConformsTo(dmt->getBase()).size() > 1) {
     appendAnyGenericType(assocTy->getProtocol());
   }
 }
@@ -1670,7 +1985,7 @@ void ASTMangler::appendClosureComponents(Type Ty, unsigned discriminator,
   if (!Ty)
     Ty = ErrorType::get(localContext->getASTContext());
 
-  Ty = parentContext->mapTypeOutOfContext(Ty);
+  Ty = Ty->mapTypeOutOfContext();
   appendType(Ty->getCanonicalType());
   appendOperator(isImplicit ? "fu" : "fU", Index(discriminator));
 }
@@ -1682,7 +1997,7 @@ void ASTMangler::appendDefaultArgumentEntity(const DeclContext *func,
 }
 
 void ASTMangler::appendInitializerEntity(const VarDecl *var) {
-  appendEntity(var, "v", var->isStatic());
+  appendEntity(var, "vp", var->isStatic());
   appendOperator("fi");
 }
 
@@ -1693,45 +2008,29 @@ static bool isMethodDecl(const Decl *decl) {
     && decl->getDeclContext()->isTypeContext();
 }
 
-static bool genericParamIsBelowDepth(Type type, unsigned methodDepth) {
-  if (!type->hasTypeParameter())
-    return true;
-
-  return !type.findIf([methodDepth](Type t) -> bool {
-    if (auto *gp = t->getAs<GenericTypeParamType>())
-      return gp->getDepth() >= methodDepth;
-    return false;
-  });
-}
-
 CanType ASTMangler::getDeclTypeForMangling(
-    const ValueDecl *decl,
-    ArrayRef<GenericTypeParamType *> &genericParams,
-    unsigned &initialParamDepth,
-    ArrayRef<Requirement> &requirements,
-    SmallVectorImpl<Requirement> &requirementsBuf) {
+                                       const ValueDecl *decl,
+                                       GenericSignature *&genericSig,
+                                       GenericSignature *&parentGenericSig) {
+  genericSig = nullptr;
+  parentGenericSig = nullptr;
+
   auto &C = decl->getASTContext();
   if (!decl->hasInterfaceType() || decl->getInterfaceType()->is<ErrorType>()) {
     if (isa<AbstractFunctionDecl>(decl))
-      return CanFunctionType::get(C.TheErrorType, C.TheErrorType);
+      return CanFunctionType::get({AnyFunctionType::Param(C.TheErrorType)},
+                                  C.TheErrorType, AnyFunctionType::ExtInfo());
     return C.TheErrorType;
   }
 
-  auto type = decl->getInterfaceType()->getCanonicalType();
 
-  initialParamDepth = 0;
-  CanGenericSignature sig;
+  CanType type = decl->getInterfaceType()->getCanonicalType();
   if (auto gft = dyn_cast<GenericFunctionType>(type)) {
-    sig = gft.getGenericSignature();
-    CurGenericSignature = sig;
-    genericParams = sig->getGenericParams();
-    requirements = sig->getRequirements();
+    genericSig = gft.getGenericSignature();
+    CurGenericSignature = gft.getGenericSignature();
 
-    type = CanFunctionType::get(gft.getInput(), gft.getResult(),
+    type = CanFunctionType::get(gft->getParams(), gft.getResult(),
                                 gft->getExtInfo());
-  } else {
-    genericParams = {};
-    requirements = {};
   }
 
   if (!type->hasError()) {
@@ -1741,89 +2040,27 @@ CanType ASTMangler::getDeclTypeForMangling(
       type = cast<AnyFunctionType>(type).getResult();
     }
 
-    if (isMethodDecl(decl) || isa<SubscriptDecl>(decl)) {
-      // Drop generic parameters and requirements from the method's context.
-      auto parentGenericSig =
-        decl->getDeclContext()->getGenericSignatureOfContext();
-      if (parentGenericSig && sig) {
-        // The method's depth starts above the depth of the context.
-        if (!parentGenericSig->getGenericParams().empty())
-          initialParamDepth =
-            parentGenericSig->getGenericParams().back()->getDepth() + 1;
-
-        while (!genericParams.empty()) {
-          if (genericParams.front()->getDepth() >= initialParamDepth)
-            break;
-          genericParams = genericParams.slice(1);
-        }
-
-        requirementsBuf.clear();
-        for (auto &reqt : sig->getRequirements()) {
-          switch (reqt.getKind()) {
-        case RequirementKind::Conformance:
-        case RequirementKind::Layout:
-        case RequirementKind::Superclass:
-          // We don't need the requirement if the constrained type is below the
-          // method depth.
-          if (genericParamIsBelowDepth(reqt.getFirstType(), initialParamDepth))
-            continue;
-          break;
-        case RequirementKind::SameType:
-          // We don't need the requirement if both types are below the method
-          // depth, or non-dependent.
-          if (genericParamIsBelowDepth(reqt.getFirstType(), initialParamDepth) &&
-              genericParamIsBelowDepth(reqt.getSecondType(), initialParamDepth))
-            continue;
-          break;
-          }
-
-          // If we fell through the switch, mangle the requirement.
-          requirementsBuf.push_back(reqt);
-        }
-        requirements = requirementsBuf;
-      }
-    }
+    if (isMethodDecl(decl) || isa<SubscriptDecl>(decl))
+      parentGenericSig = decl->getDeclContext()->getGenericSignatureOfContext();
   }
-  return type->getCanonicalType();
+
+  return type;
 }
 
 void ASTMangler::appendDeclType(const ValueDecl *decl, bool isFunctionMangling) {
-  ArrayRef<GenericTypeParamType *> genericParams;
-  unsigned initialParamDepth;
-  ArrayRef<Requirement> requirements;
-  SmallVector<Requirement, 4> requirementsBuf;
   Mod = decl->getModuleContext();
-  auto type = getDeclTypeForMangling(decl,
-                                     genericParams, initialParamDepth,
-                                     requirements, requirementsBuf);
- 
+  GenericSignature *genericSig = nullptr;
+  GenericSignature *parentGenericSig = nullptr;
+  auto type = getDeclTypeForMangling(decl, genericSig, parentGenericSig);
+
   if (AnyFunctionType *FuncTy = type->getAs<AnyFunctionType>()) {
-
-    const ParameterList *Params = nullptr;
-    if (const auto *FDecl = dyn_cast<AbstractFunctionDecl>(decl)) {
-      unsigned PListIdx = isMethodDecl(decl) ? 1 : 0;
-      if (PListIdx < FDecl->getNumParameterLists()) {
-        Params = FDecl->getParameterList(PListIdx);
-      }
-    } else if (const auto *SDecl = dyn_cast<SubscriptDecl>(decl)) {
-        Params = SDecl->getIndices();
-    }
-    bool forceSingleParam = Params && (Params->size() == 1);
-          
-
-    if (isFunctionMangling) {
-      appendFunctionSignature(FuncTy, forceSingleParam);
-    } else {
-      appendFunctionType(FuncTy, forceSingleParam);
-    }
+    appendFunction(FuncTy, isFunctionMangling);
   } else {
     appendType(type);
   }
 
   // Mangle the generic signature, if any.
-  if (!genericParams.empty() || !requirements.empty()) {
-    appendGenericSignatureParts(genericParams, initialParamDepth,
-                                requirements);
+  if (genericSig && appendGenericSignature(genericSig, parentGenericSig)) {
     // The 'F' function mangling doesn't need a 'u' for its generic signature.
     if (!isFunctionMangling)
       appendOperator("u");
@@ -1862,48 +2099,28 @@ void ASTMangler::appendDestructorEntity(const DestructorDecl *dtor,
   appendOperator(isDeallocating ? "fD" : "fd");
 }
 
-static StringRef getCodeForAccessorKind(AccessorKind kind,
-                                        AddressorKind addressorKind) {
-  switch (kind) {
-  case AccessorKind::NotAccessor: llvm_unreachable("bad accessor kind!");
-  case AccessorKind::IsGetter:    return "g";
-  case AccessorKind::IsSetter:    return "s";
-  case AccessorKind::IsWillSet:   return "w";
-  case AccessorKind::IsDidSet:    return "W";
-  case AccessorKind::IsAddressor:
-    // 'l' is for location. 'A' was taken.
-    switch (addressorKind) {
-    case AddressorKind::NotAddressor: llvm_unreachable("bad combo");
-    case AddressorKind::Unsafe: return "lu";
-    case AddressorKind::Owning: return "lO";
-    case AddressorKind::NativeOwning: return "lo";
-    case AddressorKind::NativePinning: return "lp";
-    }
-    llvm_unreachable("bad addressor kind");
-  case AccessorKind::IsMutableAddressor:
-    switch (addressorKind) {
-    case AddressorKind::NotAddressor: llvm_unreachable("bad combo");
-    case AddressorKind::Unsafe: return "au";
-    case AddressorKind::Owning: return "aO";
-    case AddressorKind::NativeOwning: return "ao";
-    case AddressorKind::NativePinning: return "aP";
-    }
-    llvm_unreachable("bad addressor kind");
-  case AccessorKind::IsMaterializeForSet: return "m";
-  }
-  llvm_unreachable("bad accessor kind");
-}
-
-void ASTMangler::appendAccessorEntity(AccessorKind kind,
-                                      AddressorKind addressorKind,
-                                      const ValueDecl *decl,
+void ASTMangler::appendAccessorEntity(StringRef accessorKindCode,
+                                      const AbstractStorageDecl *decl,
                                       bool isStatic) {
-  assert(kind != AccessorKind::NotAccessor);
   appendContextOf(decl);
   bindGenericParameters(decl->getDeclContext());
-  appendDeclName(decl);
-  appendDeclType(decl);
-  appendOperator("f", getCodeForAccessorKind(kind, addressorKind));
+  if (isa<VarDecl>(decl)) {
+    appendDeclName(decl);
+    appendDeclType(decl);
+    appendOperator("v", accessorKindCode);
+  } else if (isa<SubscriptDecl>(decl)) {
+    appendDeclType(decl);
+
+    StringRef privateDiscriminator = getPrivateDiscriminatorIfNecessary(decl);
+    if (!privateDiscriminator.empty()) {
+      appendIdentifier(privateDiscriminator);
+      appendOperator("Ll");
+    }
+
+    appendOperator("i", accessorKindCode);
+  } else {
+    llvm_unreachable("Unknown type of AbstractStorageDecl");
+  }
   if (isStatic)
     appendOperator("Z");
 }
@@ -1926,18 +2143,15 @@ void ASTMangler::appendEntity(const ValueDecl *decl) {
   
   // Handle accessors specially, they are mangled as modifiers on the accessed
   // declaration.
-  if (auto func = dyn_cast<FuncDecl>(decl)) {
-    auto accessorKind = func->getAccessorKind();
-    if (accessorKind != AccessorKind::NotAccessor)
-      return appendAccessorEntity(accessorKind, func->getAddressorKind(),
-                                  func->getAccessorStorageDecl(),
-                                  decl->isStatic());
+  if (auto accessor = dyn_cast<AccessorDecl>(decl)) {
+    return appendAccessorEntity(
+        getCodeForAccessorKind(accessor->getAccessorKind(),
+                               accessor->getAddressorKind()),
+        accessor->getStorage(), accessor->isStatic());
   }
 
-  if (isa<VarDecl>(decl))
-    return appendEntity(decl, "v", decl->isStatic());
-  if (isa<SubscriptDecl>(decl))
-    return appendEntity(decl, "i", decl->isStatic());
+  if (auto storageDecl = dyn_cast<AbstractStorageDecl>(decl))
+    return appendAccessorEntity("p", storageDecl, decl->isStatic());
   if (isa<GenericTypeParamDecl>(decl))
     return appendEntity(decl, "fp", decl->isStatic());
 
@@ -1952,10 +2166,12 @@ void ASTMangler::appendEntity(const ValueDecl *decl) {
 }
 
 void ASTMangler::appendProtocolConformance(const ProtocolConformance *conformance){
-  Mod = conformance->getDeclContext()->getParentModule();
-  if (auto behaviorStorage = conformance->getBehaviorDecl()) {
-    auto topLevelContext =
+  GenericSignature *contextSig = nullptr;
+  auto topLevelContext =
       conformance->getDeclContext()->getModuleScopeContext();
+  Mod = topLevelContext->getParentModule();
+
+  if (auto behaviorStorage = conformance->getBehaviorDecl()) {
     appendContextOf(behaviorStorage);
     FileUnit *fileUnit = cast<FileUnit>(topLevelContext);
     appendIdentifier(
@@ -1963,15 +2179,28 @@ void ASTMangler::appendProtocolConformance(const ProtocolConformance *conformanc
     appendProtocolName(conformance->getProtocol());
     appendIdentifier(behaviorStorage->getBaseName().getIdentifier().str());
   } else {
-    auto conformanceDC = conformance->getDeclContext();
-    auto conformingType =
-      conformanceDC->mapTypeOutOfContext(conformance->getType());
+    auto conformingType = conformance->getType();
     appendType(conformingType->getCanonicalType());
     appendProtocolName(conformance->getProtocol());
-    appendModule(conformance->getDeclContext()->getParentModule());
+
+    bool needsModule = true;
+    if (auto *file = dyn_cast<FileUnit>(topLevelContext)) {
+      if (file->getKind() == FileUnitKind::ClangModule) {
+        if (conformance->getProtocol()->hasClangNode())
+          appendOperator("So");
+        else
+          appendOperator("SC");
+        needsModule = false;
+      }
+    }
+    if (needsModule)
+      appendModule(Mod);
+
+    contextSig =
+      conformingType->getAnyNominal()->getGenericSignatureOfContext();
   }
   if (GenericSignature *Sig = conformance->getGenericSignature()) {
-    appendGenericSignature(Sig);
+    appendGenericSignature(Sig, contextSig);
   }
 }
 
@@ -1997,18 +2226,18 @@ void ASTMangler::appendOpParamForLayoutConstraint(LayoutConstraint layout) {
     appendOperatorParam("T");
     break;
   case LayoutConstraintKind::TrivialOfExactSize:
-    if (!layout->getAlignment())
+    if (!layout->getAlignmentInBits())
       appendOperatorParam("e", Index(layout->getTrivialSizeInBits()));
     else
       appendOperatorParam("E", Index(layout->getTrivialSizeInBits()),
-                     Index(layout->getAlignment()));
+                          Index(layout->getAlignmentInBits()));
     break;
   case LayoutConstraintKind::TrivialOfAtMostSize:
-    if (!layout->getAlignment())
+    if (!layout->getAlignmentInBits())
       appendOperatorParam("m", Index(layout->getTrivialSizeInBits()));
     else
       appendOperatorParam("M", Index(layout->getTrivialSizeInBits()),
-                     Index(layout->getAlignment()));
+                          Index(layout->getAlignmentInBits()));
     break;
   }
 }

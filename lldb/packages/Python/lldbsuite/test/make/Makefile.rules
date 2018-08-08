@@ -6,6 +6,7 @@
 # OBJC_SOURCES :=
 # OBJCXX_SOURCES :=
 # DYLIB_C_SOURCES :=
+# DYLIB_OBJC_SOURCES :=
 # DYLIB_CXX_SOURCES :=
 #
 # Specifying DYLIB_ONLY has the effect of building dylib only, skipping
@@ -27,15 +28,32 @@
 # Uncomment line below for debugging shell commands
 # SHELL = /bin/sh -x
 
-THIS_FILE_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))/
+SRCDIR := $(shell dirname $(firstword $(MAKEFILE_LIST)))/
+THIS_FILE_DIR := $(shell dirname $(lastword $(MAKEFILE_LIST)))/
 LLDB_BASE_DIR := $(THIS_FILE_DIR)../../../../../
 
+
+#----------------------------------------------------------------------
+# If OS is not defined, use 'uname -s' to determine the OS name.
+#
+# uname on Windows gives "windows32", but most environments standardize
+# on "Windows_NT", so we'll make it consistent here.  When running
+# tests from Visual Studio, the environment variable isn't inherited
+# all the way down to the process spawned for make.
+#----------------------------------------------------------------------
+HOST_OS = $(shell uname -s)
+ifeq "$(HOST_OS)" "windows32"
+	HOST_OS = Windows_NT
+endif
+ifeq "$(OS)" ""
+	OS = $(HOST_OS)
+endif
 
 #----------------------------------------------------------------------
 # If TRIPLE is not defined try to set the ARCH, CC, CFLAGS, and more
 # from the triple alone
 #----------------------------------------------------------------------
-TRIPLE_CFLAGS :=
+ARCH_CFLAGS :=
 ifneq "$(TRIPLE)" ""
 	triple_space = $(subst -, ,$(TRIPLE))
 	ARCH =$(word 1, $(triple_space))
@@ -52,34 +70,39 @@ ifneq "$(TRIPLE)" ""
 					ifeq "$(TRIPLE_VERSION)" ""
 						TRIPLE_VERSION =$(shell echo $(notdir $(SDKROOT)) | sed -e 's/.*\([0-9]\.[0-9]\).*/\1/')
 					endif
-					TRIPLE_CFLAGS :=-mios-version-min=$(TRIPLE_VERSION) -isysroot "$(SDKROOT)"
+					ARCH_CFLAGS :=-mios-version-min=$(TRIPLE_VERSION) -isysroot "$(SDKROOT)"
 				else
 					SDKROOT = $(shell xcrun --sdk iphonesimulator --show-sdk-path)
 					ifeq "$(TRIPLE_VERSION)" ""
 						TRIPLE_VERSION =$(shell echo $(notdir $(SDKROOT)) | sed -e 's/.*\([0-9]\.[0-9]\).*/\1/')
 					endif
-					TRIPLE_CFLAGS :=-mios-simulator-version-min=9.0 -isysroot "$(SDKROOT)"
 					TRIPLE_SWIFTFLAGS :=-target $(TRIPLE) -sdk "$(SDKROOT)"
+					ARCH_CFLAGS :=-mios-simulator-version-min=$(TRIPLE_VERSION) -isysroot "$(SDKROOT)"
+				endif
+			endif
+		endif
+		ifeq "$(TRIPLE_OS)" "watchos"
+		    ifeq "$(SDKROOT)" ""
+				# Set SDKROOT if it wasn't set
+				ifneq (,$(findstring arm,$(ARCH)))
+					SDKROOT = $(shell xcrun --sdk watchos --show-sdk-path)
+					ifeq "$(TRIPLE_VERSION)" ""
+						TRIPLE_VERSION =$(shell echo $(notdir $(SDKROOT)) | sed -e 's/.*\([0-9]\.[0-9]\).*/\1/')
+					endif
+					ARCH_CFLAGS :=-mwatchos-version-min=$(TRIPLE_VERSION) -isysroot "$(SDKROOT)"
+				else
+					SDKROOT = $(shell xcrun --sdk watchsimulator --show-sdk-path)
+					ifeq "$(TRIPLE_VERSION)" ""
+						TRIPLE_VERSION =$(shell echo $(notdir $(SDKROOT)) | sed -e 's/.*\([0-9]\.[0-9]\).*/\1/')
+					endif
+					ARCH_CFLAGS :=-mwatchos-simulator-version-min=$(TRIPLE_VERSION) -isysroot "$(SDKROOT)"
 				endif
 			endif
 		endif
 	endif
 endif
-
-#----------------------------------------------------------------------
-# If OS is not defined, use 'uname -s' to determine the OS name.
-#
-# uname on Windows gives "windows32", but most environments standardize
-# on "Windows_NT", so we'll make it consistent here.  When running
-# tests from Visual Studio, the environment variable isn't inherited
-# all the way down to the process spawned for make.
-#----------------------------------------------------------------------
-HOST_OS = $(shell uname -s)
-ifeq "$(HOST_OS)" "windows32"
-	HOST_OS = Windows_NT
-endif
-ifeq "$(OS)" ""
-	OS = $(HOST_OS)
+ifeq "$(OS)" "Android"
+	include $(THIS_FILE_DIR)/Android.rules
 endif
 
 #----------------------------------------------------------------------
@@ -133,17 +156,17 @@ ifeq "$(OS)" "Darwin"
 endif
 
 #----------------------------------------------------------------------
-# SWIFTCC defaults to swift.
+# SWIFTC defaults to swift.
 # TODO:
-# If you change the defaults of SWIFTCC, be sure to also change it in the file
+# If you change the defaults of SWIFTC, be sure to also change it in the file
 # test/plugins/builder_base.py, which provides a Python way to return the
-# value of the make variable SWIFTCC -- getSwiftCompiler().
+# value of the make variable SWIFTC -- getSwiftCompiler().
 #
 # See also these functions:
 #   o cxx_compiler
 #   o cxx_linker
 #----------------------------------------------------------------------
-SWIFTCC ?= $(shell $(LEVEL)/find-swift.py)
+SWIFTC ?= $(shell $(LEVEL)/find-swift.py)
 ifeq "$(SDKROOT)" ""
 	SWIFTSDKROOT = $(shell $(LEVEL)/find-swift.py -s)
 else
@@ -196,6 +219,9 @@ else
 	ifeq "$(ARCH)" "powerpc64"
 		override ARCH := $(subst powerpc64,64,$(ARCH))
 	endif
+	ifeq "$(ARCH)" "powerpc64le"
+		override ARCH := $(subst powerpc64le,64,$(ARCH))
+	endif
 	ifeq "$(ARCH)" "aarch64"
 		override ARCH :=
 		override ARCHFLAG :=
@@ -233,48 +259,53 @@ SWIFTFLAGS ?= -g -Onone -save-temps -Xfrontend -serialize-debugging-options
 
 # Setup a default per-user Swift module cache directory.
 SWIFT_MODULE_CACHE_PATH ?= /tmp/lldbtest.swift.modulecache.$(USER)
-SWIFTFLAGS += -module-cache-path $(SWIFT_MODULE_CACHE_PATH)
+SWIFT_MODULE_CACHE_FLAGS = -module-cache-path $(SWIFT_MODULE_CACHE_PATH)
+SWIFTFLAGS += $(SWIFT_MODULE_CACHE_FLAGS)
 
-CFLAGS += $(FRAMEWORK_INCLUDES) $(CFLAGS_EXTRAS) -I$(LLDB_BASE_DIR)include
+ifneq (,$(findstring arm,$(ARCH)))
+	SWIFTFLAGS += -static-stdlib
+endif
+
 ifeq "$(OS)" "Darwin"
 	ifneq "$(SDKROOT)" ""
 		CFLAGS += -isysroot "$(SDKROOT)"
 	endif
 endif
 
-CFLAGS += -include $(THIS_FILE_DIR)test_common.h $(TRIPLE_CFLAGS)
-CFLAGS_NO_ARCH := $(CFLAGS)
-
-ifeq "$(ARCHFLAG)" "-arch"
-    CFLAGS += $(ARCHFLAG) $(ARCH)
+ifeq "$(OS)" "Darwin"
+	CFLAGS += $(ARCHFLAG) $(ARCH) $(FRAMEWORK_INCLUDES) -I$(LLDB_BASE_DIR)include
 else
-    CFLAGS += $(ARCHFLAG)$(ARCH)
+	CFLAGS += $(ARCHFLAG)$(ARCH) $(FRAMEWORK_INCLUDES) -I$(LLDB_BASE_DIR)include
 endif
 
+CFLAGS += -I$(SRCDIR) -include $(THIS_FILE_DIR)test_common.h -I$(THIS_FILE_DIR)
+CFLAGS += $(NO_LIMIT_DEBUG_INFO_FLAGS) $(ARCH_CFLAGS) $(CFLAGS_EXTRAS)
 SWIFTFLAGS += $(TRIPLE_SWIFTFLAGS)
 
 # Use this one if you want to build one part of the result without debug information:
 ifeq "$(OS)" "Darwin"
-	CFLAGS_NO_DEBUG = -O0 $(ARCHFLAG) $(ARCH) $(FRAMEWORK_INCLUDES) $(CFLAGS_EXTRAS) $(TRIPLE_CFLAGS)
+	CFLAGS_NO_DEBUG = -O0 $(ARCHFLAG) $(ARCH) $(FRAMEWORK_INCLUDES) $(ARCH_CFLAGS) $(CFLAGS_EXTRAS)
 else
-	CFLAGS_NO_DEBUG = -O0 $(ARCHFLAG)$(ARCH) $(FRAMEWORK_INCLUDES) $(CFLAGS_EXTRAS) $(TRIPLE_CFLAGS)
+	CFLAGS_NO_DEBUG = -O0 $(ARCHFLAG)$(ARCH) $(FRAMEWORK_INCLUDES) $(ARCH_CFLAGS) $(CFLAGS_EXTRAS)
 endif
 
 ifeq "$(MAKE_DWO)" "YES"
 	CFLAGS += -gsplit-dwarf
 endif
 
+CLANG_MODULE_CACHE_DIR := module-cache
+
+MANDATORY_MODULE_BUILD_CFLAGS := -fmodules -gmodules -fmodules-cache-path=$(CLANG_MODULE_CACHE_DIR)
+
 ifeq "$(MAKE_GMODULES)" "YES"
-	CFLAGS += -fmodules -gmodules -fmodules-cache-path=./clang-module-cache
+	CFLAGS += $(MANDATORY_MODULE_BUILD_CFLAGS)
 endif
 
-CXXFLAGS += -std=c++11
-# FIXME: C++ modules aren't supported on all platforms.
-CXXFLAGS += $(subst -fmodules,, $(subst -fmodules-cache-path=./clang-module-cache,, $(CFLAGS)))
+CXXFLAGS += -std=c++11 $(CFLAGS)
 LD = $(CC)
 LDFLAGS ?= $(CFLAGS)
-LDFLAGS += $(LD_EXTRAS)
-ifeq (,$(filter $(OS), Windows_NT Android))
+LDFLAGS += $(LD_EXTRAS) $(ARCH_LDFLAGS)
+ifeq (,$(filter $(OS), Windows_NT Android Darwin))
 	ifneq (,$(filter YES,$(ENABLE_THREADS)))
 		LDFLAGS += -pthread
 	endif
@@ -349,10 +380,12 @@ ifeq "$(OS)" "Windows_NT"
 		# Clang for Windows doesn't support C++ Exceptions
 		CXXFLAGS += -fno-exceptions
 		CXXFLAGS += -D_HAS_EXCEPTIONS=0
-		ifeq "$(VisualStudioVersion)" "14.0"
-			CXXFLAGS += -fms-compatibility-version=19.0
-			override CXXFLAGS := $(subst -std=c++11,-std=c++14,$(CXXFLAGS))
-		endif
+
+		# MSVC 2015 or higher is required, which depends on c++14, so
+		# append these values unconditionally.
+		CXXFLAGS += -fms-compatibility-version=19.0
+		override CXXFLAGS := $(subst -std=c++11,-std=c++14,$(CXXFLAGS))
+
 		# The MSVC linker doesn't understand long section names
 		# generated by the clang compiler.
 		LDFLAGS += -fuse-ld=lld
@@ -371,19 +404,21 @@ ifeq (1,$(USE_LIBSTDCPP))
 endif
 
 ifeq (1,$(USE_LIBCPP))
-	# Clang requires an extra flag: -stdlib=libstdc++
-	ifneq (,$(findstring clang,$(CC)))
-		ifeq "$(OS)" "Linux"
-			# This is the default install location on Ubuntu 14.04
-			ifneq ($(wildcard /usr/include/c++/v1/.),)
-				CXXFLAGS += -stdlib=libc++ -DLLDB_USING_LIBCPP
-				LDFLAGS += -stdlib=libc++
-				CXXFLAGS += -I/usr/include/c++/v1
-			endif
-		else
-			CXXFLAGS += -stdlib=libc++ -DLLDB_USING_LIBCPP
+	CXXFLAGS += -DLLDB_USING_LIBCPP
+	ifeq "$(OS)" "Linux"
+		ifneq (,$(findstring clang,$(CC)))
+			CXXFLAGS += -stdlib=libc++
 			LDFLAGS += -stdlib=libc++
+		else
+			CXXFLAGS += -isystem /usr/include/c++/v1
+			LDFLAGS += -lc++
 		endif
+	else ifeq "$(OS)" "Android"
+		# Nothing to do, this is already handled in
+		# Android.rules.
+	else
+		CXXFLAGS += -stdlib=libc++
+		LDFLAGS += -stdlib=libc++
 	endif
 endif
 
@@ -453,8 +488,16 @@ endif
 # Check if we need the Swift/ObjC interop features
 #----------------------------------------------------------------------
 ifeq "$(SWIFT_OBJC_INTEROP)" "1"
-	SWIFTFLAGS += -framework Foundation -framework CoreGraphics
-	LDFLAGS +=-lswiftObjectiveC -lswiftFoundation -framework Foundation -framework CoreGraphics
+        ifeq "$(OS)" "Darwin"
+		SWIFTFLAGS += -framework Foundation -framework CoreGraphics
+		LDFLAGS += -lswiftObjectiveC -lswiftFoundation -framework Foundation -framework CoreGraphics
+        else
+                # CFLAGS_EXTRAS is used via "dotest.py -E" to pass the -I and -L paths
+                # for Foundation and libdispatch on Linux.
+                SWIFTFLAGS += $(CFLAGS_EXTRAS)
+                LDFLAGS += $(CFLAGS_EXTRAS)
+        endif
+
 endif
 
 #----------------------------------------------------------------------
@@ -536,13 +579,32 @@ endif
 #----------------------------------------------------------------------
 
 #----------------------------------------------------------------------
+# Compile the executable from all the objects.
+#----------------------------------------------------------------------
+ifeq "$(USESWIFTDRIVER)" "1"
+$(EXE) : $(SWIFT_SOURCES)
+	$(SWIFTC) $^ $(SWIFTFLAGS) -o "$(EXE)"
+else
+ifneq "$(DYLIB_NAME)" ""
+ifeq "$(DYLIB_ONLY)" ""
+$(EXE) : $(OBJECTS) $(ARCHIVE_NAME) $(DYLIB_FILENAME)
+	$(LD) $^ -L. -l$(DYLIB_NAME) $(LDFLAGS) -o "$(EXE)"
+else
+EXE = $(DYLIB_FILENAME)
+endif
+else
+$(EXE) : $(OBJECTS) $(ARCHIVE_NAME)
+	$(LD) $(LDFLAGS) $^ -o "$(EXE)"
+endif
+endif
+#----------------------------------------------------------------------
 # Make the dSYM file from the executable if $(MAKE_DSYM) != "NO"
 #----------------------------------------------------------------------
-ifneq "$(DYLIB_ONLY)" "YES"
 $(DSYM) : $(EXE)
 ifeq "$(OS)" "Darwin"
 ifneq "$(MAKE_DSYM)" "NO"
 	"$(DS)" $(DSFLAGS) -o "$(DSYM)" "$(EXE)"
+else
 endif
 else
 ifeq "$(SPLIT_DEBUG_SYMBOLS)" "YES"
@@ -550,27 +612,7 @@ ifeq "$(SPLIT_DEBUG_SYMBOLS)" "YES"
 	$(OBJCOPY) --strip-debug --add-gnu-debuglink="$(DSYM)" "$(EXE)" "$(EXE)"
 endif
 endif
-endif
 
-#----------------------------------------------------------------------
-# Compile the executable from all the objects.
-#----------------------------------------------------------------------
-ifeq "$(USESWIFTDRIVER)" "1"
-$(EXE) : $(SWIFT_SOURCES)
-	$(SWIFTCC) $(SWIFT_SOURCES) $(SWIFTFLAGS) -o "$(EXE)"
-else
-ifneq "$(DYLIB_NAME)" ""
-ifeq "$(DYLIB_ONLY)" ""
-$(EXE) : $(OBJECTS) $(ARCHIVE_NAME) $(DYLIB_FILENAME)
-	$(LD) $(OBJECTS) $(ARCHIVE_NAME) -L. -l$(DYLIB_NAME) $(LDFLAGS) -o "$(EXE)"
-else
-EXE = $(DYLIB_FILENAME)
-endif
-else
-$(EXE) : $(OBJECTS) $(ARCHIVE_NAME)
-	$(LD) $(OBJECTS) $(LDFLAGS) $(ARCHIVE_NAME) -o "$(EXE)"
-endif
-endif
 #----------------------------------------------------------------------
 # Make the archive
 #----------------------------------------------------------------------
@@ -588,6 +630,11 @@ endif
 # Make the dylib
 #----------------------------------------------------------------------
 $(DYLIB_OBJECTS) : CFLAGS += -DCOMPILING_LLDB_TEST_DLL
+
+ifneq "$(OS)" "Windows_NT"
+$(DYLIB_OBJECTS) : CFLAGS += -fPIC
+$(DYLIB_OBJECTS) : CXXFLAGS += -fPIC
+endif
 
 $(DYLIB_FILENAME) : $(DYLIB_OBJECTS)
 ifeq "$(OS)" "Darwin"
@@ -611,7 +658,7 @@ endif
 
 #ifneq "$(PCH_OUTPUT)" ""
 $(PCH_OUTPUT) : $(PCH_CXX_SOURCE)
-	$(CXX) $(CXXFLAGS) -x c++-header -o $(PCH_OUTPUT) $(PCH_CXX_SOURCE)
+	$(CXX) $(CXXFLAGS) -x c++-header -o $@ $<
 %.o : %.cpp $(PCH_OUTPUT)
 	$(CXX) $(PCHFLAGS) $(CXXFLAGS) -c -o $@ $<
 #endif
@@ -684,7 +731,7 @@ endif
 dsym:	$(DSYM)
 all:	$(EXE) $(DSYM)
 clean::
-	$(RM) $(OBJECTS) $(PREREQS) $(PREREQS:.d=.d.tmp) $(DWOS) $(ARCHIVE_NAME) $(ARCHIVE_OBJECTS)
+	$(RM) -rf $(OBJECTS) $(PREREQS) $(PREREQS:.d=.d.tmp) $(DWOS) $(ARCHIVE_NAME) $(ARCHIVE_OBJECTS) $(CLANG_MODULE_CACHE_DIR)
 ifneq "$(DYLIB_NAME)" ""
 	$(RM) -r $(DYLIB_FILENAME).dSYM
 	$(RM) $(DYLIB_OBJECTS) $(DYLIB_PREREQS) $(DYLIB_PREREQS:.d=.d.tmp) $(DYLIB_DWOS) $(DYLIB_FILENAME) $(DYLIB_FILENAME).debug

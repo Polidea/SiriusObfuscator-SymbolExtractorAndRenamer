@@ -7,16 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
 class TestNSTextCheckingResult: XCTestCase {
     static var allTests: [(String, (TestNSTextCheckingResult) -> () throws -> Void)] {
         return [
@@ -31,7 +21,7 @@ class TestNSTextCheckingResult: XCTestCase {
            let regex = try NSRegularExpression(pattern: patternString, options: patternOptions)
            let searchString = "1x030cy"
            let searchOptions: NSRegularExpression.MatchingOptions = []
-           let searchRange = NSMakeRange(0,7)
+           let searchRange = NSRange(location: 0, length: 7)
            let match: NSTextCheckingResult =  regex.firstMatch(in: searchString, options: searchOptions, range: searchRange)!
            //Positive offset
            var result = match.adjustingRanges(offset: 1)

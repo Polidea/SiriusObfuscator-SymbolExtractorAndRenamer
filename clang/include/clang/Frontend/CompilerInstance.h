@@ -136,6 +136,13 @@ class CompilerInstance : public ModuleLoader {
   /// along with the module map
   llvm::DenseMap<const IdentifierInfo *, Module *> KnownModules;
 
+  /// \brief The set of top-level modules that has already been built on the
+  /// fly as part of this overall compilation action.
+  std::map<std::string, std::string> BuiltModules;
+
+  /// Should we delete the BuiltModules when we're done?
+  bool DeleteBuiltModules = true;
+
   /// \brief The location of the module-import keyword for the last module
   /// import. 
   SourceLocation LastModuleImportLoc;
@@ -175,6 +182,12 @@ class CompilerInstance : public ModuleLoader {
 
   /// The list of active output files.
   std::list<OutputFile> OutputFiles;
+
+  /// \brief An optional callback function used to wrap all FrontendActions
+  /// produced to generate imported modules before they are executed.
+  std::function<std::unique_ptr<FrontendAction>
+    (const FrontendOptions &opts, std::unique_ptr<FrontendAction> action)>
+    GenModuleActionWrapper;
 
   CompilerInstance(const CompilerInstance &) = delete;
   void operator=(const CompilerInstance &) = delete;
@@ -640,7 +653,9 @@ public:
                     const CodeGenOptions *CodeGenOpts = nullptr);
 
   /// Create the file manager and replace any existing one with it.
-  void createFileManager();
+  ///
+  /// \return The new file manager on success, or null on failure.
+  FileManager *createFileManager();
 
   /// Create the source manager and replace any existing one with it.
   void createSourceManager(FileManager &FileMgr);
@@ -780,6 +795,9 @@ public:
                               Module::NameVisibilityKind Visibility,
                               bool IsInclusionDirective) override;
 
+  void loadModuleFromSource(SourceLocation ImportLoc, StringRef ModuleName,
+                            StringRef Source) override;
+
   void makeModuleVisible(Module *Mod, Module::NameVisibilityKind Visibility,
                          SourceLocation ImportLoc) override;
 
@@ -790,6 +808,15 @@ public:
   GlobalModuleIndex *loadGlobalModuleIndex(SourceLocation TriggerLoc) override;
 
   bool lookupMissingImports(StringRef Name, SourceLocation TriggerLoc) override;
+
+  void setGenModuleActionWrapper(std::function<std::unique_ptr<FrontendAction>
+    (const FrontendOptions &Opts, std::unique_ptr<FrontendAction> Action)> Wrapper) {
+    GenModuleActionWrapper = Wrapper;
+  };
+
+  std::function<std::unique_ptr<FrontendAction>
+    (const FrontendOptions &Opts, std::unique_ptr<FrontendAction> Action)>
+  getGenModuleActionWrapper() const { return GenModuleActionWrapper; }
 
   void addDependencyCollector(std::shared_ptr<DependencyCollector> Listener) {
     DependencyCollectors.push_back(std::move(Listener));

@@ -8,13 +8,8 @@ beautification by scripts.  The fields are: name (N), email (E), web-address
 (W), PGP key ID and fingerprint (P), description (D), and snail-mail address
 (S).
 
-N: Sean Callanan
-E: scallanan@apple.com
-D: Expression evaluator, IR interpreter, Clang integration
-
 N: Greg Clayton
-E: clayborg@gmail.com (Phabricator)
-E: gclayton@apple.com (Direct)
+E: clayborg@gmail.com
 D: Overall LLDB architecture, Host (common+macosx), Symbol, API, ABI, Mac-specific code, 
 D: DynamicLoader, ObjectFile, IOHandler, EditLine, Core/Value*, Watchpoints, debugserver
 D: Build scripts, Test suite, Platform, gdb-remote, Anything not covered by this file
@@ -23,6 +18,7 @@ N: Jim Ingham
 E: jingham@apple.com
 D: Overall LLDB architecture, Thread plans, Expression parser, ValueObject, Breakpoints, ABI
 D: Watchpoints, Trampolines, Target, Command Interpreter, C++ / Objective C Language runtime
+D: Expression evaluator, IR interpreter, Clang integration
 D: Data Formatters
 
 N: Ilia K
@@ -35,11 +31,16 @@ D: FreeBSD
 
 N: Jason Molenda
 E: jmolenda@apple.com
-D: ABI, Disassembler, Unwinding, iOS, debugserver, Platform
+D: ABI, Disassembler, Unwinding, iOS, debugserver, Platform, ObjectFile, SymbolFile, 
+D: SymbolVendor, DWARF, gdb-remote
 
 N: Hafiz Abid Qadeer
 E: abidh.haq@gmail.com
 D: lldb-mi
+
+N: Kamil Rytarowski
+E: kamil@netbsd.org
+D: NetBSD
 
 N: Zachary Turner
 E: zturner@google.com

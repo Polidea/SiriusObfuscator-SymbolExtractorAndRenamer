@@ -38,42 +38,40 @@ class TestResilience(TestBase):
 
     @decorators.skipUnlessDarwin
     @decorators.swiftTest
+    @decorators.skipIf(debug_info=decorators.no_match("dsym"))
     def test_cross_module_extension(self):
         """Test that LLDB can debug across resilient boundaries"""
-        self.buildAll()
+        self.build()
         self.do_test()
 
     def setUp(self):
         TestBase.setUp(self)
 
-    def buildAll(self):
-        execute_command("make everything")
-
     def createSymlinks(self, exe_flavor, mod_flavor):
-        execute_command("ln -sf main." + exe_flavor + " main")
-        execute_command("ln -sf main." + exe_flavor + ".dSYM main.dSYM")
+        execute_command("ln -sf " + self.getBuildArtifact("main." + exe_flavor) + " " + self.getBuildArtifact("main"))
+        execute_command("ln -sf " + self.getBuildArtifact("main." + exe_flavor + ".dSYM") + " " + self.getBuildArtifact("main.dSYM"))
 
-        execute_command("ln -sf libmod." + exe_flavor + ".dylib libmod.dylib")
-        execute_command(
-            "ln -sf libmod." +
-            exe_flavor +
-            ".dylib.dSYM libmod.dylib.dSYM")
+        execute_command("ln -sf " + self.getBuildArtifact("libmod." + exe_flavor + ".dylib") + " " + self.getBuildArtifact("libmod.dylib"))
+        execute_command("ln -sf " + self.getBuildArtifact("libmod." + exe_flavor + ".dylib.dSYM") + " " + self.getBuildArtifact("libmod.dylib.dSYM"))
 
-        execute_command("ln -sf mod." + exe_flavor + ".swiftdoc mod.swiftdoc")
-        execute_command(
-            "ln -sf mod." +
-            exe_flavor +
-            ".swiftmodule mod.swiftmodule")
+        execute_command("ln -sf " + self.getBuildArtifact("mod." + exe_flavor + ".swiftdoc") + " " + self.getBuildArtifact("mod.swiftdoc"))
+        execute_command("ln -sf " + self.getBuildArtifact("mod." + exe_flavor + ".swiftmodule") + " " + self.getBuildArtifact("mod.swiftmodule"))
 
     def cleanupSymlinks(self):
         execute_command(
-            "rm main main.dSYM libmod.dylib libmod.dylib.dSYM mod.swiftdoc mod.swiftmodule")
+            "rm " +
+            self.getBuildArtifact("main") + " " +
+            self.getBuildArtifact("main.dSYM") + " " +
+            self.getBuildArtifact("libmod.dylib") + " " +
+            self.getBuildArtifact("libmod.dylib.dSYM") + " " +
+            self.getBuildArtifact("mod.swiftdoc") + " " +
+            self.getBuildArtifact("mod.swiftmodule"))
 
     def doTestWithFlavor(self, exe_flavor, mod_flavor):
         self.createSymlinks(exe_flavor, mod_flavor)
 
         exe_name = "main"
-        exe_path = os.path.join(os.getcwd(), exe_name)
+        exe_path = self.getBuildArtifact(exe_name)
 
         source_name = "main.swift"
         source_spec = lldb.SBFileSpec(source_name)
@@ -83,7 +81,7 @@ class TestResilience(TestBase):
         self.assertTrue(target, VALID_TARGET)
 
         breakpoint = target.BreakpointCreateBySourceRegex('break', source_spec)
-        self.assertTrue(breakpoint.GetNumLocations() > 0, VALID_BREAKPOINT)
+        self.assertTrue(breakpoint.GetNumLocations() > 1, VALID_BREAKPOINT)
 
         process = target.LaunchSimple(None, None, os.getcwd())
         self.assertTrue(process, PROCESS_IS_VALID)
@@ -96,6 +94,17 @@ class TestResilience(TestBase):
         self.frame = self.thread.frames[0]
         self.assertTrue(self.frame, "Frame 0 is valid.")
 
+        # FIXME: this should work with all flavors!
+        if exe_flavor == "a":
+            self.expect("target var global", DATA_TYPES_DISPLAYED_CORRECTLY,
+                        substrs=["a = 1"])
+        process.Continue()
+
+        self.assertTrue(len(threads) == 1)
+        self.thread = threads[0]
+        self.frame = self.thread.frames[0]
+        self.assertTrue(self.frame, "Frame 0 is valid.")
+        
         # Try 'frame variable'
         var = self.frame.FindVariable("s")
         child = var.GetChildMemberWithName("a")

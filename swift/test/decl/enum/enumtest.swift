@@ -41,7 +41,7 @@ func test1b(_ b : Bool) {
 
 enum MaybeInt {
   case none
-  case some(Int)
+  case some(Int) // expected-note {{'some' declared here}}
 
   init(_ i: Int) { self = MaybeInt.some(i) }
 }
@@ -87,6 +87,7 @@ func test3(_ a: ZeroOneTwoThree) {
   
   var _ : (Int,Int) -> ZeroOneTwoThree = .Two // expected-error{{type '(Int, Int) -> ZeroOneTwoThree' has no member 'Two'}}
   var _ : Int = .Two // expected-error{{type 'Int' has no member 'Two'}}
+  var _ : MaybeInt = 0 > 3 ? .none : .soma(3) // expected-error {{type 'MaybeInt' has no member 'soma'; did you mean 'some'?}}
 }
 
 func test3a(_ a: ZeroOneTwoThree) {
@@ -97,7 +98,9 @@ func test3a(_ a: ZeroOneTwoThree) {
 
   // Overload resolution can resolve this to the right constructor.
   var h = ZeroOneTwoThree(1)
-
+  
+  var i = 0 > 3 ? .none : .some(3) // expected-error {{reference to member 'none' cannot be resolved without a contextual type}}
+  
   test3a;  // expected-error {{unused function}}
   .Zero   // expected-error {{reference to member 'Zero' cannot be resolved without a contextual type}}
   test3a   // expected-error {{unused function}}
@@ -307,13 +310,19 @@ enum E21269142 {  // expected-note {{did you mean to specify a raw type on the e
 print(E21269142.Foo.rawValue)  // expected-error {{value of type 'E21269142' has no member 'rawValue'}}
 
 // Check that typo correction does something sensible with synthesized members.
-enum SyntheticMember { // expected-note {{did you mean the implicitly-synthesized property 'hashValue'?}}
+enum SyntheticMember { // expected-note {{property 'hashValue' is implicitly declared}}
   case Foo
 }
-print(SyntheticMember.Foo.hasValue) // expected-error {{value of type 'SyntheticMember' has no member 'hasValue'}}
+
+func useSynthesizedMember() {
+  print(SyntheticMember.Foo.hasValue) // expected-error {{value of type 'SyntheticMember' has no member 'hasValue'; did you mean 'hashValue'?}}
+}
 
 // Non-materializable argument type
 enum Lens<T> {
   case foo(inout T) // expected-error {{'inout' may only be used on parameters}}
   case bar(inout T, Int) // expected-error {{'inout' may only be used on parameters}}
+
+  case baz((inout T) -> ()) // ok
+  case quux((inout T, inout T) -> ()) // ok
 }

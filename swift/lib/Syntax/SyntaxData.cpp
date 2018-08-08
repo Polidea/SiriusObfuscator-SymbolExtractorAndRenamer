@@ -10,13 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "swift/Syntax/DeclSyntax.h"
-#include "swift/Syntax/ExprSyntax.h"
-#include "swift/Syntax/GenericSyntax.h"
-#include "swift/Syntax/TypeSyntax.h"
-#include "swift/Syntax/StmtSyntax.h"
-#include "swift/Syntax/UnknownSyntax.h"
-#include "llvm/Support/ErrorHandling.h"
+#include "swift/Syntax/SyntaxData.h"
 
 using namespace swift;
 using namespace swift::syntax;
@@ -24,31 +18,9 @@ using namespace swift::syntax;
 RC<SyntaxData> SyntaxData::make(RC<RawSyntax> Raw,
                                 const SyntaxData *Parent,
                                 CursorIndex IndexInParent) {
-  return RC<SyntaxData> {
-    new SyntaxData(Raw, Parent, IndexInParent)
-  };
-}
-
-RC<SyntaxData> SyntaxData::makeDataFromRaw(RC<RawSyntax> Raw,
-                                           const SyntaxData *Parent,
-                                           CursorIndex IndexInParent) {
-  switch (Raw->Kind) {
-#define SYNTAX(Id, ParentType) \
-  case SyntaxKind::Id: \
-    return Id##SyntaxData::make(Raw, Parent, IndexInParent);
-
-#define MISSING_SYNTAX(Id, ParentType) \
-  case SyntaxKind::Id: \
-    return ParentType##Data::make(Raw, Parent, IndexInParent);
-
-#define SYNTAX_COLLECTION(Id, Element) SYNTAX(Id, {})
-
-#include "swift/Syntax/SyntaxKinds.def"
-  case SyntaxKind::Token:
-    llvm_unreachable("Can't make a SyntaxData from a Token!");
-  }
-
-  llvm_unreachable("Unhandled SyntaxKind in switch.");
+  auto size = totalSizeToAlloc<AtomicCache<SyntaxData>>(Raw->getNumChildren());
+  void *data = ::operator new(size);
+  return RC<SyntaxData>{new (data) SyntaxData(Raw, Parent, IndexInParent)};
 }
 
 bool SyntaxData::isType() const {
@@ -65,6 +37,10 @@ bool SyntaxData::isDecl() const {
 
 bool SyntaxData::isExpr() const {
   return Raw->isExpr();
+}
+
+bool SyntaxData::isPattern() const {
+  return Raw->isPattern();
 }
 
 bool SyntaxData::isUnknown() const {

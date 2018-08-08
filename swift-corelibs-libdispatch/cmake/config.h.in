@@ -21,6 +21,10 @@
    you don't. */
 #cmakedefine01 HAVE_DECL_CLOCK_UPTIME_FAST
 
+/* Define to 1 if you have the declaration of `CLOCK_MONOTONIC_COARSE', and to
+   0 if you don't. */
+#cmakedefine01 HAVE_CLOCK_MONOTONIC_COARSE
+
 /* Define to 1 if you have the declaration of `FD_COPY', and to 0 if you
    don't. */
 #cmakedefine01 HAVE_DECL_FD_COPY
@@ -135,10 +139,10 @@
 #cmakedefine HAVE_PTHREAD_MACHDEP_H
 
 /* Define to 1 if you have the `pthread_main_np' function. */
-#cmakedefine HAVE_PTHREAD_MAIN_NP
+#cmakedefine01 HAVE_PTHREAD_MAIN_NP
 
 /* Define to 1 if you have the <pthread_np.h> header file. */
-#cmakedefine HAVE_PTHREAD_NP_H
+#cmakedefine01 HAVE_PTHREAD_NP_H
 
 /* Define to 1 if you have the <pthread/qos.h> header file. */
 #cmakedefine HAVE_PTHREAD_QOS_H
@@ -188,9 +192,6 @@
 /* Define to 1 if you have the <TargetConditionals.h> header file. */
 #cmakedefine HAVE_TARGETCONDITIONALS_H
 
-/* Define to 1 if you have the <unistd.h> header file. */
-#cmakedefine01 HAVE_UNISTD_H
-
 /* Define to 1 if you have the `_pthread_workqueue_init' function. */
 #cmakedefine HAVE__PTHREAD_WORKQUEUE_INIT
 
@@ -212,7 +213,7 @@
 #endif
 /* Enable GNU extensions on systems that have them.  */
 #ifndef _GNU_SOURCE
-#cmakedefine01 _GNU_SOURCE
+#cmakedefine _GNU_SOURCE
 #endif
 /* Enable threading extensions on Solaris.  */
 #ifndef _POSIX_PTHREAD_SEMANTICS

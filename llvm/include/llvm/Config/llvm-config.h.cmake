@@ -14,6 +14,9 @@
 #ifndef LLVM_CONFIG_H
 #define LLVM_CONFIG_H
 
+/* Define if LLVM_ENABLE_DUMP is enabled */
+#cmakedefine LLVM_ENABLE_DUMP
+
 /* Define if we link Polly to the tools */
 #cmakedefine LINK_POLLY_INTO_TOOLS
 
@@ -55,9 +58,6 @@
 
 /* Define if this is Win32ish platform */
 #cmakedefine LLVM_ON_WIN32 ${LLVM_ON_WIN32}
-
-/* Installation prefix directory */
-#cmakedefine LLVM_PREFIX "${LLVM_PREFIX}"
 
 /* Define if we have the Intel JIT API runtime support library */
 #cmakedefine01 LLVM_USE_INTEL_JITEVENTS

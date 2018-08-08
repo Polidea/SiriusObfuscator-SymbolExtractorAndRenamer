@@ -18,6 +18,8 @@
 // CHECK: Hello World
 // CHECK: Hello Bob, today is Tuesday.
 
+@inlinable
+@usableFromInline
 func greet(_ name: String, _ day: String) -> String {
   return "Hello \(name), today is \(day)."
 }

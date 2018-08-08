@@ -8,15 +8,19 @@
  See http://swift.org/CONTRIBUTORS.txt for Swift project authors
 */
 
-/// Converts an asynchronous method having callback using Result enum to asynchronous.
+/// Converts an asynchronous method having callback using Result enum to synchronous.
 ///
 /// - Parameter body: The async method must be called inside this body and closure provided in the parameter
 ///                   should be passed to the async method's completion handler.
 /// - Returns: The value wrapped by the async method's result.
 /// - Throws: The error wrapped by the async method's result
 public func await<T, ErrorType>(_ body: (@escaping (Result<T, ErrorType>) -> Void) -> Void) throws -> T {
+    return try await(body).dematerialize()
+}
+
+public func await<T>(_ body: (@escaping (T) -> Void) -> Void) -> T {
     let condition = Condition()
-    var result: Result<T, ErrorType>? = nil
+    var result: T? = nil
     body { theResult in
         condition.whileLocked {
             result = theResult
@@ -28,5 +32,5 @@ public func await<T, ErrorType>(_ body: (@escaping (Result<T, ErrorType>) -> Voi
             condition.wait()
         }
     }
-    return try result!.dematerialize()
+    return result!
 }

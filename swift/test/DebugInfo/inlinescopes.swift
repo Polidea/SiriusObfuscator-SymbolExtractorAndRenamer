@@ -1,5 +1,4 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: echo "public var x = Int64()" \
 // RUN:   | %target-swift-frontend -module-name FooBar -emit-module -o %t -
 // RUN: %target-swift-frontend %s -O -I %t -emit-ir -g -o %t.ll
@@ -34,4 +33,4 @@ let y = inlined(x)
 use(y)
 
 // Check if the inlined and removed function still has the correct linkage name.
-// CHECK-DAG: !DISubprogram(name: "inlined", linkageName: "_T04main7inlineds5Int64VADF"
+// CHECK-DAG: !DISubprogram(name: "inlined", linkageName: "$S4main7inlinedys5Int64VADF"

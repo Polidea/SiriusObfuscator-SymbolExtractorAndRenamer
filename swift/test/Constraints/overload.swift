@@ -153,7 +153,9 @@ struct X1 {
 }
 
 let x1 = X1(Int.self)
-let x1check: X1 = x1 // expected-error{{value of optional type 'X1?' not unwrapped; did you mean to use '!' or '?'?}}
+let x1check: X1 = x1 // expected-error{{value of optional type 'X1?' must be unwrapped}}
+  // expected-note@-1{{coalesce}}
+  // expected-note@-2{{force-unwrap}}
 
 
 struct X2 {
@@ -164,7 +166,9 @@ struct X2 {
 }
 
 let x2 = X2(Int.self)
-let x2check: X2 = x2 // expected-error{{value of optional type 'X2?' not unwrapped; did you mean to use '!' or '?'?}}
+let x2check: X2 = x2 // expected-error{{value of optional type 'X2?' must be unwrapped}}
+  // expected-note@-1{{coalesce}}
+  // expected-note@-2{{force-unwrap}}
 
 // rdar://problem/28051973
 struct R_28051973 {
@@ -223,3 +227,12 @@ func curry<F, S, T, R>(_ f: @escaping (F, S, T) -> R) -> (F) -> (S) -> (T) -> R 
 let _ = curry(+)(1)
 let _ = [0].reduce(0, +)
 let _ = curry(+)("string vs. pointer")
+
+
+func autoclosure1<T>(_: T, _: @autoclosure () -> X) { }
+
+func autoclosure1<T>(_: [T], _: X) { }
+
+func test_autoclosure1(ia: [Int]) {
+  autoclosure1(ia, X()) // okay: resolves to the second function
+}

@@ -26,7 +26,8 @@
 // Project includes
 
 namespace lldb_private {
-
+class SwiftExpressionParser;
+  
 //----------------------------------------------------------------------
 /// @class SwiftUserExpression SwiftUserExpression.h
 /// "lldb/Expression/SwiftUserExpression.h"
@@ -146,7 +147,7 @@ private:
   //------------------------------------------------------------------
 
   void ScanContext(ExecutionContext &exe_ctx,
-                   lldb_private::Error &err) override;
+                   lldb_private::Status &err) override;
 
   bool AddArguments(ExecutionContext &exe_ctx, std::vector<lldb::addr_t> &args,
                     lldb::addr_t struct_address,
@@ -156,7 +157,7 @@ private:
 
   class ResultDelegate : public Materializer::PersistentVariableDelegate {
   public:
-    ResultDelegate(SwiftUserExpression &, bool is_error);
+    ResultDelegate(lldb::TargetSP target, SwiftUserExpression &, bool is_error);
     ConstString GetName() override;
     void DidDematerialize(lldb::ExpressionVariableSP &variable) override;
 
@@ -164,10 +165,11 @@ private:
     lldb::ExpressionVariableSP &GetVariable();
 
   private:
+    lldb::TargetSP m_target_sp;
     SwiftUserExpression &m_user_expression;
-    bool m_is_error;
     PersistentExpressionState *m_persistent_state;
     lldb::ExpressionVariableSP m_variable;
+    bool m_is_error;
   };
 
   ResultDelegate m_result_delegate;
@@ -185,6 +187,7 @@ private:
   };
 
   PersistentVariableDelegate m_persistent_variable_delegate;
+  std::unique_ptr<SwiftExpressionParser> m_parser;
 };
 
 } // namespace lldb_private

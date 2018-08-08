@@ -31,7 +31,7 @@ class MTCSwiftPropertyTestCase(TestBase):
 
     def mtc_tests(self):
         # Load the test
-        exe = os.path.join(os.getcwd(), "a.out")
+        exe = self.getBuildArtifact("a.out")
         self.expect("file " + exe, patterns=["Current executable set to .*a.out"])
 
         self.runCmd("env DYLD_INSERT_LIBRARIES=%s" % self.mtc_dylib_path)
@@ -40,8 +40,6 @@ class MTCSwiftPropertyTestCase(TestBase):
         process = self.dbg.GetSelectedTarget().process
         thread = process.GetSelectedThread()
         frame = thread.GetSelectedFrame()
-
-        self.expect("thread info", substrs=['stop reason = NSView.superview must be used from main thread only'])
 
         self.expect(
             "thread info -s",
@@ -55,3 +53,5 @@ class MTCSwiftPropertyTestCase(TestBase):
         self.assertEqual(data["class_name"], "NSView")
         self.assertEqual(data["selector"], "superview")
         self.assertEqual(data["description"], "NSView.superview must be used from main thread only")
+
+        self.expect("thread info", substrs=['stop reason = NSView.superview must be used from main thread only'])

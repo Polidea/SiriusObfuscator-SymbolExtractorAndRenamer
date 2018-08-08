@@ -14,6 +14,11 @@
 // rdar://problem/19804127
 import TestsUtils
 
+public let DictionaryRemove = [
+  BenchmarkInfo(name: "DictionaryRemove", runFunction: run_DictionaryRemove, tags: [.validation, .api, .Dictionary]),
+  BenchmarkInfo(name: "DictionaryRemoveOfObjects", runFunction: run_DictionaryRemoveOfObjects, tags: [.validation, .api, .Dictionary]),
+]
+
 @inline(never)
 public func run_DictionaryRemove(_ N: Int) {
     let size = 100
@@ -47,8 +52,8 @@ class Box<T : Hashable> : Hashable {
     value = v
   }
 
-  var hashValue: Int {
-    return value.hashValue
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(value)
   }
 
   static func ==(lhs: Box, rhs: Box) -> Bool {

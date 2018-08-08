@@ -18,12 +18,54 @@
 #ifndef SWIFT_SIL_SILVTABLEVISITOR_H
 #define SWIFT_SIL_SILVTABLEVISITOR_H
 
-#include "swift/AST/Attr.h"
+#include <string>
+
 #include "swift/AST/Decl.h"
 #include "swift/AST/Types.h"
-#include "swift/SIL/TypeLowering.h"
+#include "swift/AST/ASTMangler.h"
 
 namespace swift {
+
+// Utility class for deterministically ordering vtable entries for
+// synthesized methods.
+struct SortedFuncList {
+  using Entry = std::pair<std::string, AbstractFunctionDecl *>;
+  SmallVector<Entry, 2> elts;
+  bool sorted = false;
+
+  void add(AbstractFunctionDecl *afd) {
+    Mangle::ASTMangler mangler;
+    std::string mangledName;
+    if (auto *cd = dyn_cast<ConstructorDecl>(afd))
+      mangledName = mangler.mangleConstructorEntity(cd, 0, 0);
+    else
+      mangledName = mangler.mangleEntity(afd, 0);
+
+    elts.push_back(std::make_pair(mangledName, afd));
+  }
+
+  bool empty() { return elts.empty(); }
+
+  void sort() {
+    assert(!sorted);
+    sorted = true;
+    std::sort(elts.begin(),
+              elts.end(),
+              [](const Entry &lhs, const Entry &rhs) -> bool {
+                return lhs.first < rhs.first;
+              });
+  }
+
+  decltype(elts)::const_iterator begin() const {
+    assert(sorted);
+    return elts.begin();
+  }
+
+  decltype(elts)::const_iterator end() const {
+    assert(sorted);
+    return elts.end();
+  }
+};
 
 /// A CRTP class for visiting virtually-dispatched methods of a class.
 ///
@@ -35,16 +77,17 @@ namespace swift {
 /// - addMethodOverride(SILDeclRef baseRef, SILDeclRef derivedRef):
 ///   update vtable entry for baseRef to call derivedRef
 ///
+/// - addPlaceholder(MissingMemberDecl *);
+///   introduce an entry for a method that could not be deserialized
+///
 template <class T> class SILVTableVisitor {
-  Lowering::TypeConverter &Types;
-
   T &asDerived() { return *static_cast<T*>(this); }
 
   void maybeAddMethod(FuncDecl *fd) {
     assert(!fd->hasClangNode());
 
-    maybeAddEntry(SILDeclRef(fd, SILDeclRef::Kind::Func),
-                  fd->needsNewVTableEntry());
+    SILDeclRef constant(fd, SILDeclRef::Kind::Func);
+    maybeAddEntry(constant, constant.requiresNewVTableEntry());
   }
 
   void maybeAddConstructor(ConstructorDecl *cd) {
@@ -53,18 +96,14 @@ template <class T> class SILVTableVisitor {
     // Required constructors (or overrides thereof) have their allocating entry
     // point in the vtable.
     if (cd->isRequired()) {
-      bool needsAllocatingEntry = cd->needsNewVTableEntry();
-      if (!needsAllocatingEntry)
-        if (auto *baseCD = cd->getOverriddenDecl())
-          needsAllocatingEntry = !baseCD->isRequired() || baseCD->hasClangNode();
-      maybeAddEntry(SILDeclRef(cd, SILDeclRef::Kind::Allocator),
-                    needsAllocatingEntry);
+      SILDeclRef constant(cd, SILDeclRef::Kind::Allocator);
+      maybeAddEntry(constant, constant.requiresNewVTableEntry());
     }
 
     // All constructors have their initializing constructor in the
     // vtable, which can be used by a convenience initializer.
-    maybeAddEntry(SILDeclRef(cd, SILDeclRef::Kind::Initializer),
-                  cd->needsNewVTableEntry());
+    SILDeclRef constant(cd, SILDeclRef::Kind::Initializer);
+    maybeAddEntry(constant, constant.requiresNewVTableEntry());
   }
 
   void maybeAddEntry(SILDeclRef declRef, bool needsNewEntry) {
@@ -75,27 +114,53 @@ template <class T> class SILVTableVisitor {
     // Update any existing entries that it overrides.
     auto nextRef = declRef;
     while ((nextRef = nextRef.getNextOverriddenVTableEntry())) {
-      auto baseRef = Types.getOverriddenVTableEntry(nextRef);
+      auto baseRef = nextRef.getOverriddenVTableEntry();
       asDerived().addMethodOverride(baseRef, declRef);
       nextRef = baseRef;
     }
   }
 
-protected:
-  SILVTableVisitor(Lowering::TypeConverter &Types) : Types(Types) {}
+  void maybeAddMember(Decl *member) {
+    if (auto *fd = dyn_cast<FuncDecl>(member))
+      maybeAddMethod(fd);
+    else if (auto *cd = dyn_cast<ConstructorDecl>(member))
+      maybeAddConstructor(cd);
+    else if (auto *placeholder = dyn_cast<MissingMemberDecl>(member))
+      asDerived().addPlaceholder(placeholder);
+  }
 
+protected:
   void addVTableEntries(ClassDecl *theClass) {
     // Imported classes do not have a vtable.
     if (!theClass->hasKnownSwiftImplementation())
       return;
 
+    // Note that while vtable order is not ABI, we still want it to be
+    // consistent between translation units.
+    //
+    // So, sort synthesized members by their mangled name, since they
+    // are added lazily during type checking, with the remaining ones
+    // forced at the end.
+    SortedFuncList synthesizedMembers;
+
     for (auto member : theClass->getMembers()) {
-      if (auto *fd = dyn_cast<FuncDecl>(member))
-        maybeAddMethod(fd);
-      else if (auto *cd = dyn_cast<ConstructorDecl>(member))
-        maybeAddConstructor(cd);
-      else if (auto *placeholder = dyn_cast<MissingMemberDecl>(member))
-        asDerived().addPlaceholder(placeholder);
+      if (auto *afd = dyn_cast<AbstractFunctionDecl>(member)) {
+        if (afd->isSynthesized()) {
+          synthesizedMembers.add(afd);
+          continue;
+        }
+      }
+
+      maybeAddMember(member);
+    }
+
+    if (synthesizedMembers.empty())
+      return;
+
+    synthesizedMembers.sort();
+
+    for (const auto &pair : synthesizedMembers) {
+      maybeAddMember(pair.second);
     }
   }
 };

@@ -263,7 +263,7 @@ static bool printSourceSymbolsFromModule(StringRef modulePath,
   IntrusiveRefCntPtr<DiagnosticsEngine> Diags =
       CompilerInstance::createDiagnostics(new DiagnosticOptions());
   std::unique_ptr<ASTUnit> AU = ASTUnit::LoadFromASTFile(
-      modulePath, *pchRdr, Diags,
+      modulePath, *pchRdr, ASTUnit::LoadASTOnly, Diags,
       FileSystemOpts, /*UseDebugInfo=*/false,
       /*OnlyLocalDecls=*/true, None,
       /*CaptureDiagnostics=*/false,
@@ -670,8 +670,8 @@ static void printSymbol(const IndexRecordOccurrence &Rec, raw_ostream &OS) {
 static void printSymbol(indexstore::IndexRecordSymbol Sym, raw_ostream &OS) {
   SymbolInfo SymInfo{getSymbolKind(Sym.getKind()),
                      getSymbolSubKind(Sym.getSubKind()),
-                     SymbolPropertySet(Sym.getProperties()),
-                     getSymbolLanguage(Sym.getLanguage())};
+                     getSymbolLanguage(Sym.getLanguage()),
+                     SymbolPropertySet(Sym.getProperties())};
 
   printSymbolInfo(SymInfo, OS);
   OS << " | ";
@@ -705,8 +705,8 @@ static void printSymbol(indexstore::IndexRecordOccurrence Occur, raw_ostream &OS
   auto Sym = Occur.getSymbol();
   SymbolInfo SymInfo{getSymbolKind(Sym.getKind()),
                      getSymbolSubKind(Sym.getSubKind()),
-                     SymbolPropertySet(Sym.getProperties()),
-                     getSymbolLanguage(Sym.getLanguage())};
+                     getSymbolLanguage(Sym.getLanguage()),
+                     SymbolPropertySet(Sym.getProperties())};
 
   printSymbolInfo(SymInfo, OS);
   OS << " | ";

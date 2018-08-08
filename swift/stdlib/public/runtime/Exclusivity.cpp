@@ -79,7 +79,7 @@ static void reportExclusivityConflict(ExclusivityFlags oldAction, void *oldPC,
                                       ExclusivityFlags newFlags, void *newPC,
                                       void *pointer) {
   static std::atomic<long> reportedConflicts{0};
-  constexpr unsigned maxReportedConflicts = 100;
+  constexpr long maxReportedConflicts = 100;
   // Don't report more that 100 conflicts. Hopefully, this will improve
   // performance in case there are conflicts inside a tight loop.
   if (reportedConflicts.fetch_add(1, std::memory_order_relaxed) >=
@@ -91,9 +91,9 @@ static void reportExclusivityConflict(ExclusivityFlags oldAction, void *oldPC,
   constexpr unsigned maxAccessDescriptionLength = 50;
   char message[maxMessageLength];
   snprintf(message, sizeof(message),
-           "Simultaneous accesses to 0x%lx, but modification requires "
+           "Simultaneous accesses to 0x%" PRIxPTR ", but modification requires "
            "exclusive access",
-           (uintptr_t)pointer);
+           reinterpret_cast<uintptr_t>(pointer));
   fprintf(stderr, "%s.\n", message);
 
   char oldAccess[maxAccessDescriptionLength];
@@ -102,7 +102,7 @@ static void reportExclusivityConflict(ExclusivityFlags oldAction, void *oldPC,
   fprintf(stderr, "%s ", oldAccess);
   if (oldPC) {
     dumpStackTraceEntry(0, oldPC, /*shortOutput=*/true);
-    fprintf(stderr, " (0x%lx).\n", (uintptr_t)oldPC);
+    fprintf(stderr, " (0x%" PRIxPTR ").\n", reinterpret_cast<uintptr_t>(oldPC));
   } else {
     fprintf(stderr, "<unknown>.\n");
   }
@@ -147,6 +147,29 @@ static void reportExclusivityConflict(ExclusivityFlags oldAction, void *oldPC,
 namespace {
 
 /// A single access that we're tracking.
+///
+/// The following inputs are accepted by the begin_access runtime entry
+/// point. This table show the action performed by the current runtime to
+/// convert those inputs into stored fields in the Access scratch buffer.
+///
+/// Pointer | Runtime     | Access | PC    | Reported| Access
+/// Argument| Behavior    | Pointer| Arg   | PC      | PC
+/// -------- ------------- -------- ------- --------- ----------
+/// null    | [trap or missing enforcement]
+/// nonnull | [nontracked]| null   | null  | caller  | [discard]
+/// nonnull | [nontracked]| null   | valid | <same>  | [discard]
+/// nonnull | [tracked]   | <same> | null  | caller  | caller
+/// nonnull | [tracked]   | <same> | valid | <same>  | <same>
+///
+/// [nontracked] means that the Access scratch buffer will not be added to the
+/// runtime's list of tracked accesses. However, it may be passed to a
+/// subsequent call to end_unpaired_access. The null Pointer field then
+/// identifies the Access record as nontracked.
+///
+/// The runtime owns the contents of the scratch buffer, which is allocated by
+/// the compiler but otherwise opaque. The runtime may later reuse the Pointer
+/// or PC fields or any spare bits for additional flags, and/or a pointer to
+/// out-of-line storage.
 struct Access {
   void *Pointer;
   void *PC;
@@ -188,7 +211,7 @@ class AccessSet {
 public:
   constexpr AccessSet() {}
 
-  void insert(Access *access, void *pc, void *pointer, ExclusivityFlags flags) {
+  bool insert(Access *access, void *pc, void *pointer, ExclusivityFlags flags) {
     auto action = getAccessAction(flags);
 
     for (Access *cur = Head; cur != nullptr; cur = cur->getNext()) {
@@ -208,10 +231,13 @@ public:
       // If we're only warning, don't report multiple conflicts.
       break;
     }
+    if (!isTracking(flags))
+      return false;
 
     // Insert to the front of the array so that remove tends to find it faster.
     access->initialize(pc, pointer, Head, action);
     Head = access;
+    return true;
   }
 
   void remove(Access *access) {
@@ -234,24 +260,16 @@ public:
 
     swift_runtime_unreachable("access not found in set");
   }
-};
 
-/// A set of independent access sets.  This is not designed to put
-/// the access sets on different cache lines, so it's fine for
-/// thread-local sets and probably not fine for concurrent sets.
-class AccessSets {
-  enum { NumAccessSets = 8 };
-  AccessSet Sets[NumAccessSets];
-
-public:
-  constexpr AccessSets() = default;
-  AccessSets(const AccessSets &) = delete;
-  AccessSets &operator=(const AccessSets &) = delete;
-
-  AccessSet &get(void *pointer) {
-    size_t index = std::hash<void*>()(pointer) % NumAccessSets;
-    return Sets[index];
+#ifndef NDEBUG
+  /// Only available with asserts. Intended to be used with
+  /// swift_dumpTrackedAccess().
+  void forEach(std::function<void (Access *)> action) {
+    for (auto *iter = Head; iter != nullptr; iter = iter->getNext()) {
+      action(iter);
+    }
   }
+#endif
 };
 
 } // end anonymous namespace
@@ -263,10 +281,10 @@ public:
 // Use direct language support for thread-locals.
 
 static_assert(LLVM_ENABLE_THREADS, "LLVM_THREAD_LOCAL will use a global?");
-static LLVM_THREAD_LOCAL AccessSets ExclusivityAccessSets;
+static LLVM_THREAD_LOCAL AccessSet ExclusivityAccessSet;
 
-static AccessSets &getAllSets() {
-  return ExclusivityAccessSets;
+static AccessSet &getAccessSet() {
+  return ExclusivityAccessSet;
 }
 
 #elif SWIFT_EXCLUSIVITY_USE_PTHREAD_SPECIFIC
@@ -275,7 +293,7 @@ static AccessSets &getAllSets() {
 static pthread_key_t createAccessSetPthreadKey() {
   pthread_key_t key;
   int result = pthread_key_create(&key, [](void *pointer) {
-    delete static_cast<AccessSets*>(pointer);
+    delete static_cast<AccessSet*>(pointer);
   });
 
   if (result != 0) {
@@ -285,26 +303,21 @@ static pthread_key_t createAccessSetPthreadKey() {
   return key;
 }
 
-static AccessSets &getAllSets() {
+static AccessSet &getAccessSet() {
   static pthread_key_t key = createAccessSetPthreadKey();
 
-  AccessSets *sets = static_cast<AccessSets*>(pthread_getspecific(key));
-  if (!sets) {
-    sets = new AccessSets();
-    pthread_setspecific(key, sets);
+  AccessSet *set = static_cast<AccessSet*>(pthread_getspecific(key));
+  if (!set) {
+    set = new AccessSet();
+    pthread_setspecific(key, set);
   }
-  return *sets;
+  return *set;
 }
 
 /** An access set accessed via pthread_get_specific. *************************/
 #else
 #error No implementation chosen for exclusivity!
 #endif
-
-/// Return the right access set for the given pointer.
-static AccessSet &getAccessSet(void *pointer) {
-  return getAllSets().get(pointer);
-}
 
 /// Begin tracking a dynamic access.
 ///
@@ -316,16 +329,20 @@ void swift::swift_beginAccess(void *pointer, ValueBuffer *buffer,
 
   Access *access = reinterpret_cast<Access*>(buffer);
 
-  // If exclusivity checking is disabled, record in the access
-  // buffer that we didn't track anything.
+  // If exclusivity checking is disabled, record in the access buffer that we
+  // didn't track anything. pc is currently undefined in this case.
   if (_swift_disableExclusivityChecking) {
     access->Pointer = nullptr;
     return;
   }
 
-  if (!pc) pc = get_return_address();
+  // If the provided `pc` is null, then the runtime may override it for
+  // diagnostics.
+  if (!pc)
+    pc = get_return_address();
 
-  getAccessSet(pointer).insert(access, pc, pointer, flags);
+  if (!getAccessSet().insert(access, pc, pointer, flags))
+    access->Pointer = nullptr;
 }
 
 /// End tracking a dynamic access.
@@ -339,5 +356,19 @@ void swift::swift_endAccess(ValueBuffer *buffer) {
     return;
   }
 
-  getAccessSet(pointer).remove(access);
+  getAccessSet().remove(access);
 }
+
+#ifndef NDEBUG
+
+// Dump the accesses that are currently being tracked by the runtime.
+//
+// This is only intended to be used in the debugger.
+void swift::swift_dumpTrackedAccesses() {
+  getAccessSet().forEach([](Access *a) {
+      fprintf(stderr, "Access. Pointer: %p. PC: %p. AccessAction: %s",
+              a->Pointer, a->PC, getAccessName(a->getAccessAction()));
+  });
+}
+
+#endif

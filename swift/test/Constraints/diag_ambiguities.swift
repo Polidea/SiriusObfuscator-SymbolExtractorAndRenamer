@@ -1,4 +1,4 @@
-// RUN: %target-typecheck-verify-swift -verify-ignore-unknown
+// RUN: %target-typecheck-verify-swift
 
 func f0(_ i: Int, _ d: Double) {} // expected-note{{found this candidate}}
 func f0(_ d: Double, _ i: Int) {} // expected-note{{found this candidate}}
@@ -37,7 +37,9 @@ func rdar29691909(o: AnyObject) -> Any? {
 }
 
 func rdar29907555(_ value: Any!) -> String {
-  return "\(value)" // no error
+  return "\(value)" // expected-warning {{string interpolation produces a debug description for an optional value; did you mean to make this explicit?}}
+  // expected-note@-1 {{use 'String(describing:)' to silence this warning}}
+  // expected-note@-2 {{provide a default value to avoid this warning}}
 }
 
 struct SR3715 {
@@ -49,7 +51,7 @@ struct SR3715 {
   func take(_ a: [Any]) {}
 
   func test() {
-    take([overloaded]) // no error
+    take([overloaded])
   }
 }
 
@@ -57,12 +59,8 @@ struct SR3715 {
 // we emit a diagnostic instead of crashing.
 struct Movie {}
 
-protocol P {
-  associatedtype itemType
-  var items: [itemType] { get set }
-}
-
-class MoviesViewController : P {
+class MoviesViewController {
+  typealias itemType = Movie // expected-note {{'itemType' declared here}}
   let itemType = [Movie].self // expected-note {{'itemType' declared here}}
   var items: [Movie] = [Movie]()
 

@@ -710,29 +710,29 @@ std::string RNBRemote::CompressString(const std::string &orig) {
       size_t compressed_size = 0;
 
 #if defined(HAVE_LIBCOMPRESSION)
-      if (compression_decode_buffer &&
-          compression_type == compression_types::lz4) {
+      if (compression_type == compression_types::lz4) {
         compressed_size = compression_encode_buffer(
-            encoded_data.data(), encoded_data_buf_size, (uint8_t *)orig.c_str(),
-            orig.size(), nullptr, COMPRESSION_LZ4_RAW);
+            encoded_data.data(), encoded_data_buf_size,
+            (const uint8_t *)orig.c_str(), orig.size(), nullptr,
+            COMPRESSION_LZ4_RAW);
       }
-      if (compression_decode_buffer &&
-          compression_type == compression_types::zlib_deflate) {
+      if (compression_type == compression_types::zlib_deflate) {
         compressed_size = compression_encode_buffer(
-            encoded_data.data(), encoded_data_buf_size, (uint8_t *)orig.c_str(),
-            orig.size(), nullptr, COMPRESSION_ZLIB);
+            encoded_data.data(), encoded_data_buf_size,
+            (const uint8_t *)orig.c_str(), orig.size(), nullptr,
+            COMPRESSION_ZLIB);
       }
-      if (compression_decode_buffer &&
-          compression_type == compression_types::lzma) {
+      if (compression_type == compression_types::lzma) {
         compressed_size = compression_encode_buffer(
-            encoded_data.data(), encoded_data_buf_size, (uint8_t *)orig.c_str(),
-            orig.size(), nullptr, COMPRESSION_LZMA);
+            encoded_data.data(), encoded_data_buf_size,
+            (const uint8_t *)orig.c_str(), orig.size(), nullptr,
+            COMPRESSION_LZMA);
       }
-      if (compression_decode_buffer &&
-          compression_type == compression_types::lzfse) {
+      if (compression_type == compression_types::lzfse) {
         compressed_size = compression_encode_buffer(
-            encoded_data.data(), encoded_data_buf_size, (uint8_t *)orig.c_str(),
-            orig.size(), nullptr, COMPRESSION_LZFSE);
+            encoded_data.data(), encoded_data_buf_size,
+            (const uint8_t *)orig.c_str(), orig.size(), nullptr,
+            COMPRESSION_LZFSE);
       }
 #endif
 
@@ -1628,7 +1628,7 @@ rnb_err_t RNBRemote::HandlePacket_H(const char *p) {
 }
 
 rnb_err_t RNBRemote::HandlePacket_qLaunchSuccess(const char *p) {
-  if (m_ctx.HasValidProcessID() || m_ctx.LaunchStatus().Error() == 0)
+  if (m_ctx.HasValidProcessID() || m_ctx.LaunchStatus().Status() == 0)
     return SendPacket("OK");
   std::ostringstream ret_str;
   std::string status_str;
@@ -2247,7 +2247,7 @@ rnb_err_t set_logging(const char *p) {
                 continue;
             }
             char *fn = (char *) alloca (c - p + 1);
-            strncpy (fn, p, c - p);
+            strlcpy (fn, p, c - p);
             fn[c - p] = '\0';
 
             // A file name of "asl" is special and is another way to indicate
@@ -2862,7 +2862,7 @@ rnb_err_t RNBRemote::SendStopReplyPacketForThread(nub_thread_t tid) {
       else {
         // the thread name contains special chars, send as hex bytes
         ostrm << std::hex << "hexname:";
-        uint8_t *u_thread_name = (uint8_t *)thread_name;
+        const uint8_t *u_thread_name = (const uint8_t *)thread_name;
         for (size_t i = 0; i < thread_name_len; i++)
           ostrm << RAWHEX8(u_thread_name[i]);
         ostrm << ';';
@@ -3049,7 +3049,7 @@ rnb_err_t RNBRemote::HandlePacket_last_signal(const char *unused) {
 
     // If we have an empty exit packet, lets fill one in to be safe.
     if (!pid_exited_packet[0]) {
-      strncpy(pid_exited_packet, "W00", sizeof(pid_exited_packet) - 1);
+      strlcpy(pid_exited_packet, "W00", sizeof(pid_exited_packet) - 1);
       pid_exited_packet[sizeof(pid_exited_packet) - 1] = '\0';
     }
 
@@ -3611,9 +3611,6 @@ rnb_err_t RNBRemote::HandlePacket_qSupported(const char *p) {
   snprintf(buf, sizeof(buf), "qXfer:features:read+;PacketSize=%x;qEcho+",
            max_packet_size);
 
-  // By default, don't enable compression.  It's only worth doing when we are
-  // working
-  // with a low speed communication channel.
   bool enable_compression = false;
   (void)enable_compression;
 
@@ -3624,7 +3621,7 @@ rnb_err_t RNBRemote::HandlePacket_qSupported(const char *p) {
 #if defined(HAVE_LIBCOMPRESSION)
   // libcompression is weak linked so test if compression_decode_buffer() is
   // available
-  if (enable_compression && compression_decode_buffer != NULL) {
+  if (enable_compression) {
     strcat(buf, ";SupportedCompressions=lzfse,zlib-deflate,lz4,lzma;"
                 "DefaultCompressionMinSize=");
     char numbuf[16];
@@ -3670,7 +3667,7 @@ rnb_err_t RNBRemote::HandlePacket_v(const char *p) {
     return RNBRemote::HandlePacket_s("s");
   } else if (strstr(p, "vCont") == p) {
     DNBThreadResumeActions thread_actions;
-    char *c = (char *)(p += strlen("vCont"));
+    char *c = const_cast<char *>(p += strlen("vCont"));
     char *c_end = c + strlen(c);
     if (*c == '?')
       return SendPacket("vCont;c;C;s;S");
@@ -4310,24 +4307,22 @@ rnb_err_t RNBRemote::HandlePacket_QEnableCompression(const char *p) {
   }
 
 #if defined(HAVE_LIBCOMPRESSION)
-  if (compression_decode_buffer != NULL) {
-    if (strstr(p, "type:zlib-deflate;") != nullptr) {
-      EnableCompressionNextSendPacket(compression_types::zlib_deflate);
-      m_compression_minsize = new_compression_minsize;
-      return SendPacket("OK");
-    } else if (strstr(p, "type:lz4;") != nullptr) {
-      EnableCompressionNextSendPacket(compression_types::lz4);
-      m_compression_minsize = new_compression_minsize;
-      return SendPacket("OK");
-    } else if (strstr(p, "type:lzma;") != nullptr) {
-      EnableCompressionNextSendPacket(compression_types::lzma);
-      m_compression_minsize = new_compression_minsize;
-      return SendPacket("OK");
-    } else if (strstr(p, "type:lzfse;") != nullptr) {
-      EnableCompressionNextSendPacket(compression_types::lzfse);
-      m_compression_minsize = new_compression_minsize;
-      return SendPacket("OK");
-    }
+  if (strstr(p, "type:zlib-deflate;") != nullptr) {
+    EnableCompressionNextSendPacket(compression_types::zlib_deflate);
+    m_compression_minsize = new_compression_minsize;
+    return SendPacket("OK");
+  } else if (strstr(p, "type:lz4;") != nullptr) {
+    EnableCompressionNextSendPacket(compression_types::lz4);
+    m_compression_minsize = new_compression_minsize;
+    return SendPacket("OK");
+  } else if (strstr(p, "type:lzma;") != nullptr) {
+    EnableCompressionNextSendPacket(compression_types::lzma);
+    m_compression_minsize = new_compression_minsize;
+    return SendPacket("OK");
+  } else if (strstr(p, "type:lzfse;") != nullptr) {
+    EnableCompressionNextSendPacket(compression_types::lzfse);
+    m_compression_minsize = new_compression_minsize;
+    return SendPacket("OK");
   }
 #endif
 
@@ -4656,6 +4651,8 @@ rnb_err_t RNBRemote::HandlePacket_qHostInfo(const char *p) {
     strm << "ostype:tvos;";
 #elif defined(TARGET_OS_WATCH) && TARGET_OS_WATCH == 1
     strm << "ostype:watchos;";
+#elif defined(TARGET_OS_BRIDGE) && TARGET_OS_BRIDGE == 1
+    strm << "ostype:bridgeos;";
 #else
     strm << "ostype:ios;";
 #endif
@@ -4986,6 +4983,13 @@ void UpdateTargetXML() {
   s << g_target_xml_header << std::endl;
 
   // Set the architecture
+  //
+  // On raw targets (no OS, vendor info), I've seen replies like
+  // <architecture>i386:x86-64</architecture> (for x86_64 systems - from vmware)
+  // <architecture>arm</architecture> (for an unspecified arm device - from a Segger JLink)
+  // For good interop, I'm not sure what's expected here.  e.g. will anyone understand
+  // <architecture>x86_64</architecture> ? Or is i386:x86_64 the expected phrasing?
+  //
   // s << "<architecture>" << arch "</architecture>" << std::endl;
 
   // Set the OSABI
@@ -6061,7 +6065,7 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
         // need to override the host cpusubtype (which is in the
         // CPU_SUBTYPE_ARM64 subtype namespace)
         // with a reasonable CPU_SUBTYPE_ARMV7 subtype.
-        cpusubtype = 11; // CPU_SUBTYPE_ARM_V7S
+        cpusubtype = 12; // CPU_SUBTYPE_ARM_V7K
       }
     }
     rep << "cpusubtype:" << std::hex << cpusubtype << ';';
@@ -6087,49 +6091,73 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
       for (uint32_t i = 0; i < mh.ncmds && !os_handled; ++i) {
         const nub_size_t bytes_read =
             DNBProcessMemoryRead(pid, load_command_addr, sizeof(lc), &lc);
-        uint32_t raw_cmd = lc.cmd & ~LC_REQ_DYLD;
-        if (bytes_read != sizeof(lc))
-          break;
-        switch (raw_cmd) {
-        case LC_VERSION_MIN_IPHONEOS:
-          os_handled = true;
-          rep << "ostype:ios;";
-          DNBLogThreadedIf(LOG_RNB_PROC,
-                           "LC_VERSION_MIN_IPHONEOS -> 'ostype:ios;'");
-          break;
 
-        case LC_VERSION_MIN_MACOSX:
+        uint32_t major_version, minor_version, patch_version;
+        auto *platform = DNBGetDeploymentInfo(pid, lc, load_command_addr,
+                                              major_version, minor_version,
+                                              patch_version);
+        if (platform) {
           os_handled = true;
-          rep << "ostype:macosx;";
-          DNBLogThreadedIf(LOG_RNB_PROC,
-                           "LC_VERSION_MIN_MACOSX -> 'ostype:macosx;'");
-          break;
-
-#if defined(LC_VERSION_MIN_TVOS)
-        case LC_VERSION_MIN_TVOS:
-          os_handled = true;
-          rep << "ostype:tvos;";
-          DNBLogThreadedIf(LOG_RNB_PROC,
-                           "LC_VERSION_MIN_TVOS -> 'ostype:tvos;'");
-          break;
-#endif
-
-#if defined(LC_VERSION_MIN_WATCHOS)
-        case LC_VERSION_MIN_WATCHOS:
-          os_handled = true;
-          rep << "ostype:watchos;";
-          DNBLogThreadedIf(LOG_RNB_PROC,
-                           "LC_VERSION_MIN_WATCHOS -> 'ostype:watchos;'");
-          break;
-#endif
-
-        default:
+          rep << "ostype:" << platform << ";";
           break;
         }
         load_command_addr = load_command_addr + lc.cmdsize;
       }
+
+// Test that the PLATFORM_* defines are available from mach-o/loader.h
+#if defined (PLATFORM_MACOS)
+      for (uint32_t i = 0; i < mh.ncmds && !os_handled; ++i) 
+      {
+        nub_size_t bytes_read =
+            DNBProcessMemoryRead(pid, load_command_addr, sizeof(lc), &lc);
+        uint32_t raw_cmd = lc.cmd & ~LC_REQ_DYLD;
+        if (bytes_read != sizeof(lc))
+          break;
+
+        if (raw_cmd == LC_BUILD_VERSION)
+        {
+          uint32_t platform; // first field of 'struct build_version_command'
+          bytes_read = DNBProcessMemoryRead(pid, load_command_addr + 8, sizeof(platform), &platform);
+          if (bytes_read != sizeof (platform))
+              break;
+          switch (platform)
+          {
+              case PLATFORM_MACOS:
+                  os_handled = true;
+                  rep << "ostype:macosx;";
+                  DNBLogThreadedIf(LOG_RNB_PROC,
+                           "LC_BUILD_VERSION PLATFORM_MACOS -> 'ostype:macosx;'");
+                  break;
+              case PLATFORM_IOS:
+                  os_handled = true;
+                  rep << "ostype:ios;";
+                  DNBLogThreadedIf(LOG_RNB_PROC,
+                           "LC_BUILD_VERSION PLATFORM_IOS -> 'ostype:ios;'");
+                  break;
+              case PLATFORM_TVOS:
+                  os_handled = true;
+                  rep << "ostype:tvos;";
+                  DNBLogThreadedIf(LOG_RNB_PROC,
+                           "LC_BUILD_VERSION PLATFORM_TVOS -> 'ostype:tvos;'");
+                  break;
+              case PLATFORM_WATCHOS:
+                  os_handled = true;
+                  rep << "ostype:watchos;";
+                  DNBLogThreadedIf(LOG_RNB_PROC,
+                           "LC_BUILD_VERSION PLATFORM_WATCHOS -> 'ostype:watchos;'");
+                  break;
+              case PLATFORM_BRIDGEOS:
+                  os_handled = true;
+                  rep << "ostype:bridgeos;";
+                  DNBLogThreadedIf(LOG_RNB_PROC,
+                           "LC_BUILD_VERSION PLATFORM_BRIDGEOS -> 'ostype:bridgeos;'");
+                  break;
+          }
+        }
+      }
+#endif // PLATFORM_MACOS
     }
-#endif
+#endif // when compiling this on x86 targets
   }
 
   // If we weren't able to find the OS in a LC_VERSION_MIN load command, try
@@ -6143,6 +6171,8 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
       rep << "ostype:tvos;";
 #elif defined(TARGET_OS_WATCH) && TARGET_OS_WATCH == 1
       rep << "ostype:watchos;";
+#elif defined(TARGET_OS_BRIDGE) && TARGET_OS_BRIDGE == 1
+      rep << "ostype:bridgeos;";
 #else
       rep << "ostype:ios;";
 #endif
@@ -6194,6 +6224,8 @@ rnb_err_t RNBRemote::HandlePacket_qProcessInfo(const char *p) {
         rep << "ostype:tvos;";
 #elif defined(TARGET_OS_WATCH) && TARGET_OS_WATCH == 1
         rep << "ostype:watchos;";
+#elif defined(TARGET_OS_BRIDGE) && TARGET_OS_BRIDGE == 1
+        rep << "ostype:bridgeos;";
 #else
         rep << "ostype:ios;";
 #endif

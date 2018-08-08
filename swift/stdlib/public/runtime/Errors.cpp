@@ -14,10 +14,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if defined(__CYGWIN__) || defined(__ANDROID__) || defined(_WIN32)
+#if defined(__CYGWIN__) || defined(__ANDROID__) || defined(_WIN32) || defined(__HAIKU__)
 #  define SWIFT_SUPPORTS_BACKTRACE_REPORTING 0
 #else
 #  define SWIFT_SUPPORTS_BACKTRACE_REPORTING 1
+#endif
+
+#if defined(_WIN32)
+#include <mutex>
 #endif
 
 #include <stdio.h>
@@ -30,13 +34,17 @@
 #include <unistd.h>
 #endif
 #include <stdarg.h>
+
 #include "ImageInspection.h"
 #include "swift/Runtime/Debug.h"
 #include "swift/Runtime/Mutex.h"
 #include "swift/Demangling/Demangle.h"
 #include "swift/Basic/LLVM.h"
 #include "llvm/ADT/StringRef.h"
-#if !defined(_MSC_VER)
+
+#if defined(_MSC_VER)
+#include <DbgHelp.h>
+#else
 #include <cxxabi.h>
 #endif
 
@@ -46,8 +54,10 @@
 #include <execinfo.h>
 #endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__)
 #include <asl.h>
+#elif defined(__ANDROID__)
+#include <android/log.h>
 #endif
 
 namespace FatalErrorFlags {
@@ -58,9 +68,9 @@ enum: uint32_t {
 
 using namespace swift;
 
+#if SWIFT_SUPPORTS_BACKTRACE_REPORTING
 static bool getSymbolNameAddr(llvm::StringRef libraryName, SymbolInfo syminfo,
                               std::string &symbolName, uintptr_t &addrOut) {
-
   // If we failed to find a symbol and thus dlinfo->dli_sname is nullptr, we
   // need to use the hex address.
   bool hasUnavailableAddress = syminfo.symbolName == nullptr;
@@ -76,17 +86,39 @@ static bool getSymbolNameAddr(llvm::StringRef libraryName, SymbolInfo syminfo,
   // demangle with swift. We are taking advantage of __cxa_demangle actually
   // providing failure status instead of just returning the original string like
   // swift demangle.
+#if defined(_WIN32)
+  DWORD dwFlags = UNDNAME_COMPLETE;
+#if !defined(_WIN64)
+  dwFlags |= UNDNAME_32_BIT_DECODE;
+#endif
+  static std::mutex mutex;
+
+  char szUndName[1024];
+  DWORD dwResult;
+
+  {
+    std::lock_guard<std::mutex> lock(m);
+    dwResult = UnDecorateSymbolName(syminfo.symbolName, szUndName,
+                                    sizeof(szUndName), dwFlags);
+  }
+
+  if (dwResult == TRUE) {
+    symbolName += szUndName;
+    return true;
+  }
+#else
   int status;
   char *demangled = abi::__cxa_demangle(syminfo.symbolName, 0, 0, &status);
   if (status == 0) {
-    assert(demangled != nullptr && "If __cxa_demangle succeeds, demangled "
-                                   "should never be nullptr");
+    assert(demangled != nullptr &&
+           "If __cxa_demangle succeeds, demangled should never be nullptr");
     symbolName += demangled;
     free(demangled);
     return true;
   }
-  assert(demangled == nullptr && "If __cxa_demangle fails, demangled should "
-                                 "be a nullptr");
+  assert(demangled == nullptr &&
+         "If __cxa_demangle fails, demangled should be a nullptr");
+#endif
 
   // Otherwise, try to demangle with swift. If swift fails to demangle, it will
   // just pass through the original output.
@@ -95,6 +127,7 @@ static bool getSymbolNameAddr(llvm::StringRef libraryName, SymbolInfo syminfo,
       Demangle::DemangleOptions::SimplifiedUIDemangleOptions());
   return true;
 }
+#endif
 
 void swift::dumpStackTraceEntry(unsigned index, void *framePC,
                                 bool shortOutput) {
@@ -138,7 +171,7 @@ void swift::dumpStackTraceEntry(unsigned index, void *framePC,
     fprintf(stderr, "%s`%s + %td", libraryName.data(), symbolName.c_str(),
             offset);
   } else {
-    constexpr const char *format = "%-4u %-34s 0x%0.16lx %s + %td\n";
+    constexpr const char *format = "%-4u %-34s 0x%0.16" PRIxPTR " %s + %td\n";
     fprintf(stderr, format, index, libraryName.data(), symbolAddr,
             symbolName.c_str(), offset);
   }
@@ -146,8 +179,8 @@ void swift::dumpStackTraceEntry(unsigned index, void *framePC,
   if (shortOutput) {
     fprintf(stderr, "<unavailable>");
   } else {
-    constexpr const char *format = "%-4u 0x%0.16lx\n";
-    fprintf(stderr, format, index, framePC);
+    constexpr const char *format = "%-4u 0x%0.16tx\n";
+    fprintf(stderr, format, index, reinterpret_cast<uintptr_t>(framePC));
   }
 #endif
 }
@@ -228,8 +261,10 @@ reportNow(uint32_t flags, const char *message)
 #else
   write(STDERR_FILENO, message, strlen(message));
 #endif
-#ifdef __APPLE__
+#if defined(__APPLE__)
   asl_log(nullptr, nullptr, ASL_LEVEL_ERR, "%s", message);
+#elif defined(__ANDROID__)
+  __android_log_print(ANDROID_LOG_FATAL, "SwiftRuntime", "%s", message);
 #endif
 #if SWIFT_SUPPORTS_BACKTRACE_REPORTING
   if (flags & FatalErrorFlags::ReportBacktrace) {
@@ -255,6 +290,12 @@ void _swift_runtime_on_report(uintptr_t flags, const char *message,
 void swift::_swift_reportToDebugger(uintptr_t flags, const char *message,
                                     RuntimeErrorDetails *details) {
   _swift_runtime_on_report(flags, message, details);
+}
+
+bool swift::_swift_reportFatalErrorsToDebugger = true;
+
+bool swift::_swift_shouldReportFatalErrorsToDebugger() {
+  return _swift_reportFatalErrorsToDebugger;
 }
 
 /// Report a fatal error to system console, stderr, and crash logs.
@@ -297,7 +338,10 @@ swift::fatalError(uint32_t flags, const char *format, ...)
   va_start(args, format);
 
   char *log;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
   swift_vasprintf(&log, format, args);
+#pragma GCC diagnostic pop
 
   swift_reportError(flags, log);
   abort();
@@ -311,7 +355,10 @@ swift::warning(uint32_t flags, const char *format, ...)
   va_start(args, format);
 
   char *log;
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wuninitialized"
   swift_vasprintf(&log, format, args);
+#pragma GCC diagnostic pop
 
   reportNow(flags, log);
 
@@ -340,6 +387,13 @@ void swift::swift_abortRetainOverflow() {
 void swift::swift_abortUnownedRetainOverflow() {
   swift::fatalError(FatalErrorFlags::ReportBacktrace,
                     "Fatal error: Object's unowned reference was retained too many times");
+}
+
+// Crash due to a weak retain count overflow.
+// FIXME: can't pass the object's address from InlineRefCounts without hacks
+void swift::swift_abortWeakRetainOverflow() {
+  swift::fatalError(FatalErrorFlags::ReportBacktrace,
+                    "Fatal error: Object's weak reference was retained too many times");
 }
 
 // Crash due to retain of a dead unowned reference.

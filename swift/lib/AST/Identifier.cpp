@@ -20,6 +20,12 @@
 #include "llvm/Support/ConvertUTF.h"
 using namespace swift;
 
+void *DeclBaseName::SubscriptIdentifierData =
+    &DeclBaseName::SubscriptIdentifierData;
+void *DeclBaseName::ConstructorIdentifierData =
+    &DeclBaseName::ConstructorIdentifierData;
+void *DeclBaseName::DestructorIdentifierData =
+    &DeclBaseName::DestructorIdentifierData;
 
 raw_ostream &llvm::operator<<(raw_ostream &OS, Identifier I) {
   if (I.get() == nullptr)
@@ -27,9 +33,8 @@ raw_ostream &llvm::operator<<(raw_ostream &OS, Identifier I) {
   return OS << I.get();
 }
 
-raw_ostream &llvm::operator<<(raw_ostream &OS, DeclBaseName I) {
-  // TODO: Handle special names
-  return OS << I.getIdentifier();
+raw_ostream &llvm::operator<<(raw_ostream &OS, DeclBaseName D) {
+  return OS << D.userFacingName();
 }
 
 raw_ostream &llvm::operator<<(raw_ostream &OS, DeclName I) {
@@ -154,7 +159,7 @@ llvm::raw_ostream &DeclName::print(llvm::raw_ostream &os,
   if (skipEmptyArgumentNames) {
     // If there is more than one argument yet none of them have names,
     // we're done.
-    if (getArgumentNames().size() > 0) {
+    if (!getArgumentNames().empty()) {
       bool anyNonEmptyNames = false;
       for (auto c : getArgumentNames()) {
         if (!c.empty()) {

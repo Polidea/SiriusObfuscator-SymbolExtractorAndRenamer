@@ -9,7 +9,7 @@
 
 import CoreFoundation
 
-extension Dictionary : _ObjectTypeBridgeable {
+extension Dictionary : _ObjectiveCBridgeable {
     
     public typealias _ObjectType = NSDictionary
     public func _bridgeToObjectiveC() -> _ObjectType {
@@ -30,8 +30,8 @@ extension Dictionary : _ObjectTypeBridgeable {
         
         keyBuffer.deinitialize(count: count)
         valueBuffer.deinitialize(count: count)
-        keyBuffer.deallocate(capacity: count)
-        valueBuffer.deallocate(capacity: count)
+        keyBuffer.deallocate()
+        valueBuffer.deallocate()
         
         return dict
 
@@ -75,8 +75,8 @@ extension Dictionary : _ObjectTypeBridgeable {
             }
             keys.deinitialize(count: cnt)
             values.deinitialize(count: cnt)
-            keys.deallocate(capacity: cnt)
-            values.deallocate(capacity: cnt)
+            keys.deallocate()
+            values.deallocate()
         }
         if !failedConversion {
             result = dict

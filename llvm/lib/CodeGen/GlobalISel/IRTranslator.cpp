@@ -1,4 +1,4 @@
-//===-- llvm/CodeGen/GlobalISel/IRTranslator.cpp - IRTranslator --*- C++ -*-==//
+//===- llvm/CodeGen/GlobalISel/IRTranslator.cpp - IRTranslator ---*- C++ -*-==//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -11,34 +11,69 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
-
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Analysis/OptimizationDiagnosticInfo.h"
-#include "llvm/CodeGen/GlobalISel/CallLowering.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/Analysis.h"
-#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/GlobalISel/CallLowering.h"
+#include "llvm/CodeGen/LowLevelType.h"
+#include "llvm/CodeGen/MachineBasicBlock.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
-#include "llvm/CodeGen/MachineModuleInfo.h"
+#include "llvm/CodeGen/MachineFunction.h"
+#include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineMemOperand.h"
+#include "llvm/CodeGen/MachineOperand.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetFrameLowering.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GetElementPtrTypeIterator.h"
+#include "llvm/IR/InlineAsm.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Metadata.h"
 #include "llvm/IR/Type.h"
+#include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
-#include "llvm/Target/TargetFrameLowering.h"
+#include "llvm/MC/MCContext.h"
+#include "llvm/Pass.h"
+#include "llvm/Support/Casting.h"
+#include "llvm/Support/CodeGen.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/LowLevelTypeImpl.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
-#include "llvm/Target/TargetLowering.h"
+#include "llvm/Target/TargetMachine.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <iterator>
+#include <string>
+#include <utility>
+#include <vector>
 
 #define DEBUG_TYPE "irtranslator"
 
 using namespace llvm;
 
 char IRTranslator::ID = 0;
+
 INITIALIZE_PASS_BEGIN(IRTranslator, DEBUG_TYPE, "IRTranslator LLVM IR -> MI",
                 false, false)
 INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
@@ -62,7 +97,7 @@ static void reportTranslationError(MachineFunction &MF,
     ORE.emit(R);
 }
 
-IRTranslator::IRTranslator() : MachineFunctionPass(ID), MRI(nullptr) {
+IRTranslator::IRTranslator() : MachineFunctionPass(ID) {
   initializeIRTranslatorPass(*PassRegistry::getPassRegistry());
 }
 
@@ -70,7 +105,6 @@ void IRTranslator::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<TargetPassConfig>();
   MachineFunctionPass::getAnalysisUsage(AU);
 }
-
 
 unsigned IRTranslator::getOrCreateVReg(const Value &Val) {
   unsigned &ValReg = ValToVReg[&Val];
@@ -90,8 +124,8 @@ unsigned IRTranslator::getOrCreateVReg(const Value &Val) {
     bool Success = translate(*CV, VReg);
     if (!Success) {
       OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
-                                 MF->getFunction()->getSubprogram(),
-                                 &MF->getFunction()->getEntryBlock());
+                                 MF->getFunction().getSubprogram(),
+                                 &MF->getFunction().getEntryBlock());
       R << "unable to translate constant: " << ore::NV("Type", Val.getType());
       reportTranslationError(*MF, *TPC, *ORE, R);
       return VReg;
@@ -204,6 +238,8 @@ bool IRTranslator::translateCompare(const User &U,
 bool IRTranslator::translateRet(const User &U, MachineIRBuilder &MIRBuilder) {
   const ReturnInst &RI = cast<ReturnInst>(U);
   const Value *Ret = RI.getReturnValue();
+  if (Ret && DL->getTypeStoreSize(Ret->getType()) == 0)
+    Ret = nullptr;
   // The target may mess up with the insertion point, but
   // this is not important as a return is the last instruction
   // of the block anyway.
@@ -303,6 +339,9 @@ bool IRTranslator::translateLoad(const User &U, MachineIRBuilder &MIRBuilder) {
                                : MachineMemOperand::MONone;
   Flags |= MachineMemOperand::MOLoad;
 
+  if (DL->getTypeStoreSize(LI.getType()) == 0)
+    return true;
+
   unsigned Res = getOrCreateVReg(LI);
   unsigned Addr = getOrCreateVReg(*LI.getPointerOperand());
 
@@ -311,7 +350,7 @@ bool IRTranslator::translateLoad(const User &U, MachineIRBuilder &MIRBuilder) {
       *MF->getMachineMemOperand(MachinePointerInfo(LI.getPointerOperand()),
                                 Flags, DL->getTypeStoreSize(LI.getType()),
                                 getMemOpAlignment(LI), AAMDNodes(), nullptr,
-                                LI.getSynchScope(), LI.getOrdering()));
+                                LI.getSyncScopeID(), LI.getOrdering()));
   return true;
 }
 
@@ -321,6 +360,9 @@ bool IRTranslator::translateStore(const User &U, MachineIRBuilder &MIRBuilder) {
                                : MachineMemOperand::MONone;
   Flags |= MachineMemOperand::MOStore;
 
+  if (DL->getTypeStoreSize(SI.getValueOperand()->getType()) == 0)
+    return true;
+
   unsigned Val = getOrCreateVReg(*SI.getValueOperand());
   unsigned Addr = getOrCreateVReg(*SI.getPointerOperand());
 
@@ -329,7 +371,7 @@ bool IRTranslator::translateStore(const User &U, MachineIRBuilder &MIRBuilder) {
       *MF->getMachineMemOperand(
           MachinePointerInfo(SI.getPointerOperand()), Flags,
           DL->getTypeStoreSize(SI.getValueOperand()->getType()),
-          getMemOpAlignment(SI), AAMDNodes(), nullptr, SI.getSynchScope(),
+          getMemOpAlignment(SI), AAMDNodes(), nullptr, SI.getSyncScopeID(),
           SI.getOrdering()));
   return true;
 }
@@ -339,6 +381,15 @@ bool IRTranslator::translateExtractValue(const User &U,
   const Value *Src = U.getOperand(0);
   Type *Int32Ty = Type::getInt32Ty(U.getContext());
   SmallVector<Value *, 1> Indices;
+
+  // If Src is a single element ConstantStruct, translate extractvalue
+  // to that element to avoid inserting a cast instruction.
+  if (auto CS = dyn_cast<ConstantStruct>(Src))
+    if (CS->getNumOperands() == 1) {
+      unsigned Res = getOrCreateVReg(*CS->getOperand(0));
+      ValToVReg[&U] = Res;
+      return true;
+    }
 
   // getIndexedOffsetInType is designed for GEPs, so the first index is the
   // usual array element rather than looking into the actual aggregate.
@@ -381,18 +432,19 @@ bool IRTranslator::translateInsertValue(const User &U,
   uint64_t Offset = 8 * DL->getIndexedOffsetInType(Src->getType(), Indices);
 
   unsigned Res = getOrCreateVReg(U);
-  const Value &Inserted = *U.getOperand(1);
-  MIRBuilder.buildInsert(Res, getOrCreateVReg(*Src), getOrCreateVReg(Inserted),
-                         Offset);
+  unsigned Inserted = getOrCreateVReg(*U.getOperand(1));
+  MIRBuilder.buildInsert(Res, getOrCreateVReg(*Src), Inserted, Offset);
 
   return true;
 }
 
 bool IRTranslator::translateSelect(const User &U,
                                    MachineIRBuilder &MIRBuilder) {
-  MIRBuilder.buildSelect(getOrCreateVReg(U), getOrCreateVReg(*U.getOperand(0)),
-                         getOrCreateVReg(*U.getOperand(1)),
-                         getOrCreateVReg(*U.getOperand(2)));
+  unsigned Res = getOrCreateVReg(U);
+  unsigned Tst = getOrCreateVReg(*U.getOperand(0));
+  unsigned Op0 = getOrCreateVReg(*U.getOperand(1));
+  unsigned Op1 = getOrCreateVReg(*U.getOperand(2));
+  MIRBuilder.buildSelect(Res, Tst, Op0, Op1);
   return true;
 }
 
@@ -526,7 +578,8 @@ bool IRTranslator::translateMemfunc(const CallInst &CI,
     return false;
   }
 
-  return CLI->lowerCall(MIRBuilder, MachineOperand::CreateES(Callee),
+  return CLI->lowerCall(MIRBuilder, CI.getCallingConv(),
+                        MachineOperand::CreateES(Callee),
                         CallLowering::ArgInfo(0, CI.getType()), Args);
 }
 
@@ -538,7 +591,7 @@ void IRTranslator::getStackGuard(unsigned DstReg,
   MIB.addDef(DstReg);
 
   auto &TLI = *MF->getSubtarget().getTargetLowering();
-  Value *Global = TLI.getSDagStackGuard(*MF->getFunction()->getParent());
+  Value *Global = TLI.getSDagStackGuard(*MF->getFunction().getParent());
   if (!Global)
     return;
 
@@ -548,7 +601,7 @@ void IRTranslator::getStackGuard(unsigned DstReg,
                MachineMemOperand::MODereferenceable;
   *MemRefs =
       MF->getMachineMemOperand(MPInfo, Flags, DL->getPointerSizeInBits() / 8,
-                               DL->getPointerABIAlignment());
+                               DL->getPointerABIAlignment(0));
   MIB.setMemRefs(MemRefs, MemRefs + 1);
 }
 
@@ -571,7 +624,7 @@ bool IRTranslator::translateOverflowIntrinsic(const CallInst &CI, unsigned Op,
     MIB.addUse(Zero);
   }
 
-  MIRBuilder.buildSequence(getOrCreateVReg(CI), Res, 0, Overflow, Width);
+  MIRBuilder.buildSequence(getOrCreateVReg(CI), {Res, Overflow}, {0, Width});
   return true;
 }
 
@@ -637,23 +690,16 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
     if (!V) {
       // Currently the optimizer can produce this; insert an undef to
       // help debugging.  Probably the optimizer should not do this.
-      MIRBuilder.buildIndirectDbgValue(0, DI.getOffset(), DI.getVariable(),
-                                       DI.getExpression());
+      MIRBuilder.buildIndirectDbgValue(0, DI.getVariable(), DI.getExpression());
     } else if (const auto *CI = dyn_cast<Constant>(V)) {
-      MIRBuilder.buildConstDbgValue(*CI, DI.getOffset(), DI.getVariable(),
-                                    DI.getExpression());
+      MIRBuilder.buildConstDbgValue(*CI, DI.getVariable(), DI.getExpression());
     } else {
       unsigned Reg = getOrCreateVReg(*V);
       // FIXME: This does not handle register-indirect values at offset 0. The
       // direct/indirect thing shouldn't really be handled by something as
       // implicit as reg+noreg vs reg+imm in the first palce, but it seems
       // pretty baked in right now.
-      if (DI.getOffset() != 0)
-        MIRBuilder.buildIndirectDbgValue(Reg, DI.getOffset(), DI.getVariable(),
-                                         DI.getExpression());
-      else
-        MIRBuilder.buildDirectDbgValue(Reg, DI.getVariable(),
-                                       DI.getExpression());
+      MIRBuilder.buildDirectDbgValue(Reg, DI.getVariable(), DI.getExpression());
     }
     return true;
   }
@@ -674,6 +720,33 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
         .addDef(getOrCreateVReg(CI))
         .addUse(getOrCreateVReg(*CI.getArgOperand(0)))
         .addUse(getOrCreateVReg(*CI.getArgOperand(1)));
+    return true;
+  case Intrinsic::exp:
+    MIRBuilder.buildInstr(TargetOpcode::G_FEXP)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
+  case Intrinsic::exp2:
+    MIRBuilder.buildInstr(TargetOpcode::G_FEXP2)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
+  case Intrinsic::log:
+    MIRBuilder.buildInstr(TargetOpcode::G_FLOG)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
+  case Intrinsic::log2:
+    MIRBuilder.buildInstr(TargetOpcode::G_FLOG2)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)));
+    return true;
+  case Intrinsic::fma:
+    MIRBuilder.buildInstr(TargetOpcode::G_FMA)
+        .addDef(getOrCreateVReg(CI))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(0)))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(1)))
+        .addUse(getOrCreateVReg(*CI.getArgOperand(2)));
     return true;
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
@@ -739,10 +812,21 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   auto TII = MF->getTarget().getIntrinsicInfo();
   const Function *F = CI.getCalledFunction();
 
+  // FIXME: support Windows dllimport function calls.
+  if (F && F->hasDLLImportStorageClass())
+    return false;
+
   if (CI.isInlineAsm())
     return translateInlineAsm(CI, MIRBuilder);
 
-  if (!F || !F->isIntrinsic()) {
+  Intrinsic::ID ID = Intrinsic::not_intrinsic;
+  if (F && F->isIntrinsic()) {
+    ID = F->getIntrinsicID();
+    if (TII && ID == Intrinsic::not_intrinsic)
+      ID = static_cast<Intrinsic::ID>(TII->getIntrinsicID(F));
+  }
+
+  if (!F || !F->isIntrinsic() || ID == Intrinsic::not_intrinsic) {
     unsigned Res = CI.getType()->isVoidTy() ? 0 : getOrCreateVReg(CI);
     SmallVector<unsigned, 8> Args;
     for (auto &Arg: CI.arg_operands())
@@ -753,10 +837,6 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
       return getOrCreateVReg(*CI.getCalledValue());
     });
   }
-
-  Intrinsic::ID ID = F->getIntrinsicID();
-  if (TII && ID == Intrinsic::not_intrinsic)
-    ID = static_cast<Intrinsic::ID>(TII->getIntrinsicID(F));
 
   assert(ID != Intrinsic::not_intrinsic && "unknown intrinsic");
 
@@ -773,6 +853,17 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
       return false;
     MIB.addUse(getOrCreateVReg(*Arg));
   }
+
+  // Add a MachineMemOperand if it is a target mem intrinsic.
+  const TargetLowering &TLI = *MF->getSubtarget().getTargetLowering();
+  TargetLowering::IntrinsicInfo Info;
+  // TODO: Add a GlobalISel version of getTgtMemIntrinsic.
+  if (TLI.getTgtMemIntrinsic(Info, CI, *MF, ID)) {
+    uint64_t Size = Info.memVT.getStoreSize();
+    MIB.addMemOperand(MF->getMachineMemOperand(MachinePointerInfo(Info.ptrVal),
+                                               Info.flags, Size, Info.align));
+  }
+
   return true;
 }
 
@@ -800,7 +891,6 @@ bool IRTranslator::translateInvoke(const User &U,
   // FIXME: support Windows exception handling.
   if (!isa<LandingPadInst>(EHPadBB->front()))
     return false;
-
 
   // Emit the actual call, bracketed by EH_LABELs so that the MF knows about
   // the region covered by the try.
@@ -842,7 +932,7 @@ bool IRTranslator::translateLandingPad(const User &U,
   // If there aren't registers to copy the values into (e.g., during SjLj
   // exceptions), then don't bother.
   auto &TLI = *MF->getSubtarget().getTargetLowering();
-  const Constant *PersonalityFn = MF->getFunction()->getPersonalityFn();
+  const Constant *PersonalityFn = MF->getFunction().getPersonalityFn();
   if (TLI.getExceptionPointerRegister(PersonalityFn) == 0 &&
       TLI.getExceptionSelectorRegister(PersonalityFn) == 0)
     return true;
@@ -983,9 +1073,11 @@ bool IRTranslator::translateInsertElement(const User &U,
     ValToVReg[&U] = Elt;
     return true;
   }
-  MIRBuilder.buildInsertVectorElement(
-      getOrCreateVReg(U), getOrCreateVReg(*U.getOperand(0)),
-      getOrCreateVReg(*U.getOperand(1)), getOrCreateVReg(*U.getOperand(2)));
+  unsigned Res = getOrCreateVReg(U);
+  unsigned Val = getOrCreateVReg(*U.getOperand(0));
+  unsigned Elt = getOrCreateVReg(*U.getOperand(1));
+  unsigned Idx = getOrCreateVReg(*U.getOperand(2));
+  MIRBuilder.buildInsertVectorElement(Res, Val, Elt, Idx);
   return true;
 }
 
@@ -998,15 +1090,26 @@ bool IRTranslator::translateExtractElement(const User &U,
     ValToVReg[&U] = Elt;
     return true;
   }
-  MIRBuilder.buildExtractVectorElement(getOrCreateVReg(U),
-                                       getOrCreateVReg(*U.getOperand(0)),
-                                       getOrCreateVReg(*U.getOperand(1)));
+  unsigned Res = getOrCreateVReg(U);
+  unsigned Val = getOrCreateVReg(*U.getOperand(0));
+  unsigned Idx = getOrCreateVReg(*U.getOperand(1));
+  MIRBuilder.buildExtractVectorElement(Res, Val, Idx);
+  return true;
+}
+
+bool IRTranslator::translateShuffleVector(const User &U,
+                                          MachineIRBuilder &MIRBuilder) {
+  MIRBuilder.buildInstr(TargetOpcode::G_SHUFFLE_VECTOR)
+      .addDef(getOrCreateVReg(U))
+      .addUse(getOrCreateVReg(*U.getOperand(0)))
+      .addUse(getOrCreateVReg(*U.getOperand(1)))
+      .addUse(getOrCreateVReg(*U.getOperand(2)));
   return true;
 }
 
 bool IRTranslator::translatePHI(const User &U, MachineIRBuilder &MIRBuilder) {
   const PHINode &PI = cast<PHINode>(U);
-  auto MIB = MIRBuilder.buildInstr(TargetOpcode::PHI);
+  auto MIB = MIRBuilder.buildInstr(TargetOpcode::G_PHI);
   MIB.addDef(getOrCreateVReg(PI));
 
   PendingPHIs.emplace_back(&PI, MIB.getInstr());
@@ -1093,6 +1196,31 @@ bool IRTranslator::translate(const Constant &C, unsigned Reg) {
     default:
       return false;
     }
+  } else if (auto CS = dyn_cast<ConstantStruct>(&C)) {
+    // Return the element if it is a single element ConstantStruct.
+    if (CS->getNumOperands() == 1) {
+      unsigned EltReg = getOrCreateVReg(*CS->getOperand(0));
+      EntryBuilder.buildCast(Reg, EltReg);
+      return true;
+    }
+    SmallVector<unsigned, 4> Ops;
+    SmallVector<uint64_t, 4> Indices;
+    uint64_t Offset = 0;
+    for (unsigned i = 0; i < CS->getNumOperands(); ++i) {
+      unsigned OpReg = getOrCreateVReg(*CS->getOperand(i));
+      Ops.push_back(OpReg);
+      Indices.push_back(Offset);
+      Offset += MRI->getType(OpReg).getSizeInBits();
+    }
+    EntryBuilder.buildSequence(Reg, Ops, Indices);
+  } else if (auto CV = dyn_cast<ConstantVector>(&C)) {
+    if (CV->getNumOperands() == 1)
+      return translate(*CV->getOperand(0), Reg);
+    SmallVector<unsigned, 4> Ops;
+    for (unsigned i = 0; i < CV->getNumOperands(); ++i) {
+      Ops.push_back(getOrCreateVReg(*CV->getOperand(i)));
+    }
+    EntryBuilder.buildMerge(Reg, Ops);
   } else
     return false;
 
@@ -1106,11 +1234,16 @@ void IRTranslator::finalizeFunction() {
   ValToVReg.clear();
   FrameIndices.clear();
   MachinePreds.clear();
+  // MachineIRBuilder::DebugLoc can outlive the DILocation it holds. Clear it
+  // to avoid accessing free’d memory (in runOnMachineFunction) and to avoid
+  // destroying it twice (in ~IRTranslator() and ~LLVMContext())
+  EntryBuilder = MachineIRBuilder();
+  CurBuilder = MachineIRBuilder();
 }
 
 bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
   MF = &CurMF;
-  const Function &F = *MF->getFunction();
+  const Function &F = MF->getFunction();
   if (F.empty())
     return false;
   CLI = MF->getSubtarget().getCallLowering();
@@ -1119,9 +1252,17 @@ bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
   MRI = &MF->getRegInfo();
   DL = &F.getParent()->getDataLayout();
   TPC = &getAnalysis<TargetPassConfig>();
-  ORE = make_unique<OptimizationRemarkEmitter>(&F);
+  ORE = llvm::make_unique<OptimizationRemarkEmitter>(&F);
 
   assert(PendingPHIs.empty() && "stale PHIs");
+
+  if (!DL->isLittleEndian()) {
+    // Currently we don't properly handle big endian code.
+    OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
+                               F.getSubprogram(), &F.getEntryBlock());
+    R << "unable to translate in big endian mode";
+    reportTranslationError(*MF, *TPC, *ORE, R);
+  }
 
   // Release the per-function state when we return, whether we succeeded or not.
   auto FinalizeOnReturn = make_scope_exit([this]() { finalizeFunction(); });
@@ -1147,12 +1288,14 @@ bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
 
   // Lower the actual args into this basic block.
   SmallVector<unsigned, 8> VRegArgs;
-  for (const Argument &Arg: F.args())
+  for (const Argument &Arg: F.args()) {
+    if (DL->getTypeStoreSize(Arg.getType()) == 0)
+      continue; // Don't handle zero sized types.
     VRegArgs.push_back(getOrCreateVReg(Arg));
+  }
   if (!CLI->lowerFormalArguments(EntryBuilder, F, VRegArgs)) {
     OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
-                               MF->getFunction()->getSubprogram(),
-                               &MF->getFunction()->getEntryBlock());
+                               F.getSubprogram(), &F.getEntryBlock());
     R << "unable to lower arguments: " << ore::NV("Prototype", F.getType());
     reportTranslationError(*MF, *TPC, *ORE, R);
     return false;
@@ -1169,23 +1312,24 @@ bool IRTranslator::runOnMachineFunction(MachineFunction &CurMF) {
       if (translate(Inst))
         continue;
 
-      std::string InstStrStorage;
-      raw_string_ostream InstStr(InstStrStorage);
-      InstStr << Inst;
-
       OptimizationRemarkMissed R("gisel-irtranslator", "GISelFailure",
                                  Inst.getDebugLoc(), &BB);
-      R << "unable to translate instruction: " << ore::NV("Opcode", &Inst)
-        << ": '" << InstStr.str() << "'";
+      R << "unable to translate instruction: " << ore::NV("Opcode", &Inst);
+
+      if (ORE->allowExtraAnalysis("gisel-irtranslator")) {
+        std::string InstStrStorage;
+        raw_string_ostream InstStr(InstStrStorage);
+        InstStr << Inst;
+
+        R << ": '" << InstStr.str() << "'";
+      }
+
       reportTranslationError(*MF, *TPC, *ORE, R);
       return false;
     }
   }
 
   finishPendingPhis();
-
-  auto &TLI = *MF->getSubtarget().getTargetLowering();
-  TLI.finalizeLowering(*MF);
 
   // Merge the argument lowering and constants block with its single
   // successor, the LLVM-IR entry block.  We want the basic block to

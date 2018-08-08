@@ -107,7 +107,7 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
     }
     
     public convenience init(index value: Int) {
-        self.init(indexesIn: NSMakeRange(value, 1))
+        self.init(indexesIn: NSRange(location: value, length: 1))
     }
     
     open func isEqual(to indexSet: IndexSet) -> Bool {
@@ -349,7 +349,8 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
     }
     open func contains(_ indexSet: IndexSet) -> Bool {
         var result = true
-        enumerateRanges(options: []) { range, stop in
+        let nsIndexSet = indexSet._bridgeToObjectiveC()
+        nsIndexSet.enumerateRanges(options: []) { range, stop in
             if !self.contains(in: range) {
                 result = false
                 stop.pointee = true
@@ -377,10 +378,6 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
     }
     
     internal func _enumerateWithOptions<P, R>(_ opts : NSEnumerationOptions, range: NSRange, paramType: P.Type, returnType: R.Type, block: (P, UnsafeMutablePointer<ObjCBool>) -> R) -> Int? {
-        guard !opts.contains(.concurrent) else {
-            NSUnimplemented()
-        }
-        
         guard let startRangeIndex = self._indexOfRangeAfterOrContainingIndex(range.location), let endRangeIndex = _indexOfRangeBeforeOrContainingIndex(NSMaxRange(range) - 1) else {
             return nil
         }
@@ -393,23 +390,23 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
         let lock = NSLock()
         let ranges = _ranges[startRangeIndex...endRangeIndex]
         let rangeSequence = (reverse ? AnyCollection(ranges.reversed()) : AnyCollection(ranges))
-        let iteration = withoutActuallyEscaping(block) { (closure: @escaping (P, UnsafeMutablePointer<ObjCBool>) -> R) -> (Int) -> Void in
-            return { (rangeIdx) in
+        withoutActuallyEscaping(block) { (closure: @escaping (P, UnsafeMutablePointer<ObjCBool>) -> R) -> () in
+            let iteration : (Int) -> Void = { (rangeIdx) in
                 lock.lock()
-                var stop = sharedStop
+                var stop = ObjCBool(sharedStop)
                 lock.unlock()
-                if stop { return }
+                if stop.boolValue { return }
                 
-                let idx = rangeSequence.index(rangeSequence.startIndex, offsetBy: Int64(rangeIdx))
+                let idx = rangeSequence.index(rangeSequence.startIndex, offsetBy: rangeIdx)
                 let curRange = rangeSequence[idx]
                 let intersection = NSIntersectionRange(curRange, range)
                 if passRanges {
                     if intersection.length > 0 {
                         let _ = closure(intersection as! P, &stop)
                     }
-                    if stop {
+                    if stop.boolValue {
                         lock.lock()
-                        sharedStop = stop
+                        sharedStop = stop.boolValue
                         lock.unlock()
                         return
                     }
@@ -426,22 +423,21 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
                         } else {
                             let _ = closure(idx as! P, &stop)
                         }
-                        if stop {
+                        if stop.boolValue {
                             lock.lock()
-                            sharedStop = stop
+                            sharedStop = stop.boolValue
                             lock.unlock()
                             return
                         }
                     }
                 }
             }
-        }
-        
-        if opts.contains(.concurrent) {
-            DispatchQueue.concurrentPerform(iterations: Int(rangeSequence.count), execute: iteration)
-        } else {
-            for idx in 0..<Int(rangeSequence.count) {
-                iteration(idx)
+            if opts.contains(.concurrent) {
+                DispatchQueue.concurrentPerform(iterations: Int(rangeSequence.count), execute: iteration)
+            } else {
+                for idx in 0..<Int(rangeSequence.count) {
+                    iteration(idx)
+                }
             }
         }
         
@@ -452,7 +448,7 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
         enumerate(options: [], using: block)
     }
     open func enumerate(options opts: NSEnumerationOptions = [], using block: (Int, UnsafeMutablePointer<ObjCBool>) -> Void) {
-        let _ = _enumerateWithOptions(opts, range: NSMakeRange(0, Int.max), paramType: Int.self, returnType: Void.self, block: block)
+        let _ = _enumerateWithOptions(opts, range: NSRange(location: 0, length: Int.max), paramType: Int.self, returnType: Void.self, block: block)
     }
     open func enumerate(in range: NSRange, options opts: NSEnumerationOptions = [], using block: (Int, UnsafeMutablePointer<ObjCBool>) -> Void) {
         let _ = _enumerateWithOptions(opts, range: range, paramType: Int.self, returnType: Void.self, block: block)
@@ -462,17 +458,17 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
         return index(options: [], passingTest: predicate)
     }
     open func index(options opts: NSEnumerationOptions = [], passingTest predicate: (Int, UnsafeMutablePointer<ObjCBool>) -> Bool) -> Int {
-        return _enumerateWithOptions(opts, range: NSMakeRange(0, Int.max), paramType: Int.self, returnType: Bool.self, block: predicate) ?? NSNotFound
+        return _enumerateWithOptions(opts, range: NSRange(location: 0, length: Int.max), paramType: Int.self, returnType: Bool.self, block: predicate) ?? NSNotFound
     }
     open func index(in range: NSRange, options opts: NSEnumerationOptions = [], passingTest predicate: (Int, UnsafeMutablePointer<ObjCBool>) -> Bool) -> Int {
         return _enumerateWithOptions(opts, range: range, paramType: Int.self, returnType: Bool.self, block: predicate) ?? NSNotFound
     }
     
     open func indexes(passingTest predicate: (Int, UnsafeMutablePointer<ObjCBool>) -> Bool) -> IndexSet {
-        return indexes(in: NSMakeRange(0, Int.max), options: [], passingTest: predicate)
+        return indexes(in: NSRange(location: 0, length: Int.max), options: [], passingTest: predicate)
     }
     open func indexes(options opts: NSEnumerationOptions = [], passingTest predicate: (Int, UnsafeMutablePointer<ObjCBool>) -> Bool) -> IndexSet {
-        return indexes(in: NSMakeRange(0, Int.max), options: opts, passingTest: predicate)
+        return indexes(in: NSRange(location: 0, length: Int.max), options: opts, passingTest: predicate)
     }
     open func indexes(in range: NSRange, options opts: NSEnumerationOptions = [], passingTest predicate: (Int, UnsafeMutablePointer<ObjCBool>) -> Bool) -> IndexSet {
         var result = IndexSet()
@@ -493,7 +489,7 @@ open class NSIndexSet : NSObject, NSCopying, NSMutableCopying, NSSecureCoding {
         enumerateRanges(options: [], using: block)
     }
     open func enumerateRanges(options opts: NSEnumerationOptions = [], using block: (NSRange, UnsafeMutablePointer<ObjCBool>) -> Void) {
-        let _ = _enumerateWithOptions(opts, range: NSMakeRange(0, Int.max), paramType: NSRange.self, returnType: Void.self, block: block)
+        let _ = _enumerateWithOptions(opts, range: NSRange(location: 0, length: Int.max), paramType: NSRange.self, returnType: Void.self, block: block)
     }
     open func enumerateRanges(in range: NSRange, options opts: NSEnumerationOptions = [], using block: (NSRange, UnsafeMutablePointer<ObjCBool>) -> Void) {
         let _ = _enumerateWithOptions(opts, range: range, paramType: NSRange.self, returnType: Void.self, block: block)
@@ -557,11 +553,11 @@ open class NSMutableIndexSet : NSIndexSet {
     }
     
     open func add(_ value: Int) {
-        add(in: NSMakeRange(value, 1))
+        add(in: NSRange(location: value, length: 1))
     }
     
     open func remove(_ value: Int) {
-        remove(in: NSMakeRange(value, 1))
+        remove(in: NSRange(location: value, length: 1))
     }
     
     internal func _insertRange(_ range: NSRange, atIndex index: Int) {
@@ -593,7 +589,7 @@ open class NSMutableIndexSet : NSIndexSet {
             let nextRange = _ranges[rangeIndex + 1]
             let currentEnd = currentRange.location + currentRange.length
             let nextEnd = nextRange.location + nextRange.length
-            if nextEnd >= nextRange.location {
+            if currentEnd >= nextRange.location {
                 // overlaps
                 if currentEnd < nextEnd {
                     // next range extends beyond current range
@@ -676,16 +672,16 @@ open class NSMutableIndexSet : NSIndexSet {
                     // Don't increment rangeIndex
                     continue
                 } else {
-                    self._replaceRangeAtIndex(rangeIndex, withRange: NSMakeRange(removeEnd, curEnd - removeEnd))
+                    self._replaceRangeAtIndex(rangeIndex, withRange: NSRange(location: removeEnd, length: curEnd - removeEnd))
                     return
                 }
             } else if range.location > curRange.location && removeEnd < curEnd {
-                let firstPiece = NSMakeRange(curRange.location, range.location - curRange.location)
-                let secondPiece = NSMakeRange(removeEnd, curEnd - removeEnd)
+                let firstPiece = NSRange(location: curRange.location, length: range.location - curRange.location)
+                let secondPiece = NSRange(location: removeEnd, length: curEnd - removeEnd)
                 _replaceRangeAtIndex(rangeIndex, withRange: secondPiece)
                 _insertRange(firstPiece, atIndex: rangeIndex)
             } else if range.location > curRange.location && range.location < curEnd && removeEnd >= curEnd {
-                _replaceRangeAtIndex(rangeIndex, withRange: NSMakeRange(curRange.location, range.location - curRange.location))
+                _replaceRangeAtIndex(rangeIndex, withRange: NSRange(location: curRange.location, length: range.location - curRange.location))
             }
             rangeIndex += 1
         }

@@ -1,9 +1,9 @@
-// RUN: %target-swift-frontend -parse-stdlib -emit-silgen %s | %FileCheck %s
+// RUN: %target-swift-frontend -enable-sil-ownership -parse-stdlib -emit-silgen %s | %FileCheck %s
 
 typealias Int = Builtin.Int64
 
-// CHECK: sil hidden @_T013capture_inout8localFooyBi64_z1x_tF
-// CHECK: bb0([[X_INOUT:%.*]] : $*Builtin.Int64):
+// CHECK: sil hidden @$S13capture_inout8localFoo1xyBi64_z_tF
+// CHECK: bb0([[X_INOUT:%.*]] : @trivial $*Builtin.Int64):
 // CHECK-NOT: alloc_box
 // CHECK:   [[FUNC:%.*]] = function_ref [[CLOSURE:@.*]] : $@convention(thin) (@inout_aliasable Builtin.Int64) -> Builtin.Int64
 // CHECK:   apply [[FUNC]]([[X_INOUT]])
@@ -16,8 +16,8 @@ func localFoo(x: inout Int) {
   bar()
 }
 
-// CHECK: sil hidden @_T013capture_inout7anonFooyBi64_z1x_tF
-// CHECK: bb0([[X_INOUT:%.*]] : $*Builtin.Int64):
+// CHECK: sil hidden @$S13capture_inout7anonFoo1xyBi64_z_tF
+// CHECK: bb0([[X_INOUT:%.*]] : @trivial $*Builtin.Int64):
 // CHECK-NOT: alloc_box
 // CHECK:   [[FUNC:%.*]] = function_ref [[CLOSURE:@.*]] : $@convention(thin) (@inout_aliasable Builtin.Int64) -> Builtin.Int64
 // CHECK:   apply [[FUNC]]([[X_INOUT]])

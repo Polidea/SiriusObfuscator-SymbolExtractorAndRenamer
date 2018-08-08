@@ -43,6 +43,8 @@ static void diagnoseMissingReturn(const UnreachableInst *UI,
 
   if (auto *FD = FLoc.getAsASTNode<FuncDecl>()) {
     ResTy = FD->getResultInterfaceType();
+  } else if (auto *CD = FLoc.getAsASTNode<ConstructorDecl>()) {
+    ResTy = CD->getResultInterfaceType();
   } else if (auto *CE = FLoc.getAsASTNode<ClosureExpr>()) {
     ResTy = CE->getResultType();
   } else {
@@ -118,6 +120,10 @@ class EmitDFDiagnostics : public SILFunctionTransform {
 
   /// The entry point to the transformation.
   void run() override {
+    // Don't rerun diagnostics on deserialized functions.
+    if (getFunction()->wasDeserializedCanonical())
+      return;
+
     SILModule &M = getFunction()->getModule();
     for (auto &BB : *getFunction())
       for (auto &I : BB) {

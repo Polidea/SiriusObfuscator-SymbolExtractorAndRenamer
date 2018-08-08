@@ -27,9 +27,13 @@
 #ifndef __DISPATCH_OS_SHIMS__
 #define __DISPATCH_OS_SHIMS__
 
+#if !defined(_WIN32)
 #include <pthread.h>
-#ifdef __linux__
-#include "shims/linux_stubs.h"
+#endif
+#if defined(_WIN32)
+#include "shims/generic_win_stubs.h"
+#elif defined(__unix__)
+#include "shims/generic_unix_stubs.h"
 #endif
 
 #ifdef __ANDROID__
@@ -66,20 +70,13 @@
 #define FD_COPY(f, t) (void)(*(t) = *(f))
 #endif
 
-#if TARGET_OS_WIN32
-#define bzero(ptr,len) memset((ptr), 0, (len))
-#define snprintf _snprintf
+#if HAVE_STRLCPY
+#include <string.h>
+#else // that is, if !HAVE_STRLCPY
 
-inline size_t strlcpy(char *dst, const char *src, size_t size) {
-	int res = strlen(dst) + strlen(src) + 1;
-	if (size > 0) {
-		size_t n = size - 1;
-		strncpy(dst, src, n);
-		dst[n] = 0;
-	}
-	return res;
-}
-#endif // TARGET_OS_WIN32
+size_t strlcpy(char *dst, const char *src, size_t size);
+
+#endif // HAVE_STRLCPY
 
 #if PTHREAD_WORKQUEUE_SPI_VERSION < 20140716
 static inline int
@@ -248,7 +245,7 @@ void __builtin_trap(void);
 
 #if __has_feature(c_static_assert)
 #define __dispatch_is_array(x) \
-	_Static_assert(!__builtin_types_compatible_p(typeof((x)[0]) *, typeof(x)), \
+	_Static_assert(!__builtin_types_compatible_p(__typeof__((x)[0]) *, __typeof__(x)), \
 				#x " isn't an array")
 #define countof(x) \
 	({ __dispatch_is_array(x); sizeof(x) / sizeof((x)[0]); })

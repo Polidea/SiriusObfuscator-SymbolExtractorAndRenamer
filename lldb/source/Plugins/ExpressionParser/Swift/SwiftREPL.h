@@ -13,7 +13,7 @@
 #ifndef liblldb_SwiftREPL_h_
 #define liblldb_SwiftREPL_h_
 
-#include "lldb/Core/Error.h"
+#include "lldb/Utility/Status.h"
 #include "lldb/Expression/REPL.h"
 #include "lldb/lldb-public.h"
 
@@ -38,14 +38,21 @@ public:
   static void Terminate();
 
 protected:
-  static lldb::REPLSP CreateInstance(Error &error, lldb::LanguageType language,
+  static lldb::REPLSP CreateInstance(Status &error, lldb::LanguageType language,
                                      Debugger *debugger, Target *target,
                                      const char *repl_options);
+
+  static lldb::REPLSP CreateInstanceFromTarget(Status &error, Target &target,
+                                               const char *repl_options);
+
+  static lldb::REPLSP CreateInstanceFromDebugger(Status &error,
+                                                 Debugger &debugger,
+                                                 const char *repl_options);
 
   static void
   EnumerateSupportedLanguages(std::set<lldb::LanguageType> &languages);
 
-  Error DoInitialization() override;
+  Status DoInitialization() override;
 
   ConstString GetSourceFileBasename() override;
 
@@ -67,9 +74,6 @@ protected:
                    StringList &matches) override;
 
 public:
-  //------------------------------------------------------------------
-  // llvm casting support
-  //------------------------------------------------------------------
   static bool classof(const REPL *repl) {
     return repl->getKind() == LLVMCastKind::eKindSwift;
   }

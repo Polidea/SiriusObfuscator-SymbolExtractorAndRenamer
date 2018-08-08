@@ -13,10 +13,8 @@ from lldbbuild import *
 
 #### SETTINGS ####
 
-
 def LLVM_HASH_INCLUDES_DIFFS():
     return False
-
 
 # For use with Xcode-style builds
 
@@ -53,22 +51,101 @@ def fallback_repo(name):
         'ref': None
     }
 
+def dirs_exist(names):
+    for name in names:
+        if not os.path.isdir(process_root(name)):
+            return False
+    return True
+
 def XCODE_REPOSITORIES():
+    names = ["llvm", "clang", "swift", "cmark", "ninja"]
+    if dirs_exist(names):
+        return [fallback_repo(n) for n in names]
     override = repo.get_override()
     if override:
         return [process_repo(r) for r in override]
     identifier = repo.identifier()
-    if identifier == None:
-        return [fallback_repo(n) for n in ["llvm", "clang", "swift", "cmark", "ninja"]]
     set = repo.find(identifier)
     return [process_repo(r) for r in set]
 
 
+def get_c_compiler():
+    return subprocess.check_output([
+        'xcrun',
+        '--sdk', 'macosx',
+        '-find', 'clang'
+    ]).rstrip()
+
+
+def get_cxx_compiler():
+    return subprocess.check_output([
+        'xcrun',
+        '--sdk', 'macosx',
+        '-find', 'clang++'
+    ]).rstrip()
+
+#                 CFLAGS="-isysroot $(xcrun --sdk macosx --show-sdk-path) -mmacosx-version-min=${DARWIN_DEPLOYMENT_VERSION_OSX}" \
+#                        LDFLAGS="-mmacosx-version-min=${DARWIN_DEPLOYMENT_VERSION_OSX}" \
+
+
+def get_deployment_target():
+    return os.environ.get('MACOSX_DEPLOYMENT_TARGET', None)
+
+
+def get_c_flags():
+    cflags = ''
+    # sdk_path = subprocess.check_output([
+    #     'xcrun',
+    #     '--sdk', 'macosx',
+    #     '--show-sdk-path']).rstrip()
+    # cflags += '-isysroot {}'.format(sdk_path)
+
+    deployment_target = get_deployment_target()
+    if deployment_target:
+        # cflags += ' -mmacosx-version-min={}'.format(deployment_target)
+        pass
+
+    return cflags
+
+
+def get_cxx_flags():
+    return get_c_flags()
+
+
+def get_common_linker_flags():
+    linker_flags = ""
+    deployment_target = get_deployment_target()
+    if deployment_target:
+        # if len(linker_flags) > 0:
+        #     linker_flags += ' '
+        # linker_flags += '-mmacosx-version-min={}'.format(deployment_target)
+        pass
+
+    return linker_flags
+
+
+def get_exe_linker_flags():
+    return get_common_linker_flags()
+
+def with_devices_preset_suffix():
+    """Return a suffix for the LLDB-specific Swift build preset."""
+    if os.environ.get("LLDB_SWIFT_STDLIB_INCLUDES_DEVICES", None) is not None:
+        return "_with_devices"
+    else:
+        return ""
+
+def with_asan_preset_suffix():
+    """Return a suffix for the ASAN Swift build preset."""
+    if building_with_asan_enabled():
+        return "_asan"
+    else:
+        return ""
+
 def BUILD_SCRIPT_FLAGS():
     return {
-        "Debug": ["--preset=LLDB_Swift_ReleaseAssert"],
-        "DebugClang": ["--preset=LLDB_Swift_DebugAssert"],
-        "Release": ["--preset=LLDB_Swift_ReleaseAssert"],
+        "Debug": ["--preset=LLDB_Swift_ReleaseAssert" + with_asan_preset_suffix() + with_devices_preset_suffix()],
+        "DebugClang": ["--preset=LLDB_Swift_DebugAssert" + with_asan_preset_suffix() + with_devices_preset_suffix()],
+        "Release": ["--preset=LLDB_Swift_ReleaseAssert" + with_asan_preset_suffix() + with_devices_preset_suffix()],
     }
 
 
@@ -147,7 +224,7 @@ def apply_patches(spec):
             f, spec['name'] + '.*.diff')]
     for p in patches:
         run_in_directory(["patch",
-                          "-p0",
+                          "-p1",
                           "-i",
                           os.path.join(lldb_source_path(),
                                        'scripts',
@@ -350,8 +427,8 @@ def build_llvm_if_needed():
 
 #### MAIN LOGIC ####
 
-all_check_out_if_needed()
-build_llvm_if_needed()
-write_archives_txt()
-
-sys.exit(0)
+if __name__ == "__main__":
+    all_check_out_if_needed()
+    build_llvm_if_needed()
+    write_archives_txt()
+    sys.exit(0)

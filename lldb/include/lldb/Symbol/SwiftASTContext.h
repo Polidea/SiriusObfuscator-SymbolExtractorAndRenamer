@@ -15,18 +15,19 @@
 
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "lldb/Core/ClangForward.h"
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/ThreadSafeDenseMap.h"
 #include "lldb/Core/ThreadSafeDenseSet.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Symbol/TypeSystem.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-private.h"
 
 #include "lldb/Utility/Either.h"
+#include "lldb/Utility/Status.h"
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/Support/Threading.h"
 
 #include <map>
 #include <set>
@@ -35,15 +36,16 @@ namespace swift {
 enum class IRGenDebugInfoKind : unsigned;
 class CanType;
 class IRGenOptions;
+class NominalTypeDecl;
 struct PrintOptions;
 class SILModule;
+class VarDecl;
 namespace irgen {
 class FixedTypeInfo;
 class TypeInfo;
 }
 }
 
-struct CachedMemberInfo;
 class DWARFASTParser;
 class SwiftEnumDescriptor;
 
@@ -122,9 +124,18 @@ public:
 
   static ConstString GetPluginNameStatic();
 
+  /// Create a SwiftASTContext from a Module.  This context is used
+  /// for frame variable ans uses ClangImporter options specific to
+  /// this lldb::Module.  The optional target is to create a
+  /// module-specific scract context.
   static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
-                                           Module *module, Target *target,
-                                           const char *compiler_options);
+                                           Module &module,
+                                           Target *target = nullptr);
+  /// Create a SwiftASTContext from a Target.  This context is global
+  /// and used for the expression evaluator.
+  static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
+                                           Target &target,
+                                           const char *extra_options);
 
   static void EnumerateSupportedLanguages(
       std::set<lldb::LanguageType> &languages_for_types,
@@ -136,7 +147,7 @@ public:
 
   bool SupportsLanguage(lldb::LanguageType language) override;
 
-  Error IsCompatible() override;
+  Status IsCompatible() override;
 
   swift::SourceManager &GetSourceManager();
 
@@ -165,7 +176,7 @@ public:
 
   bool AddFrameworkSearchPath(const char *path);
 
-  bool AddClangArgument(const char *arg, bool force = false);
+  bool AddClangArgument(std::string arg, bool force = false);
 
   bool AddClangArgumentPair(const char *arg1, const char *arg2);
 
@@ -212,15 +223,15 @@ public:
   const char *GetClangArgumentAtIndex(size_t idx);
 
   swift::ModuleDecl *CreateModule(const ConstString &module_basename,
-                                  Error &error);
+                                  Status &error);
 
   // This function should only be called when all search paths
   // for all items in a swift::ASTContext have been setup to
   // allow for imports to happen correctly. Use with caution,
   // or use the GetModule() call that takes a FileSpec.
-  swift::ModuleDecl *GetModule(const ConstString &module_name, Error &error);
+  swift::ModuleDecl *GetModule(const ConstString &module_name, Status &error);
 
-  swift::ModuleDecl *GetModule(const FileSpec &module_spec, Error &error);
+  swift::ModuleDecl *GetModule(const FileSpec &module_spec, Status &error);
 
   void CacheModule(swift::ModuleDecl *module);
 
@@ -229,13 +240,13 @@ public:
   // "LinkLibraries" that the module requires.
 
   swift::ModuleDecl *FindAndLoadModule(const ConstString &module_basename,
-                                       Process &process, Error &error);
+                                       Process &process, Status &error);
 
   swift::ModuleDecl *FindAndLoadModule(const FileSpec &module_spec,
-                                       Process &process, Error &error);
+                                       Process &process, Status &error);
 
   void LoadModule(swift::ModuleDecl *swift_module, Process &process,
-                  Error &error);
+                  Status &error);
 
   bool RegisterSectionModules(Module &module,
                               std::vector<std::string> &module_names);
@@ -250,7 +261,7 @@ public:
   // It doesn't do frameworks since frameworks don't need it and this is kind of
   // a hack anyway.
 
-  void LoadExtraDylibs(Process &process, Error &error);
+  void LoadExtraDylibs(Process &process, Status &error);
 
   swift::Identifier GetIdentifier(const char *name);
 
@@ -271,9 +282,6 @@ public:
   size_t FindTypesOrDecls(const char *name, swift::ModuleDecl *swift_module,
                           TypesOrDecls &results, bool append = true);
 
-  size_t FindContainedType(llvm::StringRef name, CompilerType container_type,
-                           std::set<CompilerType> &results, bool append = true);
-
   size_t FindContainedTypeOrDecl(llvm::StringRef name,
                                  TypeOrDecl container_type_or_decl,
                                  TypesOrDecls &results, bool append = true);
@@ -284,7 +292,7 @@ public:
   CompilerType FindFirstType(const char *name, const ConstString &module_name);
 
   CompilerType GetTypeFromMangledTypename(const char *mangled_typename,
-                                          Error &error);
+                                          Status &error);
 
   // Get a function type that returns nothing and take no parameters
   CompilerType GetVoidFunctionType();
@@ -307,7 +315,7 @@ public:
   // CompilerType for the imported type.
   // If it cannot be, returns an invalid CompilerType, and sets the error to
   // indicate what went wrong.
-  CompilerType ImportType(CompilerType &type, Error &error);
+  CompilerType ImportType(CompilerType &type, Status &error);
 
   swift::ClangImporter *GetClangImporter();
 
@@ -330,7 +338,7 @@ public:
 
   CompilerType GetErrorType();
 
-  CompilerType GetNSErrorType(Error &error);
+  CompilerType GetNSErrorType(Status &error);
 
   CompilerType CreateMetatypeType(CompilerType instance_type);
 
@@ -376,14 +384,18 @@ public:
     return m_fatal_errors.Fail() || HasFatalErrors(m_ast_context_ap.get());
   }
 
-  Error GetFatalErrors();
+  Status GetFatalErrors();
 
   union ExtraTypeInformation {
     uint64_t m_intValue;
-    struct {
+    struct ExtraTypeInformationFlags {
+      ExtraTypeInformationFlags(bool is_trivial_option_set, bool is_zero_size)
+          : m_is_trivial_option_set(is_trivial_option_set),
+            m_is_zero_size(is_zero_size) {}
+
       bool m_is_trivial_option_set : 1;
       bool m_is_zero_size : 1;
-    };
+    } m_flags;
 
     ExtraTypeInformation();
 
@@ -494,13 +506,21 @@ public:
     bool m_is_objc;
     bool m_is_anyobject;
     bool m_is_errortype;
+
+    /// The superclass bound, which can only be non-null when this is
+    /// a class-bound existential.
+    CompilerType m_superclass;
+
+    /// The member index for the error value within an error
+    /// existential.
+    static constexpr uint32_t error_instance_index = 0;
+
+    /// Retrieve the index at which the instance type occurs.
+    uint32_t GetInstanceTypeIndex() const { return m_num_payload_words; }
   };
 
   static bool GetProtocolTypeInfo(const CompilerType &type,
                                   ProtocolInfo &protocol_info);
-
-  static bool IsOptionalChain(CompilerType type, CompilerType &payload_type,
-                              uint32_t &depth);
 
   enum class TypeAllocationStrategy { eInline, ePointer, eDynamic, eUnknown };
 
@@ -628,8 +648,10 @@ public:
 
   size_t GetNumTemplateArguments(void *type) override;
 
-  CompilerType GetTemplateArgument(void *type, size_t idx,
-                                   lldb::TemplateArgumentKind &kind) override;
+  lldb::GenericKind GetGenericArgumentKind(void *type, size_t idx) override;
+  CompilerType GetUnboundGenericType(void *type, size_t idx);
+  CompilerType GetBoundGenericType(void *type, size_t idx);
+  CompilerType GetGenericArgumentType(void *type, size_t idx) override;
 
   CompilerType GetTypeForFormatters(void *type) override;
 
@@ -744,9 +766,6 @@ public:
   bool IsReferenceType(void *type, CompilerType *pointee_type,
                        bool *is_rvalue) override;
 
-  static bool IsInoutType(const CompilerType &compiler_type,
-                          CompilerType *original_type);
-
   bool
   ShouldTreatScalarValueAsAddress(lldb::opaque_compiler_type_t type) override;
 
@@ -788,7 +807,7 @@ protected:
 
   void CacheDemangledTypeFailure(const char *);
 
-  bool LoadOneImage(Process &process, FileSpec &link_lib_spec, Error &error);
+  bool LoadOneImage(Process &process, FileSpec &link_lib_spec, Status &error);
 
   bool LoadLibraryUsingPaths(Process &process, llvm::StringRef library_name,
                              std::vector<std::string> &search_paths,
@@ -804,10 +823,11 @@ protected:
   std::unique_ptr<llvm::TargetOptions> m_target_options_ap;
   std::unique_ptr<swift::irgen::IRGenerator> m_ir_generator_ap;
   std::unique_ptr<swift::irgen::IRGenModule> m_ir_gen_module_ap;
+  llvm::once_flag m_ir_gen_module_once;
   std::unique_ptr<swift::DiagnosticConsumer> m_diagnostic_consumer_ap;
   std::unique_ptr<swift::CompilerInvocation> m_compiler_invocation_ap;
   std::unique_ptr<DWARFASTParser> m_dwarf_ast_parser_ap;
-  Error m_error; // Any errors that were found while creating or using the AST
+  Status m_error; // Any errors that were found while creating or using the AST
                  // context
   swift::ModuleDecl *m_scratch_module;
   std::unique_ptr<swift::SILModule> m_sil_module_ap;
@@ -839,7 +859,7 @@ protected:
   bool m_initialized_search_path_options;
   bool m_initialized_clang_importer_options;
   bool m_reported_fatal_error;
-  Error m_fatal_errors;
+  Status m_fatal_errors;
 
   typedef ThreadSafeDenseSet<const char *> SwiftMangledNameSet;
   SwiftMangledNameSet m_negative_type_cache;
@@ -853,11 +873,26 @@ protected:
 
   ExtraTypeInformation GetExtraTypeInformation(void *type);
 
-  CachedMemberInfo *GetCachedMemberInfo(void *type);
+  /// Record the set of stored properties for each nominal type declaration
+  /// for which we've asked this question.
+  ///
+  /// All of the information in this DenseMap is easily re-constructed
+  /// with NominalTypeDecl::getStoredProperties(), but we cache the
+  /// result to provide constant-time indexed access.
+  llvm::DenseMap<swift::NominalTypeDecl *, std::vector<swift::VarDecl *>>
+    m_stored_properties;
+
+  /// Retrieve the stored properties for the given nominal type declaration.
+  llvm::ArrayRef<swift::VarDecl *> GetStoredProperties(
+                                               swift::NominalTypeDecl *nominal);
 
   SwiftEnumDescriptor *GetCachedEnumInfo(void *type);
 
   friend class CompilerType;
+
+  /// Apply a PathMappingList dictionary on all search paths in the
+  /// ClangImporterOptions.
+  void RemapClangImporterOptions(const PathMappingList &path_map);
 };
 
 class SwiftASTContextForExpressions : public SwiftASTContext {

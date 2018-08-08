@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-swift-frontend -emit-module -o %t %s -module-name Test
 // RUN: llvm-bcanalyzer %t/Test.swiftmodule | %FileCheck %s
 
@@ -7,7 +7,7 @@
 
 // CHECK-NOT: UnknownCode
 
-let a: Int? = 1 // expected-note {{did you mean 'a'?}}
+let a: Int? = 1 // expected-note {{'a' declared here}}
 guard let b = a else {
   fatalError()
 }

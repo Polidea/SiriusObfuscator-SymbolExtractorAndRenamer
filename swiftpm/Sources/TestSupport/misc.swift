@@ -214,7 +214,8 @@ public func loadMockPackageGraph(
             path: AbsolutePath(url).appending(component: Manifest.filename),
             url: url,
             package: .v3(package),
-            version: "1.0.0"
+            version: "1.0.0",
+            manifestVersion: .v3
         )
         if url == root {
             rootManifest = manifest
@@ -222,7 +223,7 @@ public func loadMockPackageGraph(
             externalManifests.append(manifest)
         }
     }
-    let root = PackageGraphRoot(manifests: [rootManifest])
+    let root = PackageGraphRoot(input: PackageGraphRootInput(packages: [AbsolutePath(root)]), manifests: [rootManifest])
     return PackageGraphLoader().load(root: root, externalManifests: externalManifests, diagnostics: diagnostics, fileSystem: fs)
 }
 
@@ -239,7 +240,8 @@ public func loadMockPackageGraph4(
             path: AbsolutePath(url).appending(component: Manifest.filename),
             url: url,
             package: .v4(package),
-            version: "1.0.0"
+            version: "1.0.0",
+            manifestVersion: .v4
         )
         if url == root {
             rootManifest = manifest
@@ -247,7 +249,7 @@ public func loadMockPackageGraph4(
             externalManifests.append(manifest)
         }
     }
-    let root = PackageGraphRoot(manifests: [rootManifest])
+    let root = PackageGraphRoot(input: PackageGraphRootInput(packages: [AbsolutePath(root)]), manifests: [rootManifest])
     return PackageGraphLoader().load(root: root, externalManifests: externalManifests, diagnostics: diagnostics, fileSystem: fs)
 }
 

@@ -110,6 +110,10 @@ static void describeLibclangFailure(enum CXErrorCode Err) {
   case CXError_ASTReadError:
     fprintf(stderr, "Failure: AST deserialization error occurred\n");
     return;
+
+  default:
+    fprintf(stderr, "Failure (other)\n");
+    return;
   }
 }
 
@@ -804,10 +808,45 @@ static void PrintCursor(CXCursor Cursor, const char *CommentSchemaFile) {
       printf(" (const)");
     if (clang_CXXMethod_isPureVirtual(Cursor))
       printf(" (pure)");
+    if (clang_CXXRecord_isAbstract(Cursor))
+      printf(" (abstract)");
+    if (clang_EnumDecl_isScoped(Cursor))
+      printf(" (scoped)");
     if (clang_Cursor_isVariadic(Cursor))
       printf(" (variadic)");
     if (clang_Cursor_isObjCOptional(Cursor))
       printf(" (@optional)");
+
+    switch (clang_getCursorExceptionSpecificationType(Cursor))
+    {
+      case CXCursor_ExceptionSpecificationKind_None:
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_DynamicNone:
+        printf(" (noexcept dynamic none)");
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_Dynamic:
+        printf(" (noexcept dynamic)");
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_MSAny:
+        printf(" (noexcept dynamic any)");
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_BasicNoexcept:
+        printf(" (noexcept)");
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_ComputedNoexcept:
+        printf(" (computed-noexcept)");
+        break;
+
+      case CXCursor_ExceptionSpecificationKind_Unevaluated:
+      case CXCursor_ExceptionSpecificationKind_Uninstantiated:
+      case CXCursor_ExceptionSpecificationKind_Unparsed:
+        break;
+    }
 
     {
       CXString language;
@@ -1530,10 +1569,19 @@ static enum CXChildVisitResult PrintManglings(CXCursor cursor, CXCursor p,
     return CXChildVisit_Continue;
   PrintCursor(cursor, NULL);
   Manglings = clang_Cursor_getCXXManglings(cursor);
-  for (I = 0, E = Manglings->Count; I < E; ++I)
-    printf(" [mangled=%s]", clang_getCString(Manglings->Strings[I]));
-  clang_disposeStringSet(Manglings);
-  printf("\n");
+  if (Manglings) {
+    for (I = 0, E = Manglings->Count; I < E; ++I)
+      printf(" [mangled=%s]", clang_getCString(Manglings->Strings[I]));
+    clang_disposeStringSet(Manglings);
+    printf("\n");
+  }
+  Manglings = clang_Cursor_getObjCManglings(cursor);
+  if (Manglings) {
+    for (I = 0, E = Manglings->Count; I < E; ++I)
+      printf(" [mangled=%s]", clang_getCString(Manglings->Strings[I]));
+    clang_disposeStringSet(Manglings);
+    printf("\n");
+  }
   return CXChildVisit_Recurse;
 }
 
@@ -1570,6 +1618,51 @@ static enum CXChildVisitResult PrintTypeDeclaration(CXCursor cursor, CXCursor p,
   }
 
   return CXChildVisit_Recurse;
+}
+
+/******************************************************************************/
+/* Target information testing.                                                */
+/******************************************************************************/
+
+static int print_target_info(int argc, const char **argv) {
+  CXIndex Idx;
+  CXTranslationUnit TU;
+  CXTargetInfo TargetInfo;
+  CXString Triple;
+  const char *FileName;
+  enum CXErrorCode Err;
+  int PointerWidth;
+
+  if (argc == 0) {
+    fprintf(stderr, "No filename specified\n");
+    return 1;
+  }
+
+  FileName = argv[1];
+
+  Idx = clang_createIndex(0, 1);
+  Err = clang_parseTranslationUnit2(Idx, FileName, argv, argc, NULL, 0,
+                                    getDefaultParsingOptions(), &TU);
+  if (Err != CXError_Success) {
+    fprintf(stderr, "Couldn't parse translation unit!\n");
+    describeLibclangFailure(Err);
+    clang_disposeIndex(Idx);
+    return 1;
+  }
+
+  TargetInfo = clang_getTranslationUnitTargetInfo(TU);
+
+  Triple = clang_TargetInfo_getTriple(TargetInfo);
+  printf("TargetTriple: %s\n", clang_getCString(Triple));
+  clang_disposeString(Triple);
+
+  PointerWidth = clang_TargetInfo_getPointerWidth(TargetInfo);
+  printf("PointerWidth: %d\n", PointerWidth);
+
+  clang_TargetInfo_dispose(TargetInfo);
+  clang_disposeTranslationUnit(TU);
+  clang_disposeIndex(Idx);
+  return 0;
 }
 
 /******************************************************************************/
@@ -1660,11 +1753,15 @@ int perform_test_load_source(int argc, const char **argv,
   int result;
   unsigned Repeats = 0;
   unsigned I;
+  const char *InvocationPath;
 
   Idx = clang_createIndex(/* excludeDeclsFromPCH */
                           (!strcmp(filter, "local") || 
                            !strcmp(filter, "local-display"))? 1 : 0,
                           /* displayDiagnostics=*/1);
+  InvocationPath = getenv("CINDEXTEST_INVOCATION_EMISSION_PATH");
+  if (InvocationPath)
+    clang_CXIndex_setInvocationEmissionPathOption(Idx, InvocationPath);
 
   if ((CommentSchemaFile = parse_comments_schema(argc, argv))) {
     argc--;
@@ -1697,6 +1794,8 @@ int perform_test_load_source(int argc, const char **argv,
       return -1;
 
     if (Repeats > 1) {
+      clang_suspendTranslationUnit(TU);
+
       Err = clang_reparseTranslationUnit(TU, num_unsaved_files, unsaved_files,
                                          clang_defaultReparseOptions(TU));
       if (Err != CXError_Success) {
@@ -2223,7 +2322,8 @@ int perform_code_completion(int argc, const char **argv, int timing_only) {
   CXTranslationUnit TU;
   unsigned I, Repeats = 1;
   unsigned completionOptions = clang_defaultCodeCompleteOptions();
-  
+  const char *InvocationPath;
+
   if (getenv("CINDEXTEST_CODE_COMPLETE_PATTERNS"))
     completionOptions |= CXCodeComplete_IncludeCodePatterns;
   if (getenv("CINDEXTEST_COMPLETION_BRIEF_COMMENTS"))
@@ -2242,7 +2342,10 @@ int perform_code_completion(int argc, const char **argv, int timing_only) {
     return -1;
 
   CIdx = clang_createIndex(0, 0);
-  
+  InvocationPath = getenv("CINDEXTEST_INVOCATION_EMISSION_PATH");
+  if (InvocationPath)
+    clang_CXIndex_setInvocationEmissionPathOption(CIdx, InvocationPath);
+
   if (getenv("CINDEXTEST_EDITING"))
     Repeats = 5;
 
@@ -4342,11 +4445,12 @@ static void print_usage(void) {
     "       c-index-test -test-print-type {<args>}*\n"
     "       c-index-test -test-print-type-size {<args>}*\n"
     "       c-index-test -test-print-bitwidth {<args>}*\n"
+    "       c-index-test -test-print-target-info {<args>}*\n"
     "       c-index-test -test-print-type-declaration {<args>}*\n"
     "       c-index-test -print-usr [<CursorKind> {<args>}]*\n"
-    "       c-index-test -print-usr-file <file>\n"
-    "       c-index-test -write-pch <file> <compiler arguments>\n");
+    "       c-index-test -print-usr-file <file>\n");
   fprintf(stderr,
+    "       c-index-test -write-pch <file> <compiler arguments>\n"
     "       c-index-test -compilation-db [lookup <filename>] database\n");
   fprintf(stderr,
     "       c-index-test -print-build-session-timestamp\n");
@@ -4454,6 +4558,8 @@ int cindextest_main(int argc, const char **argv) {
     return perform_test_load_tu(argv[2], "all", NULL, PrintMangledName, NULL);
   else if (argc > 2 && strcmp(argv[1], "-test-print-manglings") == 0)
     return perform_test_load_tu(argv[2], "all", NULL, PrintManglings, NULL);
+  else if (argc > 2 && strcmp(argv[1], "-test-print-target-info") == 0)
+    return print_target_info(argc - 2, argv + 2);
   else if (argc > 1 && strcmp(argv[1], "-print-usr") == 0) {
     if (argc > 2)
       return print_usrs(argv + 2, argv + argc);

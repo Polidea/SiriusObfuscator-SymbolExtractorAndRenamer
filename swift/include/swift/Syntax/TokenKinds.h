@@ -19,28 +19,18 @@
 
 namespace swift {
 enum class tok {
-  unknown = 0,
-  eof,
-  code_complete,
-  identifier,
-  oper_binary_unspaced,   // "x+y"
-  oper_binary_spaced,     // "x + y"
-  oper_postfix,
-  oper_prefix,
-  dollarident,
-  integer_literal,
-  floating_literal,
-  string_literal,
-  sil_local_name,      // %42 in SIL mode.
-  comment,
-
-#define KEYWORD(X) kw_ ## X,
-#define PUNCTUATOR(X, Y) X,
-#define POUND_KEYWORD(X) pound_ ## X,
+#define TOKEN(X) X,
 #include "swift/Syntax/TokenKinds.def"
 
   NUM_TOKENS
 };
+
+/// Check whether a token kind is known to have any specific text content.
+/// e.g., tol::l_paren has determined text however tok::identifier doesn't.
+bool isTokenTextDetermined(tok kind);
+
+/// If a token kind has determined text, return the text; otherwise assert.
+StringRef getTokenText(tok kind);
 } // end namespace swift
 
 #endif // SWIFT_TOKENKINDS_H

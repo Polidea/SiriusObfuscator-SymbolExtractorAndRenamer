@@ -22,6 +22,7 @@ namespace swift {
 
 class SILBasicBlock;
 class SILModule;
+class SILUndef;
 
 // Map an argument index onto a SILArgumentConvention.
 inline SILArgumentConvention
@@ -42,11 +43,14 @@ class SILArgument : public ValueBase {
 
   SILBasicBlock *ParentBB;
   const ValueDecl *Decl;
-  ValueOwnershipKind OwnershipKind;
 
 public:
-  ValueOwnershipKind getOwnershipKind() const { return OwnershipKind; }
-  void setOwnershipKind(ValueOwnershipKind NewKind) { OwnershipKind = NewKind; }
+  ValueOwnershipKind getOwnershipKind() const {
+    return static_cast<ValueOwnershipKind>(Bits.SILArgument.VOKind);
+  }
+  void setOwnershipKind(ValueOwnershipKind NewKind) {
+    Bits.SILArgument.VOKind = static_cast<unsigned>(NewKind);
+  }
 
   SILBasicBlock *getParent() { return ParentBB; }
   const SILBasicBlock *getParent() const { return ParentBB; }
@@ -58,9 +62,11 @@ public:
 
   const ValueDecl *getDecl() const { return Decl; }
 
-  static bool classof(const ValueBase *V) {
-    return V->getKind() >= ValueKind::First_SILArgument &&
-           V->getKind() <= ValueKind::Last_SILArgument;
+  static bool classof(const SILInstruction *) = delete;
+  static bool classof(const SILUndef *) = delete;
+  static bool classof(const SILNode *node) {
+    return node->getKind() >= SILNodeKind::First_SILArgument &&
+           node->getKind() <= SILNodeKind::Last_SILArgument;
   }
 
   unsigned getIndex() const {
@@ -121,7 +127,10 @@ protected:
   explicit SILArgument(ValueKind SubClassKind, SILType Ty,
                        ValueOwnershipKind OwnershipKind,
                        const ValueDecl *D = nullptr)
-      : ValueBase(SubClassKind, Ty), ParentBB(nullptr), Decl(D), OwnershipKind(OwnershipKind) {}
+      : ValueBase(SubClassKind, Ty, IsRepresentative::Yes), ParentBB(nullptr),
+        Decl(D) {
+    Bits.SILArgument.VOKind = static_cast<unsigned>(OwnershipKind);
+  }
   void setParent(SILBasicBlock *P) { ParentBB = P; }
 
   friend SILBasicBlock;
@@ -165,8 +174,10 @@ public:
   /// payload argument is the enum itself (the operand of the switch_enum).
   SILValue getSingleIncomingValue() const;
 
-  static bool classof(const ValueBase *V) {
-    return V->getKind() == ValueKind::SILPHIArgument;
+  static bool classof(const SILInstruction *) = delete;
+  static bool classof(const SILUndef *) = delete;
+  static bool classof(const SILNode *node) {
+    return node->getKind() == SILNodeKind::SILPHIArgument;
   }
 
 private:
@@ -216,8 +227,10 @@ public:
     return getArgumentConvention() == P;
   }
 
-  static bool classof(const ValueBase *V) {
-    return V->getKind() == ValueKind::SILFunctionArgument;
+  static bool classof(const SILInstruction *) = delete;
+  static bool classof(const SILUndef *) = delete;
+  static bool classof(const SILNode *node) {
+    return node->getKind() == SILNodeKind::SILFunctionArgument;
   }
 
 private:

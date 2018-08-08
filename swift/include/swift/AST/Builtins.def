@@ -199,12 +199,6 @@ BUILTIN_SIL_OPERATION(Assign, "assign", Special)
 /// Init has type (T, Builtin.RawPointer) -> ()
 BUILTIN_SIL_OPERATION(Init, "initialize", Special)
 
-/// CastToUnknownObject has type (T) -> Builtin.UnknownObject.
-BUILTIN_SIL_OPERATION(CastToUnknownObject, "castToUnknownObject", Special)
-
-/// CastFromUnknownObject has type (Builtin.UnknownObject) -> T.
-BUILTIN_SIL_OPERATION(CastFromUnknownObject, "castFromUnknownObject", Special)
-
 /// CastToNativeObject has type (T) -> Builtin.NativeObject.
 ///
 /// This builtin asserts if the underlying type /could/ be objc.
@@ -231,6 +225,18 @@ BUILTIN_SIL_OPERATION(CastFromNativeObject, "castFromNativeObject", Special)
 /// or else undefined behavior will ensue.
 BUILTIN_SIL_OPERATION(CastToBridgeObject, "castToBridgeObject", Special)
 
+/// ValueToBridgeObject has type (T) -> Builtin.BridgeObject.
+/// It sets the BridgeObject to a tagged pointer representation holding its
+//  operands by tagging and shifting the operand if needed.
+///
+/// valueToBridgeObject(x) === (x << _swift_abi_ObjCReservedLowBits) |
+///     _swift_BridgeObject_TaggedPointerBits
+///
+/// x thus must not be using any high bits shifted away (via _swift_abi_ObjCReservedLowBits)
+/// or the tag bits post-shift.
+/// ARC operations on such tagged values are NOPs.
+BUILTIN_SIL_OPERATION(ValueToBridgeObject, "valueToBridgeObject", Special)
+
 /// CastReferenceFromBridgeObject has type (Builtin.BridgeObject) -> T.
 /// It recovers the heap object reference by masking spare bits from the
 /// BridgeObject.
@@ -243,6 +249,13 @@ BUILTIN_SIL_OPERATION(CastReferenceFromBridgeObject,
 BUILTIN_SIL_OPERATION(CastBitPatternFromBridgeObject,
                       "castBitPatternFromBridgeObject",
                       Special)
+
+/// ClassifyBridgeObject has type:
+///      (Builtin.BridgeObject) -> (Builtin.Int1, Builtin.Int1).
+/// It interprets the bits mangled into a bridge object, returning whether it is
+/// an Objective-C object or tagged pointer representation.
+BUILTIN_SIL_OPERATION(ClassifyBridgeObject, "classifyBridgeObject", Special)
+
 
 /// BridgeToRawPointer has type (T) -> Builtin.RawPointer
 BUILTIN_SIL_OPERATION(BridgeToRawPointer, "bridgeToRawPointer", Special)
@@ -259,10 +272,15 @@ BUILTIN_SIL_OPERATION(CastReference, "castReference", Special)
 /// reinterpretCast has type T -> U.
 BUILTIN_SIL_OPERATION(ReinterpretCast, "reinterpretCast", Special)
 
-/// addressof ([inout] T) -> Builtin.RawPointer
-/// Returns a RawPointer pointing to an lvalue. The returned pointer is only
-/// valid within the scope of the statement for logical lvalues.
+/// addressof (inout T) -> Builtin.RawPointer
+/// Returns a RawPointer pointing to a physical lvalue. The returned pointer is
+/// only valid for the duration of the original binding.
 BUILTIN_SIL_OPERATION(AddressOf, "addressof", Special)
+
+/// addressOfBorrow (__shared T) -> Builtin.RawPointer
+/// Returns a RawPointer pointing to a borrowed rvalue. The returned pointer is only
+/// valid within the scope of the borrow.
+BUILTIN_SIL_OPERATION(AddressOfBorrow, "addressOfBorrow", Special)
 
 /// GepRaw(Builtin.RawPointer, Builtin.Word) -> Builtin.RawPointer
 ///
@@ -280,6 +298,27 @@ BUILTIN_SIL_OPERATION(Gep, "gep", Integer)
 /// Like the Gep-builtin, but rounds up the resulting address to a tail-
 /// allocated element type 'E'.
 BUILTIN_SIL_OPERATION(GetTailAddr, "getTailAddr", Integer)
+
+/// performInstantaneousReadAccess(Builtin.RawPointer, T.Type) -> ()
+/// Begin and then immediately end a read access to the given raw pointer,
+/// which will be treated as an address of type 'T'.
+BUILTIN_SIL_OPERATION(PerformInstantaneousReadAccess,
+                      "performInstantaneousReadAccess", Special)
+
+/// beginUnpairedModifyAccess(Builtin.RawPointer, Builtin.RawPointer,
+///                           T.Type) -> ()
+/// Begins but does not end a 'modify' access to the first raw pointer argument.
+/// The second raw pointer must be a pointer to an UnsafeValueBuffer, which
+/// will be used by the runtime to record the access. The lifetime of the
+/// value buffer must be longer than that of the access itself. The accessed
+/// address will be treated as having type 'T'.
+BUILTIN_SIL_OPERATION(BeginUnpairedModifyAccess, "beginUnpairedModifyAccess",
+                      Special)
+
+/// endUnpairedAccess(Builtin.RawPointer) -> ()
+/// Ends an in-progress unpaired access. The raw pointer argument must be
+/// be a pointer to an UnsafeValueBuffer that records an in progress access.
+BUILTIN_SIL_OPERATION(EndUnpairedAccess, "endUnpairedAccess", Special)
 
 /// condfail(Int1) -> ()
 /// Triggers a runtime failure if the condition is true.
@@ -306,7 +345,7 @@ BUILTIN_SIL_OPERATION(FixLifetime, "fixLifetime", Special)
 ///
 /// - Objective-C object types require an additional check that the
 ///   dynamic object type uses native swift reference counting:
-///   (Builtin.UnknownObject, unknown class reference, class existential)
+///   (AnyObject, unknown class reference, class existential)
 ///
 /// - Bridged object types allow the dynamic object type check to be
 ///   passed based on their pointer encoding:
@@ -331,8 +370,7 @@ BUILTIN_SIL_OPERATION(IsUniqueOrPinned, "isUniqueOrPinned", Special)
 ///
 /// These variants of isUnique implicitly cast to a non-null NativeObject before
 /// checking uniqueness. This allows an object reference statically typed as
-/// BridgeObject or UnknownObject to be treated as a native object by the
-/// runtime.
+/// BridgeObject to be treated as a native object by the runtime.
 BUILTIN_SIL_OPERATION(IsUnique_native, "isUnique_native", Special)
 BUILTIN_SIL_OPERATION(IsUniqueOrPinned_native, "isUniqueOrPinned_native",
                       Special)
@@ -436,6 +474,13 @@ BUILTIN_MISC_OPERATION(StaticReport, "staticReport", "", Special)
 /// Returns the selected assertion configuration.
 BUILTIN_MISC_OPERATION(AssertConf, "assert_configuration", "n", Special)
 
+/// StringObjectOr has type (T,T) -> T.
+/// Sets bits in a string object. The first operand is bit-cast string literal
+/// pointer to an integer. The second operand is the bit mask to be or'd into
+/// the high bits of the pointer.
+/// It is required that the or'd bits are all 0 in the first operand. So this
+/// or-operation is actually equivalent to an addition.
+BUILTIN_MISC_OPERATION(StringObjectOr,     "stringObjectOr",      "n", Integer)
 
 /// Special truncation builtins that check for sign and overflow errors. These
 /// take an integer as an input and return a tuple of the truncated result and
@@ -478,11 +523,18 @@ BUILTIN_MISC_OPERATION(CondUnreachable, "conditionallyUnreachable", "", Special)
 /// DestroyArray has type (T.Type, Builtin.RawPointer, Builtin.Word) -> ()
 BUILTIN_MISC_OPERATION(DestroyArray, "destroyArray", "", Special)
 
-/// CopyArray, TakeArrayFrontToBack, and TakeArrayBackToFront all have type
+/// CopyArray, TakeArrayNoAlias, TakeArrayFrontToBack, and TakeArrayBackToFront
+/// AssignCopyArrayNoAlias, AssignCopyArrayFrontToBack,
+/// AssignCopyArrayBackToFront, AssignTakeArray all have type
 /// (T.Type, Builtin.RawPointer, Builtin.RawPointer, Builtin.Word) -> ()
 BUILTIN_MISC_OPERATION(CopyArray, "copyArray", "", Special)
+BUILTIN_MISC_OPERATION(TakeArrayNoAlias, "takeArrayNoAlias", "", Special)
 BUILTIN_MISC_OPERATION(TakeArrayFrontToBack, "takeArrayFrontToBack", "", Special)
 BUILTIN_MISC_OPERATION(TakeArrayBackToFront, "takeArrayBackToFront", "", Special)
+BUILTIN_MISC_OPERATION(AssignCopyArrayNoAlias, "assignCopyArrayNoAlias", "", Special)
+BUILTIN_MISC_OPERATION(AssignCopyArrayFrontToBack, "assignCopyArrayFrontToBack", "", Special)
+BUILTIN_MISC_OPERATION(AssignCopyArrayBackToFront, "assignCopyArrayBackToFront", "", Special)
+BUILTIN_MISC_OPERATION(AssignTakeArray, "assignTakeArray", "", Special)
 
 // unsafeGuaranteed has type <T: AnyObject> T -> (T, Builtin.Int8)
 BUILTIN_MISC_OPERATION(UnsafeGuaranteed, "unsafeGuaranteed", "", Special)
@@ -508,6 +560,17 @@ BUILTIN_MISC_OPERATION(Swift3ImplicitObjCEntrypoint, "swift3ImplicitObjCEntrypoi
 BUILTIN_SANITIZER_OPERATION(TSanInoutAccess, "tsanInoutAccess", "")
 
 #undef BUILTIN_SANITIZER_OPERATION
+
+/// Builtins for compile-time type-checking operations used for unit testing.
+#ifndef BUILTIN_TYPE_CHECKER_OPERATION
+#define BUILTIN_TYPE_CHECKER_OPERATION(Id, Name) BUILTIN(Id, #Name, "n")
+#endif
+
+BUILTIN_TYPE_CHECKER_OPERATION(TypeJoin, type_join)
+BUILTIN_TYPE_CHECKER_OPERATION(TypeJoinInout, type_join_inout)
+BUILTIN_TYPE_CHECKER_OPERATION(TypeJoinMeta, type_join_meta)
+
+#undef BUILTIN_TYPE_CHECKER_OPERATION
 
 // BUILTIN_TYPE_TRAIT_OPERATION - Compile-time type trait operations.
 #ifndef BUILTIN_TYPE_TRAIT_OPERATION

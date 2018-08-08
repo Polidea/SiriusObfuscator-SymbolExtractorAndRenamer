@@ -30,6 +30,7 @@ namespace swift {
   class ValueDecl;
   
   enum class PatternKind : uint8_t;
+  enum class ReferenceOwnership : uint8_t;
   enum class StaticSpellingKind : uint8_t;
   enum class DescriptiveDeclKind : uint8_t;
   enum DeclAttrKind : unsigned;
@@ -76,6 +77,7 @@ namespace swift {
     Type,
     TypeRepr,
     PatternKind,
+    ReferenceOwnership,
     StaticSpellingKind,
     DescriptiveDeclKind,
     DeclAttribute,
@@ -103,6 +105,7 @@ namespace swift {
       Type TypeVal;
       TypeRepr *TyR;
       PatternKind PatternKindVal;
+      ReferenceOwnership ReferenceOwnershipVal;
       StaticSpellingKind StaticSpellingKindVal;
       DescriptiveDeclKind DescriptiveDeclKindVal;
       const DeclAttribute *DeclAttributeVal;
@@ -123,10 +126,12 @@ namespace swift {
       : Kind(DiagnosticArgumentKind::Unsigned), UnsignedVal(I) {
     }
 
-    DiagnosticArgument(DeclName I)
-      : Kind(DiagnosticArgumentKind::Identifier), IdentifierVal(I) {
-    }
-    
+    DiagnosticArgument(DeclName D)
+        : Kind(DiagnosticArgumentKind::Identifier), IdentifierVal(D) {}
+
+    DiagnosticArgument(DeclBaseName D)
+        : Kind(DiagnosticArgumentKind::Identifier), IdentifierVal(D) {}
+
     DiagnosticArgument(Identifier I)
       : Kind(DiagnosticArgumentKind::Identifier), IdentifierVal(I) {
     }
@@ -159,6 +164,10 @@ namespace swift {
 
     DiagnosticArgument(PatternKind K)
         : Kind(DiagnosticArgumentKind::PatternKind), PatternKindVal(K) {}
+
+    DiagnosticArgument(ReferenceOwnership RO)
+        : Kind(DiagnosticArgumentKind::ReferenceOwnership),
+          ReferenceOwnershipVal(RO) {}
 
     DiagnosticArgument(StaticSpellingKind SSK)
         : Kind(DiagnosticArgumentKind::StaticSpellingKind),
@@ -233,6 +242,11 @@ namespace swift {
     PatternKind getAsPatternKind() const {
       assert(Kind == DiagnosticArgumentKind::PatternKind);
       return PatternKindVal;
+    }
+
+    ReferenceOwnership getAsReferenceOwnership() const {
+      assert(Kind == DiagnosticArgumentKind::ReferenceOwnership);
+      return ReferenceOwnershipVal;
     }
 
     StaticSpellingKind getAsStaticSpellingKind() const {
@@ -433,6 +447,7 @@ namespace swift {
       Unspecified,
       Ignore,
       Note,
+      Remark,
       Warning,
       Error,
       Fatal,
@@ -745,7 +760,7 @@ namespace swift {
     /// \returns true if any diagnostic consumer gave an error while invoking
     //// \c finishProcessing.
     bool finishProcessing();
-    
+
     /// \brief Format the given diagnostic text and place the result in the given
     /// buffer.
     static void formatDiagnosticText(
@@ -766,6 +781,9 @@ namespace swift {
     /// \brief Send all tentative diagnostics to all diagnostic consumers and
     /// delete them.
     void emitTentativeDiagnostics();
+
+  public:
+    static const char *diagnosticStringFor(const DiagID id);
   };
 
   /// \brief Represents a diagnostic transaction. While a transaction is

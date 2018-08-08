@@ -71,6 +71,14 @@ static void addOwnershipModelEliminatorPipeline(SILPassPipelinePlan &P) {
   P.addOwnershipModelEliminator();
 }
 
+/// Passes for performing definite initialization. Must be run together in this
+/// order.
+static void addDefiniteInitialization(SILPassPipelinePlan &P) {
+  P.addMarkUninitializedFixup();
+  P.addDefiniteInitialization();
+  P.addRawSILInstLowering();
+}
+
 static void addMandatoryOptPipeline(SILPassPipelinePlan &P,
                                     const SILOptions &Options) {
   P.startPipeline("Guaranteed Passes");
@@ -83,18 +91,23 @@ static void addMandatoryOptPipeline(SILPassPipelinePlan &P,
   // Select access kind after capture promotion and before stack promotion.
   // This guarantees that stack-promotable boxes have [static] enforcement.
   P.addAccessEnforcementSelection();
-  P.addInactiveAccessMarkerElimination();
 
   P.addAllocBoxToStack();
   P.addNoReturnFolding();
+  addDefiniteInitialization(P);
+  P.addClosureLifetimeFixup();
   P.addOwnershipModelEliminator();
-  P.addMarkUninitializedFixup();
-  P.addDefiniteInitialization();
   P.addMandatoryInlining();
+  P.addMandatorySILLinker();
   P.addPredictableMemoryOptimizations();
+
+  // Diagnostic ConstantPropagation must be rerun on deserialized functions
+  // because it is sensitive to the assert configuration.
+  // Consequently, certain optimization passes beyond this point will also rerun.
   P.addDiagnosticConstantPropagation();
   P.addGuaranteedARCOpts();
   P.addDiagnoseUnreachable();
+  P.addDiagnoseInfiniteRecursion();
   P.addEmitDFDiagnostics();
   // Canonical swift requires all non cond_br critical edges to be split.
   P.addSplitNonCondBrCriticalEdges();
@@ -218,6 +231,10 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
   // Split up operations on stack-allocated aggregates (struct, tuple).
   P.addSROA();
 
+  // Re-run predictable memory optimizations, since previous optimization
+  // passes sometimes expose oppotunities here.
+  P.addPredictableMemoryOptimizations();
+
   // Promote stack allocations to values.
   P.addMem2Reg();
 
@@ -234,6 +251,9 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
   // current function (after optimizing any new callees).
   P.addDevirtualizer();
   P.addGenericSpecializer();
+  // Run devirtualizer after the specializer, because many
+  // class_method/witness_method instructions may use concrete types now.
+  P.addDevirtualizer();
 
   switch (OpLevel) {
   case OptimizationLevelKind::HighLevel:
@@ -241,10 +261,16 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
     P.addEarlyInliner();
     break;
   case OptimizationLevelKind::MidLevel:
-    // Does inline semantics-functions (except "availability"), but not
-    // global-init functions.
     P.addGlobalOpt();
     P.addLetPropertiesOpt();
+    // It is important to serialize before any of the @_semantics
+    // functions are inlined, because otherwise the information about
+    // uses of such functions inside the module is lost,
+    // which reduces the ability of the compiler to optimize clients
+    // importing this module.
+    P.addSerializeSILPass();
+    // Does inline semantics-functions (except "availability"), but not
+    // global-init functions.
     P.addPerfInliner();
     break;
   case OptimizationLevelKind::LowLevel:
@@ -270,10 +296,11 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
   P.addCSE();
   P.addRedundantLoadElimination();
 
-  // Perform retain/release code motion and run the first ARC optimizer.
+  P.addPerformanceConstantPropagation();
   P.addCSE();
   P.addDCE();
 
+  // Perform retain/release code motion and run the first ARC optimizer.
   P.addEarlyCodeMotion();
   P.addReleaseHoisting();
   P.addARCSequenceOpts();
@@ -288,6 +315,11 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
     P.addEarlyCodeMotion();
 
   P.addRetainSinking();
+  // Retain sinking does not sink all retains in one round.
+  // Let it run one more time time, because it can be beneficial.
+  // FIXME: Improve the RetainSinking pass to sink more/all
+  // retains in one go.
+  P.addRetainSinking();
   P.addReleaseHoisting();
   P.addARCSequenceOpts();
   P.addRemovePins();
@@ -295,7 +327,7 @@ void addSSAPasses(SILPassPipelinePlan &P, OptimizationLevelKind OpLevel) {
 
 static void addPerfDebugSerializationPipeline(SILPassPipelinePlan &P) {
   P.startPipeline("Performance Debug Serialization");
-  P.addSILLinker();
+  P.addPerformanceSILLinker();
 }
 
 static void addPerfEarlyModulePassPipeline(SILPassPipelinePlan &P) {
@@ -305,10 +337,13 @@ static void addPerfEarlyModulePassPipeline(SILPassPipelinePlan &P) {
   // we do not spend time optimizing them.
   P.addDeadFunctionElimination();
   // Start by cloning functions from stdlib.
-  P.addSILLinker();
+  P.addPerformanceSILLinker();
 
   // Cleanup after SILGen: remove trivial copies to temporaries.
   P.addTempRValueOpt();
+
+  // Add the outliner pass (Osize).
+  P.addOutliner();
 }
 
 static void addHighLevelEarlyLoopOptPipeline(SILPassPipelinePlan &P) {
@@ -322,7 +357,7 @@ static void addHighLevelEarlyLoopOptPipeline(SILPassPipelinePlan &P) {
 static void addMidModulePassesStackPromotePassPipeline(SILPassPipelinePlan &P) {
   P.startPipeline("MidModulePasses+StackPromote");
   P.addDeadFunctionElimination();
-  P.addSILLinker();
+  P.addPerformanceSILLinker();
   P.addDeadObjectElimination();
   P.addGlobalPropertyOpt();
 
@@ -337,12 +372,22 @@ static void addMidLevelPassPipeline(SILPassPipelinePlan &P) {
   // Specialize partially applied functions with dead arguments as a preparation
   // for CapturePropagation.
   P.addDeadArgSignatureOpt();
+
+  // Run loop unrolling after inlining and constant propagation, because loop
+  // trip counts may have became constant.
+  P.addLoopUnroll();
 }
 
 static void addClosureSpecializePassPipeline(SILPassPipelinePlan &P) {
   P.startPipeline("ClosureSpecialize");
   P.addDeadFunctionElimination();
   P.addDeadObjectElimination();
+
+  // These few passes are needed to cleanup between loop unrolling and GlobalOpt.
+  P.addSimplifyCFG();
+  P.addSILCombine();
+  P.addPerformanceConstantPropagation();
+  P.addSimplifyCFG();
 
   // Hoist globals out of loops.
   // Global-init functions should not be inlined GlobalOpt is done.
@@ -383,6 +428,9 @@ static void addLowLevelPassPipeline(SILPassPipelinePlan &P) {
   P.addReleaseDevirtualizer();
 
   addSSAPasses(P, OptimizationLevelKind::LowLevel);
+
+  P.addDeadObjectElimination();
+  P.addObjectOutliner();
   P.addDeadStoreElimination();
 
   // We've done a lot of optimizations on this function, attempt to FSO.
@@ -393,7 +441,6 @@ static void addLateLoopOptPassPipeline(SILPassPipelinePlan &P) {
   P.startPipeline("LateLoopOpt");
 
   // Delete dead code and drop the bodies of shared functions.
-  P.addExternalFunctionDefinitionsElimination();
   P.addDeadFunctionElimination();
 
   // Perform the final lowering transformations.
@@ -406,6 +453,7 @@ static void addLateLoopOptPassPipeline(SILPassPipelinePlan &P) {
 
   // Remove dead code.
   P.addDCE();
+  P.addSILCombine();
   P.addSimplifyCFG();
 
   // Try to hoist all releases, including epilogue releases. This should be
@@ -427,7 +475,7 @@ SILPassPipelinePlan
 SILPassPipelinePlan::getLoweringPassPipeline() {
   SILPassPipelinePlan P;
   P.startPipeline("Address Lowering");
-  P.addSILCleanup();
+  P.addIRGenPrepare();
   P.addAddressLowering();
 
   return P;
@@ -457,7 +505,7 @@ SILPassPipelinePlan::getSILOptPreparePassPipeline(const SILOptions &Options) {
   }
 
   P.startPipeline("SILOpt Prepare Passes");
-  P.addFullAccessMarkerElimination();
+  P.addAccessMarkerElimination();
 
   return P;
 }
@@ -515,12 +563,6 @@ SILPassPipelinePlan SILPassPipelinePlan::getOnonePassPipeline() {
   P.addUsePrespecialized();
 
   P.startPipeline("Rest of Onone");
-  // Don't keep external functions from stdlib and other modules.
-  // We don't want that our unoptimized version will be linked instead
-  // of the optimized version from the stdlib.
-  // Here we just convert external definitions to declarations. LLVM will
-  // eventually remove unused declarations.
-  P.addExternalDefsToDecls();
 
   // Has only an effect if the -assume-single-thread option is specified.
   P.addAssumeSingleThreaded();
@@ -594,7 +636,7 @@ void SILPassPipelinePlan::print(llvm::raw_ostream &os) {
                os << "        \"" << Pipeline.Name << "\"";
                for (PassKind Kind : getPipelinePasses(Pipeline)) {
                  os << ",\n        [\"" << PassKindID(Kind) << "\","
-                    << PassKindTag(Kind) << ']';
+                    << "\"" << PassKindTag(Kind) << "\"]";
                }
              },
              [&] { os << "\n    ],\n"; });

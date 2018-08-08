@@ -40,9 +40,11 @@ protocol Racoon {
   associatedtype Stripes
   class Claw<T> { // expected-error{{type 'Claw' cannot be nested in protocol 'Racoon'}}
     func mangle(_ s: Stripes) {}
+    // expected-error@-1 {{use of undeclared type 'Stripes'}}
   }
   struct Fang<T> { // expected-error{{type 'Fang' cannot be nested in protocol 'Racoon'}}
     func gnaw(_ s: Stripes) {}
+    // expected-error@-1 {{use of undeclared type 'Stripes'}}
   }
   enum Fur { // expected-error{{type 'Fur' cannot be nested in protocol 'Racoon'}}
     case Stripes
@@ -50,12 +52,10 @@ protocol Racoon {
 }
 
 enum SillyRawEnum : SillyProtocol.InnerClass {}
-// expected-error@-1 {{reference to generic type 'SillyProtocol.InnerClass' requires arguments in <...>}}
-// expected-error@-2 {{type 'SillyRawEnum' does not conform to protocol 'RawRepresentable'}}
+// expected-error@-1 {{type 'SillyRawEnum' does not conform to protocol 'RawRepresentable'}}
 
 protocol SillyProtocol {
   class InnerClass<T> {} // expected-error {{type 'InnerClass' cannot be nested in protocol 'SillyProtocol'}}
-  // expected-note@-1 {{generic type 'InnerClass' declared here}}
 }
 
 enum OuterEnum {

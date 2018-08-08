@@ -3,6 +3,7 @@ set(LLVM_LINK_COMPONENTS
   ExecutionEngine
   MC
   MCJIT
+  Option
   Support
   native
   )
@@ -16,6 +17,7 @@ add_dependencies(clang-interpreter
   )
 
 target_link_libraries(clang-interpreter
+  PRIVATE
   clangBasic
   clangCodeGen
   clangDriver

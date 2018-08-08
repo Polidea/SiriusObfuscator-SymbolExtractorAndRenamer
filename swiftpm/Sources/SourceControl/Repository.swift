@@ -11,7 +11,7 @@
 import Basic
 
 /// Specifies a repository address.
-public struct RepositorySpecifier {
+public struct RepositorySpecifier: Hashable {
     /// The URL of the repository.
     public let url: String
 
@@ -30,16 +30,6 @@ public struct RepositorySpecifier {
         // persistence.
         let basename = url.components(separatedBy: "/").last!
         return basename + "-" + String(url.hashValue)
-    }
-}
-
-extension RepositorySpecifier: Hashable {
-    public var hashValue: Int {
-        return url.hashValue
-    }
-    
-    public static func == (lhs: RepositorySpecifier, rhs: RepositorySpecifier) -> Bool {
-        return lhs.url == rhs.url
     }
 }
 
@@ -185,7 +175,7 @@ public protocol WorkingCheckout {
 
     /// This check for any modified state of the repository and returns true
     /// if there are uncommited changes.
-    func hasUncommitedChanges() -> Bool
+    func hasUncommittedChanges() -> Bool
 
     /// Check out the given tag.
     func checkout(tag: String) throws
@@ -200,6 +190,9 @@ public protocol WorkingCheckout {
     ///
     /// Note: It is an error to provide a branch name which already exists.
     func checkout(newBranch: String) throws
+
+    /// Returns true if there is an alternative store in the checkout and it is valid.
+    func isAlternateObjectStoreValid() -> Bool
 }
 
 /// A single repository revision.
@@ -213,14 +206,6 @@ public struct Revision: Hashable {
 
     public init(identifier: String) {
         self.identifier = identifier
-    }
-
-    public var hashValue: Int {
-        return identifier.hashValue
-    }
-
-    public static func == (lhs: Revision, rhs: Revision) -> Bool {
-        return lhs.identifier == rhs.identifier
     }
 }
 

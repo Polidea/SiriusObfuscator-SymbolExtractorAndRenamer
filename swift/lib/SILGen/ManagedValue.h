@@ -31,6 +31,7 @@ enum class CastConsumptionKind : unsigned char;
 
 namespace Lowering {
 
+class Initialization;
 class SILGenFunction;
 
 /// ManagedValue - represents a singular SIL value and an optional cleanup.
@@ -200,7 +201,33 @@ public:
     // either +0 or trivial (in which case +0 vs +1 doesn't matter).
     return !hasCleanup();
   }
-  
+
+  /// Returns true if this is an managed value that can be used safely as a +1
+  /// managed value.
+  ///
+  /// This returns true iff:
+  ///
+  /// 1. All sub-values are trivially typed.
+  /// 2. There exists at least one non-trivial typed sub-value and all such
+  /// sub-values all have cleanups.
+  ///
+  /// *NOTE* Due to 1. isPlusOne and isPlusZero both return true for managed
+  /// values consisting of only trivial values.
+  bool isPlusOne(SILGenFunction &SGF) const;
+
+  /// Returns true if this is an ManagedValue that can be used safely as a +0
+  /// ManagedValue.
+  ///
+  /// Specifically, we return true if:
+  ///
+  /// 1. All sub-values are trivially typed.
+  /// 2. At least 1 subvalue is non-trivial and all such non-trivial values do
+  /// not have a cleanup.
+  ///
+  /// *NOTE* Due to 1. isPlusOne and isPlusZero both return true for
+  /// ManagedValues consisting of only trivial values.
+  bool isPlusZero() const;
+
   SILValue getLValueAddress() const {
     assert(isLValue() && "This isn't an lvalue");
     return getValue();
@@ -235,7 +262,7 @@ public:
   }
 
   /// Emit a copy of this value with independent ownership.
-  ManagedValue copy(SILGenFunction &SGF, SILLocation loc);
+  ManagedValue copy(SILGenFunction &SGF, SILLocation loc) const;
 
   /// Emit a copy of this value with independent ownership into the current
   /// formal evaluation scope.
@@ -270,6 +297,10 @@ public:
     return isLValue() ? *this : ManagedValue::forUnmanaged(getValue());
   }
 
+  /// If this managed value is a plus one value, return *this. If this is a plus
+  /// zero value, return a copy instead.
+  ManagedValue ensurePlusOne(SILGenFunction &SGF, SILLocation loc) const;
+
   /// Given a scalar value, materialize it into memory with the
   /// exact same level of cleanup it had before.
   ManagedValue materialize(SILGenFunction &SGF, SILLocation loc) const;
@@ -287,6 +318,13 @@ public:
   /// \param loc - the AST location to associate with emitted instructions.
   /// \param address - the address to assign to.
   void forwardInto(SILGenFunction &SGF, SILLocation loc, SILValue address);
+
+  /// Forward this value into the given initialization.
+  ///
+  /// \param SGF - The SILGenFunction.
+  /// \param loc - the AST location to associate with emitted instructions.
+  /// \param dest - the destination to forward into
+  void forwardInto(SILGenFunction &SGF, SILLocation loc, Initialization *dest);
   
   /// Assign this value into memory, destroying the existing
   /// value at the destination address.
@@ -302,6 +340,7 @@ public:
   }
 
   void dump() const;
+  void dump(raw_ostream &os, unsigned indent = 0) const;
   void print(raw_ostream &os) const;
 };
 

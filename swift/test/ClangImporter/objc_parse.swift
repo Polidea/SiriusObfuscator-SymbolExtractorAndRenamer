@@ -8,6 +8,7 @@ import AVFoundation
 import Newtype
 import objc_ext
 import TestProtocols
+import TypeAndValue
 
 import ObjCParseExtras
 import ObjCParseExtrasToo
@@ -127,9 +128,12 @@ func properties(_ b: B) {
 
   // Dynamic properties.
   var obj : AnyObject = b
-  var optStr = obj.nsstringProperty
+  var optStr = obj.nsstringProperty // optStr has type String??
   if optStr != nil {
-    var s : String = optStr!
+    var s : String = optStr! // expected-error{{value of optional type 'String?' must be unwrapped}}
+    // expected-note@-1{{coalesce}}
+    // expected-note@-2{{force-unwrap}}
+    var t : String = optStr!!
   }
 
   // Properties that are Swift keywords
@@ -174,7 +178,7 @@ func keyedSubscripting(_ b: B, idx: A, a: A) {
   dict[NSString()] = a
   let value = dict[NSString()]
 
-  dict[nil] = a // expected-error {{ambiguous reference}}
+  dict[nil] = a // expected-error {{cannot assign value of type 'A' to type 'Any?'}}
   let q = dict[nil]  // expected-error {{ambiguous subscript}}
   _ = q
 }
@@ -213,7 +217,7 @@ func testProtocolMethods(_ b: B, p2m: P2.Type) {
 
 func testId(_ x: AnyObject) {
   x.perform!("foo:", with: x) // expected-warning{{no method declared with Objective-C selector 'foo:'}}
-  // expected-warning @-1 {{result of call is unused, but produces 'Unmanaged<AnyObject>!'}}
+  // expected-warning @-1 {{result of call is unused, but produces 'Unmanaged<AnyObject>?'}}
 
   _ = x.performAdd(1, withValue: 2, withValue: 3, withValue2: 4)
   _ = x.performAdd!(1, withValue: 2, withValue: 3, withValue2: 4)
@@ -250,13 +254,13 @@ func almostSubscriptableKeyMismatch(_ bc: BadCollection, key: NSString) {
 
 func almostSubscriptableKeyMismatchInherited(_ bc: BadCollectionChild,
                                              key: String) {
-  var value : Any = bc[key] // no-warning, inherited from parent
+  var value : Any = bc[key]
   bc[key] = value // expected-error{{cannot assign through subscript: subscript is get-only}}
 }
 
 func almostSubscriptableKeyMismatchInherited(_ roc: ReadOnlyCollectionChild,
                                              key: String) {
-  var value : Any = roc[key] // no-warning, inherited from parent
+  var value : Any = roc[key]
   roc[key] = value // expected-error{{cannot assign through subscript: subscript is get-only}}
 }
 
@@ -286,7 +290,9 @@ extension Wobbler2 : NSMaybeInitWobble { // expected-error{{type 'Wobbler2' does
 
 func optionalMemberAccess(_ w: NSWobbling) {
   w.wobble()
-  w.wibble() // expected-error{{value of optional type '(() -> Void)?' not unwrapped; did you mean to use '!' or '?'?}} {{11-11=!}}
+  w.wibble() // expected-error{{value of optional type '(() -> Void)?' must be unwrapped}}
+  // expected-note@-1{{coalesce}}
+  // expected-note@-2{{force-unwrap}}
   let x = w[5]!!
   _ = x
 }
@@ -377,7 +383,7 @@ func testPreferClassMethodToCurriedInstanceMethod(_ obj: NSObject) {
   // FIXME: We shouldn't need the ": Bool" type annotation here.
   // <rdar://problem/18006008>
   let _: Bool = NSObject.isEqual(obj)
-  _ = NSObject.isEqual(obj) as (NSObject!) -> Bool // no-warning
+  _ = NSObject.isEqual(obj) as (NSObject?) -> Bool // no-warning
 }
 
 
@@ -486,8 +492,7 @@ func testWeakVariable() {
 }
 
 class IncompleteProtocolAdopter : Incomplete, IncompleteOptional { // expected-error {{type 'IncompleteProtocolAdopter' cannot conform to protocol 'Incomplete' because it has requirements that cannot be satisfied}}
-      // expected-error@-1{{type 'IncompleteProtocolAdopter' does not conform to protocol 'Incomplete'}}
-  @objc func getObject() -> AnyObject { return self } // expected-note{{candidate has non-matching type '() -> AnyObject'}}
+  @objc func getObject() -> AnyObject { return self }
 }
 
 func testNullarySelectorPieces(_ obj: AnyObject) {
@@ -628,4 +633,43 @@ class NewtypeUser {
   @objc func stringNewtypeOptional(a: SNTErrorDomain?) {} // expected-error {{'SNTErrorDomain' has been renamed to 'ErrorDomain'}}{{39-53=ErrorDomain}}
   @objc func intNewtype(a: MyInt) {}
   @objc func intNewtypeOptional(a: MyInt?) {} // expected-error {{method cannot be marked @objc because the type of the parameter cannot be represented in Objective-C}}
+  @objc func intNewtypeArray(a: [MyInt]) {} // expected-error {{method cannot be marked @objc because the type of the parameter cannot be represented in Objective-C}}
+  @objc func intNewtypeDictionary(a: [MyInt: NSObject]) {} // expected-error {{method cannot be marked @objc because the type of the parameter cannot be represented in Objective-C}}
+  @objc func cfNewtype(a: CFNewType) {}
+  @objc func cfNewtypeArray(a: [CFNewType]) {} // expected-error {{method cannot be marked @objc because the type of the parameter cannot be represented in Objective-C}}
+}
+
+func testTypeAndValue() {
+  _ = testStruct()
+  _ = testStruct(value: 0)
+  let _: (testStruct) -> Void = testStruct
+  let _: () -> testStruct = testStruct.init
+  let _: (CInt) -> testStruct = testStruct.init
+}
+
+// rdar://problem/34913507
+func testBridgedTypedef(bt: BridgedTypedefs) {
+  let _: Int = bt.arrayOfArrayOfStrings // expected-error{{'[[String]]'}}
+}
+
+func testBridgeFunctionPointerTypedefs(fptrTypedef: FPTypedef) {
+  // See also print_clang_bool_bridging.swift.
+  let _: Int = fptrTypedef // expected-error{{'@convention(c) (String) -> String'}}
+  let _: Int = getFP() // expected-error{{'@convention(c) (String) -> String'}}
+}
+
+func testNonTrivialStructs() {
+  _ = NonTrivialToCopy() // expected-error {{use of unresolved identifier 'NonTrivialToCopy'}}
+  _ = NonTrivialToCopyWrapper() // expected-error {{use of unresolved identifier 'NonTrivialToCopyWrapper'}}
+  _ = TrivialToCopy() // okay
+}
+
+func testErrorNewtype() {
+  _ = ErrorNewType(3) // expected-error {{argument type 'Int' does not conform to expected type 'Error'}}
+
+  // Since we import NSError as Error, and Error is not Hashable...we end up
+  // losing the types for these functions, even though the above assignment 
+  // works.
+  testErrorDictionary(3) // expected-error {{cannot convert value of type 'Int' to expected argument type '[AnyHashable : String]'}}
+  testErrorDictionaryNewtype(3) // expected-error {{cannot convert value of type 'Int' to expected argument type '[AnyHashable : String]'}}
 }

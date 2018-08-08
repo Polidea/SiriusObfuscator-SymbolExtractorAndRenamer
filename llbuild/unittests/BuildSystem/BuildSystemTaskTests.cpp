@@ -25,6 +25,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include <memory>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -36,6 +37,86 @@ using namespace llbuild::buildsystem;
 using namespace llbuild::unittests;
 
 namespace {
+
+class LoggingFileSystem : public FileSystem {
+private:
+  std::mutex deletedPathsMutex;
+  std::vector<std::string> deletedPaths;
+  std::mutex missingPathsMutex;
+  std::vector<std::string> missingPaths;
+
+  std::unique_ptr<FileSystem> realFS = createLocalFileSystem();
+
+public:
+  std::vector<std::string> getDeletedPaths() {
+    std::unique_lock<std::mutex> lock(deletedPathsMutex);
+    return deletedPaths;
+  }
+
+  std::vector<std::string> getMissingPaths() {
+    std::unique_lock<std::mutex> lock(missingPathsMutex);
+    return missingPaths;
+  }
+
+  LoggingFileSystem() {}
+
+  virtual bool createDirectory(const std::string& path) override {
+    return realFS->createDirectory(path);
+  }
+
+  virtual std::unique_ptr<llvm::MemoryBuffer> getFileContents(const std::string& path) override {
+    return realFS->getFileContents(path);
+  }
+
+  virtual bool remove(const std::string& path) override {
+    std::unique_lock<std::mutex> lock(deletedPathsMutex);
+    deletedPaths.push_back(path);
+    return true;
+  }
+
+  virtual FileInfo getFileInfo(const std::string& path) override {
+    FileInfo info = realFS->getFileInfo(path);
+    if (info.isMissing()) {
+      std::unique_lock<std::mutex> lock(missingPathsMutex);
+      missingPaths.push_back(path);
+    }
+    return info;
+  }
+
+  virtual FileInfo getLinkInfo(const std::string& path) override {
+    return realFS->getLinkInfo(path);
+  }
+};
+
+/// Wrap a file system object reference so that tests may create a unique object
+/// that shares access to the underlying object
+class FileSystemReferenceWrapper : public FileSystem {
+private:
+  FileSystem& realFS;
+
+public:
+  FileSystemReferenceWrapper(FileSystem& realFS) : realFS(realFS) {}
+
+  virtual bool createDirectory(const std::string& path) override {
+    return realFS.createDirectory(path);
+  }
+
+  virtual std::unique_ptr<llvm::MemoryBuffer> getFileContents(const std::string& path) override {
+    return realFS.getFileContents(path);
+  }
+
+  virtual bool remove(const std::string& path) override {
+    return realFS.remove(path);
+  }
+
+  virtual FileInfo getFileInfo(const std::string& path) override {
+    return realFS.getFileInfo(path);
+  }
+
+  virtual FileInfo getLinkInfo(const std::string& path) override {
+    return realFS.getLinkInfo(path);
+  }
+};
 
 /// Check that we evaluate a path key properly.
 TEST(BuildSystemTaskTests, basics) {
@@ -55,7 +136,7 @@ TEST(BuildSystemTaskTests, basics) {
   // Create the build system.
   auto description = llvm::make_unique<BuildDescription>();
   MockBuildSystemDelegate delegate;
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, createLocalFileSystem());
   system.loadDescription(std::move(description));
 
   // Build a specific key.
@@ -63,6 +144,26 @@ TEST(BuildSystemTaskTests, basics) {
   ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isExistingInput());
   ASSERT_EQ(result.getValue().getOutputInfo().size, testString.size());
+}
+
+/// Check that we evaluate a missing input path key properly.
+TEST(BuildSystemTaskTests, missingInput) {
+  TmpDir tempDir{ __FUNCTION__ };
+
+  // Create a non-existent sample file path.
+  SmallString<256> path{ tempDir.str() };
+  sys::path::append(path, "a.txt");
+
+  // Create the build system.
+  auto description = llvm::make_unique<BuildDescription>();
+  MockBuildSystemDelegate delegate;
+  BuildSystem system(delegate, createLocalFileSystem());
+  system.loadDescription(std::move(description));
+
+  // Build a specific key.
+  auto result = system.build(BuildKey::makeNode(path));
+  ASSERT_TRUE(result.hasValue());
+  ASSERT_TRUE(result.getValue().isMissingInput());
 }
 
 
@@ -91,12 +192,13 @@ TEST(BuildSystemTaskTests, directoryContents) {
   // Create the build system.
   auto description = llvm::make_unique<BuildDescription>();
   MockBuildSystemDelegate delegate;
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, createLocalFileSystem());
   system.loadDescription(std::move(description));
 
   // Build a specific key.
   {
-    auto result = system.build(BuildKey::makeDirectoryContents(tempDir.str()));
+    auto result = system.build(BuildKey::makeDirectoryContents(tempDir.str(),
+                                                               StringList()));
     ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result->isDirectoryContents());
     ASSERT_EQ(result->getDirectoryContents(), std::vector<StringRef>({
@@ -106,10 +208,70 @@ TEST(BuildSystemTaskTests, directoryContents) {
   // Check that a missing directory behaves properly.
   {
     auto result = system.build(BuildKey::makeDirectoryContents(
-                                   tempDir.str() + "/missing-subpath"));
+                                   tempDir.str() + "/missing-subpath",
+                                                               StringList()));
     ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result->isMissingInput());
   }
+}
+
+/// Check that we evaluate a produced node dependency properly
+TEST(BuildSystemTaskTests, producedNode) {
+  TmpDir tempDir{ __FUNCTION__ };
+  auto localFS = createLocalFileSystem();
+
+  // Create a outputFile path
+  SmallString<256> outputFile{ tempDir.str() };
+  sys::path::append(outputFile, "a.txt");
+
+  SmallString<256> manifest{ tempDir.str() };
+  sys::path::append(manifest, "manifest.llbuild");
+  {
+    std::error_code ec;
+    llvm::raw_fd_ostream os(manifest, ec, llvm::sys::fs::F_Text);
+    assert(!ec);
+
+    os <<
+    "client:\n"
+    "  name: mock\n"
+    "\n"
+    "targets:\n"
+    "  \"\": [\"<all>\"]\n"
+    "\n"
+    "nodes:\n"
+    "  \"" << outputFile << "\": {}\n"
+    "\n"
+    "commands:\n"
+    "  \"touch-outputFile\":\n"
+    "    tool: shell\n"
+    "    outputs: [\"" << outputFile << "\"]\n"
+    "    description: \"touch-outputFile\"\n"
+    "    args:\n"
+    "      touch " << outputFile << "\n"
+    "  \"<all>\":\n"
+    "    tool: phony\n"
+    "    inputs: [\"" << outputFile << "\"]\n"
+    "    outputs: [\"<all>\"]";
+  }
+
+  // Create the build system.
+  auto keyToBuild = BuildKey::makeTarget("");
+  MockBuildSystemDelegate delegate;
+  BuildSystem system(delegate, createLocalFileSystem());
+  bool loadingResult = system.loadDescription(manifest);
+  ASSERT_TRUE(loadingResult);
+
+  // Check that the file does not exist
+  auto beforeFileInfo = localFS->getFileInfo(outputFile.str());
+  ASSERT_TRUE(beforeFileInfo.isMissing());
+
+  // Build a specific key.
+  auto result = system.build(keyToBuild);
+  ASSERT_TRUE(result.hasValue());
+
+  // Check that the file does exist
+  auto afterFileInfo = localFS->getFileInfo(outputFile.str());
+  ASSERT_TRUE(!afterFileInfo.isMissing());
 }
 
 
@@ -148,10 +310,11 @@ TEST(BuildSystemTaskTests, directorySignature) {
   }
   
   // Create the build system.
-  auto keyToBuild = BuildKey::makeDirectoryTreeSignature(tempDir.str());
+  auto keyToBuild = BuildKey::makeDirectoryTreeSignature(tempDir.str(),
+                                                         StringList());
   auto description = llvm::make_unique<BuildDescription>();
   MockBuildSystemDelegate delegate;
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, createLocalFileSystem());
   system.loadDescription(std::move(description));
 
   // Build an initial value.
@@ -232,7 +395,7 @@ TEST(BuildSystemTaskTests, doesNotProcessDependenciesAfterCancellation) {
 
   auto keyToBuild = BuildKey::makeCommand("WAIT");
   MockBuildSystemDelegate delegate;
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, basic::createLocalFileSystem());
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
 
@@ -357,7 +520,7 @@ commands:
 
   {
     MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-    BuildSystem system(delegate);
+    BuildSystem system(delegate, createLocalFileSystem());
     system.attachDB(builddb.c_str(), nullptr);
 
     bool loadingResult = system.loadDescription(manifest);
@@ -365,6 +528,7 @@ commands:
 
     auto result = system.build(keyToBuild);
 
+    ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result.getValue().isStaleFileRemoval());
     ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
     ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "a.out") == 0);
@@ -393,22 +557,26 @@ commands:
 )END";
   }
 
+  auto mockFS = std::make_shared<LoggingFileSystem>();
+  std::unique_ptr<FileSystem> wrapFS(new FileSystemReferenceWrapper(*mockFS));
   MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, std::move(wrapFS));
   system.attachDB(builddb.c_str(), nullptr);
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
   auto result = system.build(keyToBuild);
 
+  ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isStaleFileRemoval());
   ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
   ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "b.out") == 0);
 
+  ASSERT_EQ(std::vector<std::string>({ "a.out" }), mockFS->getDeletedPaths());
+
   ASSERT_EQ(std::vector<std::string>({
     "commandPreparing(C.1)",
     "commandStarted(C.1)",
-    // FIXME: Maybe it's worth creating a virtual FileSystem implementation and checking if `remove` has been called
-    "commandWarning(C.1) cannot remove stale file 'a.out': No such file or directory\n",
+    "commandNote(C.1) Removed stale file 'a.out'\n",
     "commandFinished(C.1: 0)",
   }), delegate.getMessages());
 }
@@ -442,7 +610,7 @@ commands:
 
   {
     MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-    BuildSystem system(delegate);
+    BuildSystem system(delegate, createLocalFileSystem());
     system.attachDB(builddb.c_str(), nullptr);
 
     bool loadingResult = system.loadDescription(manifest);
@@ -450,6 +618,7 @@ commands:
 
     auto result = system.build(keyToBuild);
 
+    ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result.getValue().isStaleFileRemoval());
     ASSERT_EQ(result.getValue().getStaleFileList().size(), 3UL);
     ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "/bar/a.out") == 0);
@@ -481,13 +650,16 @@ commands:
 )END";
   }
 
+  auto mockFS = std::make_shared<LoggingFileSystem>();
+  std::unique_ptr<FileSystem> wrapFS(new FileSystemReferenceWrapper(*mockFS));
   MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, std::move(wrapFS));
   system.attachDB(builddb.c_str(), nullptr);
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
   auto result = system.build(keyToBuild);
 
+  ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isStaleFileRemoval());
   ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
   ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "/bar/b.out") == 0);
@@ -495,13 +667,15 @@ commands:
   auto messages = delegate.getMessages();
   std::sort(messages.begin(), messages.end());
 
+  ASSERT_EQ(std::vector<std::string>({ "/foo" }), mockFS->getDeletedPaths());
+
   ASSERT_EQ(std::vector<std::string>({
     "commandFinished(C.1: 0)",
+    "commandNote(C.1) Removed stale file '/foo'\n",
     "commandPreparing(C.1)",
     "commandStarted(C.1)",
     "commandWarning(C.1) Stale file '/bar/a.out' is located outside of the allowed root paths.\n",
     "commandWarning(C.1) Stale file '/foobar.txt' is located outside of the allowed root paths.\n",
-    "commandWarning(C.1) cannot remove stale file '/foo': No such file or directory\n",
   }), messages);
 }
 
@@ -534,7 +708,7 @@ commands:
 
   {
     MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-    BuildSystem system(delegate);
+    BuildSystem system(delegate, createLocalFileSystem());
     system.attachDB(builddb.c_str(), nullptr);
 
     bool loadingResult = system.loadDescription(manifest);
@@ -542,6 +716,7 @@ commands:
 
     auto result = system.build(keyToBuild);
 
+    ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result.getValue().isStaleFileRemoval());
     ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
     ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "a.out") == 0);
@@ -572,12 +747,13 @@ commands:
   }
 
   MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, createLocalFileSystem());
   system.attachDB(builddb.c_str(), nullptr);
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
   auto result = system.build(keyToBuild);
 
+  ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isStaleFileRemoval());
   ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
   ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "/bar/b.out") == 0);
@@ -619,7 +795,7 @@ commands:
 
   {
     MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-    BuildSystem system(delegate);
+    BuildSystem system(delegate, createLocalFileSystem());
     system.attachDB(builddb.c_str(), nullptr);
 
     bool loadingResult = system.loadDescription(manifest);
@@ -627,6 +803,7 @@ commands:
 
     auto result = system.build(keyToBuild);
 
+    ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result.getValue().isStaleFileRemoval());
     ASSERT_EQ(result.getValue().getStaleFileList().size(), 2UL);
     ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "a.out") == 0);
@@ -656,24 +833,32 @@ commands:
 )END";
   }
 
+  auto mockFS = std::make_shared<LoggingFileSystem>();
+  std::unique_ptr<FileSystem> wrapFS(new FileSystemReferenceWrapper(*mockFS));
   MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, std::move(wrapFS));
   system.attachDB(builddb.c_str(), nullptr);
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
   auto result = system.build(keyToBuild);
 
+  ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isStaleFileRemoval());
   ASSERT_EQ(result.getValue().getStaleFileList().size(), 1UL);
   ASSERT_TRUE(strcmp(result.getValue().getStaleFileList()[0].str().c_str(), "/bar/b.out") == 0);
 
+  ASSERT_EQ(std::vector<std::string>({ "/foo/" }), mockFS->getDeletedPaths());
+
+  auto messages = delegate.getMessages();
+  std::sort(messages.begin(), messages.end());
+
   ASSERT_EQ(std::vector<std::string>({
+    "commandFinished(C.1: 0)",
+    "commandNote(C.1) Removed stale file '/foo/'\n",
     "commandPreparing(C.1)",
     "commandStarted(C.1)",
-    "commandWarning(C.1) cannot remove stale file '/foo/': No such file or directory\n",
     "commandWarning(C.1) Stale file 'a.out' has a relative path. This is invalid in combination with the root path attribute.\n",
-    "commandFinished(C.1: 0)",
-  }), delegate.getMessages());
+  }), messages);
 }
 
 TEST(BuildSystemTaskTests, staleFileRemovalWithManyFiles) {
@@ -708,7 +893,7 @@ commands:
 
   {
     MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-    BuildSystem system(delegate);
+    BuildSystem system(delegate, createLocalFileSystem());
     system.attachDB(builddb.c_str(), nullptr);
 
     bool loadingResult = system.loadDescription(manifest);
@@ -716,6 +901,7 @@ commands:
 
     auto result = system.build(keyToBuild);
 
+    ASSERT_TRUE(result.hasValue());
     ASSERT_TRUE(result.getValue().isStaleFileRemoval());
     ASSERT_EQ(result.getValue().getStaleFileList().size(), 50UL);
 
@@ -753,12 +939,13 @@ commands:
   }
 
   MockBuildSystemDelegate delegate(/*trackAllMessages=*/true);
-  BuildSystem system(delegate);
+  BuildSystem system(delegate, createLocalFileSystem());
   system.attachDB(builddb.c_str(), nullptr);
   bool loadingResult = system.loadDescription(manifest);
   ASSERT_TRUE(loadingResult);
   auto result = system.build(keyToBuild);
 
+  ASSERT_TRUE(result.hasValue());
   ASSERT_TRUE(result.getValue().isStaleFileRemoval());
   ASSERT_EQ(result.getValue().getStaleFileList().size(), 22UL);
 
@@ -786,4 +973,90 @@ TEST(BuildSystemTaskTests, staleFileRemovalPathIsPrefixedByPath) {
   ASSERT_FALSE(pathIsPrefixedByPath("/foobar", "/foo"));
 }
 
+}
+
+/// Check that we evaluate properly handle a previously missing input that may
+/// now be produced.
+TEST(BuildSystemTaskTests, producedNodeAfterPreviouslyMissing) {
+  TmpDir tempDir{ __FUNCTION__ };
+  auto localFS = createLocalFileSystem();
+
+  SmallString<256> builddb{ tempDir.str() };
+  sys::path::append(builddb, "build.db");
+
+  SmallString<256> outputFile{ tempDir.str() };
+  sys::path::append(outputFile, "a.txt");
+
+  // Try to build the missing output file
+  {
+    // Create the build system.
+    auto description = llvm::make_unique<BuildDescription>();
+    MockBuildSystemDelegate delegate;
+    BuildSystem system(delegate, createLocalFileSystem());
+    system.attachDB(builddb.c_str(), nullptr);
+    system.loadDescription(std::move(description));
+
+    // Build a specific key.
+    auto result = system.build(BuildKey::makeNode(outputFile));
+    ASSERT_TRUE(result.hasValue());
+    ASSERT_TRUE(result.getValue().isMissingInput());
+  }
+
+  // Build such that the output file should be produced
+  {
+    SmallString<256> manifest{ tempDir.str() };
+    sys::path::append(manifest, "manifest.llbuild");
+    {
+      std::error_code ec;
+      llvm::raw_fd_ostream os(manifest, ec, llvm::sys::fs::F_Text);
+      assert(!ec);
+
+      os <<
+      "client:\n"
+      "  name: mock\n"
+      "\n"
+      "targets:\n"
+      "  \"\": [\"<all>\"]\n"
+      "\n"
+      "nodes:\n"
+      "  \"" << outputFile << "\": {}\n"
+      "\n"
+      "commands:\n"
+      "  \"touch-outputFile\":\n"
+      "    tool: shell\n"
+      "    outputs: [\"" << outputFile << "\"]\n"
+      "    description: \"touch-outputFile\"\n"
+      "    args:\n"
+      "      touch " << outputFile << "\n"
+      "  \"<all>\":\n"
+      "    tool: phony\n"
+      "    inputs: [\"" << outputFile << "\"]\n"
+      "    outputs: [\"<all>\"]\n";
+    }
+
+    // Create the build system.
+    auto keyToBuild = BuildKey::makeTarget("");
+    MockBuildSystemDelegate delegate;
+    BuildSystem system(delegate, createLocalFileSystem());
+    system.attachDB(builddb.c_str(), nullptr);
+    bool loadingResult = system.loadDescription(manifest);
+    ASSERT_TRUE(loadingResult);
+
+    // Check that the file does not exist
+    auto beforeFileInfo = localFS->getFileInfo(outputFile.str());
+    ASSERT_TRUE(beforeFileInfo.isMissing());
+
+    // Build a specific key.
+    auto result = system.build(keyToBuild);
+    ASSERT_TRUE(result.hasValue());
+
+    // Ensure that we have not had any missing inputs
+    for (auto message : delegate.getMessages()) {
+      ASSERT_EQ(message.find("missing input"), std::string::npos);
+    }
+
+    // Check that the file does exist
+    auto afterFileInfo = localFS->getFileInfo(outputFile.str());
+    ASSERT_TRUE(!afterFileInfo.isMissing());
+  }
 }

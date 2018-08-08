@@ -13,6 +13,9 @@
 #ifndef LLBUILD_BUILDSYSTEM_COMMAND_RESULT_H
 #define LLBUILD_BUILDSYSTEM_COMMAND_RESULT_H
 
+#include "llbuild/Basic/CrossPlatformCompatibility.h"
+#include <inttypes.h>
+
 namespace llbuild {
 namespace buildsystem {
 
@@ -22,6 +25,32 @@ enum class CommandResult {
   Failed,
   Cancelled,
   Skipped,
+};
+
+/// Extended result of a command execution.
+struct CommandExtendedResult {
+  CommandResult result; /// The final status of the command
+  int exitStatus;       /// The exit code
+
+  uint64_t utime;     /// User time (in us)
+  uint64_t stime;     /// Sys time (in us)
+  uint64_t maxrss;    /// Max RSS (in bytes)
+  llbuild_pid_t pid;  /// Process identifier (can be -1 for failure reasons)
+
+  CommandExtendedResult(CommandResult result, int exitStatus, llbuild_pid_t pid, uint64_t utime = 0,
+                uint64_t stime = 0, uint64_t maxrss = 0)
+    : result(result), exitStatus(exitStatus), utime(utime)
+    , stime(stime), maxrss(maxrss), pid(pid)
+  {}
+
+  static CommandExtendedResult makeFailed(int exitStatus = -1) {
+    return CommandExtendedResult(CommandResult::Failed, exitStatus, -1);
+  }
+
+  static CommandExtendedResult makeCancelled(int exitStatus = -1) {
+    return CommandExtendedResult(CommandResult::Cancelled, exitStatus, -1);
+  }
+
 };
 
 }

@@ -56,7 +56,23 @@ public extension ManifestResourceProvider {
 extension ToolsVersion {
     /// Returns the manifest version for this tools version.
     public var manifestVersion: ManifestVersion {
-        return major == 3 ? .three : .four
+        // FIXME: This works for now but we may want to do something better here
+        // if we're going to have a lot of manifest versions. We can make
+        // ManifestVersion a proper version type and then automatically
+        // determine the best version from the available versions.
+        //
+        // Return manifest version 3 if major component of tools version is 3.
+        if major == 3 {
+            return .v3
+        }
+
+        // If the tools version is less than 4.2, return manifest version 4.
+        if major == 4 && minor < 2 {
+            return .v4
+        }
+
+        // Return 4.2 for otherwise.
+        return .v4_2
     }
 }
 
@@ -149,7 +165,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         path inputPath: AbsolutePath,
         baseURL: String,
         version: Version?,
-        manifestVersion: ManifestVersion = .three,
+        manifestVersion: ManifestVersion = .v3,
         fileSystem: FileSystem? = nil
     ) throws -> Manifest {
         // If we were given a file system, load via a temporary file.
@@ -186,24 +202,36 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         }
         let json = try JSON(string: jsonString)
 
+        // The loaded manifest object.
+        let manifest: Manifest
+
         // Load the correct version from JSON.
         switch manifestVersion {
-        case .three:
+        case .v3:
             let pd = try loadPackageDescription(json, baseURL: baseURL)
-            return Manifest(
+            manifest = Manifest(
                 path: inputPath,
                 url: baseURL,
                 package: .v3(pd.package),
                 legacyProducts: pd.products,
                 version: version,
-                interpreterFlags: parseResult.interpreterFlags)
+                interpreterFlags: parseResult.interpreterFlags,
+                manifestVersion: manifestVersion
+            )
 
-        case .four:
+        case .v4, .v4_2:
             let package = try loadPackageDescription4(json, baseURL: baseURL)
-            return Manifest(
-                path: inputPath, url: baseURL, package: .v4(package),
-                version: version, interpreterFlags: parseResult.interpreterFlags)
+            manifest = Manifest(
+                path: inputPath,
+                url: baseURL,
+                package: .v4(package),
+                version: version,
+                interpreterFlags: parseResult.interpreterFlags,
+                manifestVersion: manifestVersion
+            )
         }
+
+        return manifest
     }
 
     /// Parse the manifest at the given path to JSON.
@@ -217,7 +245,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
                "Manifest files must contain .swift suffix in their name, given: \(manifestPath.asString).")
 
         // For now, we load the manifest by having Swift interpret it directly.
-        // Eventually, we should have two loading processes, one that loads only the
+        // Eventually, we should have two loading processes, one that loads only
         // the declarative package specification using the Swift compiler directly
         // and validates it.
 
@@ -237,7 +265,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
         cmd += [resources.swiftCompiler.asString]
         cmd += ["--driver-mode=swift"]
         cmd += verbosity.ccArgs
-        cmd += ["-L", runtimePath, "-lPackageDescription"]
+        cmd += ["-L", runtimePath, "-lPackageDescription", "-suppress-warnings"]
         cmd += interpreterFlags
         cmd += [manifestPath.asString]
 
@@ -290,7 +318,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
     ) -> [String] {
         var cmd = [String]()
         let runtimePath = self.runtimePath(for: manifestVersion)
-        cmd += ["-swift-version", String(manifestVersion.rawValue)]
+        cmd += ["-swift-version", manifestVersion.swiftLanguageVersion.rawValue]
         cmd += ["-I", runtimePath.asString]
       #if os(macOS)
         cmd += ["-target", "x86_64-apple-macosx10.10"]
@@ -303,7 +331,7 @@ public final class ManifestLoader: ManifestLoaderProtocol {
 
     /// Returns the runtime path given the manifest version and path to libDir.
     private func runtimePath(for version: ManifestVersion) -> AbsolutePath {
-        return resources.libDir.appending(component: String(version.rawValue))
+        return resources.libDir.appending(component: version.rawValue)
     }
 }
 

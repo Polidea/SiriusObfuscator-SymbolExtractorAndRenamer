@@ -32,6 +32,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/CrashRecoveryContext.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Timer.h"
@@ -270,10 +271,6 @@ struct AllocatedCXCodeCompleteResults : public CXCodeCompleteResults {
   /// \brief Source manager, used for diagnostics.
   IntrusiveRefCntPtr<SourceManager> SourceMgr;
   
-  /// \brief Temporary files that should be removed once we have finished
-  /// with the code-completion results.
-  std::vector<std::string> TemporaryFiles;
-
   /// \brief Temporary buffers that will be deleted once we have finished with
   /// the code-completion results.
   SmallVector<const llvm::MemoryBuffer *, 1> TemporaryBuffers;
@@ -320,7 +317,8 @@ AllocatedCXCodeCompleteResults::AllocatedCXCodeCompleteResults(
     : CXCodeCompleteResults(), DiagOpts(new DiagnosticOptions),
       Diag(new DiagnosticsEngine(
           IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs), &*DiagOpts)),
-      FileMgr(FileMgr), SourceMgr(new SourceManager(*Diag, *FileMgr)),
+      FileMgr(std::move(FileMgr)),
+      SourceMgr(new SourceManager(*Diag, *this->FileMgr)),
       CodeCompletionAllocator(
           std::make_shared<clang::GlobalCodeCompletionAllocator>()),
       Contexts(CXCompletionContext_Unknown),
@@ -334,8 +332,6 @@ AllocatedCXCodeCompleteResults::~AllocatedCXCodeCompleteResults() {
   llvm::DeleteContainerPointers(DiagnosticsWrappers);
   delete [] Results;
 
-  for (unsigned I = 0, N = TemporaryFiles.size(); I != N; ++I)
-    llvm::sys::fs::remove(TemporaryFiles[I]);
   for (unsigned I = 0, N = TemporaryBuffers.size(); I != N; ++I)
     delete TemporaryBuffers[I];
 
@@ -696,6 +692,17 @@ clang_codeCompleteAt_Impl(CXTranslationUnit TU, const char *complete_filename,
   CaptureCompletionResults Capture(Opts, *Results, &TU);
 
   // Perform completion.
+  std::vector<const char *> CArgs;
+  for (const auto &Arg : TU->Arguments)
+    CArgs.push_back(Arg.c_str());
+  std::string CompletionInvocation =
+      llvm::formatv("-code-completion-at={0}:{1}:{2}", complete_filename,
+                    complete_line, complete_column)
+          .str();
+  LibclangInvocationReporter InvocationReporter(
+      *CXXIdx, complete_filename,
+      LibclangInvocationReporter::OperationKind::CompletionOperation,
+      TU->ParsingOptions, CArgs, CompletionInvocation, unsaved_files);
   AST->CodeComplete(complete_filename, complete_line, complete_column,
                     RemappedFiles, (options & CXCodeComplete_IncludeMacros),
                     (options & CXCodeComplete_IncludeCodePatterns),
@@ -810,11 +817,6 @@ CXCodeCompleteResults *clang_codeCompleteAt(CXTranslationUnit TU,
         TU, complete_filename, complete_line, complete_column,
         llvm::makeArrayRef(unsaved_files, num_unsaved_files), options);
   };
-
-  if (getenv("LIBCLANG_NOTHREADS")) {
-    CodeCompleteAtImpl();
-    return result;
-  }
 
   llvm::CrashRecoveryContext CRC;
 

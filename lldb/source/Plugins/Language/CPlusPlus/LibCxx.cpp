@@ -13,21 +13,21 @@
 // C++ Includes
 // Other libraries and framework includes
 // Project includes
-#include "lldb/Core/DataBufferHeap.h"
 #include "lldb/Core/Debugger.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/FormatEntity.h"
-#include "lldb/Core/Stream.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/DataFormatters/VectorIterator.h"
-#include "lldb/Host/Endian.h"
 #include "lldb/Symbol/ClangASTContext.h"
+#include "lldb/Target/ProcessStructReader.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Utility/ProcessStructReader.h"
+#include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/Endian.h"
+#include "lldb/Utility/Status.h"
+#include "lldb/Utility/Stream.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -53,7 +53,7 @@ bool lldb_private::formatters::LibcxxSmartPointerSummaryProvider(
     return true;
   } else {
     bool print_pointee = false;
-    Error error;
+    Status error;
     ValueObjectSP pointee_sp = ptr_sp->Dereference(error);
     if (pointee_sp && error.Success()) {
       if (pointee_sp->DumpPrintableRepresentation(
@@ -153,12 +153,11 @@ bool lldb_private::formatters::LibCxxMapIteratorSyntheticFrontEnd::Update() {
                      .get();
     if (m_pair_ptr) {
       auto __i_(valobj_sp->GetChildMemberWithName(g___i_, true));
-      lldb::TemplateArgumentKind kind;
       if (!__i_) {
         m_pair_ptr = nullptr;
         return false;
       }
-      CompilerType pair_type(__i_->GetCompilerType().GetTemplateArgument(0, kind));
+      CompilerType pair_type(__i_->GetCompilerType().GetTypeTemplateArgument(0));
       std::string name; uint64_t bit_offset_ptr; uint32_t bitfield_bit_size_ptr; bool is_bitfield_ptr;
       pair_type = pair_type.GetFieldAtIndex(0, name, &bit_offset_ptr, &bitfield_bit_size_ptr, &is_bitfield_ptr);
       if (!pair_type) {
@@ -181,7 +180,7 @@ bool lldb_private::formatters::LibCxxMapIteratorSyntheticFrontEnd::Update() {
         });
         DataBufferSP buffer_sp(new DataBufferHeap(tree_node_type.GetByteSize(nullptr),0));
         ProcessSP process_sp(target_sp->GetProcessSP());
-        Error error;
+        Status error;
         process_sp->ReadMemory(addr, buffer_sp->GetBytes(), buffer_sp->GetByteSize(), error);
         if (error.Fail())
           return false;
@@ -395,7 +394,8 @@ static bool ExtractLibcxxStringInfo(ValueObject &valobj,
   if (!D)
     return false;
 
-  ValueObjectSP layout_decider(D->GetChildAtIndexPath({0, 0}));
+  ValueObjectSP layout_decider(
+    D->GetChildAtIndexPath(llvm::ArrayRef<size_t>({0, 0})));
 
   // this child should exist
   if (!layout_decider)

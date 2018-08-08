@@ -1,5 +1,4 @@
-//===-- ValueObjectDynamicValue.cpp ---------------------------------*- C++
-//-*-===//
+//===-- ValueObjectDynamicValue.cpp ------------------------------*- C++-*-===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -9,29 +8,25 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/ValueObjectDynamicValue.h"
-
-// C Includes
-// C++ Includes
-// Other libraries and framework includes
-// Project includes
-#include "lldb/Core/Log.h"
-#include "lldb/Core/Module.h"
+#include "lldb/Core/Scalar.h" // for Scalar, operator!=
 #include "lldb/Core/Value.h"
 #include "lldb/Core/ValueObject.h"
-#include "lldb/Core/ValueObjectList.h"
-
 #include "lldb/Symbol/CompilerType.h"
-#include "lldb/Symbol/ObjectFile.h"
-#include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/Type.h"
-#include "lldb/Symbol/Variable.h"
-
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/Target/Process.h"
-#include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Target/Thread.h"
+#include "lldb/Utility/DataExtractor.h" // for DataExtractor
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Logging.h" // for GetLogIfAllCategoriesSet
+#include "lldb/Utility/Status.h"  // for Status
+#include "lldb/lldb-types.h"      // for addr_t, offset_t
+
+#include <string.h> // for strcmp, size_t
+namespace lldb_private {
+class Declaration;
+}
 
 using namespace lldb_private;
 using namespace lldb;
@@ -125,7 +120,7 @@ bool ValueObjectDynamicValue::UpdateValue() {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
 
   Log *verbose_log(
-      GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES | LIBLLDB_LOG_VERBOSE));
+      GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
 
   SetValueIsValid(false);
   m_error.Clear();
@@ -300,7 +295,7 @@ bool ValueObjectDynamicValue::UpdateValue() {
 bool ValueObjectDynamicValue::IsInScope() { return m_parent->IsInScope(); }
 
 bool ValueObjectDynamicValue::SetValueFromCString(const char *value_str,
-                                                  Error &error) {
+                                                  Status &error) {
   if (!UpdateValueIfNeeded(false)) {
     error.SetErrorString("unable to read value");
     return false;
@@ -335,7 +330,7 @@ bool ValueObjectDynamicValue::SetValueFromCString(const char *value_str,
   return ret_val;
 }
 
-bool ValueObjectDynamicValue::SetData(DataExtractor &data, Error &error) {
+bool ValueObjectDynamicValue::SetData(DataExtractor &data, Status &error) {
   if (!UpdateValueIfNeeded(false)) {
     error.SetErrorString("unable to read value");
     return false;

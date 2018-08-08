@@ -64,6 +64,10 @@ struct BigWithDtor {
   int a, b, c, d, e, f;
 };
 
+struct BaseNoByval : Small {
+  int bb;
+};
+
 // WIN32: declare void @"{{.*take_bools_and_chars.*}}"
 // WIN32:       (<{ i8, [3 x i8], i8, [3 x i8], %struct.SmallWithDtor,
 // WIN32:           i8, [3 x i8], i8, [3 x i8], i32, i8, [3 x i8] }>* inalloca)
@@ -127,6 +131,12 @@ void medium_arg(Medium s) {}
 // WIN64: define void @"\01?medium_arg@@YAXUMedium@@@Z"(i64 %s.coerce)
 // WOA: define arm_aapcs_vfpcc void @"\01?medium_arg@@YAXUMedium@@@Z"([2 x i32] %s.coerce)
 
+void base_no_byval_arg(BaseNoByval s) {}
+// LINUX-LABEL: define void @_Z17base_no_byval_arg11BaseNoByval(%struct.BaseNoByval* byval align 4 %s)
+// WIN32: define void @"\01?base_no_byval_arg@@YAXUBaseNoByval@@@Z"(i32 %s.0, i32 %s.1)
+// WIN64: define void @"\01?base_no_byval_arg@@YAXUBaseNoByval@@@Z"(i64 %s.coerce)
+// WOA: define arm_aapcs_vfpcc void @"\01?base_no_byval_arg@@YAXUBaseNoByval@@@Z"([2 x i32] %s.coerce)
+
 void small_arg_with_ctor(SmallWithCtor s) {}
 // LINUX-LABEL: define void @_Z19small_arg_with_ctor13SmallWithCtor(%struct.SmallWithCtor* byval align 4 %s)
 // WIN32: define void @"\01?small_arg_with_ctor@@YAXUSmallWithCtor@@@Z"(i32 %s.0)
@@ -162,12 +172,9 @@ void small_arg_with_dtor(SmallWithDtor s) {}
 void call_small_arg_with_dtor() {
   small_arg_with_dtor(SmallWithDtor());
 }
-// The temporary is copied, so it's destroyed in the caller as well as the
-// callee.
 // WIN64-LABEL: define void @"\01?call_small_arg_with_dtor@@YAXXZ"()
 // WIN64:   call %struct.SmallWithDtor* @"\01??0SmallWithDtor@@QEAA@XZ"
 // WIN64:   call void @"\01?small_arg_with_dtor@@YAXUSmallWithDtor@@@Z"(i32 %{{.*}})
-// WIN64:   call void @"\01??1SmallWithDtor@@QEAA@XZ"
 // WIN64:   ret void
 
 // Test that references aren't destroyed in the callee.

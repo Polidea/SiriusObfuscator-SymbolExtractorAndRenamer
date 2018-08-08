@@ -33,7 +33,7 @@ class PackageDescription4LoadingTests: XCTestCase {
         let m = try manifestLoader.load(
             package: AbsolutePath.root,
             baseURL: AbsolutePath.root.asString,
-            manifestVersion: .four,
+            manifestVersion: .v4,
             fileSystem: fs)
         if case .v4 = m.package {} else {
             return XCTFail("Invalid manfiest version")
@@ -63,16 +63,25 @@ class PackageDescription4LoadingTests: XCTestCase {
 
         for version in threeVersions {
             let toolsVersion = ToolsVersion(string: version)!
-            XCTAssertEqual(toolsVersion.manifestVersion, .three)
+            XCTAssertEqual(toolsVersion.manifestVersion, .v3)
         }
 
         let fourVersions = [
-            "2.0.0", "4.0.0", "4.0.10", "5.1.0", "6.1.100", "4.3",
+            "4.0.0", "4.0.10", "4.1", "4.1.999", "4.1.0",
         ]
 
         for version in fourVersions {
             let toolsVersion = ToolsVersion(string: version)!
-            XCTAssertEqual(toolsVersion.manifestVersion, .four)
+            XCTAssertEqual(toolsVersion.manifestVersion, .v4, "version: \(version)")
+        }
+
+        let fourTwoVersions = [
+            "4.2.0", "4.2.1", "5.1.0", "6.1.100", "4.3", "5.0.0",
+        ]
+
+        for version in fourTwoVersions {
+            let toolsVersion = ToolsVersion(string: version)!
+            XCTAssertEqual(toolsVersion.manifestVersion, .v4_2)
         }
     }
 
@@ -87,7 +96,7 @@ class PackageDescription4LoadingTests: XCTestCase {
 
         loadManifest(stream.bytes) { manifest in
             XCTAssertEqual(manifest.name, "Trivial")
-            XCTAssertEqual(manifest.manifestVersion, .four)
+            XCTAssertEqual(manifest.manifestVersion, .v4)
             XCTAssertEqual(manifest.package.targets, [])
             XCTAssertEqual(manifest.package.dependencies, [])
             let flags = manifest.interpreterFlags.joined(separator: " ")
@@ -150,7 +159,7 @@ class PackageDescription4LoadingTests: XCTestCase {
             )
             """
         loadManifest(stream.bytes) { manifest in
-            XCTAssertEqual(manifest.package.swiftLanguageVersions ?? [], [3, 4])
+            XCTAssertEqual(manifest.package.swiftLanguageVersions?.map({$0.rawValue}), ["3", "4"])
         }
 
         stream = BufferedOutputByteStream()
@@ -162,7 +171,7 @@ class PackageDescription4LoadingTests: XCTestCase {
             )
             """
         loadManifest(stream.bytes) { manifest in
-            XCTAssertEqual(manifest.package.swiftLanguageVersions!, [])
+            XCTAssertEqual(manifest.package.swiftLanguageVersions, [])
         }
 
         stream = BufferedOutputByteStream()
@@ -172,7 +181,7 @@ class PackageDescription4LoadingTests: XCTestCase {
                name: "Foo")
             """
         loadManifest(stream.bytes) { manifest in
-            XCTAssert(manifest.package.swiftLanguageVersions == nil)
+            XCTAssertEqual(manifest.package.swiftLanguageVersions, nil)
         }
     }
 
@@ -371,6 +380,27 @@ class PackageDescription4LoadingTests: XCTestCase {
         }
     }
 
+    func testManifestWithWarnings() {
+        let stream = BufferedOutputByteStream()
+        stream <<< """
+            import PackageDescription
+            func foo() {
+                let a = 5
+            }
+            let package = Package(
+                name: "Trivial"
+            )
+            """
+
+        loadManifest(stream.bytes) { manifest in
+            XCTAssertEqual(manifest.name, "Trivial")
+            XCTAssertEqual(manifest.manifestVersion, .v4)
+            XCTAssertEqual(manifest.package.targets, [])
+            XCTAssertEqual(manifest.package.dependencies, [])
+        }
+    }
+    
+
     static var allTests = [
         ("testCTarget", testCTarget),
         ("testCompatibleSwiftVersions", testCompatibleSwiftVersions),
@@ -383,5 +413,6 @@ class PackageDescription4LoadingTests: XCTestCase {
         ("testTrivial", testTrivial),
         ("testUnavailableAPIs", testUnavailableAPIs),
         ("testLanguageStandards", testLanguageStandards),
+        ("testManifestWithWarnings", testManifestWithWarnings),
     ]
 }

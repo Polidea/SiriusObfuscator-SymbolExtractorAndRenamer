@@ -1,5 +1,4 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 
 // REQUIRES: objc_interop
 // FIXME: this is failing on simulators
@@ -47,7 +46,7 @@
 // CHECK-FOUNDATION: func copy(with: NSZone? = nil) -> Any!
 
 // Note: Objective-C type parameter names.
-// CHECK-FOUNDATION: func object(forKey: NSCopying) -> Any?
+// CHECK-FOUNDATION: func object(forKey: Any) -> Any?
 // CHECK-FOUNDATION: func removeObject(forKey: NSCopying)
 
 // Note: Don't drop the name of the first parameter in an initializer entirely.

@@ -33,7 +33,7 @@ class GdbRemoteTestCaseBase(TestBase):
 
     NO_DEBUG_INFO_TESTCASE = True
 
-    _TIMEOUT_SECONDS = 7
+    _TIMEOUT_SECONDS = 120
 
     _GDBREMOTE_KILL_PACKET = "$k#6b"
 
@@ -370,7 +370,7 @@ class GdbRemoteTestCaseBase(TestBase):
                 ["*:{}".format(self.port)]
         else:
             commandline_args = self.debug_monitor_extra_args + \
-                ["localhost:{}".format(self.port)]
+                ["127.0.0.1:{}".format(self.port)]
 
         if attach_pid:
             commandline_args += ["--attach=%d" % attach_pid]
@@ -484,7 +484,7 @@ class GdbRemoteTestCaseBase(TestBase):
         # This process needs to be started so that it just hangs around for a while.  We'll
         # have it sleep.
         if not exe_path:
-            exe_path = os.path.abspath("a.out")
+            exe_path = self.getBuildArtifact("a.out")
 
         args = []
         if inferior_args:
@@ -547,10 +547,10 @@ class GdbRemoteTestCaseBase(TestBase):
         if self._inferior_startup == self._STARTUP_LAUNCH:
             # Build launch args
             if not inferior_exe_path:
-                inferior_exe_path = os.path.abspath("a.out")
+                inferior_exe_path = self.getBuildArtifact("a.out")
 
             if lldb.remote_platform:
-                remote_path = lldbutil.append_to_process_working_directory(
+                remote_path = lldbutil.append_to_process_working_directory(self,
                     os.path.basename(inferior_exe_path))
                 remote_file_spec = lldb.SBFileSpec(remote_path, False)
                 err = lldb.remote_platform.Install(lldb.SBFileSpec(
@@ -884,12 +884,13 @@ class GdbRemoteTestCaseBase(TestBase):
     def add_set_breakpoint_packets(
             self,
             address,
+            z_packet_type=0,
             do_continue=True,
             breakpoint_kind=1):
         self.test_sequence.add_log_lines(
             [  # Set the breakpoint.
-                "read packet: $Z0,{0:x},{1}#00".format(
-                    address, breakpoint_kind),
+                "read packet: $Z{2},{0:x},{1}#00".format(
+                    address, breakpoint_kind, z_packet_type),
                 # Verify the stub could set it.
                 "send packet: $OK#00",
             ], True)
@@ -905,11 +906,15 @@ class GdbRemoteTestCaseBase(TestBase):
                                  2: "stop_thread_id"}},
                 ], True)
 
-    def add_remove_breakpoint_packets(self, address, breakpoint_kind=1):
+    def add_remove_breakpoint_packets(
+            self,
+            address,
+            z_packet_type=0,
+            breakpoint_kind=1):
         self.test_sequence.add_log_lines(
             [  # Remove the breakpoint.
-                "read packet: $z0,{0:x},{1}#00".format(
-                    address, breakpoint_kind),
+                "read packet: $z{2},{0:x},{1}#00".format(
+                    address, breakpoint_kind, z_packet_type),
                 # Verify the stub could unset it.
                 "send packet: $OK#00",
             ], True)
@@ -930,7 +935,8 @@ class GdbRemoteTestCaseBase(TestBase):
         "qXfer:libraries:read",
         "qXfer:libraries-svr4:read",
         "qXfer:features:read",
-        "qEcho"
+        "qEcho",
+        "QPassSignals"
     ]
 
     def parse_qSupported_response(self, context):
@@ -1602,10 +1608,10 @@ class GdbRemoteTestCaseBase(TestBase):
             '.*' if lldbplatformutil.hasChattyStderr(self) else '^' + regex + '$'
 
     def install_and_create_launch_args(self):
-        exe_path = os.path.abspath('a.out')
+        exe_path = self.getBuildArtifact("a.out")
         if not lldb.remote_platform:
             return [exe_path]
-        remote_path = lldbutil.append_to_process_working_directory(
+        remote_path = lldbutil.append_to_process_working_directory(self,
             os.path.basename(exe_path))
         remote_file_spec = lldb.SBFileSpec(remote_path, False)
         err = lldb.remote_platform.Install(lldb.SBFileSpec(exe_path, True),

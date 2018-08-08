@@ -53,10 +53,12 @@ enum class SymbolKind : uint8_t {
   ConversionFunction,
 
   Parameter,
+  Using,
+
   CommentTag,
 };
 
-enum class SymbolLanguage {
+enum class SymbolLanguage : uint8_t {
   C,
   ObjC,
   CXX,
@@ -64,12 +66,14 @@ enum class SymbolLanguage {
 };
 
 /// Language specific sub-kinds.
-enum class SymbolSubKind {
+enum class SymbolSubKind : uint8_t {
   None,
   CXXCopyConstructor,
   CXXMoveConstructor,
   AccessorGetter,
   AccessorSetter,
+  UsingTypename,
+  UsingValue,
 
   // Swift sub-kinds
 
@@ -77,6 +81,8 @@ enum class SymbolSubKind {
   SwiftAccessorDidSet,
   SwiftAccessorAddressor,
   SwiftAccessorMutableAddressor,
+  SwiftAccessorRead,
+  SwiftAccessorModify,
 
   SwiftExtensionOfStruct,
   SwiftExtensionOfClass,
@@ -92,8 +98,9 @@ enum class SymbolSubKind {
   SwiftGenericTypeParam,
 };
 
+typedef uint8_t SymbolPropertySet;
 /// Set of properties that provide additional info about a symbol.
-enum class SymbolProperty : uint8_t {
+enum class SymbolProperty : SymbolPropertySet {
   Generic                       = 1 << 0,
   TemplatePartialSpecialization = 1 << 1,
   TemplateSpecialization        = 1 << 2,
@@ -104,7 +111,6 @@ enum class SymbolProperty : uint8_t {
   Local                         = 1 << 7,
 };
 static const unsigned SymbolPropertyBitNum = 8;
-typedef unsigned SymbolPropertySet;
 
 /// Set of roles that are attributed to symbol occurrences.
 enum class SymbolRole : uint32_t {
@@ -145,8 +151,8 @@ struct SymbolRelation {
 struct SymbolInfo {
   SymbolKind Kind;
   SymbolSubKind SubKind;
-  SymbolPropertySet Properties;
   SymbolLanguage Lang;
+  SymbolPropertySet Properties;
 };
 
 SymbolInfo getSymbolInfo(const Decl *D);

@@ -21,9 +21,6 @@
 
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "lldb/Core/Address.h"
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Log.h"
-#include "lldb/Core/Stream.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/ValueObjectRegister.h"
 #include "lldb/Core/ValueObjectVariable.h"
@@ -43,6 +40,9 @@
 #include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Stream.h"
 
 #include "lldb/API/SBAddress.h"
 #include "lldb/API/SBDebugger.h"
@@ -607,7 +607,7 @@ lldb::SBValue SBFrame::GetValueForVariablePath(const char *var_path,
       frame = exe_ctx.GetFramePtr();
       if (frame) {
         VariableSP var_sp;
-        Error error;
+        Status error;
         ValueObjectSP value_sp(frame->GetValueForVariableExpressionPath(
             var_path, eNoDynamicValues,
             StackFrame::eExpressionPathOptionCheckPtrVsMember |

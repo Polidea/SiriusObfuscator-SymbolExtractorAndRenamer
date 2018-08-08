@@ -12,6 +12,12 @@
 
 import TestsUtils
 
+
+public let Dictionary = [
+  BenchmarkInfo(name: "Dictionary", runFunction: run_Dictionary, tags: [.validation, .api, .Dictionary]),
+  BenchmarkInfo(name: "DictionaryOfObjects", runFunction: run_DictionaryOfObjects, tags: [.validation, .api, .Dictionary]),
+]
+
 @inline(never)
 public func run_Dictionary(scale: Int) {
   let Input = [
@@ -151,8 +157,8 @@ class Box<T : Hashable> : Hashable {
     value = v
   }
 
-  var hashValue: Int {
-    return value.hashValue
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(value)
   }
 
   static func ==(lhs: Box, rhs: Box) -> Bool {

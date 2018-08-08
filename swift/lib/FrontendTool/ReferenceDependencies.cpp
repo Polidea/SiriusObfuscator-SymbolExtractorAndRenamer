@@ -41,8 +41,8 @@ static void findNominalsAndOperators(
     if (!VD)
       continue;
 
-    if (VD->hasAccessibility() &&
-        VD->getFormalAccess() <= Accessibility::FilePrivate) {
+    if (VD->hasAccess() &&
+        VD->getFormalAccess() <= AccessLevel::FilePrivate) {
       continue;
     }
 
@@ -69,6 +69,7 @@ static bool declIsPrivate(const Decl *member) {
     case DeclKind::EnumCase:
     case DeclKind::TopLevelCode:
     case DeclKind::IfConfig:
+    case DeclKind::PoundDiagnostic:
       return true;
 
     case DeclKind::Extension:
@@ -82,7 +83,7 @@ static bool declIsPrivate(const Decl *member) {
     }
   }
 
-  return VD->getFormalAccess() <= Accessibility::FilePrivate;
+  return VD->getFormalAccess() <= AccessLevel::FilePrivate;
 }
 
 static bool extendedTypeIsPrivate(TypeLoc inheritedType) {
@@ -122,36 +123,28 @@ swift::reversePathSortedFilenames(const ArrayRef<std::string> elts) {
   return tmp;
 }
 
-bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
-                                      SourceFile *SF,
+bool swift::emitReferenceDependencies(DiagnosticEngine &diags, SourceFile *SF,
                                       DependencyTracker &depTracker,
-                                      const FrontendOptions &opts) {
-  if (!SF) {
-    diags.diagnose(SourceLoc(),
-                   diag::emit_reference_dependencies_without_primary_file);
-    return true;
-  }
-
+                                      StringRef outputPath) {
+  assert(SF && "Cannot emit reference dependencies without a SourceFile");
+  
   // Before writing to the dependencies file path, preserve any previous file
   // that may have been there. No error handling -- this is just a nicety, it
   // doesn't matter if it fails.
-  llvm::sys::fs::rename(opts.ReferenceDependenciesFilePath,
-                        opts.ReferenceDependenciesFilePath + "~");
+  llvm::sys::fs::rename(outputPath, outputPath + "~");
 
   std::error_code EC;
-  llvm::raw_fd_ostream out(opts.ReferenceDependenciesFilePath, EC,
-                           llvm::sys::fs::F_None);
+  llvm::raw_fd_ostream out(outputPath, EC, llvm::sys::fs::F_None);
 
   if (out.has_error() || EC) {
-    diags.diagnose(SourceLoc(), diag::error_opening_output,
-                   opts.ReferenceDependenciesFilePath, EC.message());
+    diags.diagnose(SourceLoc(), diag::error_opening_output, outputPath,
+                   EC.message());
     out.clear_error();
     return true;
   }
 
   auto escape = [](DeclBaseName name) -> std::string {
-    // TODO: Handle special names
-    return llvm::yaml::escape(name.getIdentifier().str());
+    return llvm::yaml::escape(name.userFacingName());
   };
 
   out << "### Swift dependencies file v0 ###\n";
@@ -175,8 +168,8 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
       auto *NTD = ED->getExtendedType()->getAnyNominal();
       if (!NTD)
         break;
-      if (NTD->hasAccessibility() &&
-          NTD->getFormalAccess() <= Accessibility::FilePrivate) {
+      if (NTD->hasAccess() &&
+          NTD->getFormalAccess() <= AccessLevel::FilePrivate) {
         break;
       }
 
@@ -216,8 +209,8 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
       auto *NTD = cast<NominalTypeDecl>(D);
       if (!NTD->hasName())
         break;
-      if (NTD->hasAccessibility() &&
-          NTD->getFormalAccess() <= Accessibility::FilePrivate) {
+      if (NTD->hasAccess() &&
+          NTD->getFormalAccess() <= AccessLevel::FilePrivate) {
         break;
       }
       out << "- \"" << escape(NTD->getName()) << "\"\n";
@@ -229,12 +222,13 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
 
     case DeclKind::TypeAlias:
     case DeclKind::Var:
-    case DeclKind::Func: {
+    case DeclKind::Func:
+    case DeclKind::Accessor: {
       auto *VD = cast<ValueDecl>(D);
       if (!VD->hasName())
         break;
-      if (VD->hasAccessibility() &&
-          VD->getFormalAccess() <= Accessibility::FilePrivate) {
+      if (VD->hasAccess() &&
+          VD->getFormalAccess() <= AccessLevel::FilePrivate) {
         break;
       }
       out << "- \"" << escape(VD->getBaseName()) << "\"\n";
@@ -244,6 +238,7 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
     case DeclKind::PatternBinding:
     case DeclKind::TopLevelCode:
     case DeclKind::IfConfig:
+    case DeclKind::PoundDiagnostic:
       // No action necessary.
       break;
 
@@ -256,7 +251,8 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
     case DeclKind::Destructor:
     case DeclKind::EnumElement:
     case DeclKind::MissingMember:
-      llvm_unreachable("cannot appear at the top level of a file");
+      // These can occur in malformed ASTs.
+      break;
     }
   }
 
@@ -288,7 +284,7 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
     for (auto *member : ED->getMembers()) {
       auto *VD = dyn_cast<ValueDecl>(member);
       if (!VD || !VD->hasName() ||
-          VD->getFormalAccess() <= Accessibility::FilePrivate) {
+          VD->getFormalAccess() <= AccessLevel::FilePrivate) {
         continue;
       }
       out << "- [\"" << mangledName << "\", \""
@@ -325,8 +321,6 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
     }
   }
 
-  ReferencedNameTracker *tracker = SF->getReferencedNameTracker();
-
   auto sortedByName =
       [](const llvm::DenseMap<DeclBaseName, bool> map) ->
         SmallVector<std::pair<DeclBaseName, bool>, 16> {
@@ -338,6 +332,9 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
     });
     return pairs;
   };
+
+  const ReferencedNameTracker *const tracker = SF->getReferencedNameTracker();
+  assert(tracker && "Cannot emit reference dependencies without a tracker");
 
   out << "depends-top-level:\n";
   for (auto &entry : sortedByName(tracker->getTopLevelNames())) {
@@ -357,11 +354,16 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
   llvm::array_pod_sort(sortedMembers.begin(), sortedMembers.end(),
                        [](const TableEntryTy *lhs,
                           const TableEntryTy *rhs) -> int {
-    if (lhs->first.first == rhs->first.first)
-      return lhs->first.second.compare(rhs->first.second);
+    if (auto cmp = lhs->first.first->getName().compare(rhs->first.first->getName()))
+      return cmp;
 
-    if (lhs->first.first->getName() != rhs->first.first->getName())
-      return lhs->first.first->getName().compare(rhs->first.first->getName());
+    if (auto cmp = lhs->first.second.compare(rhs->first.second))
+      return cmp;
+
+    // We can have two entries with the same member name if one of them
+    // was the special 'init' name and the other is the plain 'init' token.
+    if (lhs->second != rhs->second)
+      return lhs->second ? -1 : 1;
 
     // Break type name ties by mangled name.
     auto lhsMangledName = mangleTypeAsContext(lhs->first.first);
@@ -371,8 +373,8 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
 
   for (auto &entry : sortedMembers) {
     assert(entry.first.first != nullptr);
-    if (entry.first.first->hasAccessibility() &&
-        entry.first.first->getFormalAccess() <= Accessibility::FilePrivate)
+    if (entry.first.first->hasAccess() &&
+        entry.first.first->getFormalAccess() <= AccessLevel::FilePrivate)
       continue;
 
     out << "- ";
@@ -394,8 +396,8 @@ bool swift::emitReferenceDependencies(DiagnosticEngine &diags,
       isCascading |= i->second;
     }
 
-    if (i->first.first->hasAccessibility() &&
-        i->first.first->getFormalAccess() <= Accessibility::FilePrivate)
+    if (i->first.first->hasAccess() &&
+        i->first.first->getFormalAccess() <= AccessLevel::FilePrivate)
       continue;
 
     out << "- ";

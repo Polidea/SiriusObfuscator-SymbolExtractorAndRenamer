@@ -21,7 +21,7 @@ class InitTests: XCTestCase {
     
     func testInitPackageEmpty() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             
@@ -46,7 +46,7 @@ class InitTests: XCTestCase {
     
     func testInitPackageExecutable() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
 
@@ -75,7 +75,9 @@ class InitTests: XCTestCase {
             XCTAssertTrue(readmeContents.hasPrefix("# Foo\n"))
 
             XCTAssertEqual(try fs.getDirectoryContents(path.appending(component: "Sources").appending(component: "Foo")), ["main.swift"])
-            XCTAssertEqual(try fs.getDirectoryContents(path.appending(component: "Tests")), [])
+            XCTAssertEqual(
+                try fs.getDirectoryContents(path.appending(component: "Tests")).sorted(),
+                ["FooTests", "LinuxMain.swift"])
             
             // Try building it
             XCTAssertBuilds(path)
@@ -87,7 +89,7 @@ class InitTests: XCTestCase {
 
     func testInitPackageLibrary() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
 
@@ -127,7 +129,7 @@ class InitTests: XCTestCase {
     
     func testInitPackageSystemModule() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             

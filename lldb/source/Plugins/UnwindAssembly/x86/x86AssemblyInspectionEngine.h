@@ -12,12 +12,11 @@
 
 #include "llvm-c/Disassembler.h"
 
+#include "lldb/Utility/ArchSpec.h"
+#include "lldb/Utility/ConstString.h"
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-private.h"
-
-#include "lldb/Core/ArchSpec.h"
-#include "lldb/Core/ConstString.h"
 
 #include <map>
 #include <vector>
@@ -102,6 +101,7 @@ private:
   bool sub_rsp_pattern_p(int &amount);
   bool add_rsp_pattern_p(int &amount);
   bool lea_rsp_pattern_p(int &amount);
+  bool lea_rbp_rsp_pattern_p(int &amount);
   bool push_reg_p(int &regno);
   bool pop_reg_p(int &regno);
   bool pop_rbp_pattern_p();

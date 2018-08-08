@@ -100,7 +100,15 @@ const char* BuildEngineTrace::getRuleName(const Rule* rule) {
   auto result = ruleNames.emplace(rule, name);
 
   // Report the newly seen rule.
-  fprintf(fp, "{ \"new-rule\", \"%s\", \"%s\" },\n", name, rule->key.c_str());
+  // FIXME: This is currently encoding the key by merely stripping the
+  // non-printable characters. Should probably encode this into a real encoding.
+  std::string encoded = rule->key;
+  encoded.erase(
+                std::remove_if(encoded.begin(), encoded.end(),
+                               [](char c) -> bool {
+                                 return c < 32 || c > 127; }),
+                encoded.end());
+  fprintf(fp, "{ \"new-rule\", \"%s\", \"%s\" },\n", name, encoded.c_str());
 
   return result.first->second.c_str();
 }
@@ -285,3 +293,16 @@ void BuildEngineTrace::ruleDoesNotNeedToRun(const Rule* forRule) {
           getRuleName(forRule));
 }
 
+void BuildEngineTrace::cycleForceRuleNeedsToRun(const Rule* forRule) {
+  FILE *fp = static_cast<FILE*>(outputPtr);
+
+  fprintf(fp, "{ \"cycle-force-rule-needs-to-run\", \"%s\" },\n",
+          getRuleName(forRule));
+}
+
+void BuildEngineTrace::cycleSupplyPriorValue(const Rule* forRule, const Task* toTask) {
+  FILE *fp = static_cast<FILE*>(outputPtr);
+
+  fprintf(fp, "{ \"cycle-supply-prior-value\", \"%s\", \"%s\" },\n",
+          getRuleName(forRule), getTaskName(toTask));
+}

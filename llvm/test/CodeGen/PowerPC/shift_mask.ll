@@ -4,7 +4,7 @@ target triple = "powerpc64le-linux-gnu"
 
 define i8 @test000(i8 %a, i8 %b) {
 ; CHECK-LABEL: test000:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 29, 31
 ; CHECK-NEXT:    slw 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -15,7 +15,7 @@ define i8 @test000(i8 %a, i8 %b) {
 
 define i16 @test001(i16 %a, i16 %b) {
 ; CHECK-LABEL: test001:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 28, 31
 ; CHECK-NEXT:    slw 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -26,7 +26,7 @@ define i16 @test001(i16 %a, i16 %b) {
 
 define i32 @test002(i32 %a, i32 %b) {
 ; CHECK-LABEL: test002:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 27, 31
 ; CHECK-NEXT:    slw 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -37,7 +37,7 @@ define i32 @test002(i32 %a, i32 %b) {
 
 define i64 @test003(i64 %a, i64 %b) {
 ; CHECK-LABEL: test003:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 26, 31
 ; CHECK-NEXT:    sld 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -48,9 +48,7 @@ define i64 @test003(i64 %a, i64 %b) {
 
 define <16 x i8> @test010(<16 x i8> %a, <16 x i8> %b) {
 ; CHECK-LABEL: test010:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisb 4, 7
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vslb 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <16 x i8> %b, <i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7>
@@ -60,9 +58,7 @@ define <16 x i8> @test010(<16 x i8> %a, <16 x i8> %b) {
 
 define <8 x i16> @test011(<8 x i16> %a, <8 x i16> %b) {
 ; CHECK-LABEL: test011:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltish 4, 15
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vslh 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <8 x i16> %b, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
@@ -72,11 +68,7 @@ define <8 x i16> @test011(<8 x i16> %a, <8 x i16> %b) {
 
 define <4 x i32> @test012(<4 x i32> %a, <4 x i32> %b) {
 ; CHECK-LABEL: test012:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisw 4, -16
-; CHECK-NEXT:    vspltisw 5, 15
-; CHECK-NEXT:    vsubuwm 4, 5, 4
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vslw 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <4 x i32> %b, <i32 31, i32 31, i32 31, i32 31>
@@ -86,12 +78,7 @@ define <4 x i32> @test012(<4 x i32> %a, <4 x i32> %b) {
 
 define <2 x i64> @test013(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test013:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    addis 3, 2, .LCPI7_0@toc@ha
-; CHECK-NEXT:    addi 3, 3, .LCPI7_0@toc@l
-; CHECK-NEXT:    lxvd2x 0, 0, 3
-; CHECK-NEXT:    xxswapd 36, 0
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsld 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <2 x i64> %b, <i64 63, i64 63>
@@ -101,7 +88,7 @@ define <2 x i64> @test013(<2 x i64> %a, <2 x i64> %b) {
 
 define i8 @test100(i8 %a, i8 %b) {
 ; CHECK-LABEL: test100:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 3, 3, 0, 24, 31
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 29, 31
 ; CHECK-NEXT:    srw 3, 3, 4
@@ -113,7 +100,7 @@ define i8 @test100(i8 %a, i8 %b) {
 
 define i16 @test101(i16 %a, i16 %b) {
 ; CHECK-LABEL: test101:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 3, 3, 0, 16, 31
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 28, 31
 ; CHECK-NEXT:    srw 3, 3, 4
@@ -125,7 +112,7 @@ define i16 @test101(i16 %a, i16 %b) {
 
 define i32 @test102(i32 %a, i32 %b) {
 ; CHECK-LABEL: test102:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 27, 31
 ; CHECK-NEXT:    srw 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -136,7 +123,7 @@ define i32 @test102(i32 %a, i32 %b) {
 
 define i64 @test103(i64 %a, i64 %b) {
 ; CHECK-LABEL: test103:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 26, 31
 ; CHECK-NEXT:    srd 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -147,9 +134,7 @@ define i64 @test103(i64 %a, i64 %b) {
 
 define <16 x i8> @test110(<16 x i8> %a, <16 x i8> %b) {
 ; CHECK-LABEL: test110:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisb 4, 7
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrb 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <16 x i8> %b, <i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7>
@@ -159,9 +144,7 @@ define <16 x i8> @test110(<16 x i8> %a, <16 x i8> %b) {
 
 define <8 x i16> @test111(<8 x i16> %a, <8 x i16> %b) {
 ; CHECK-LABEL: test111:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltish 4, 15
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrh 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <8 x i16> %b, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
@@ -171,11 +154,7 @@ define <8 x i16> @test111(<8 x i16> %a, <8 x i16> %b) {
 
 define <4 x i32> @test112(<4 x i32> %a, <4 x i32> %b) {
 ; CHECK-LABEL: test112:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisw 4, -16
-; CHECK-NEXT:    vspltisw 5, 15
-; CHECK-NEXT:    vsubuwm 4, 5, 4
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrw 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <4 x i32> %b, <i32 31, i32 31, i32 31, i32 31>
@@ -185,12 +164,7 @@ define <4 x i32> @test112(<4 x i32> %a, <4 x i32> %b) {
 
 define <2 x i64> @test113(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test113:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    addis 3, 2, .LCPI15_0@toc@ha
-; CHECK-NEXT:    addi 3, 3, .LCPI15_0@toc@l
-; CHECK-NEXT:    lxvd2x 0, 0, 3
-; CHECK-NEXT:    xxswapd 36, 0
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrd 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <2 x i64> %b, <i64 63, i64 63>
@@ -200,7 +174,7 @@ define <2 x i64> @test113(<2 x i64> %a, <2 x i64> %b) {
 
 define i8 @test200(i8 %a, i8 %b) {
 ; CHECK-LABEL: test200:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    extsb 3, 3
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 29, 31
 ; CHECK-NEXT:    sraw 3, 3, 4
@@ -212,7 +186,7 @@ define i8 @test200(i8 %a, i8 %b) {
 
 define i16 @test201(i16 %a, i16 %b) {
 ; CHECK-LABEL: test201:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    extsh 3, 3
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 28, 31
 ; CHECK-NEXT:    sraw 3, 3, 4
@@ -224,7 +198,7 @@ define i16 @test201(i16 %a, i16 %b) {
 
 define i32 @test202(i32 %a, i32 %b) {
 ; CHECK-LABEL: test202:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 27, 31
 ; CHECK-NEXT:    sraw 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -235,7 +209,7 @@ define i32 @test202(i32 %a, i32 %b) {
 
 define i64 @test203(i64 %a, i64 %b) {
 ; CHECK-LABEL: test203:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    rlwinm 4, 4, 0, 26, 31
 ; CHECK-NEXT:    srad 3, 3, 4
 ; CHECK-NEXT:    blr
@@ -246,9 +220,7 @@ define i64 @test203(i64 %a, i64 %b) {
 
 define <16 x i8> @test210(<16 x i8> %a, <16 x i8> %b) {
 ; CHECK-LABEL: test210:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisb 4, 7
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrab 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <16 x i8> %b, <i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7, i8 7>
@@ -258,9 +230,7 @@ define <16 x i8> @test210(<16 x i8> %a, <16 x i8> %b) {
 
 define <8 x i16> @test211(<8 x i16> %a, <8 x i16> %b) {
 ; CHECK-LABEL: test211:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltish 4, 15
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrah 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <8 x i16> %b, <i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15, i16 15>
@@ -270,11 +240,7 @@ define <8 x i16> @test211(<8 x i16> %a, <8 x i16> %b) {
 
 define <4 x i32> @test212(<4 x i32> %a, <4 x i32> %b) {
 ; CHECK-LABEL: test212:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    vspltisw 4, -16
-; CHECK-NEXT:    vspltisw 5, 15
-; CHECK-NEXT:    vsubuwm 4, 5, 4
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsraw 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <4 x i32> %b, <i32 31, i32 31, i32 31, i32 31>
@@ -284,12 +250,7 @@ define <4 x i32> @test212(<4 x i32> %a, <4 x i32> %b) {
 
 define <2 x i64> @test213(<2 x i64> %a, <2 x i64> %b) {
 ; CHECK-LABEL: test213:
-; CHECK:       # BB#0:
-; CHECK-NEXT:    addis 3, 2, .LCPI23_0@toc@ha
-; CHECK-NEXT:    addi 3, 3, .LCPI23_0@toc@l
-; CHECK-NEXT:    lxvd2x 0, 0, 3
-; CHECK-NEXT:    xxswapd 36, 0
-; CHECK-NEXT:    xxland 35, 35, 36
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vsrad 2, 2, 3
 ; CHECK-NEXT:    blr
   %rem = and <2 x i64> %b, <i64 63, i64 63>

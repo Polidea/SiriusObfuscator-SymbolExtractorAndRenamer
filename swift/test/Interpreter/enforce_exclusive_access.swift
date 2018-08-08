@@ -1,5 +1,4 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift -swift-version 4 %s -o %t/a.out -enforce-exclusivity=checked -Onone
 //
 // RUN: %target-run %t/a.out
@@ -103,66 +102,6 @@ ExclusiveAccessTestSuite.test("ModifyFollowedByModify") {
 
   globalX = X() // no-trap
 }
-
-// FIXME: This should be covered by static diagnostics.
-// Once this radar is fixed, confirm that a it is covered by a static diagnostic
-// (-verify) test in exclusivity_static_diagnostics.sil.
-// <rdar://problem/32061282> Enforce exclusive access in noescape closures.
-//
-//ExclusiveAccessTestSuite.test("ClosureCaptureModifyModify")
-//.skip(.custom(
-//    { _isFastAssertConfiguration() },
-//    reason: "this trap is not guaranteed to happen in -Ounchecked"))
-//  .crashOutputMatches("Previous access (a modification) started at")
-//  .crashOutputMatches("Current access (a modification) started at")
-//  .code
-//{
-//  var x = X()
-//  modifyAndPerform(&x) {
-//    expectCrashLater()
-//    x.i = 12
-//  }
-//}
-
-// FIXME: This should be covered by static diagnostics.
-// Once this radar is fixed, confirm that a it is covered by a static diagnostic
-// (-verify) test in exclusivity_static_diagnostics.sil.
-// <rdar://problem/32061282> Enforce exclusive access in noescape closures.
-//
-//ExclusiveAccessTestSuite.test("ClosureCaptureReadModify")
-//.skip(.custom(
-//    { _isFastAssertConfiguration() },
-//    reason: "this trap is not guaranteed to happen in -Ounchecked"))
-//  .crashOutputMatches("Previous access (a read) started at")
-//  .crashOutputMatches("Current access (a modification) started at")
-//  .code
-//{
-//  var x = X()
-//  modifyAndPerform(&x) {
-//    expectCrashLater()
-//    _blackHole(x.i)
-//  }
-//}
-
-// FIXME: This should be covered by static diagnostics.
-// Once this radar is fixed, confirm that a it is covered by a static diagnostic
-// (-verify) test in exclusivity_static_diagnostics.sil.
-// <rdar://problem/32061282> Enforce exclusive access in noescape closures.
-//
-//ExclusiveAccessTestSuite.test("ClosureCaptureModifyRead")
-//.skip(.custom(
-//    { _isFastAssertConfiguration() },
-//    reason: "this trap is not guaranteed to happen in -Ounchecked"))
-//  .crashOutputMatches("Previous access (a modification) started at")
-//  .crashOutputMatches("Current access (a read) started at")
-//  .code
-//{
-//  var x = X()
-//  readAndPerform(&x) {
-//    expectCrashLater()
-//    x.i = 12
-//  }
-//}
 
 ExclusiveAccessTestSuite.test("ClosureCaptureReadRead") {
   var x = X()
@@ -299,6 +238,111 @@ ExclusiveAccessTestSuite.test("InoutWriteEscapeWrite")
   let c = { x = 7 }
   expectCrashLater()
   doOne { modifyAndPerform(&x, closure: c) }
+}
+
+class ClassWithStoredProperty {
+  final var f = 7
+}
+
+ExclusiveAccessTestSuite.test("KeyPathInoutDirectWriteClassStoredProp")
+  .skip(.custom(
+    { _isFastAssertConfiguration() },
+    reason: "this trap is not guaranteed to happen in -Ounchecked"))
+  .crashOutputMatches("Previous access (a modification) started at")
+  .crashOutputMatches("Current access (a modification) started at")
+  .code
+{
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  expectCrashLater()
+  modifyAndPerform(&c[keyPath: getF]) {
+    c.f = 12
+  }
+}
+
+ExclusiveAccessTestSuite.test("KeyPathInoutDirectReadClassStoredProp")
+  .skip(.custom(
+    { _isFastAssertConfiguration() },
+    reason: "this trap is not guaranteed to happen in -Ounchecked"))
+  .crashOutputMatches("Previous access (a modification) started at")
+  .crashOutputMatches("Current access (a read) started at")
+  .code
+{
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  expectCrashLater()
+  modifyAndPerform(&c[keyPath: getF]) {
+    let x = c.f
+    _blackHole(x)
+  }
+}
+
+// Unlike inout accesses, read-only inout-to-pointer conversions on key paths for
+// final stored-properties do not perform a long-term read access. Instead, they
+// materialize a location on the stack, perform an instantaneous read
+// from the storage indicated by the key path and write the read value to the
+// stack location. The stack location is then passed as the pointer for the
+// inout-to-pointer conversion.
+//
+// This means that there is no conflict between a read-only inout-to-pointer
+// conversion of the key path location for a call and an access to the
+// the same location within the call.
+ExclusiveAccessTestSuite.test("KeyPathReadOnlyInoutToPtrDirectWriteClassStoredProp") {
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  // This performs an instantaneous read
+  readAndPerform(&c[keyPath: getF]) {
+    c.f = 12 // no-trap
+  }
+}
+
+ExclusiveAccessTestSuite.test("SequentialKeyPathWritesDontOverlap") {
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  c[keyPath: getF] = 7
+  c[keyPath: getF] = 8 // no-trap
+  c[keyPath: getF] += c[keyPath: getF] + 1 // no-trap
+}
+
+ExclusiveAccessTestSuite.test("KeyPathInoutKeyPathWriteClassStoredProp")
+  .skip(.custom(
+    { _isFastAssertConfiguration() },
+    reason: "this trap is not guaranteed to happen in -Ounchecked"))
+  .crashOutputMatches("Previous access (a modification) started at")
+  .crashOutputMatches("Current access (a modification) started at")
+  .code
+{
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  expectCrashLater()
+  modifyAndPerform(&c[keyPath: getF]) {
+    c[keyPath: getF] = 12
+  }
+}
+
+// This does not currently trap because the standard library is compiled in Swift 3 mode,
+// which logs.
+ExclusiveAccessTestSuite.test("KeyPathInoutKeyPathReadClassStoredProp")
+  .skip(.custom(
+    { _isFastAssertConfiguration() },
+    reason: "this trap is not guaranteed to happen in -Ounchecked"))
+  .crashOutputMatches("Previous access (a modification) started at")
+  .crashOutputMatches("Current access (a read) started at")
+  .code
+{
+  let getF = \ClassWithStoredProperty.f
+  let c = ClassWithStoredProperty()
+
+  expectCrashLater()
+  modifyAndPerform(&c[keyPath: getF]) {
+    let y = c[keyPath: getF]
+    _blackHole(y)
+  }
 }
 
 runAllTests()

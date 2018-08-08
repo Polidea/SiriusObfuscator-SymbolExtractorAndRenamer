@@ -6,6 +6,7 @@ else ()
   set(LLBUILD_BUILD_MODE "%(build_mode)s")
 endif ()
 
+string(REPLACE ${CMAKE_CFG_INTDIR} ${LLBUILD_BUILD_MODE} LLBUILD_OUTPUT_DIR ${LLBUILD_EXECUTABLE_OUTPUT_INTDIR}/../)
 string(REPLACE ${CMAKE_CFG_INTDIR} ${LLBUILD_BUILD_MODE} LLBUILD_TOOLS_DIR ${LLBUILD_EXECUTABLE_OUTPUT_INTDIR})
 string(REPLACE ${CMAKE_CFG_INTDIR} ${LLBUILD_BUILD_MODE} LLBUILD_LIBS_DIR  ${LLBUILD_LIBRARY_OUTPUT_INTDIR})
 
@@ -35,10 +36,6 @@ if(PYTHONINTERP_FOUND AND LIT_FOUND AND FILECHECK_FOUND)
 
   set(test_target_dependencies
     llbuild libllbuild swift-build-tool UnitTests)
-
-  if (SWIFTC_FOUND)
-    list(APPEND test_target_dependencies swift-bindings)
-  endif()
 
   add_custom_target(test-llbuild
     COMMAND ${lit_command} ${CMAKE_CURRENT_BINARY_DIR}

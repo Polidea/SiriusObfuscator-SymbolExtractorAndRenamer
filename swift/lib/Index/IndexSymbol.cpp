@@ -20,10 +20,7 @@ using namespace swift;
 using namespace swift::index;
 
 static NominalTypeDecl *getNominalParent(const ValueDecl *D) {
-  Type Ty = D->getDeclContext()->getDeclaredTypeOfContext();
-  if (!Ty)
-    return nullptr;
-  return Ty->getAnyNominal();
+  return D->getDeclContext()->getAsNominalTypeOrNominalTypeExtensionContext();
 }
 
 /// \returns true if \c D is a subclass of 'XCTestCase'.
@@ -70,11 +67,11 @@ static bool isUnitTest(const ValueDecl *D) {
   if (FD->getParameterList(1)->size() != 0)
     return false;
 
-  // 5. ...is of at least 'internal' accessibility (unless we can use
+  // 5. ...is of at least 'internal' access (unless we can use
   //    Objective-C reflection)...
   if (!D->getASTContext().LangOpts.EnableObjCInterop &&
-      (D->getFormalAccess() < Accessibility::Internal ||
-      parentNTD->getFormalAccess() < Accessibility::Internal))
+      (D->getFormalAccess() < AccessLevel::Internal ||
+      parentNTD->getFormalAccess() < AccessLevel::Internal))
     return false;
 
   // 6. ...and starts with "test".
@@ -104,8 +101,8 @@ static void setFuncSymbolInfo(const FuncDecl *FD, SymbolInfo &sym) {
     }
   }
 
-  if (FD->isAccessor()) {
-    sym.SubKind = getSubKindForAccessor(FD->getAccessorKind());
+  if (auto accessor = dyn_cast<AccessorDecl>(FD)) {
+    sym.SubKind = getSubKindForAccessor(accessor->getAccessorKind());
     return;
   }
 
@@ -141,7 +138,7 @@ static SymbolKind getVarSymbolKind(const VarDecl *VD) {
 
 SymbolInfo index::getSymbolInfoForDecl(const Decl *D) {
   SymbolInfo info{ SymbolKind::Unknown, SymbolSubKind::None,
-                   SymbolPropertySet(), SymbolLanguage::Swift };
+                   SymbolLanguage::Swift, SymbolPropertySet() };
   switch (D->getKind()) {
     case DeclKind::Enum:             info.Kind = SymbolKind::Enum; break;
     case DeclKind::Struct:           info.Kind = SymbolKind::Struct; break;
@@ -191,6 +188,7 @@ SymbolInfo index::getSymbolInfoForDecl(const Decl *D) {
     case DeclKind::Param:
       info.Kind = SymbolKind::Parameter;
       break;
+    case DeclKind::Accessor:
     case DeclKind::Func:
       setFuncSymbolInfo(cast<FuncDecl>(D), info);
       break;
@@ -202,7 +200,23 @@ SymbolInfo index::getSymbolInfoForDecl(const Decl *D) {
         info.Properties |= SymbolProperty::GKInspectable;
       break;
 
-    default:
+    // Arguably these should be indexed?
+    case DeclKind::PrecedenceGroup:
+    case DeclKind::InfixOperator:
+    case DeclKind::PrefixOperator:
+    case DeclKind::PostfixOperator:
+      break;
+
+    // These all reflect some sort of uninteresting syntactic structure
+    // and don't merit indexing.
+    case DeclKind::Import:
+    case DeclKind::PatternBinding:
+    case DeclKind::EnumCase:
+    case DeclKind::TopLevelCode:
+    case DeclKind::IfConfig:
+    case DeclKind::PoundDiagnostic:
+    case DeclKind::MissingMember:
+    case DeclKind::Module:
       break;
   }
 
@@ -215,16 +229,15 @@ SymbolInfo index::getSymbolInfoForDecl(const Decl *D) {
 
 SymbolSubKind index::getSubKindForAccessor(AccessorKind AK) {
   switch (AK) {
-    case AccessorKind::NotAccessor: return SymbolSubKind::None;
-    case AccessorKind::IsGetter:    return SymbolSubKind::AccessorGetter;
-    case AccessorKind::IsSetter:    return SymbolSubKind::AccessorSetter;
-    case AccessorKind::IsWillSet:   return SymbolSubKind::SwiftAccessorWillSet;
-    case AccessorKind::IsDidSet:    return SymbolSubKind::SwiftAccessorDidSet;
-    case AccessorKind::IsAddressor: return SymbolSubKind::SwiftAccessorAddressor;
-    case AccessorKind::IsMutableAddressor:
-      return SymbolSubKind::SwiftAccessorMutableAddressor;
-    case AccessorKind::IsMaterializeForSet:
-      llvm_unreachable("unexpected MaterializeForSet");
+  case AccessorKind::IsGetter:    return SymbolSubKind::AccessorGetter;
+  case AccessorKind::IsSetter:    return SymbolSubKind::AccessorSetter;
+  case AccessorKind::IsWillSet:   return SymbolSubKind::SwiftAccessorWillSet;
+  case AccessorKind::IsDidSet:    return SymbolSubKind::SwiftAccessorDidSet;
+  case AccessorKind::IsAddressor: return SymbolSubKind::SwiftAccessorAddressor;
+  case AccessorKind::IsMutableAddressor:
+    return SymbolSubKind::SwiftAccessorMutableAddressor;
+  case AccessorKind::IsMaterializeForSet:
+    llvm_unreachable("unexpected MaterializeForSet");
   }
 
   llvm_unreachable("Unhandled AccessorKind in switch.");

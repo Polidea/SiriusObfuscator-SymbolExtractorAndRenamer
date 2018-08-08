@@ -7,15 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-import CoreFoundation
-
 class TestNumberFormatter: XCTestCase {
 
     static var allTests: [(String, (TestNumberFormatter) -> () throws -> Void)] {
@@ -104,9 +95,22 @@ class TestNumberFormatter: XCTestCase {
     }
     
     func test_groupingSeparator() {
+        let decFormatter1 = NumberFormatter()
+        XCTAssertEqual(decFormatter1.groupingSize, 0)
+        decFormatter1.numberStyle = .decimal
+        XCTAssertEqual(decFormatter1.groupingSize, 3)
+
+        let decFormatter2 = NumberFormatter()
+        XCTAssertEqual(decFormatter2.groupingSize, 0)
+        decFormatter2.groupingSize = 1
+        decFormatter2.numberStyle = .decimal
+        XCTAssertEqual(decFormatter2.groupingSize, 1)
+
         let numberFormatter = NumberFormatter()
         numberFormatter.usesGroupingSeparator = true
         numberFormatter.groupingSeparator = "_"
+        XCTAssertEqual(numberFormatter.groupingSize, 0)
+        numberFormatter.groupingSize = 3
         let formattedString = numberFormatter.string(from: 42_000)
         XCTAssertEqual(formattedString, "42_000")
     }
@@ -163,15 +167,18 @@ class TestNumberFormatter: XCTestCase {
         numberFormatter.plusSign = sign
         XCTAssertEqual(numberFormatter.plusSign, sign)
 
+#if !os(Android)
         let formattedString = numberFormatter.string(from: 420000000000000000)
         XCTAssertNotNil(formattedString)
         XCTAssertEqual(formattedString, "4.2E👍17")
+#endif
 
         // Verify a negative exponent does not have the 👍
         let noPlusString = numberFormatter.string(from: -0.420)
         XCTAssertNotNil(noPlusString)
         if let fmt = noPlusString {
-            XCTAssertFalse(fmt.contains(sign), "Expected format of -0.420 (-4.2E-1) shouldn't have a plus sign which was set as \(sign)")
+            let contains: Bool = fmt.contains(sign)
+            XCTAssertFalse(contains, "Expected format of -0.420 (-4.2E-1) shouldn't have a plus sign which was set as \(sign)")
         }
     }
 
@@ -196,14 +203,24 @@ class TestNumberFormatter: XCTestCase {
     }
     
     func test_minimumIntegerDigits() {
+        let numberFormatter1 = NumberFormatter()
+        XCTAssertEqual(numberFormatter1.minimumIntegerDigits, 0)
+        numberFormatter1.minimumIntegerDigits = 3
+        numberFormatter1.numberStyle = .decimal
+        XCTAssertEqual(numberFormatter1.minimumIntegerDigits, 3)
+
         let numberFormatter = NumberFormatter()
+        XCTAssertEqual(numberFormatter.minimumIntegerDigits, 0)
+        numberFormatter.numberStyle = .decimal
+        XCTAssertEqual(numberFormatter.minimumIntegerDigits, 1)
         numberFormatter.minimumIntegerDigits = 3
         var formattedString = numberFormatter.string(from: 0)
         XCTAssertEqual(formattedString, "000")
 
         numberFormatter.numberStyle = .decimal
+        XCTAssertEqual(numberFormatter.minimumIntegerDigits, 3)
         formattedString = numberFormatter.string(from: 0.1)
-        XCTAssertEqual(formattedString, "0.1")        
+        XCTAssertEqual(formattedString, "000.1")
     }
     
     func test_maximumIntegerDigits() {
@@ -231,6 +248,7 @@ class TestNumberFormatter: XCTestCase {
     
     func test_groupingSize() {
         let numberFormatter = NumberFormatter()
+        XCTAssertEqual(numberFormatter.groupingSize, 0)
         numberFormatter.groupingSize = 4
         numberFormatter.groupingSeparator = "_"
         numberFormatter.usesGroupingSeparator = true
@@ -240,6 +258,7 @@ class TestNumberFormatter: XCTestCase {
     
     func test_secondaryGroupingSize() {
         let numberFormatter = NumberFormatter()
+        numberFormatter.groupingSize = 3
         numberFormatter.secondaryGroupingSize = 2
         numberFormatter.groupingSeparator = "_"
         numberFormatter.usesGroupingSeparator = true
@@ -469,7 +488,7 @@ class TestNumberFormatter: XCTestCase {
         XCTAssertEqual(numberFormatter.perMillSymbol, "‰")
         XCTAssertEqual(numberFormatter.exponentSymbol, "E")
         XCTAssertEqual(numberFormatter.groupingSeparator, ",")
-        XCTAssertEqual(numberFormatter.paddingCharacter, "*")
+        XCTAssertEqual(numberFormatter.paddingCharacter, " ")
     }
 }
 

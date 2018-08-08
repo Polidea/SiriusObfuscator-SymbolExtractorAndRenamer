@@ -8,6 +8,8 @@
  See http://swift.org/CONTRIBUTORS.txt for Swift project authors
 */
 
+import Dispatch
+
 /// A type which can be used as a diagnostic parameter.
 public protocol DiagnosticParameter {
 
@@ -250,18 +252,53 @@ public protocol DiagnosticsScope {
 }
 
 public class DiagnosticsEngine: CustomStringConvertible {
-    /// The diagnostics produced by the engine.
-    public var diagnostics: [Diagnostic] = []
 
+    public typealias DiagnosticsHandler = (Diagnostic) -> Void
+
+    /// Queue to protect concurrent mutations to the diagnositcs engine.
+    private let queue = DispatchQueue(label: "\(DiagnosticsEngine.self)")
+
+    /// Queue for dispatching handlers.
+    private let handlerQueue = DispatchQueue(label: "\(DiagnosticsEngine.self)-callback")
+
+    /// The diagnostics produced by the engine.
+    public var diagnostics: [Diagnostic] {
+        return queue.sync { _diagnostics }
+    }
+    private var _diagnostics: [Diagnostic] = []
+
+    /// The list of handlers to run when a diagnostic is emitted.
+    ///
+    /// The handler will be called on an unknown queue.
+    private let handlers: [DiagnosticsHandler]
+
+    /// Returns true if there is an error diagnostics in the engine.
     public var hasErrors: Bool {
         return diagnostics.contains(where: { $0.behavior == .error })
     }
-    
-    public init() {
+
+    public init(handlers: [DiagnosticsHandler] = []) {
+        self.handlers = handlers
     }
 
     public func emit(data: DiagnosticData, location: DiagnosticLocation) {
-        diagnostics.append(Diagnostic(location: location, data: data))
+        let diagnostic = Diagnostic(location: location, data: data)
+
+        queue.sync {
+            _diagnostics.append(diagnostic)
+        }
+
+        // Call the handlers on the background queue, if we have any.
+        if !handlers.isEmpty {
+            // FIXME: We should probably do this async but then we need
+            // a way for clients to be able to wait until all handlers
+            // are called.
+            handlerQueue.sync {
+                for handler in self.handlers {
+                    handler(diagnostic)
+                }
+            }
+        }
     }
 
     /// Merges contents of given engine.

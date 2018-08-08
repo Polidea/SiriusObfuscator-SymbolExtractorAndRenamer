@@ -1,7 +1,7 @@
 /*	CFTimeZone.c
-	Copyright (c) 1998-2016, Apple Inc. and the Swift project authors
+	Copyright (c) 1998-2017, Apple Inc. and the Swift project authors
  
-	Portions Copyright (c) 2014-2016 Apple Inc. and the Swift project authors
+	Portions Copyright (c) 2014-2017, Apple Inc. and the Swift project authors
 	Licensed under Apache License v2.0 with Runtime Library Exception
 	See http://swift.org/LICENSE.txt for license information
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
@@ -813,6 +813,15 @@ static CFTimeZoneRef __CFTimeZoneCreateSystem(void) {
         CFRelease(name);
         if (result) return result;
     }
+#if DEPLOYMENT_TARGET_ANDROID
+    // Timezone database by name not available on Android.
+    // Approximate with gmtoff - could be general default.
+    struct tm info;
+    time_t now = time(NULL);
+    if (NULL != localtime_r(&now, &info)) {
+        return CFTimeZoneCreateWithTimeIntervalFromGMT(kCFAllocatorSystemDefault, info.tm_gmtoff);
+    }
+#endif
     return CFTimeZoneCreateWithTimeIntervalFromGMT(kCFAllocatorSystemDefault, 0.0);
 }
 

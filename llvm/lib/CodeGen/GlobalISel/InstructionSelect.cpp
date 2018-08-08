@@ -19,16 +19,28 @@
 #include "llvm/CodeGen/GlobalISel/Utils.h"
 #include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/Config/config.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Target/TargetSubtargetInfo.h"
+#include "llvm/Support/TargetRegistry.h"
 
 #define DEBUG_TYPE "instruction-select"
 
 using namespace llvm;
+
+#ifdef LLVM_GISEL_COV_PREFIX
+static cl::opt<std::string>
+    CoveragePrefix("gisel-coverage-prefix", cl::init(LLVM_GISEL_COV_PREFIX),
+                   cl::desc("Record GlobalISel rule coverage files of this "
+                            "prefix if instrumentation was generated"));
+#else
+static const std::string CoveragePrefix = "";
+#endif
 
 char InstructionSelect::ID = 0;
 INITIALIZE_PASS_BEGIN(InstructionSelect, DEBUG_TYPE,
@@ -65,13 +77,13 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
 
   const TargetPassConfig &TPC = getAnalysis<TargetPassConfig>();
   const InstructionSelector *ISel = MF.getSubtarget().getInstructionSelector();
+  CodeGenCoverage CoverageInfo;
   assert(ISel && "Cannot work without InstructionSelector");
 
   // An optimization remark emitter. Used to report failures.
   MachineOptimizationRemarkEmitter MORE(MF, /*MBFI=*/nullptr);
 
-  // FIXME: freezeReservedRegs is now done in IRTranslator, but there are many
-  // other MF/MFI fields we need to initialize.
+  // FIXME: There are many other MF/MFI fields we need to initialize.
 
 #ifndef NDEBUG
   // Check that our input is fully legal: we require the function to have the
@@ -127,7 +139,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
         continue;
       }
 
-      if (!ISel->select(MI)) {
+      if (!ISel->select(MI, CoverageInfo)) {
         // FIXME: It would be nice to dump all inserted instructions.  It's
         // not obvious how, esp. considering select() can insert after MI.
         reportGISelFailure(MF, TPC, MORE, "gisel-select", "cannot select", MI);
@@ -144,6 +156,8 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
       });
     }
   }
+
+  const TargetRegisterInfo &TRI = *MF.getSubtarget().getRegisterInfo();
 
   // Now that selection is complete, there are no more generic vregs.  Verify
   // that the size of the now-constrained vreg is unchanged and that it has a
@@ -165,7 +179,7 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
       continue;
 
     if (VRegToType.second.isValid() &&
-        VRegToType.second.getSizeInBits() > (RC->getSize() * 8)) {
+        VRegToType.second.getSizeInBits() > TRI.getRegSizeInBits(*RC)) {
       reportGISelFailure(MF, TPC, MORE, "gisel-select",
                          "VReg has explicit size different from class size",
                          *MI);
@@ -175,12 +189,22 @@ bool InstructionSelect::runOnMachineFunction(MachineFunction &MF) {
 
   if (MF.size() != NumBlocks) {
     MachineOptimizationRemarkMissed R("gisel-select", "GISelFailure",
-                                      MF.getFunction()->getSubprogram(),
+                                      MF.getFunction().getSubprogram(),
                                       /*MBB=*/nullptr);
     R << "inserting blocks is not supported yet";
     reportGISelFailure(MF, TPC, MORE, R);
     return false;
   }
+
+  auto &TLI = *MF.getSubtarget().getTargetLowering();
+  TLI.finalizeLowering(MF);
+
+  CoverageInfo.emit(CoveragePrefix,
+                    MF.getSubtarget()
+                        .getTargetLowering()
+                        ->getTargetMachine()
+                        .getTarget()
+                        .getBackendName());
 
   // FIXME: Should we accurately track changes?
   return true;

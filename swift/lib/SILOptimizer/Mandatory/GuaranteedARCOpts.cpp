@@ -24,7 +24,7 @@ namespace {
 
 struct GuaranteedARCOptsVisitor
     : SILInstructionVisitor<GuaranteedARCOptsVisitor, bool> {
-  bool visitValueBase(ValueBase *V) { return false; }
+  bool visitSILInstruction(SILInstruction *I) { return false; }
   bool visitDestroyAddrInst(DestroyAddrInst *DAI);
   bool visitStrongReleaseInst(StrongReleaseInst *SRI);
   bool visitDestroyValueInst(DestroyValueInst *DVI);
@@ -75,6 +75,7 @@ static bool couldReduceStrongRefcount(SILInstruction *Inst) {
   if (isa<LoadInst>(Inst) || isa<StoreInst>(Inst) ||
       isa<RetainValueInst>(Inst) || isa<UnownedRetainInst>(Inst) ||
       isa<UnownedReleaseInst>(Inst) || isa<StrongRetainUnownedInst>(Inst) ||
+      isa<CopyUnownedValueInst>(Inst) ||
       isa<StoreWeakInst>(Inst) || isa<StrongRetainInst>(Inst) ||
       isa<AllocStackInst>(Inst) || isa<DeallocStackInst>(Inst) ||
       isa<BeginAccessInst>(Inst) || isa<EndAccessInst>(Inst) ||
@@ -205,6 +206,9 @@ bool GuaranteedARCOptsVisitor::visitReleaseValueInst(ReleaseValueInst *RVI) {
 
 namespace {
 
+// Even though this is a mandatory pass, it is rerun after deserialization in
+// case DiagnosticConstantPropagation exposed anything new in this assert
+// configuration.
 struct GuaranteedARCOpts : SILFunctionTransform {
   void run() override {
     GuaranteedARCOptsVisitor Visitor;

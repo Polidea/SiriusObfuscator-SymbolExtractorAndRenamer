@@ -13,8 +13,9 @@ public class BridgedClass : NSObject, NSCopying {
 
 public class BridgedClassSub : BridgedClass { }
 
-// Attempt to bridge to a non-whitelisted type from another module.
-extension LazyFilterIterator : _ObjectiveCBridgeable { // expected-error{{conformance of 'LazyFilterIterator' to '_ObjectiveCBridgeable' can only be written in module 'Swift'}}
+// Attempt to bridge to a type from another module. We only allow this for a
+// few specific types, like String.
+extension LazyFilterSequence.Iterator : _ObjectiveCBridgeable { // expected-error{{conformance of 'Iterator' to '_ObjectiveCBridgeable' can only be written in module 'Swift'}}
   public typealias _ObjectiveCType = BridgedClassSub
 
   public func _bridgeToObjectiveC() -> _ObjectiveCType {
@@ -23,19 +24,19 @@ extension LazyFilterIterator : _ObjectiveCBridgeable { // expected-error{{confor
 
   public static func _forceBridgeFromObjectiveC(
     _ source: _ObjectiveCType,
-    result: inout LazyFilterIterator?
+    result: inout LazyFilterSequence.Iterator?
   ) { }
 
   public static func _conditionallyBridgeFromObjectiveC(
     _ source: _ObjectiveCType,
-    result: inout LazyFilterIterator?
+    result: inout LazyFilterSequence.Iterator?
   ) -> Bool {
     return true
   }
 
   public static func _unconditionallyBridgeFromObjectiveC(_ source: _ObjectiveCType?)
-      -> LazyFilterIterator {
-    let result: LazyFilterIterator?
+      -> LazyFilterSequence.Iterator {
+    let result: LazyFilterSequence.Iterator?
     return result!
   }
 }
@@ -180,8 +181,10 @@ func dictionaryToNSDictionary() {
 struct NotEquatable {}
 func notEquatableError(_ d: Dictionary<Int, NotEquatable>) -> Bool {
   // FIXME: Another awful diagnostic.
-  return d == d // expected-error{{binary operator '==' cannot be applied to two 'Dictionary<Int, NotEquatable>' operands}}
-  // expected-note @-1 {{overloads for '==' exist with these partially matching parameter lists: }}
+  return d == d // expected-error{{'<Self where Self : Equatable> (Self.Type) -> (Self, Self) -> Bool' requires that 'NotEquatable' conform to 'Equatable'}}
+  // expected-note @-1 {{requirement from conditional conformance of 'Dictionary<Int, NotEquatable>' to 'Equatable'}}
+  // expected-error @-2 {{type 'NotEquatable' does not conform to protocol 'Equatable'}}
+  // expected-note @-3{{requirement specified as 'NotEquatable' : 'Equatable'}}
 }
 
 // NSString -> String
@@ -194,7 +197,7 @@ let d: Double = 3.14159
 inferDouble = d
 
 // rdar://problem/17962491
-_ = 1 % 3 / 3.0 // expected-error{{'%' is unavailable: Use truncatingRemainder instead}}
+_ = 1 % 3 / 3.0 // expected-error{{'%' is unavailable: For floating point numbers use truncatingRemainder instead}}
 var inferDouble2 = 1 / 3 / 3.0
 let d2: Double = 3.14159
 inferDouble2 = d2
@@ -255,18 +258,18 @@ func rdar19770981(_ s: String, ns: NSString) {
 
 // <rdar://problem/19831919> Fixit offers as! conversions that are known to always fail
 func rdar19831919() {
-  var s1 = 1 + "str"; // expected-error{{binary operator '+' cannot be applied to operands of type 'Int' and 'String'}} expected-note{{overloads for '+' exist with these partially matching parameter lists: (Int, Int), (String, String), (Int, UnsafeMutablePointer<Pointee>), (Int, UnsafePointer<Pointee>)}}
+  var s1 = 1 + "str"; // expected-error{{binary operator '+' cannot be applied to operands of type 'Int' and 'String'}} expected-note{{overloads for '+' exist with these partially matching parameter lists: (Int, Int), (String, String)}}
 }
 
 // <rdar://problem/19831698> Incorrect 'as' fixits offered for invalid literal expressions
 func rdar19831698() {
-  var v70 = true + 1 // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and 'Int'}} expected-note {{overloads for '+' exist with these partially matching parameter lists: (Int, Int), (UnsafeMutablePointer<Pointee>, Int), (UnsafePointer<Pointee>, Int)}}
+  var v70 = true + 1 // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and 'Int'}} expected-note {{expected an argument list of type '(Int, Int)'}}
   var v71 = true + 1.0 // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and 'Double'}}
 // expected-note@-1{{overloads for '+'}}
   var v72 = true + true // expected-error{{binary operator '+' cannot be applied to two 'Bool' operands}}
   // expected-note @-1 {{overloads for '+' exist with these partially matching parameter lists:}}
   var v73 = true + [] // expected-error{{binary operator '+' cannot be applied to operands of type 'Bool' and '[Any]'}}
-  // expected-note @-1 {{overloads for '+' exist with these partially matching parameter lists:}}
+  // expected-note @-1 {{overloads for '+' exist with these partially matching parameter lists: (Self, Other), (Other, Self)}}
   var v75 = true + "str" // expected-error {{binary operator '+' cannot be applied to operands of type 'Bool' and 'String'}} expected-note {{expected an argument list of type '(String, String)'}}
 }
 
@@ -293,13 +296,13 @@ func rdar20029786(_ ns: NSString?) {
 
   let s3: NSString? = "str" as String? // expected-error {{cannot convert value of type 'String?' to specified type 'NSString?'}}
 
-  var s4: String = ns ?? "str" // expected-error{{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}}{{20-20=(}}{{31-31=) as String}}
+  var s4: String = ns ?? "str" // expected-error{{cannot convert value of type 'NSString' to specified type 'String'}}
   var s5: String = (ns ?? "str") as String // fixed version
 }
 
 // <rdar://problem/19813772> QoI: Using as! instead of as in this case produces really bad diagnostic
 func rdar19813772(_ nsma: NSMutableArray) {
-  var a1 = nsma as! Array // expected-error{{generic parameter 'Element' could not be inferred in cast to 'Array<_>'}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{26-26=<Any>}}
+  var a1 = nsma as! Array // expected-error{{generic parameter 'Element' could not be inferred in cast to 'Array'}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{26-26=<Any>}}
   var a2 = nsma as! Array<AnyObject> // expected-warning{{forced cast from 'NSMutableArray' to 'Array<AnyObject>' always succeeds; did you mean to use 'as'?}} {{17-20=as}}
   var a3 = nsma as Array<AnyObject>
 }
@@ -318,11 +321,11 @@ func force_cast_fixit(_ a : [NSString]) -> [NSString] {
 
 // <rdar://problem/21244068> QoI: IUO prevents specific diagnostic + fixit about non-implicitly converted bridge types
 func rdar21244068(_ n: NSString!) -> String {
-  return n  // expected-error {{'NSString!' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}} {{11-11= as String}}
+  return n  // expected-error {{'NSString' is not implicitly convertible to 'String'; did you mean to use 'as' to explicitly convert?}}
 }
 
 func forceBridgeDiag(_ obj: BridgedClass!) -> BridgedStruct {
-  return obj // expected-error{{'BridgedClass!' is not implicitly convertible to 'BridgedStruct'; did you mean to use 'as' to explicitly convert?}}{{13-13= as BridgedStruct}}
+  return obj // expected-error{{'BridgedClass' is not implicitly convertible to 'BridgedStruct'; did you mean to use 'as' to explicitly convert?}}
 }
 
 struct KnownUnbridged {}

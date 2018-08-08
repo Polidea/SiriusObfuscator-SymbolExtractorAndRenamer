@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %build-irgen-test-overlays
 // RUN: %target-swift-frontend(mock-sdk: -sdk %S/Inputs -I %t) %s -emit-ir | %FileCheck %s
 
@@ -6,7 +6,7 @@
 
 import Foundation
 
-// CHECK:       @_T028class_with_stub_initializers3FooCN =
+// CHECK:       @"$S28class_with_stub_initializers3FooCN" =
 // -- The init() stub should get no vtable entry
 // CHECK-NOT:     %T28class_with_stub_initializers3FooC* (%T28class_with_stub_initializers3FooC*)*
 // CHECK:         %T28class_with_stub_initializers3FooC* (i64, %T28class_with_stub_initializers3FooC*)*

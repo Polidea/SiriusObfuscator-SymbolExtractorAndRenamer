@@ -14,7 +14,7 @@ open class DateFormatter : Formatter {
     private var __cfObject: CFType?
     private var _cfObject: CFType {
         guard let obj = __cfObject else {
-            #if os(OSX) || os(iOS)
+            #if os(macOS) || os(iOS)
                 let dateStyle = CFDateFormatterStyle(rawValue: CFIndex(self.dateStyle.rawValue))!
                 let timeStyle = CFDateFormatterStyle(rawValue: CFIndex(self.timeStyle.rawValue))!
             #else
@@ -142,9 +142,23 @@ open class DateFormatter : Formatter {
         }
     }
 
-    open var dateStyle: Style = .none { willSet { _dateFormat = nil; _reset() } }
+    open var dateStyle: Style = .none {
+        willSet {
+            _dateFormat = nil
+        }
+        didSet {
+            _dateFormat = CFDateFormatterGetFormat(_cfObject)._swiftObject
+        }
+    }
 
-    open var timeStyle: Style = .none { willSet { _dateFormat = nil; _reset() } }
+    open var timeStyle: Style = .none {
+        willSet {
+            _dateFormat = nil
+        }
+        didSet {
+            _dateFormat = CFDateFormatterGetFormat(_cfObject)._swiftObject
+        }
+    }
 
     /*@NSCopying*/ open var locale: Locale! = .current { willSet { _reset() } }
 

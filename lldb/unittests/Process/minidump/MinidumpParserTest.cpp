@@ -15,51 +15,41 @@
 #include "Plugins/Process/minidump/RegisterContextMinidump_x86_32.h"
 #include "Plugins/Process/minidump/RegisterContextMinidump_x86_64.h"
 
-// Other libraries and framework includes
-#include "gtest/gtest.h"
-
-#include "lldb/Core/ArchSpec.h"
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Host/FileSpec.h"
+#include "TestingSupport/TestUtilities.h"
 #include "lldb/Target/MemoryRegionInfo.h"
-
+#include "lldb/Utility/ArchSpec.h"
+#include "lldb/Utility/DataBufferLLVM.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/FileSpec.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
+#include "gtest/gtest.h"
 
 // C includes
 
 // C++ includes
 #include <memory>
 
-extern const char *TestMainArgv0;
-
 using namespace lldb_private;
 using namespace minidump;
 
 class MinidumpParserTest : public testing::Test {
 public:
-  void SetUp() override {
-    llvm::StringRef dmp_folder = llvm::sys::path::parent_path(TestMainArgv0);
-    inputs_folder = dmp_folder;
-    llvm::sys::path::append(inputs_folder, "Inputs");
-  }
+  void SetUpData(const char *minidump_filename,
+                 uint64_t load_size = UINT64_MAX) {
+    std::string filename = GetInputFilePath(minidump_filename);
+    auto BufferPtr = DataBufferLLVM::CreateSliceFromPath(filename, load_size, 0);
 
-  void SetUpData(const char *minidump_filename, size_t load_size = SIZE_MAX) {
-    llvm::SmallString<128> filename = inputs_folder;
-    llvm::sys::path::append(filename, minidump_filename);
-    FileSpec minidump_file(filename.c_str(), false);
-    lldb::DataBufferSP data_sp(
-        minidump_file.MemoryMapFileContents(0, load_size));
     llvm::Optional<MinidumpParser> optional_parser =
-        MinidumpParser::Create(data_sp);
+        MinidumpParser::Create(BufferPtr);
     ASSERT_TRUE(optional_parser.hasValue());
     parser.reset(new MinidumpParser(optional_parser.getValue()));
     ASSERT_GT(parser->GetData().size(), 0UL);
   }
 
-  llvm::SmallString<128> inputs_folder;
   std::unique_ptr<MinidumpParser> parser;
 };
 
@@ -325,9 +315,9 @@ TEST_F(MinidumpParserTest, ConvertMinidumpContext_x86_32) {
   llvm::ArrayRef<uint8_t> registers(parser->GetThreadContext(thread));
 
   ArchSpec arch = parser->GetArchitecture();
-  RegisterInfoInterface *reg_interface = new RegisterContextLinux_i386(arch);
+  auto reg_interface = llvm::make_unique<RegisterContextLinux_i386>(arch);
   lldb::DataBufferSP buf =
-      ConvertMinidumpContext_x86_32(registers, reg_interface);
+      ConvertMinidumpContext_x86_32(registers, reg_interface.get());
   ASSERT_EQ(reg_interface->GetGPRSize(), buf->GetByteSize());
 
   const RegisterInfo *reg_info = reg_interface->GetRegisterInfo();
@@ -367,9 +357,9 @@ TEST_F(MinidumpParserTest, ConvertMinidumpContext_x86_64) {
   llvm::ArrayRef<uint8_t> registers(parser->GetThreadContext(thread));
 
   ArchSpec arch = parser->GetArchitecture();
-  RegisterInfoInterface *reg_interface = new RegisterContextLinux_x86_64(arch);
+  auto reg_interface = llvm::make_unique<RegisterContextLinux_x86_64>(arch);
   lldb::DataBufferSP buf =
-      ConvertMinidumpContext_x86_64(registers, reg_interface);
+      ConvertMinidumpContext_x86_64(registers, reg_interface.get());
   ASSERT_EQ(reg_interface->GetGPRSize(), buf->GetByteSize());
 
   const RegisterInfo *reg_info = reg_interface->GetRegisterInfo();
@@ -417,9 +407,9 @@ TEST_F(MinidumpParserTest, ConvertMinidumpContext_x86_32_wow64) {
   llvm::ArrayRef<uint8_t> registers(parser->GetThreadContextWow64(thread));
 
   ArchSpec arch = parser->GetArchitecture();
-  RegisterInfoInterface *reg_interface = new RegisterContextLinux_i386(arch);
+  auto reg_interface = llvm::make_unique<RegisterContextLinux_i386>(arch);
   lldb::DataBufferSP buf =
-      ConvertMinidumpContext_x86_32(registers, reg_interface);
+      ConvertMinidumpContext_x86_32(registers, reg_interface.get());
   ASSERT_EQ(reg_interface->GetGPRSize(), buf->GetByteSize());
 
   const RegisterInfo *reg_info = reg_interface->GetRegisterInfo();

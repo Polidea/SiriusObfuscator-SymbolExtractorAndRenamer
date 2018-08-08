@@ -17,35 +17,43 @@
 #ifndef SWIFT_IRGEN_GENDECL_H
 #define SWIFT_IRGEN_GENDECL_H
 
+#include "swift/Basic/OptimizationMode.h"
+#include "swift/SIL/SILLocation.h"
 #include "llvm/IR/CallingConv.h"
 #include "DebugTypeInfo.h"
 #include "IRGen.h"
 
 namespace llvm {
-  class AttributeSet;
+  class AttributeList;
   class Function;
   class FunctionType;
 }
 namespace swift {
 namespace irgen {
   class IRGenModule;
+  class LinkEntity;
   class LinkInfo;
+  class Signature;
+
+  void updateLinkageForDefinition(IRGenModule &IGM,
+                                  llvm::GlobalValue *global,
+                                  const LinkEntity &entity);
 
   llvm::Function *createFunction(IRGenModule &IGM,
                                  LinkInfo &linkInfo,
-                                 llvm::FunctionType *fnType,
-                                 llvm::CallingConv::ID cc,
-                                 const llvm::AttributeSet &attrs,
-                                 llvm::Function *insertBefore = nullptr);
+                                 const Signature &signature,
+                                 llvm::Function *insertBefore = nullptr,
+                                 OptimizationMode FuncOptMode =
+                                   OptimizationMode::NotSet);
 
+  llvm::GlobalVariable *
+  createVariable(IRGenModule &IGM, LinkInfo &linkInfo, llvm::Type *objectType,
+                 Alignment alignment, DebugTypeInfo DebugType = DebugTypeInfo(),
+                 Optional<SILLocation> DebugLoc = None,
+                 StringRef DebugName = StringRef(), bool heapAllocated = false,
+                 bool indirectForDebugInfo = false);
 
-  llvm::GlobalVariable *createVariable(IRGenModule &IGM,
-                                       LinkInfo &linkInfo,
-                                       llvm::Type *objectType,
-                                       Alignment alignment,
-                                       DebugTypeInfo DebugType=DebugTypeInfo(),
-                                       Optional<SILLocation> DebugLoc = None,
-                                       StringRef DebugName = StringRef());
+  void disableAddressSanitizer(IRGenModule &IGM, llvm::GlobalVariable *var);
 }
 }
 

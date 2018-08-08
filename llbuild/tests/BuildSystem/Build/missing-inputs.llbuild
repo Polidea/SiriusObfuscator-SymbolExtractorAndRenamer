@@ -6,12 +6,11 @@
 # RUN: rm -rf %t.build
 # RUN: mkdir -p %t.build
 # RUN: cp %s %t.build/build.llbuild
-# RUN: %{llbuild} buildsystem build --serial --chdir %t.build &> %t.out || true
+# RUN: %{llbuild} buildsystem build --serial --scheduler fifo --chdir %t.build &> %t.out || true
 # RUN: cat %t.out
 # RUN: %{FileCheck} %s --input-file %t.out --check-prefix=CHECK-FAILURE
 #
-# CHECK-FAILURE: missing input 'input' and no rule to build it
-# CHECK-FAILURE: cannot build 'output-1' due to missing input
+# CHECK-FAILURE: cannot build 'output-1' due to missing inputs: 'input'
 # CHECK-FAILURE-NOT: missing input 'output-2' and no rule to build it
 
 # RUN: touch %t.build/input

@@ -1,4 +1,4 @@
-// RUN: rm -rf %t && mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift -emit-module -c %S/Inputs/OpenHelpers.swift -o %t/OpenHelpers.swiftmodule
 // RUN: %target-typecheck-verify-swift -I %t
 
@@ -49,7 +49,6 @@ open class OpenClassesMustHaveOpenSuperClasses : NonOpenSuperClass {} // expecte
 open class AnOpenClass {
   open func openMethod() {}
   open var openVar: Int = 0
-  open let openLet: Int = 1 // Should this be allowed?
   open typealias MyInt = Int // expected-error {{only classes and overridable class members can be declared 'open'; use 'public'}}
   open subscript(_: MarkerForOpenSubscripts) -> Int {
     return 0

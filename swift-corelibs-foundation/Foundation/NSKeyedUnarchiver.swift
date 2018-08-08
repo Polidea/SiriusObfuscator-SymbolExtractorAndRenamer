@@ -86,7 +86,7 @@ open class NSKeyedUnarchiver : NSCoder {
         return root
     }
     
-    public convenience init(forReadingWithData data: Data) {
+    public convenience init(forReadingWith data: Data) {
         self.init(stream: Stream.data(data))
     }
     
@@ -483,12 +483,7 @@ open class NSKeyedUnarchiver : NSCoder {
                 _cacheObject(object!, forReference: objectRef as! _NSKeyedArchiverUID)
             }
         } else {
-            // reference to a non-container object
-            if let bridgedObject = dereferencedObject as? _ObjectBridgeable {
-                object = bridgedObject._bridgeToAnyObject()
-            } else {
-                object = dereferencedObject
-            }
+            object = _SwiftValue.store(dereferencedObject)
         }
 
         return _replacementObject(object)
@@ -863,7 +858,7 @@ open class NSKeyedUnarchiver : NSCoder {
     }
 
     open class func unarchiveTopLevelObjectWithData(_ data: Data) throws -> Any? {
-        let keyedUnarchiver = NSKeyedUnarchiver(forReadingWithData: data)
+        let keyedUnarchiver = NSKeyedUnarchiver(forReadingWith: data)
         let root = try keyedUnarchiver.decodeTopLevelObject(forKey: NSKeyedArchiveRootObjectKey)
         keyedUnarchiver.finishDecoding()
         return root

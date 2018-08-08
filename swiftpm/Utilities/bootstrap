@@ -143,6 +143,7 @@ class Target(object):
     def __init__(self, name, dependencies=[], swiftflags=[], extra_libs=[],
                  subpath=None):
         self.name = name
+        self.release = False
         self.dependencies = list(dependencies)
         self.swiftflags = list(swiftflags)
         self.extra_libs = list(extra_libs)
@@ -210,7 +211,12 @@ class Target(object):
         #
         # FIXME: The -j doesn't belong here, and should move into the
         # 'swift' tool.
-        other_args = ['-Onone', '-j%d' % g_num_cpus] + self.swiftflags
+        other_args = []
+        if self.release:
+            other_args.append("-O")
+        else:
+            other_args.extend(["-Onone", "-g"])
+        other_args.extend(['-j%d' % g_num_cpus] + self.swiftflags)
         if platform.system() == 'Darwin':
             other_args.extend(["-target", "x86_64-apple-macosx10.10"])
         if args.sysroot:
@@ -221,8 +227,7 @@ class Target(object):
         if args.libdispatch_source_dir:
             other_args.extend(["-Xcc", "-fblocks"])
 
-	# FIXME: Default to swift version 3 for now.
-        other_args.extend(["-swift-version", "3"])
+        other_args.extend(["-swift-version", "4"])
         
         print("  %s:" % json.dumps(compile_swift_node), file=output)
         print("    tool: swift-compiler", file=output)
@@ -238,6 +243,7 @@ class Target(object):
               file=output)
         print("    sources: %s" % json.dumps(self.sources), file=output)
         print("    objects: %s" % json.dumps(swift_objects), file=output)
+
         import_paths = [module_dir, include_dir]
 
         # To import C target, add import path to where modulemap is located.
@@ -619,12 +625,15 @@ def build_runtimes(targets, sandbox_path, args):
     runtimes = {}
     runtimes['3'] = target_map['PackageDescription']
     runtimes['4'] = target_map['PackageDescription4']
+    runtimes['4_2'] = target_map['PackageDescription4']
 
     built_runtimes = {}
     for version, target in runtimes.items():
         note("building runtime v%s target: %s: " % (version, target.name))
         target_copy = copy.copy(target)
         target_copy.name = 'PackageDescription'
+        target_copy.release = args.release
+        target_copy.swiftflags = ["-DPACKAGE_DESCRIPTION_%s" % (version)]
         build = llbuild(
                 os.path.join(sandbox_path, "runtimes", version), [target_copy], args)
         build.create_manifest()
@@ -635,14 +644,22 @@ def build_runtimes(targets, sandbox_path, args):
 def process_runtime_libraries(build, args, lib_path):
     module_input_path = os.path.join(
         build.module_dir, "PackageDescription.swiftmodule")
+    swiftdoc_input_path = os.path.join(
+        build.module_dir, "PackageDescription.swiftdoc")
     input_lib_path = os.path.join(
         build.lib_dir, "PackageDescription.a")
 
     mkdir_p(lib_path)
     runtime_module_path = os.path.join(
         lib_path, "PackageDescription.swiftmodule")
+    runtime_swiftdoc_path = os.path.join(
+        lib_path, "PackageDescription.swiftdoc")
+
     cmd = ["rsync", "-a", module_input_path, runtime_module_path]
     subprocess.check_call(cmd)
+    cmd = ["rsync", "-a", swiftdoc_input_path, runtime_swiftdoc_path]
+    subprocess.check_call(cmd)
+
     if platform.system() == 'Darwin':
         runtime_lib_path = os.path.join(lib_path, "libPackageDescription.dylib")
         cmd = [args.swiftc_path, "-Xlinker", "-dylib", "-o",
@@ -659,13 +676,13 @@ def process_runtime_libraries(build, args, lib_path):
         # This is the command we would like to use.
         #
         # We include an RPATH entry so that the Swift libraries can be found
-        # relative to where it will be installed (in 'lib/swift/pm/...').
+        # relative to where it will be installed (in 'lib/swift/pm/<version>/...').
         runtime_lib_path = os.path.join(lib_path, "libPackageDescription.so")
-        cmd = [args.swiftc_path, "-Xlinker", "-shared", "-o", runtime_lib_path,
+        cmd = [args.swiftc_path, "-emit-library", "-o", runtime_lib_path,
                "-Xlinker", "--whole-archive",
                "-Xlinker", input_lib_path,
                "-Xlinker", "--no-whole-archive", "-lswiftGlibc",
-               "-Xlinker", "-rpath=$ORIGIN/../linux"]
+               "-Xlinker", "-rpath=$ORIGIN/../../linux"]
 
         # We need to pass one swift file here to bypass the "no input files"
         # error.
@@ -680,19 +697,12 @@ def process_runtime_libraries(build, args, lib_path):
         # Unqoute any quoted characters.
         link_cmd = [arg.replace("\\", "") for arg in link_cmd]
 
-        # Drop any .o files, and the -Xlinker which precedes '-shared'.
-        try:
-            idx = link_cmd.index("-shared")
-        except:
-            idx = -1
-        if idx == -1 or link_cmd[idx - 1] != "-Xlinker":
-            raise SystemExit("unable to understand 'swiftc' driver commands")
-        del link_cmd[idx - 1]
+        # Drop any .o files
         cmd = [arg for arg in link_cmd
                if arg.endswith(("swift_begin.o", "swift_end.o")) or
                (not arg.endswith((".o", ".autolink")))]
     subprocess.check_call(cmd)
-    return (runtime_module_path, runtime_lib_path)
+    return (runtime_module_path, runtime_swiftdoc_path, runtime_lib_path)
 
 
 def get_swift_build_tool_path():
@@ -838,6 +848,8 @@ def main():
                         help="Also generate an Xcode project for SwiftPM")
     parser.add_argument("--test-parallel", action="store_true",
                         help="Run tests in parallel")
+    parser.add_argument("--test-filter", action="append",
+                        help="Filter on a given test", default=[])
     parser.add_argument("--enable-perf-tests", action="store_true",
                         help="Enables performance tests in the generated Xcode project")
     parser.add_argument("--vendor-name", dest="vendor_name",
@@ -883,13 +895,32 @@ def main():
     # Compute the build paths.
     if platform.system() == 'Darwin':
         build_target = "x86_64-apple-macosx10.10"
+    elif platform.system() == 'Linux':              
+        if platform.machine() == 'x86_64':
+            build_target = "x86_64-unknown-linux"
+        elif platform.machine() == 's390x':
+            build_target = "s390x-unknown-linux"
+        elif platform.machine() == 'ppc64le':
+            build_target = 'powerpc64le-unknown-linux'
+        elif platform.machine().startswith("armv7"):
+            build_target = 'armv7-unknown-linux-gnueabihf'
+        elif platform.machine() == 'aarch64':
+            build_target = 'aarch64-unknown-linux'
+        else:
+            raise SystemExit("ERROR: unsupported machine:",platform.machine())
     else:
-        build_target = 'x86_64-unknown-linux'
+        raise SystemExit("ERROR: unsupported system:",platform.system())
 
     build_path = os.path.join(g_project_root, args.build_path)
     sandbox_path = os.path.join(build_path, ".bootstrap")
     target_path = os.path.join(build_path, build_target)
 
+    # Confirm rsync is available.
+    try:
+        subprocess.check_output(['rsync', '--version'], stderr=subprocess.STDOUT)
+    except Exception as e:
+        error("rsync is not available with error: %s" % e)  
+    
     # If the action is "clean", just remove the bootstrap and build directories.
     if "clean" in build_actions:
         cmd = ["rm", "-rf", sandbox_path]
@@ -950,6 +981,11 @@ def main():
             # TODO remove, here to prevent revlock incremental CI build failures
             shutil.rmtree(libdir)
         symlink_force(os.path.join(sandbox_path, "lib"), target_path)
+
+        # To simulate usr/lib directory.
+        usrdir = os.path.join(target_path, "usr")
+        mkdir_p(usrdir)
+        symlink_force(os.path.join(sandbox_path, "lib"), usrdir)
 
         if args.foundation_path:
             libswiftdir = os.path.join(sandbox_path, "lib", "swift", "linux")
@@ -1032,7 +1068,7 @@ def main():
         build_flags.extend(["--configuration", "release"])
 
     env_cmd = ["env", "SWIFT_EXEC=" + os.path.join(bindir, "swiftc"),
-                      "SWIFT_BUILD_PATH=" + build_path]
+                      "SWIFTPM_BUILD_DIR=" + build_path]
     if args.sysroot:
         env_cmd.append("SYSROOT=" + args.sysroot)
     cmd = env_cmd + [bootstrapped_product] + build_flags
@@ -1047,7 +1083,7 @@ def main():
         error("build failed with exit status %d" % (result,))
 
     swift_package_path = os.path.join(target_path, conf, "swift-package")
-    swift_build_path = os.path.join(target_path, conf, "swift-build")
+    swiftpm_build_dir = os.path.join(target_path, conf, "swift-build")
     swift_test_path = os.path.join(target_path, conf, "swift-test")
     swift_run_path = os.path.join(target_path, conf, "swift-run")
     swiftpm_xctest_helper_path = os.path.join(
@@ -1059,6 +1095,8 @@ def main():
         cmd = env_cmd + [swift_test_path] + build_flags
         if args.test_parallel:
             cmd.append("--parallel")
+        for arg in args.test_filter:
+            cmd.extend(["--filter", arg])
         note("testing with command: %s" % (
             ' '.join(cmd),))
         result = subprocess.call(cmd, cwd=g_project_root)
@@ -1092,13 +1130,13 @@ def main():
                                          "lib/swift/macosx"))
 
             # Install the main executables.
-            for product_path in [swift_package_path, swift_build_path,
+            for product_path in [swift_package_path, swiftpm_build_dir,
                                  swift_test_path, swift_run_path]:
                 installBinary(product_path, bin_install_path, args.swiftc_path)
 
             # Install the runtimes.
             for version, runtime in processed_runtimes.items():
-                runtime_module_path, runtime_lib_path = runtime
+                runtime_module_path, runtime_swiftdoc_path, runtime_lib_path = runtime
                 install_path = os.path.join(lib_install_path, version)
 
                 # Install library.
@@ -1111,7 +1149,17 @@ def main():
                     os.path.basename(runtime_module_path), ' '.join(cmd)))
                 result = subprocess.call(cmd)
                 if result != 0:
-                    error("install failed with exit status %d" % (result,))
+                    error("module install failed with exit status %d" % (result,))
+
+                # Install swiftdoc.
+                cmd = ["install", "-m", "0644",
+                       runtime_swiftdoc_path, install_path]
+                note("installing %s: %s" % (
+                    os.path.basename(runtime_swiftdoc_path), ' '.join(cmd)))
+                result = subprocess.call(cmd)
+                if result != 0:
+                    error("swiftdoc install failed with exit status %d" % (result,))
+
     
     # Copy the libSwiftPM library to a directory, if we've been asked to do so.
     if args.libswiftpm_library_dir:
@@ -1223,9 +1271,7 @@ def main():
         if not os.path.exists(os.path.dirname(xcconfig_path)):
             mkdir_p(os.path.dirname(xcconfig_path))
         with open(xcconfig_path, "w") as f:
-            # Add hardcoded `-swift-version 3` in other swift flags for Xcode 8.3 support.
-            if find_xcode_version().startswith("Xcode 8.3"):
-                print("OTHER_SWIFT_FLAGS = $(inherited) -swift-version 3", file=f)
+            print("\n", file=f)
         cmd += ["--xcconfig-overrides", xcconfig_path]
             
         # Call `swift-package` to generate the Xcode project.

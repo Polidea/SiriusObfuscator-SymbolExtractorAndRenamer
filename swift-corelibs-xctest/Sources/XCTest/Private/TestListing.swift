@@ -47,13 +47,13 @@ protocol Listable {
 
 private func moduleName(value: Any) -> String {
     let moduleAndType = String(reflecting: type(of: value))
-    return String(moduleAndType.characters.split(separator: ".").first!)
+    return String(moduleAndType.split(separator: ".").first!)
 }
 
 extension XCTestSuite: Listable {
     private var listables: [Listable] {
         return tests
-            .flatMap({ ($0 as? Listable) })
+            .compactMap({ ($0 as? Listable) })
     }
 
     private var listingName: String {
@@ -69,7 +69,7 @@ extension XCTestSuite: Listable {
     }
 
     func dictionaryRepresentation() -> NSDictionary {
-        let listedTests = NSArray(array: tests.flatMap({ ($0 as? Listable)?.dictionaryRepresentation() }))
+        let listedTests = NSArray(array: tests.compactMap({ ($0 as? Listable)?.dictionaryRepresentation() }))
         return NSDictionary(objects: [NSString(string: listingName),
                                       listedTests],
                             forKeys: [NSString(string: "name"),
@@ -80,22 +80,21 @@ extension XCTestSuite: Listable {
         if name.hasSuffix(".xctest") {
             return self
         } else {
-            return tests.flatMap({ ($0 as? XCTestSuite)?.findBundleTestSuite() }).first
+            return tests.compactMap({ ($0 as? XCTestSuite)?.findBundleTestSuite() }).first
         }
     }
 }
 
 extension XCTestCase: Listable {
     func list() -> [String] {
-        let adjustedName = name.characters
-            .split(separator: ".")
+        let adjustedName = name.split(separator: ".")
             .map(String.init)
             .joined(separator: "/")
         return ["\(moduleName(value: self)).\(adjustedName)"]
     }
 
     func dictionaryRepresentation() -> NSDictionary {
-        let methodName = String(name.characters.split(separator: ".").last!)
+        let methodName = String(name.split(separator: ".").last!)
         return NSDictionary(object: NSString(string: methodName), forKey: NSString(string: "name"))
     }
 }

@@ -50,7 +50,7 @@ ValueObjectSP SwiftArrayNativeBufferHandler::GetElementAtIndex(size_t idx) {
     return ValueObjectSP();
 
   DataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
-  Error error;
+  Status error;
   if (process_sp->ReadMemory(child_location, buffer->GetBytes(), m_element_size,
                              error) != m_element_size ||
       error.Fail())
@@ -86,7 +86,7 @@ SwiftArrayNativeBufferHandler::SwiftArrayNativeBufferHandler(
   if (!process_sp)
     return;
   size_t ptr_size = process_sp->GetAddressByteSize();
-  Error error;
+  Status error;
   lldb::addr_t next_read = native_ptr;
   m_metadata_ptr = process_sp->ReadPointerFromMemory(next_read, error);
   if (error.Fail())
@@ -175,7 +175,7 @@ SwiftArraySliceBufferHandler::GetElementAtIndex(size_t idx) {
     return ValueObjectSP();
 
   DataBufferSP buffer(new DataBufferHeap(m_element_size, 0));
-  Error error;
+  Status error;
   if (process_sp->ReadMemory(child_location, buffer->GetBytes(), m_element_size,
                              error) != m_element_size ||
       error.Fail())
@@ -304,11 +304,11 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
 
   if (valobj_typename.startswith(SwiftLanguageRuntime::GetCurrentMangledName("_TtCs21_SwiftDeferredNSArray"))
       || valobj_typename.startswith("_TtCs21_SwiftDeferredNSArray")
-      || valobj_typename.startswith("_TtCs21_SwiftDeferredNSArray")) {
+      || valobj_typename.startswith("Swift._SwiftDeferredNSArray") ) {
     ProcessSP process_sp(valobj.GetProcessSP());
     if (!process_sp)
       return nullptr;
-    Error error;
+    Status error;
 
     lldb::addr_t buffer_ptr = valobj.GetValueAsUnsigned(LLDB_INVALID_ADDRESS) +
                               3 * process_sp->GetAddressByteSize();
@@ -331,12 +331,9 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
         valobj.GetCompilerType().GetTypeSystem()));
     SwiftLanguageRuntime::MetadataPromiseSP promise_sp(
         swift_runtime->GetMetadataPromise(argmetadata_ptr, swift_ast_ctx));
-    if (promise_sp) {
-      if (CompilerType type = promise_sp->FulfillTypePromise()) {
-        lldb::TemplateArgumentKind kind;
-        argument_type = type.GetTemplateArgument(0, kind);
-      }
-    }
+    if (promise_sp)
+      if (CompilerType type = promise_sp->FulfillTypePromise())
+        argument_type = type.GetGenericArgumentType(0);
 
     if (!argument_type.IsValid())
       return nullptr;

@@ -97,8 +97,7 @@ extension NSRange {
         }
         
         
-        self.location = location
-        self.length = length
+        self.init(location: location, length: length)
     }
 }
 
@@ -141,18 +140,17 @@ extension NSRange {
 
 extension NSRange {
   public init<R: RangeExpression>(_ region: R)
-  where R.Bound: FixedWidthInteger, R.Bound.Stride : SignedInteger {
+  where R.Bound: FixedWidthInteger {
     let r = region.relative(to: 0..<R.Bound.max)
-    location = numericCast(r.lowerBound)
-    length = numericCast(r.count)
+    self.init(location: numericCast(r.lowerBound), length: numericCast(r.count))
   }
   
   public init<R: RangeExpression, S: StringProtocol>(_ region: R, in target: S)
   where R.Bound == S.Index, S.Index == String.Index {
     let r = region.relative(to: target)
     self = NSRange(
-      location: r.lowerBound._utf16Index - target.startIndex._utf16Index,
-      length: r.upperBound._utf16Index - r.lowerBound._utf16Index
+      location: r.lowerBound.encodedOffset - target.startIndex.encodedOffset,
+      length: r.upperBound.encodedOffset - r.lowerBound.encodedOffset
     )
   }
 
@@ -200,6 +198,7 @@ extension NSRange : CustomReflectable {
 }
 
 extension NSRange : CustomPlaygroundQuickLookable {
+    @available(*, deprecated, message: "NSRange.customPlaygroundQuickLook will be removed in a future Swift version")
     public var customPlaygroundQuickLook: PlaygroundQuickLook {
         return .range(Int64(location), Int64(length))
     }

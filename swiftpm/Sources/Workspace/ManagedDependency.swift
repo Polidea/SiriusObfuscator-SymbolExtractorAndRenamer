@@ -10,6 +10,7 @@
 
 import Basic
 import PackageGraph
+import PackageModel
 import SourceControl
 import Utility
 
@@ -32,6 +33,9 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
         /// for top of the tree style development.
         case edited(AbsolutePath?)
 
+        // The dependency is a local package.
+        case local
+
         /// Returns true if state is checkout.
         var isCheckout: Bool {
             if case .checkout = self { return true }
@@ -39,11 +43,8 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
         }
     }
 
-    /// The name of the dependency i.e. the package name.
-    public let name: String
-
-    /// The specifier for the dependency.
-    public let repository: RepositorySpecifier
+    /// The package reference.
+    public let packageRef: PackageReference
 
     /// The state of the managed dependency.
     public let state: State
@@ -59,16 +60,39 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
     var basedOn: ManagedDependency?
 
     init(
-        name: String,
-        repository: RepositorySpecifier,
+        packageRef: PackageReference,
         subpath: RelativePath,
         checkoutState: CheckoutState
     ) {
-        self.name = name
-        self.repository = repository
+        self.packageRef = packageRef
         self.state = .checkout(checkoutState)
         self.basedOn = nil
         self.subpath = subpath
+    }
+
+    /// Create a dependency present locally on the filesystem.
+    static func local(
+        packageRef: PackageReference
+    ) -> ManagedDependency {
+        return ManagedDependency(
+            packageRef: packageRef,
+            state: .local,
+            // FIXME: This is just a fake entry, we should fix it.
+            subpath: RelativePath(packageRef.identity),
+            basedOn: nil
+        )
+    }
+
+    private init(
+        packageRef: PackageReference,
+        state: State,
+        subpath: RelativePath,
+        basedOn: ManagedDependency?
+    ) {
+        self.packageRef = packageRef
+        self.subpath = subpath
+        self.basedOn = basedOn
+        self.state = state
     }
 
     private init(
@@ -77,9 +101,8 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
         unmanagedPath: AbsolutePath?
     ) {
         assert(dependency.state.isCheckout)
-        self.name = dependency.name
         self.basedOn = dependency
-        self.repository = dependency.repository
+        self.packageRef = dependency.packageRef
         self.subpath = subpath
         self.state = .edited(unmanagedPath)
     }
@@ -95,8 +118,7 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
     }
 
     public init(json: JSON) throws {
-        self.name = try json.get("name")
-        self.repository = try json.get("repositoryURL")
+        self.packageRef = try json.get("packageRef")
         self.subpath = try RelativePath(json.get("subpath"))
         self.basedOn = json.get("basedOn")
         self.state = try json.get("state")
@@ -104,8 +126,7 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
 
     public func toJSON() -> JSON {
         return .init([
-            "name": name,
-            "repositoryURL": repository.url,
+            "packageRef": packageRef.toJSON(),
             "subpath": subpath.asString,
             "basedOn": basedOn.toJSON(),
             "state": state,
@@ -114,20 +135,6 @@ public final class ManagedDependency: JSONMappable, JSONSerializable {
 }
 
 extension ManagedDependency.State: JSONMappable, JSONSerializable {
-
-    public static func == (lhs: ManagedDependency.State, rhs: ManagedDependency.State) -> Bool {
-        switch (lhs, rhs) {
-        case (.checkout(let lhs), .checkout(let rhs)):
-            return lhs == rhs
-        case (.checkout, _):
-            return false
-        case (.edited(let lhs), .edited(let rhs)):
-            return lhs == rhs
-        case (.edited, _):
-            return false
-        }
-    }
-
     public func toJSON() -> JSON {
         switch self {
         case .checkout(let checkoutState):
@@ -140,6 +147,10 @@ extension ManagedDependency.State: JSONMappable, JSONSerializable {
                 "name": "edited",
                 "path": path.toJSON(),
             ])
+        case .local:
+            return .init([
+                "name": "local",
+            ])
         }
     }
 
@@ -150,7 +161,9 @@ extension ManagedDependency.State: JSONMappable, JSONSerializable {
             self = try .checkout(json.get("checkoutState"))
         case "edited":
             let path: String? = json.get("path")
-            self = .edited(path.map(AbsolutePath.init))
+            self = .edited(path.map({AbsolutePath($0)}))
+        case "local":
+            self = .local
         default:
             throw JSON.MapError.custom(key: nil, message: "Invalid state \(name)")
         }
@@ -171,8 +184,16 @@ public final class ManagedDependencies: SimplePersistanceProtocol {
         }
     }
 
+    /// The schema version of the resolved file.
+    ///
+    /// * 2: Package identity.
+    /// * 1: Initial version.
+    static let schemaVersion: Int = 2
+
     /// The current state of managed dependencies.
-    private var dependencyMap: [RepositorySpecifier: ManagedDependency]
+    ///
+    /// Key -> package identity.
+    private var dependencyMap: [String: ManagedDependency]
 
     /// Path to the state file.
     let statePath: AbsolutePath
@@ -187,7 +208,7 @@ public final class ManagedDependencies: SimplePersistanceProtocol {
         self.statePath = statePath
         self.persistence = SimplePersistence(
             fileSystem: fileSystem,
-            schemaVersion: 1,
+            schemaVersion: ManagedDependencies.schemaVersion,
             statePath: statePath)
 
         // Load the state from disk, if possible.
@@ -201,35 +222,33 @@ public final class ManagedDependencies: SimplePersistanceProtocol {
         do {
             try self.persistence.restoreState(self)
         } catch {
-            // FIXME: We should emit a warning here.
+            // FIXME: We should emit a warning here using the diagnostic engine.
+            print("\(error)")
         }
     }
 
-    public subscript(_ url: String) -> ManagedDependency? {
-        return dependencyMap[RepositorySpecifier(url: url)]
-    }
-
-    public subscript(_ repository: RepositorySpecifier) -> ManagedDependency? {
+    public subscript(forIdentity identity: String) -> ManagedDependency? {
         get {
-            return dependencyMap[repository]
+            assert(identity == identity.lowercased())
+            return dependencyMap[identity]
         }
         set {
-            dependencyMap[repository] = newValue
+            assert(identity == identity.lowercased())
+            dependencyMap[identity] = newValue
         }
     }
 
-    /// Returns the dependency given a name, if found.
-    subscript(forName name: String) -> ManagedDependency? {
-        // FIXME: Improve complexity to O(1).
-        return dependencyMap.values.first(where: { $0.name == name })
-    }
-
-    /// Returns the dependency given a name.
-    func dependency(forName name: String) throws -> ManagedDependency {
-        guard let dependency = self[forName: name] else {
-            throw Error.dependencyNotFound(name: name)
+    /// Returns the dependency given a name or identity.
+    func dependency(forNameOrIdentity nameOrIdentity: String) throws -> ManagedDependency {
+        if let dependency = self[forIdentity: nameOrIdentity.lowercased()] {
+            return dependency
         }
-        return dependency 
+        for value in values {
+            if value.packageRef.name == nameOrIdentity {
+                return value
+            }
+        }
+        throw Error.dependencyNotFound(name: nameOrIdentity)
     }
 
     func reset() throws {
@@ -247,7 +266,7 @@ public final class ManagedDependencies: SimplePersistanceProtocol {
 
     public func restore(from json: JSON) throws {
         self.dependencyMap = try Dictionary(items:
-            json.get("dependencies").map({ ($0.repository, $0) })
+            json.get("dependencies").map({ ($0.packageRef.identity, $0) })
         )
     }
 

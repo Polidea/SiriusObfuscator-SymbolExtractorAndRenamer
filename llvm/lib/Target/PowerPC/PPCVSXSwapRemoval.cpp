@@ -42,9 +42,9 @@
 //
 //===---------------------------------------------------------------------===//
 
-#include "PPCInstrInfo.h"
 #include "PPC.h"
 #include "PPCInstrBuilder.h"
+#include "PPCInstrInfo.h"
 #include "PPCTargetMachine.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/EquivalenceClasses.h"
@@ -191,12 +191,14 @@ private:
 public:
   // Main entry point for this pass.
   bool runOnMachineFunction(MachineFunction &MF) override {
-    if (skipFunction(*MF.getFunction()))
+    if (skipFunction(MF.getFunction()))
       return false;
 
     // If we don't have VSX on the subtarget, don't do anything.
+    // Also, on Power 9 the load and store ops preserve element order and so
+    // the swaps are not required.
     const PPCSubtarget &STI = MF.getSubtarget<PPCSubtarget>();
-    if (!STI.hasVSX())
+    if (!STI.hasVSX() || !STI.needsSwapsForVSXMemOps())
       return false;
 
     bool Changed = false;
@@ -351,6 +353,8 @@ bool PPCVSXSwapRemoval::gatherVectorInstructions() {
         break;
       case PPC::LXSDX:
       case PPC::LXSSPX:
+      case PPC::XFLOADf64:
+      case PPC::XFLOADf32:
         // A load of a floating-point value into the high-order half of
         // a vector register is safe, provided that we introduce a swap
         // following the load, which will be done by the SUBREG_TO_REG
@@ -936,9 +940,9 @@ bool PPCVSXSwapRemoval::removeSwaps() {
       Changed = true;
       MachineInstr *MI = SwapVector[EntryIdx].VSEMI;
       MachineBasicBlock *MBB = MI->getParent();
-      BuildMI(*MBB, MI, MI->getDebugLoc(),
-              TII->get(TargetOpcode::COPY), MI->getOperand(0).getReg())
-        .addOperand(MI->getOperand(1));
+      BuildMI(*MBB, MI, MI->getDebugLoc(), TII->get(TargetOpcode::COPY),
+              MI->getOperand(0).getReg())
+          .add(MI->getOperand(1));
 
       DEBUG(dbgs() << format("Replaced %d with copy: ",
                              SwapVector[EntryIdx].VSEId));
@@ -962,7 +966,7 @@ LLVM_DUMP_METHOD void PPCVSXSwapRemoval::dumpSwapVector() {
 
     dbgs() << format("%6d", ID);
     dbgs() << format("%6d", EC->getLeaderValue(ID));
-    dbgs() << format(" BB#%3d", MI->getParent()->getNumber());
+    dbgs() << format(" %bb.%3d", MI->getParent()->getNumber());
     dbgs() << format("  %14s  ", TII->getName(MI->getOpcode()).str().c_str());
 
     if (SwapVector[EntryIdx].IsLoad)

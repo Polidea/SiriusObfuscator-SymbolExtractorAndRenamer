@@ -4,11 +4,13 @@ from __future__ import print_function
 # System modules
 from distutils.version import LooseVersion, StrictVersion
 from functools import wraps
+import inspect
 import os
 import platform
 import re
 import sys
 import tempfile
+import subprocess
 
 # Third-party modules
 import six
@@ -20,6 +22,7 @@ import use_lldb_suite
 import lldb
 from . import configuration
 from . import test_categories
+from . import lldbtest_config
 from lldbsuite.test_event.event_builder import EventBuilder
 from lldbsuite.support import funcutils
 from lldbsuite.test import lldbplatform
@@ -171,7 +174,7 @@ def _decorateTest(mode,
         skip_for_arch = _match_decorator_property(
             archs, self.getArchitecture())
         skip_for_debug_info = _match_decorator_property(
-            debug_info, self.debug_info)
+            debug_info, self.getDebugInfo())
         skip_for_triple = _match_decorator_property(
             triple, lldb.DBG.GetSelectedPlatform().GetTriple())
         skip_for_remote = _match_decorator_property(
@@ -304,9 +307,16 @@ def add_test_categories(cat):
         if isinstance(func, type) and issubclass(func, unittest2.TestCase):
             raise Exception(
                 "@add_test_categories can only be used to decorate a test method")
-        if hasattr(func, "categories"):
-            cat.extend(func.categories)
-        func.categories = cat
+
+        # Update or set the categories attribute. For instance methods, the
+        # attribute must be set on the actual function.
+        func_for_attr = func
+        if inspect.ismethod(func_for_attr):
+            func_for_attr = func.__func__
+        if hasattr(func_for_attr, "categories"):
+            cat.extend(func_for_attr.categories)
+        setattr(func_for_attr, "categories", cat)
+
         return func
 
     return impl
@@ -337,6 +347,28 @@ def no_debug_info_test(func):
     # Mark this function as such to separate them from the regular tests.
     wrapper.__no_debug_info_test__ = True
     return wrapper
+
+def apple_simulator_test(platform):
+    """
+    Decorate the test as a test requiring a simulator for a specific platform.
+
+    Consider that a simulator is available if you have the corresponding SDK installed.
+    The SDK identifiers for simulators are iphonesimulator, appletvsimulator, watchsimulator
+    """
+    def should_skip_simulator_test():
+        if lldbplatformutil.getHostPlatform() != 'darwin':
+            return "simulator tests are run only on darwin hosts"
+        try:
+            DEVNULL = open(os.devnull, 'w')
+            output = subprocess.check_output(["xcodebuild", "-showsdks"], stderr=DEVNULL)
+            if re.search('%ssimulator' % platform, output):
+                return None
+            else:
+                return "%s simulator is not supported on this system." % platform
+        except subprocess.CalledProcessError:
+            return "%s is not supported on this system (xcodebuild failed)." % feature
+
+    return skipTestIfFn(should_skip_simulator_test)
 
 
 def debugserver_test(func):
@@ -431,13 +463,13 @@ def expectedFlakey(expected_fn, bugnumber=None):
 
 def expectedFlakeyDwarf(bugnumber=None):
     def fn(self):
-        return self.debug_info == "dwarf"
+        return self.getDebugInfo() == "dwarf"
     return expectedFlakey(fn, bugnumber)
 
 
 def expectedFlakeyDsym(bugnumber=None):
     def fn(self):
-        return self.debug_info == "dwarf"
+        return self.getDebugInfo() == "dwarf"
     return expectedFlakey(fn, bugnumber)
 
 
@@ -498,18 +530,16 @@ def expectedFlakeyAndroid(bugnumber=None, api_levels=None, archs=None):
             archs),
         bugnumber)
 
+def skipIfOutOfTreeDebugserver(func):
+    """Decorate the item to skip tests if using an out-of-tree debugserver."""
+    def is_out_of_tree_debugserver():
+        return "out-of-tree debugserver" if lldbtest_config.out_of_tree_debugserver else None
+    return skipTestIfFn(is_out_of_tree_debugserver)(func)
 
 def skipIfRemote(func):
     """Decorate the item to skip tests if testing remotely."""
     def is_remote():
         return "skip on remote platform" if lldb.remote_platform else None
-    return skipTestIfFn(is_remote)(func)
-
-
-def skipIfRemoteDueToDeadlock(func):
-    """Decorate the item to skip tests if testing remotely due to the test deadlocking."""
-    def is_remote():
-        return "skip on remote platform (deadlocks)" if lldb.remote_platform else None
     return skipTestIfFn(is_remote)(func)
 
 
@@ -526,7 +556,7 @@ def skipIfNoSBHeaders(func):
                 'LLDB.h')
             if os.path.exists(header):
                 return None
-        
+
         header = os.path.join(
             os.environ["LLDB_SRC"],
             "include",
@@ -546,6 +576,23 @@ def skipIfiOSSimulator(func):
         return "skip on the iOS Simulator" if configuration.lldb_platform_name == 'ios-simulator' else None
     return skipTestIfFn(is_ios_simulator)(func)
 
+def skipIfiOS(func):
+    return skipIfPlatform(["ios"])(func)
+
+def skipIftvOS(func):
+    return skipIfPlatform(["tvos"])(func)
+
+def skipIfwatchOS(func):
+    return skipIfPlatform(["watchos"])(func)
+
+def skipIfbridgeOS(func):
+    return skipIfPlatform(["bridgeos"])(func)
+
+def skipIfDarwinEmbedded(func):
+    """Decorate the item to skip tests that should be skipped on Darwin armv7/arm64 targets."""
+    return skipIfPlatform(
+        lldbplatform.translate(
+            lldbplatform.darwin_embedded))(func)
 
 def skipIfFreeBSD(func):
     """Decorate the item to skip tests that should be skipped on FreeBSD."""
@@ -683,6 +730,30 @@ def skipIfTargetAndroid(api_levels=None, archs=None):
             api_levels,
             archs))
 
+def skipUnlessSupportedTypeAttribute(attr):
+    """Decorate the item to skip test unless Clang supports type __attribute__(attr)."""
+    def compiler_doesnt_support_struct_attribute(self):
+        compiler_path = self.getCompiler()
+        f = tempfile.NamedTemporaryFile()
+        cmd = [self.getCompiler(), "-x", "c++", "-c", "-o", f.name, "-"]
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = p.communicate('struct __attribute__((%s)) Test {};'%attr)
+        if attr in stderr:
+            return "Compiler does not support attribute %s"%(attr)
+        return None
+    return skipTestIfFn(compiler_doesnt_support_struct_attribute)
+
+def skipUnlessLibstdcxxAvailable(func):
+    """Decorate the item to skip test unless libstdc++ is available on the system."""
+    def compiler_doesnt_support_libstdcxx(self):
+        compiler_path = self.getCompiler()
+        f = tempfile.NamedTemporaryFile()
+        f = tempfile.NamedTemporaryFile()
+        cmd = "echo '#include <string> | %s -x c++ -stdlib=libstdc++ -o %s -" % (compiler_path, f.name)
+        if os.popen(cmd).close() is not None:
+            return "libstdcxx not available on the sytem"
+        return None
+    return skipTestIfFn(compiler_doesnt_support_libstdcxx)(func)
 
 def skipUnlessThreadSanitizer(func):
     """Decorate the item to skip test unless Clang -fsanitize=thread is supported."""
@@ -777,12 +848,12 @@ def skipUnlessSwiftAddressSanitizer(func):
     """Decorate the item to skip test unless Swift -sanitize=address is supported."""
 
     def is_swift_compiler_with_address_sanitizer(self):
-        swiftcc = swift.getSwiftCompiler()
+        swiftc = swift.getSwiftCompiler()
         f = tempfile.NamedTemporaryFile()
-        cmd = "echo 'print(1)' | %s -o %s -" % (swiftcc, f.name)
+        cmd = "echo 'print(1)' | %s -o %s -" % (swiftc, f.name)
         if os.popen(cmd).close() is not None:
             return None  # The compiler cannot compile at all, let's *not* skip the test
-        cmd = "echo 'print(1)' | %s -sanitize=address -o %s -" % (swiftcc, f.name)
+        cmd = "echo 'print(1)' | %s -sanitize=address -o %s -" % (swiftc, f.name)
         if os.popen(cmd).close() is not None:
             return "Compiler cannot compile with -sanitize=address"
         return None
@@ -793,13 +864,30 @@ def skipUnlessSwiftThreadSanitizer(func):
     """Decorate the item to skip test unless Swift -sanitize=thread is supported."""
 
     def is_swift_compiler_with_thread_sanitizer(self):
-        swiftcc = swift.getSwiftCompiler()
+        swiftc = swift.getSwiftCompiler()
         f = tempfile.NamedTemporaryFile()
-        cmd = "echo 'print(1)' | %s -o %s -" % (swiftcc, f.name)
+        cmd = "echo 'print(1)' | %s -o %s -" % (swiftc, f.name)
         if os.popen(cmd).close() is not None:
             return None  # The compiler cannot compile at all, let's *not* skip the test
-        cmd = "echo 'print(1)' | %s -sanitize=thread -o %s -" % (swiftcc, f.name)
+        cmd = "echo 'print(1)' | %s -sanitize=thread -o %s -" % (swiftc, f.name)
         if os.popen(cmd).close() is not None:
             return "Compiler cannot compile with -sanitize=thread"
         return None
     return skipTestIfFn(is_swift_compiler_with_thread_sanitizer)(func)
+
+# Call sysctl on darwin to see if a specified hardware feature is available on this machine.
+def skipUnlessFeature(feature):
+    def is_feature_enabled(self):
+        if platform.system() == 'Darwin':
+            try:
+                DEVNULL = open(os.devnull, 'w')
+                output = subprocess.check_output(["/usr/sbin/sysctl", feature], stderr=DEVNULL)
+                # If 'feature: 1' was output, then this feature is available and
+                # the test should not be skipped.
+                if re.match('%s: 1\s*' % feature, output):
+                    return None
+                else:
+                    return "%s is not supported on this system." % feature
+            except subprocess.CalledProcessError:
+                return "%s is not supported on this system." % feature
+    return skipTestIfFn(is_feature_enabled)

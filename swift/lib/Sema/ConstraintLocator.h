@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2017 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2018 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See https://swift.org/LICENSE.txt for license information
@@ -111,8 +111,9 @@ public:
     ArrayElementType,
     /// \brief The scalar type of a tuple type.
     ScalarToTuple,
-    /// \brief The load of an lvalue.
-    Load,
+    /// \brief An argument passed in an autoclosure parameter
+    /// position, which must match the autoclosure return type.
+    AutoclosureResult,
     /// The requirement that we're matching during protocol conformance
     /// checking.
     Requirement,
@@ -123,6 +124,14 @@ public:
     OpenedGeneric,
     /// A component of a key path.
     KeyPathComponent,
+    /// The Nth conditional requirement in the parent locator's conformance.
+    ConditionalRequirement,
+    /// A single requirement placed on the type parameters.
+    TypeParameterRequirement,
+    /// \brief Locator for a binding from an IUO disjunction choice.
+    ImplicitlyUnwrappedDisjunctionChoice,
+    /// \brief A result of an expressoin involving dynamic lookup.
+    DynamicLookupResult,
   };
 
   /// \brief Determine the number of numeric values used for the given path
@@ -151,16 +160,20 @@ public:
     case GeneratorElementType:
     case ArrayElementType:
     case ScalarToTuple:
-    case Load:
+    case AutoclosureResult:
     case Requirement:
     case Witness:
     case OpenedGeneric:
+    case ImplicitlyUnwrappedDisjunctionChoice:
+    case DynamicLookupResult:
       return 0;
 
     case GenericArgument:
     case NamedTupleElement:
     case TupleElement:
     case KeyPathComponent:
+    case ConditionalRequirement:
+    case TypeParameterRequirement:
       return 1;
 
     case ApplyArgToParam:
@@ -193,7 +206,7 @@ public:
     case ClosureResult:
     case ConstructorMember:
     case InstanceType:
-    case Load:
+    case AutoclosureResult:
     case OptionalPayload:
     case Member:
     case MemberRefBase:
@@ -213,6 +226,10 @@ public:
     case Requirement:
     case Witness:
     case KeyPathComponent:
+    case ConditionalRequirement:
+    case TypeParameterRequirement:
+    case ImplicitlyUnwrappedDisjunctionChoice:
+    case DynamicLookupResult:
       return 0;
 
     case FunctionArgument:
@@ -223,8 +240,6 @@ public:
     llvm_unreachable("Unhandled PathElementKind in switch.");
   }
 
-  template<unsigned N> struct incomplete;
-  
   /// \brief One element in the path of a locator, which can include both
   /// a kind (PathElementKind) and a value used to describe specific
   /// kinds further (e.g., the position of a tuple element).
@@ -342,6 +357,15 @@ public:
     /// Get a path element for a key path component.
     static PathElement getKeyPathComponent(unsigned position) {
       return PathElement(KeyPathComponent, position);
+    }
+
+    /// Get a path element for a conditional requirement.
+    static PathElement getConditionalRequirementComponent(unsigned index) {
+      return PathElement(ConditionalRequirement, index);
+    }
+
+    static PathElement getTypeRequirementComponent(unsigned index) {
+      return PathElement(TypeParameterRequirement, index);
     }
 
     /// \brief Retrieve the kind of path element.
@@ -507,7 +531,7 @@ private:
   friend class ConstraintSystem;
 };
 
-typedef ConstraintLocator::PathElement LocatorPathElt;
+using LocatorPathElt = ConstraintLocator::PathElement;
 
 /// \brief A simple stack-only builder object that constructs a
 /// constraint locator without allocating memory.

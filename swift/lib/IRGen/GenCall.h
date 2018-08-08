@@ -21,10 +21,12 @@
 #include <stdint.h>
 
 #include "swift/Basic/LLVM.h"
+#include "swift/AST/Types.h"
 #include "llvm/IR/CallingConv.h"
 
 namespace llvm {
-  class AttributeSet;
+  class AttributeList;
+  class Constant;
   class Twine;
   class Type;
   class Value;
@@ -36,14 +38,11 @@ namespace clang {
 }
 
 namespace swift {
-  enum class SILFunctionTypeRepresentation : uint8_t;
-  class SILParameterInfo;
-  class SILType;
-  class Substitution;
-
 namespace irgen {
   class Address;
   class Alignment;
+  class Callee;
+  class CalleeInfo;
   class Explosion;
   class ExplosionSchema;
   class ForeignFunctionInfo;
@@ -64,21 +63,21 @@ namespace irgen {
   llvm::CallingConv::ID expandCallingConv(IRGenModule &IGM,
                                      SILFunctionTypeRepresentation convention);
 
-  /// Should the given self parameter be given the special treatment
-  /// for self parameters?
-  bool isSelfContextParameter(SILParameterInfo parameter);
+  /// Does the given function have a self parameter that should be given
+  /// the special treatment for self parameters?
+  bool hasSelfContextParameter(CanSILFunctionType fnType);
 
   /// Add function attributes to an attribute set for a byval argument.
   void addByvalArgumentAttributes(IRGenModule &IGM,
-                                  llvm::AttributeSet &attrs,
+                                  llvm::AttributeList &attrs,
                                   unsigned argIndex,
                                   Alignment align);
 
   /// Add signext or zeroext attribute set for an argument that needs
   /// extending.
-  void addExtendAttribute(IRGenModule &IGM, llvm::AttributeSet &attrs,
+  void addExtendAttribute(IRGenModule &IGM, llvm::AttributeList &attrs,
                           unsigned index, bool signExtend);
-  
+
   /// Can a series of values be simply pairwise coerced to (or from) an
   /// explosion schema, or do they need to traffic through memory?
   bool canCoerceToSchema(IRGenModule &IGM,
@@ -87,10 +86,9 @@ namespace irgen {
 
   void emitForeignParameter(IRGenFunction &IGF, Explosion &params,
                             ForeignFunctionInfo foreignInfo,
-                            unsigned foreignParamIndex,
-                            SILType paramTy, const LoadableTypeInfo &paramTI,
-                            Explosion &paramExplosion);
-
+                            unsigned foreignParamIndex, SILType paramTy,
+                            const LoadableTypeInfo &paramTI,
+                            Explosion &paramExplosion, bool isOutlined);
 
   void emitClangExpandedParameter(IRGenFunction &IGF,
                                   Explosion &in, Explosion &out,
@@ -99,8 +97,9 @@ namespace irgen {
                                   const LoadableTypeInfo &swiftTI);
 
   bool addNativeArgument(IRGenFunction &IGF, Explosion &in,
-                         SILParameterInfo origParamInfo, Explosion &args);
-  
+                         SILParameterInfo origParamInfo, Explosion &args,
+                         bool isOutlined);
+
   /// Allocate a stack buffer of the appropriate size to bitwise-coerce a value
   /// between two LLVM types.
   std::pair<Address, Size>
@@ -112,6 +111,37 @@ namespace irgen {
   void extractScalarResults(IRGenFunction &IGF, llvm::Type *bodyType,
                             llvm::Value *call, Explosion &out);
 
+  Callee getBlockPointerCallee(IRGenFunction &IGF, llvm::Value *blockPtr,
+                               CalleeInfo &&info);
+
+  Callee getCFunctionPointerCallee(IRGenFunction &IGF, llvm::Value *fnPtr,
+                                   CalleeInfo &&info);
+
+  Callee getSwiftFunctionPointerCallee(IRGenFunction &IGF,
+                                       llvm::Value *fnPtr,
+                                       llvm::Value *contextPtr,
+                                       CalleeInfo &&info,
+                                       bool castOpaqueToRefcountedContext);
+
+  Address emitAllocYieldOnceCoroutineBuffer(IRGenFunction &IGF);
+  void emitDeallocYieldOnceCoroutineBuffer(IRGenFunction &IGF, Address buffer);
+  void emitYieldOnceCoroutineEntry(IRGenFunction &IGF,
+                                   CanSILFunctionType coroutineType,
+                                   Explosion &allParams);
+
+  Address emitAllocYieldManyCoroutineBuffer(IRGenFunction &IGF);
+  void emitDeallocYieldManyCoroutineBuffer(IRGenFunction &IGF, Address buffer);
+  void emitYieldManyCoroutineEntry(IRGenFunction &IGF,
+                                   CanSILFunctionType coroutineType,
+                                   Explosion &allParams);
+
+  /// Yield the given values from the current continuation.
+  ///
+  /// \return an i1 indicating whether the caller wants to unwind this
+  ///   coroutine instead of resuming it normally
+  llvm::Value *emitYield(IRGenFunction &IGF,
+                         CanSILFunctionType coroutineType,
+                         Explosion &yieldedValues);
 
 } // end namespace irgen
 } // end namespace swift

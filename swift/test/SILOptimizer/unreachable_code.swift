@@ -215,10 +215,10 @@ class r20097963MyClass {
   }
 }
 
-func die() -> Never { die() }
+func die() -> Never { die() } // expected-warning {{all paths through this function will call itself}}
 
 func testGuard(_ a : Int) {
-  guard case 4 = a else {  }  // expected-error {{'guard' body may not fall through, consider using a 'return' or 'throw'}}
+  guard case 4 = a else {  }  // expected-error {{'guard' body must not fall through, consider using a 'return' or 'throw'}}
 
   guard case 4 = a else { return }  // ok
   guard case 4 = a else { die() }  // ok
@@ -324,4 +324,87 @@ class FailingClass {
   convenience init?(y: ()) {
     fatalError("gotcha")
   }
+}
+
+// <https://bugs.swift.org/browse/SR-2729>
+// We should not report unreachable code inside protocol witness thunks
+
+protocol Fooable {
+  init()
+  func foo() -> Never
+}
+struct Foo: Fooable {
+  init() { // no-warning
+    fatalError()
+  }
+
+  func foo() -> Never { // no-warning
+    while true {}
+  }
+}
+
+// We should not report unreachable code inside vtable thunks
+class Base {
+  required init(x: Int) {
+    fatalError()
+  }
+
+  func foo(x: Int) -> Never {
+    while true {}
+  }
+}
+
+class Derived : Base {
+  required init(x: Int?) {
+    fatalError()
+  }
+
+  override func foo(x: Int?) -> Never {
+    while true {}
+  }
+}
+
+// Inout writeback
+func takesInOut(value: inout SillyStruct) -> Never {
+  while true {}
+}
+
+struct SillyStruct {
+  mutating func mutatingMethod() -> Never {
+    takesInOut(value: &self)
+  }
+}
+
+// This triggers various problems
+public func genericMightBeNever<R>(
+  _ body: () -> R) -> R {
+  while true {}
+
+}
+
+func sillyGenericExample() -> Never {
+  return genericMightBeNever {
+    return genericMightBeNever {
+      return fatalError()
+    }
+  }
+}
+
+// https://bugs.swift.org/browse/SR-7472
+
+protocol P {
+    static var theThing: Self { get }
+}
+
+extension Never : P {
+    static var theThing: Never { return fatalError() }
+}
+
+func test<T: P>(_ type: T.Type) -> T {
+    return type.theThing
+}
+
+func f(i: Int?) {
+    guard i != nil else { Never.theThing }
+    guard i != nil else { test(Never.self) }
 }

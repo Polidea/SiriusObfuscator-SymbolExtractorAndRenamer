@@ -92,6 +92,8 @@ class CMake(object):
             sanitizers.append('Undefined')
         if args.enable_tsan:
             sanitizers.append('Thread')
+        if args.enable_lsan:
+            sanitizers.append('Leaks')
         if sanitizers:
             define("LLVM_USE_SANITIZER", ";".join(sanitizers))
 
@@ -106,13 +108,15 @@ class CMake(object):
         else:
             define("CMAKE_C_COMPILER:PATH", toolchain.cc)
             define("CMAKE_CXX_COMPILER:PATH", toolchain.cxx)
+            define("CMAKE_LIBTOOL:PATH", toolchain.libtool)
 
         if args.cmake_generator == 'Xcode':
             define("CMAKE_CONFIGURATION_TYPES",
                    "Debug;Release;MinSizeRel;RelWithDebInfo")
 
         if args.clang_user_visible_version:
-            major, minor, patch, _ = args.clang_user_visible_version.components
+            major, minor, patch = \
+                args.clang_user_visible_version.components[0:3]
             define("LLVM_VERSION_MAJOR:STRING", major)
             define("LLVM_VERSION_MINOR:STRING", minor)
             define("LLVM_VERSION_PATCH:STRING", patch)

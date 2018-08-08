@@ -1,4 +1,4 @@
-// RUN: %target-typecheck-verify-swift
+// RUN: %target-typecheck-verify-swift -swift-version 5
 
 // ----------------------------------------------------------------------------
 // DynamicSelf is only allowed on the return type of class and
@@ -89,7 +89,7 @@ class C1 {
 
     if b { return self.init(int: 5) }
 
-    return Self() // expected-error{{use of unresolved identifier 'Self'}} expected-note {{did you mean 'self'?}}
+    return Self() // expected-error{{use of unresolved identifier 'Self'; did you mean 'self'?}}
   }
 
   // This used to crash because metatype construction went down a
@@ -287,6 +287,7 @@ extension Y {
 
 extension X {
   func tryToClone() -> Self? { return nil }
+  func tryHarderToClone() -> Self! { return nil }
   func cloneOrFail() -> Self { return self }
   func cloneAsObjectSlice() -> X? { return self }
 }
@@ -309,6 +310,10 @@ func testOptionalSelf(_ y : Y) {
   if let clone = y.cloneAsObjectSlice() {
     clone.operationThatOnlyExistsOnY() // expected-error {{value of type 'X' has no member 'operationThatOnlyExistsOnY'}}
   }
+
+  if let clone = y.tryHarderToClone().tryToClone() {
+    clone.operationThatOnlyExistsOnY();
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -328,5 +333,63 @@ class Runce : Runcible {
     runce()
     wantsRuncible(self)
     return self
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Forming a type with 'Self' in invariant position
+
+struct Generic<T> { init(_: T) {} }
+
+class InvariantSelf {
+  func me() -> Self {
+    let a = Generic(self)
+    let _: Generic<InvariantSelf> = a
+    // expected-error@-1 {{cannot convert value of type 'Generic<Self>' to specified type 'Generic<InvariantSelf>'}}
+
+    return self
+  }
+}
+
+// FIXME: This should be allowed
+
+final class FinalInvariantSelf {
+  func me() -> Self {
+    let a = Generic(self)
+    let _: Generic<FinalInvariantSelf> = a
+    // expected-error@-1 {{cannot convert value of type 'Generic<Self>' to specified type 'Generic<FinalInvariantSelf>'}}
+
+    return self
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Semi-bogus factory init pattern
+
+protocol FactoryPattern {
+  init(factory: @autoclosure () -> Self)
+}
+
+extension  FactoryPattern {
+  init(factory: @autoclosure () -> Self) { self = factory() }
+}
+
+class Factory : FactoryPattern {
+  init(_string: String) {}
+
+  convenience init(string: String) {
+    self.init(factory: Factory(_string: string))
+    // expected-error@-1 {{incorrect argument label in call (have 'factory:', expected '_string:')}}
+    // FIXME: Bogus diagnostic
+  }
+}
+
+// Final classes are OK
+
+final class FinalFactory : FactoryPattern {
+  init(_string: String) {}
+
+  convenience init(string: String) {
+    self.init(factory: FinalFactory(_string: string))
   }
 }

@@ -20,10 +20,10 @@
 // SSE4-AES: "-target-feature" "+sse4.2" "-target-feature" "+aes"
 // NO-SSE4-AES: "-target-feature" "-sse4.1" "-target-feature" "-aes"
 
-// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mavx -mavx2 -mavx512f -mavx512cd -mavx512er -mavx512pf -mavx512dq -mavx512bw -mavx512vl -mavx512vbmi -mavx512ifma %s -### -o %t.o 2>&1 | FileCheck -check-prefix=AVX %s
-// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-avx -mno-avx2 -mno-avx512f -mno-avx512cd -mno-avx512er -mno-avx512pf -mno-avx512dq -mno-avx512bw -mno-avx512vl -mno-avx512vbmi -mno-avx512ifma %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-AVX %s
-// AVX: "-target-feature" "+avx" "-target-feature" "+avx2" "-target-feature" "+avx512f" "-target-feature" "+avx512cd" "-target-feature" "+avx512er" "-target-feature" "+avx512pf" "-target-feature" "+avx512dq" "-target-feature" "+avx512bw" "-target-feature" "+avx512vl" "-target-feature" "+avx512vbmi" "-target-feature" "+avx512ifma"
-// NO-AVX: "-target-feature" "-avx" "-target-feature" "-avx2" "-target-feature" "-avx512f" "-target-feature" "-avx512cd" "-target-feature" "-avx512er" "-target-feature" "-avx512pf" "-target-feature" "-avx512dq" "-target-feature" "-avx512bw" "-target-feature" "-avx512vl" "-target-feature" "-avx512vbmi" "-target-feature" "-avx512ifma"
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mavx -mavx2 -mavx512f -mavx512cd -mavx512er -mavx512pf -mavx512dq -mavx512bw -mavx512vl -mavx512vbmi -mavx512vbmi2 -mavx512ifma %s -### -o %t.o 2>&1 | FileCheck -check-prefix=AVX %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-avx -mno-avx2 -mno-avx512f -mno-avx512cd -mno-avx512er -mno-avx512pf -mno-avx512dq -mno-avx512bw -mno-avx512vl -mno-avx512vbmi -mno-avx512vbmi2 -mno-avx512ifma %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-AVX %s
+// AVX: "-target-feature" "+avx" "-target-feature" "+avx2" "-target-feature" "+avx512f" "-target-feature" "+avx512cd" "-target-feature" "+avx512er" "-target-feature" "+avx512pf" "-target-feature" "+avx512dq" "-target-feature" "+avx512bw" "-target-feature" "+avx512vl" "-target-feature" "+avx512vbmi" "-target-feature" "+avx512vbmi2" "-target-feature" "+avx512ifma"
+// NO-AVX: "-target-feature" "-avx" "-target-feature" "-avx2" "-target-feature" "-avx512f" "-target-feature" "-avx512cd" "-target-feature" "-avx512er" "-target-feature" "-avx512pf" "-target-feature" "-avx512dq" "-target-feature" "-avx512bw" "-target-feature" "-avx512vl" "-target-feature" "-avx512vbmi" "-target-feature" "-avx512vbmi2" "-target-feature" "-avx512ifma"
 
 // RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mpclmul -mrdrnd -mfsgsbase -mbmi -mbmi2 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=BMI %s
 // RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-pclmul -mno-rdrnd -mno-fsgsbase -mno-bmi -mno-bmi2 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-BMI %s
@@ -49,3 +49,88 @@
 // RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-xsave -mno-xsaveopt -mno-xsavec -mno-xsaves %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-XSAVE %s
 // XSAVE: "-target-feature" "+xsave" "-target-feature" "+xsaveopt" "-target-feature" "+xsavec" "-target-feature" "+xsaves"
 // NO-XSAVE: "-target-feature" "-xsave" "-target-feature" "-xsaveopt" "-target-feature" "-xsavec" "-target-feature" "-xsaves"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mclflushopt %s -### -o %t.o 2>&1 | FileCheck -check-prefix=CLFLUSHOPT %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-clflushopt %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-CLFLUSHOPT %s
+// CLFLUSHOPT: "-target-feature" "+clflushopt"
+// NO-CLFLUSHOPT: "-target-feature" "-clflushopt"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mclwb %s -### -o %t.o 2>&1 | FileCheck -check-prefix=CLWB %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-clwb %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-CLWB %s
+// CLWB: "-target-feature" "+clwb"
+// NO-CLWB: "-target-feature" "-clwb"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mmovbe %s -### -o %t.o 2>&1 | FileCheck -check-prefix=MOVBE %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-movbe %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-MOVBE %s
+// MOVBE: "-target-feature" "+movbe"
+// NO-MOVBE: "-target-feature" "-movbe"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mmpx %s -### -o %t.o 2>&1 | FileCheck -check-prefix=MPX %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-mpx %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-MPX %s
+// MPX: "-target-feature" "+mpx"
+// NO-MPX: "-target-feature" "-mpx"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mshstk %s -### -o %t.o 2>&1 | FileCheck -check-prefix=CETSS %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-shstk %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-CETSS %s
+// CETSS: "-target-feature" "+shstk"
+// NO-CETSS: "-target-feature" "-shstk"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mibt %s -### -o %t.o 2>&1 | FileCheck -check-prefix=CETIBT %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-ibt %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-CETIBT %s
+// CETIBT: "-target-feature" "+ibt"
+// NO-CETIBT: "-target-feature" "-ibt"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -msgx %s -### -o %t.o 2>&1 | FileCheck -check-prefix=SGX %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-sgx %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-SGX %s
+// SGX: "-target-feature" "+sgx"
+// NO-SGX: "-target-feature" "-sgx"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mprefetchwt1 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=PREFETCHWT1 %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-prefetchwt1 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-PREFETCHWT1 %s
+// PREFETCHWT1: "-target-feature" "+prefetchwt1"
+// NO-PREFETCHWT1: "-target-feature" "-prefetchwt1"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mclzero %s -### -o %t.o 2>&1 | FileCheck -check-prefix=CLZERO %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-clzero %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-CLZERO %s
+// CLZERO: "-target-feature" "+clzero"
+// NO-CLZERO: "-target-feature" "-clzero"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mvaes %s -### -o %t.o 2>&1 | FileCheck -check-prefix=VAES %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-vaes %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-VAES %s
+// VAES: "-target-feature" "+vaes"
+// NO-VAES: "-target-feature" "-vaes"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mgfni %s -### -o %t.o 2>&1 | FileCheck -check-prefix=GFNI %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-gfni %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-GFNI %s
+// GFNI: "-target-feature" "+gfni"
+// NO-GFNI: "-target-feature" "-gfni
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mvpclmulqdq %s -### -o %t.o 2>&1 | FileCheck -check-prefix=VPCLMULQDQ %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-vpclmulqdq %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-VPCLMULQDQ %s
+// VPCLMULQDQ: "-target-feature" "+vpclmulqdq"
+// NO-VPCLMULQDQ: "-target-feature" "-vpclmulqdq"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mavx512bitalg %s -### -o %t.o 2>&1 | FileCheck -check-prefix=BITALG %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-avx512bitalg %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-BITALG %s
+// BITALG: "-target-feature" "+avx512bitalg"
+// NO-BITALG: "-target-feature" "-avx512bitalg"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mavx512vnni %s -### -o %t.o 2>&1 | FileCheck -check-prefix=VNNI %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-avx512vnni %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-VNNI %s
+// VNNI: "-target-feature" "+avx512vnni"
+// NO-VNNI: "-target-feature" "-avx512vnni"
+
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mavx512vbmi2 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=VBMI2 %s
+// RUN: %clang -target i386-unknown-linux-gnu -march=i386 -mno-avx512vbmi2 %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-VBMI2 %s
+// VBMI2: "-target-feature" "+avx512vbmi2"
+// NO-VBMI2: "-target-feature" "-avx512vbmi2"
+
+// RUN: %clang -target i386-linux-gnu -mretpoline %s -### -o %t.o 2>&1 | FileCheck -check-prefix=RETPOLINE %s
+// RUN: %clang -target i386-linux-gnu -mno-retpoline %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-RETPOLINE %s
+// RETPOLINE: "-target-feature" "+retpoline"
+// NO-RETPOLINE: "-target-feature" "-retpoline"
+
+// RUN: %clang -target i386-linux-gnu -mretpoline -mretpoline-external-thunk %s -### -o %t.o 2>&1 | FileCheck -check-prefix=RETPOLINE-EXTERNAL-THUNK %s
+// RUN: %clang -target i386-linux-gnu -mretpoline -mno-retpoline-external-thunk %s -### -o %t.o 2>&1 | FileCheck -check-prefix=NO-RETPOLINE-EXTERNAL-THUNK %s
+// RETPOLINE-EXTERNAL-THUNK: "-target-feature" "+retpoline-external-thunk"
+// NO-RETPOLINE-EXTERNAL-THUNK: "-target-feature" "-retpoline-external-thunk"

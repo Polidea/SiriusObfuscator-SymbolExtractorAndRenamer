@@ -13,8 +13,6 @@
 
 // Project includes
 #include "lldb/Expression/FunctionCaller.h"
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/State.h"
 #include "lldb/Core/ValueObject.h"
@@ -31,6 +29,8 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Target/ThreadPlan.h"
 #include "lldb/Target/ThreadPlanCallFunction.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Log.h"
 
 using namespace lldb_private;
 
@@ -86,12 +86,16 @@ bool FunctionCaller::WriteFunctionWrapper(
 
   bool can_interpret = false; // should stay that way
 
-  Error jit_error(m_parser->PrepareForExecution(
+  Status jit_error(m_parser->PrepareForExecution(
       m_jit_start_addr, m_jit_end_addr, m_execution_unit_sp, exe_ctx,
       can_interpret, eExecutionPolicyAlways));
 
-  if (!jit_error.Success())
+  if (!jit_error.Success()) {
+    diagnostic_manager.Printf(eDiagnosticSeverityError,
+                              "Error in PrepareForExecution: %s.",
+                              jit_error.AsCString());
     return false;
+  }
 
   if (m_parser->GetGenerateDebugInfo())
     m_execution_unit_sp->CreateJITModule(FunctionName());
@@ -126,7 +130,7 @@ bool FunctionCaller::WriteFunctionArguments(
     return false;
   }
 
-  Error error;
+  Status error;
   lldb::ExpressionResults return_value = lldb::eExpressionSetupError;
 
   Process *process = exe_ctx.GetProcessPtr();
@@ -163,7 +167,7 @@ bool FunctionCaller::WriteFunctionArguments(
 
   // FIXME: We will need to extend this for Variadic functions.
 
-  Error value_error;
+  Status value_error;
 
   size_t num_args = arg_values.GetSize();
   if (num_args != m_arg_values.GetSize()) {
@@ -280,7 +284,7 @@ bool FunctionCaller::FetchFunctionResults(ExecutionContext &exe_ctx,
   if (process != jit_process_sp.get())
     return false;
 
-  Error error;
+  Status error;
   ret_value.GetScalar() = process->ReadUnsignedIntegerFromMemory(
       args_addr + m_return_offset, m_return_size, 0, error);
 

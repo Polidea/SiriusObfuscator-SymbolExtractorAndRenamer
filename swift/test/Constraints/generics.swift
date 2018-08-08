@@ -188,7 +188,7 @@ func r22459135() {
 
 // <rdar://problem/19710848> QoI: Friendlier error message for "[] as Set"
 // <rdar://problem/22326930> QoI: "argument for generic parameter 'Element' could not be inferred" lacks context
-_ = [] as Set  // expected-error {{generic parameter 'Element' could not be inferred in cast to 'Set<_>}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{14-14=<<#Element: Hashable#>>}}
+_ = [] as Set  // expected-error {{generic parameter 'Element' could not be inferred in cast to 'Set'}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{14-14=<<#Element: Hashable#>>}}
 
 
 //<rdar://problem/22509125> QoI: Error when unable to infer generic archetype lacks greatness
@@ -205,7 +205,7 @@ var _ : Int = R24267414.foo() // expected-error {{generic parameter 'T' could no
 
 
 // https://bugs.swift.org/browse/SR-599
-func SR599<T: FixedWidthInteger>() -> T.Type { return T.self }  // expected-note {{in call to function 'SR599'}}
+func SR599<T: FixedWidthInteger>() -> T.Type { return T.self }  // expected-note {{in call to function 'SR599()'}}
 _ = SR599()         // expected-error {{generic parameter 'T' could not be inferred}}
 
 
@@ -265,7 +265,9 @@ protocol SubProto: BaseProto {}
 struct FullyGeneric<Foo> {} // expected-note 11 {{'Foo' declared as parameter to type 'FullyGeneric'}} expected-note 1 {{generic type 'FullyGeneric' declared here}}
 
 struct AnyClassBound<Foo: AnyObject> {} // expected-note {{'Foo' declared as parameter to type 'AnyClassBound'}} expected-note {{generic type 'AnyClassBound' declared here}}
+// expected-note@-1{{requirement specified as 'Foo' : 'AnyObject'}}
 struct AnyClassBound2<Foo> where Foo: AnyObject {} // expected-note {{'Foo' declared as parameter to type 'AnyClassBound2'}}
+// expected-note@-1{{requirement specified as 'Foo' : 'AnyObject' [with Foo = Any]}}
 
 struct ProtoBound<Foo: SubProto> {} // expected-note {{'Foo' declared as parameter to type 'ProtoBound'}} expected-note {{generic type 'ProtoBound' declared here}}
 struct ProtoBound2<Foo> where Foo: SubProto {} // expected-note {{'Foo' declared as parameter to type 'ProtoBound2'}}
@@ -301,11 +303,11 @@ func testFixIts() {
   _ = FullyGeneric<Any>()
 
   _ = AnyClassBound() // expected-error {{generic parameter 'Foo' could not be inferred}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{20-20=<AnyObject>}}
-  _ = AnyClassBound<Any>() // expected-error {{'Any' is not convertible to 'AnyObject'}}
+  _ = AnyClassBound<Any>() // expected-error {{'AnyClassBound' requires that 'Any' be a class type}}
   _ = AnyClassBound<AnyObject>()
 
   _ = AnyClassBound2() // expected-error {{generic parameter 'Foo' could not be inferred}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{21-21=<AnyObject>}}
-  _ = AnyClassBound2<Any>() // expected-error {{'Any' is not convertible to 'AnyObject'}}
+  _ = AnyClassBound2<Any>() // expected-error {{'AnyClassBound2' requires that 'Any' be a class type}}
   _ = AnyClassBound2<AnyObject>()
 
   _ = ProtoBound() // expected-error {{generic parameter 'Foo' could not be inferred}} expected-note {{explicitly specify the generic arguments to fix this issue}} {{17-17=<<#Foo: SubProto#>>}}
@@ -429,7 +431,7 @@ class GenericClass<A> {}
 func genericFunc<T>(t: T) {
   _ = [T: GenericClass] // expected-error {{generic parameter 'A' could not be inferred}}
   // expected-note@-1 {{explicitly specify the generic arguments to fix this issue}}
-  // expected-error@-2 2 {{type 'T' does not conform to protocol 'Hashable'}}
+  // expected-error@-2 3 {{type 'T' does not conform to protocol 'Hashable'}}
 }
 
 struct SR_3525<T> {}
@@ -479,4 +481,100 @@ public struct S5 {
         f(models: arr)
         g(models: arr)
     }
+}
+
+// rdar://problem/24329052 - QoI: call argument archetypes not lining up leads to ambiguity errors
+
+struct S_24329052<T> { // expected-note {{generic parameter 'T' of generic struct 'S_24329052' declared here}}
+  var foo: (T) -> Void
+  // expected-note@+1 {{generic parameter 'T' of instance method 'bar(_:)' declared here}}
+  func bar<T>(_ v: T) { foo(v) }
+  // expected-error@-1 {{cannot convert value of type 'T' (generic parameter of instance method 'bar(_:)') to expected argument type 'T' (generic parameter of generic struct 'S_24329052')}}
+}
+
+extension Sequence {
+  var rdar24329052: (Element) -> Void { fatalError() }
+  // expected-note@+1 {{generic parameter 'Element' of instance method 'foo24329052(_:)' declared here}}
+  func foo24329052<Element>(_ v: Element) { rdar24329052(v) }
+  // expected-error@-1 {{cannot convert value of type 'Element' (generic parameter of instance method 'foo24329052(_:)') to expected argument type 'Self.Element' (associated type of protocol 'Sequence')}}
+}
+
+func rdar27700622<E: Comparable>(_ input: [E]) -> [E] {
+  let pivot = input.first!
+  let lhs = input.dropFirst().filter { $0 <= pivot }
+  let rhs = input.dropFirst().filter { $0 > pivot }
+
+  return rdar27700622(lhs) + [pivot] + rdar27700622(rhs) // Ok
+}
+
+// rdar://problem/22898292 - Type inference failure with constrained subclass
+protocol P_22898292 {}
+
+do {
+  func construct_generic<T: P_22898292>(_ construct: () -> T) -> T { return construct() }
+
+  class A {}
+  class B : A, P_22898292 {}
+
+  func foo() -> B { return B() }
+  func bar(_ value: A) {}
+  func baz<T: A>(_ value: T) {}
+
+  func rdar_22898292_1() {
+    let x = construct_generic { foo() } // returns A
+    bar(x) // Ok
+    bar(construct_generic { foo() }) // Ok
+  }
+
+  func rdar22898292_2<T: B>(_ d: T) {
+    _ = { baz($0) }(construct_generic { d }) // Ok
+  }
+}
+
+// rdar://problem/35541153 - Generic parameter inference bug
+
+func rdar35541153() {
+  func foo<U: Equatable, V: Equatable, C: Collection>(_ c: C) where C.Element == (U, V) {}
+  func bar<K: Equatable, V, C: Collection>(_ c: C, _ k: K, _ v: V) where C.Element == (K, V) {}
+
+  let x: [(a: Int, b: Int)] = []
+  let y: [(k: String, v: Int)] = []
+
+  foo(x) // Ok
+  bar(y, "ultimate question", 42) // Ok
+}
+
+// rdar://problem/38159133 - [SR-7125]: Swift 4.1 Xcode 9.3b4 regression
+
+protocol P_38159133 {}
+
+do {
+  class Super {}
+  class A: Super, P_38159133 {}
+  class B: Super, P_38159133 {}
+
+  func rdar38159133(_ a: A?, _ b: B?) {
+    let _: [P_38159133] = [a, b].compactMap { $0 } // Ok
+  }
+}
+
+func rdar35890334(_ arr: inout [Int]) {
+  _ = arr.popFirst() // expected-error {{'[Int]' requires the types '[Int]' and 'ArraySlice<Int>' be equivalent to use 'popFirst'}}
+}
+
+// rdar://problem/39616039
+
+func rdar39616039() {
+  func foo<V>(default: V, _ values: [String: V]) -> V {
+    return values["foo"] ?? `default`
+  }
+
+  var a = foo(default: 42, ["foo": 0])
+  a += 1 // ok
+
+  var b = foo(default: 42.0, ["foo": 0])
+  b += 1 // ok
+
+  var c = foo(default: 42.0, ["foo": Float(0)])
+  c += 1 // ok
 }

@@ -9,13 +9,12 @@ struct S1 {}
 func foo(x: FooStruct1) -> S1 {}
 
 // REQUIRES: objc_interop
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %swiftc_driver -emit-module -o %t/FooSwiftModule.swiftmodule %S/Inputs/FooSwiftModule.swift
 
 // Sanity check that we have identical responses when things work.
 // RUN: %sourcekitd-test -req=cursor -pos=5:5 %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s > %t.from_offset.txt
-// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr6globalSiv" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s > %t.from_usr.txt
+// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr6globalSivp" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s > %t.from_usr.txt
 // RUN: %FileCheck %s -check-prefix=CHECK_SANITY1 < %t.from_offset.txt
 // RUN: %FileCheck %s -check-prefix=CHECK_SANITY1 < %t.from_usr.txt
 // RUN: diff -u %t.from_usr.txt %t.from_offset.txt
@@ -23,20 +22,20 @@ func foo(x: FooStruct1) -> S1 {}
 // CHECK_SANITY1-NEXT: global
 // CHECK_SANITY1-NEXT: s:10cursor_usr6globalSiv
 // CHECK_SANITY1-NEXT: Int
-// CHECK_SANITY1-NEXT: _T0SiD
+// CHECK_SANITY1-NEXT: $SSiD
 // CHECK_SANITY1-NEXT: <Declaration>var global: <Type usr="s:Si">Int</Type></Declaration>
 // CHECK_SANITY1-NEXT: <decl.var.global><syntaxtype.keyword>var</syntaxtype.keyword> <decl.name>global</decl.name>: <decl.var.type><ref.struct usr="s:Si">Int</ref.struct></decl.var.type></decl.var.global>
 
 // Bogus USR.
 // RUN: %sourcekitd-test -req=cursor -usr "s:blahblahblah" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=EMPTY
 // Missing s: prefix.
-// RUN: %sourcekitd-test -req=cursor -usr "10cursor_usr6globalSiv" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=EMPTY
+// RUN: %sourcekitd-test -req=cursor -usr "10cursor_usr6globalSivp" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=EMPTY
 // FIXME: no support for clang USRs.
 // RUN: %sourcekitd-test -req=cursor -usr "c:@S@FooStruct1" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=EMPTY
 // EMPTY: <empty cursor info>
 
 // FIXME: missing symbol shows up as some other part of the USR (the type here).
-// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr11global_noneSiv" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=SHOULD_BE_EMPTY
+// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr11global_noneSivp" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=SHOULD_BE_EMPTY
 // SHOULD_BE_EMPTY: source.lang.swift.decl.struct ()
 // SHOULD_BE_EMPTY: Int
 
@@ -52,7 +51,7 @@ func foo(x: FooStruct1) -> S1 {}
 // CHECK2: FooSwiftModule
 // CHECK2: <decl.function.free><syntaxtype.keyword>func</syntaxtype.keyword> <decl.name>fooSwiftFunc</decl.name>() -&gt; <decl.function.returntype><ref.struct usr="s:Si">Int</ref.struct></decl.function.returntype></decl.function.free>
 
-// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr3fooAA2S1VSC10FooStruct1VF" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=CHECK3
+// RUN: %sourcekitd-test -req=cursor -usr "s:10cursor_usr3fooyAA2S1VSC10FooStruct1VF" %s -- -I %t -F %S/../Inputs/libIDE-mock-sdk %mcp_opt %s | %FileCheck %s -check-prefix=CHECK3
 // CHECK3: source.lang.swift.decl.function.free (9:6-9:24)
 // CHECK3: foo(x:)
 // CHECK3: (FooStruct1) -> S1

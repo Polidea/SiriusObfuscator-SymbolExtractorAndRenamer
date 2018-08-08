@@ -9,29 +9,43 @@
 
 #include "lldb/Core/ValueObjectVariable.h"
 
-// C Includes
-// C++ Includes
-// Other libraries and framework includes
-// Project includes
-#include "lldb/Core/Flags.h"
+#include "lldb/Core/Address.h"      // for Address
+#include "lldb/Core/AddressRange.h" // for AddressRange
 #include "lldb/Core/Module.h"
 #include "lldb/Core/RegisterValue.h"
+#include "lldb/Core/Scalar.h" // for Scalar, operator!=
 #include "lldb/Core/Value.h"
-#include "lldb/Core/ValueObjectList.h"
-
+#include "lldb/Expression/DWARFExpression.h" // for DWARFExpression
+#include "lldb/Symbol/Declaration.h"         // for Declaration
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
 #include "lldb/Symbol/SymbolContextScope.h"
 #include "lldb/Symbol/Type.h"
 #include "lldb/Symbol/Variable.h"
-
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Target.h"
-#include "lldb/Target/Thread.h"
+#include "lldb/Utility/DataExtractor.h"     // for DataExtractor
+#include "lldb/Utility/Status.h"            // for Status
+#include "lldb/lldb-private-enumerations.h" // for AddressType::eAddressTy...
+#include "lldb/lldb-types.h"                // for addr_t
 
+#include "llvm/ADT/StringRef.h" // for StringRef
+
+#include <assert.h> // for assert
+#include <memory>   // for shared_ptr
+
+namespace lldb_private {
+class ExecutionContextScope;
+}
+namespace lldb_private {
+class StackFrame;
+}
+namespace lldb_private {
+struct RegisterInfo;
+}
 using namespace lldb_private;
 
 lldb::ValueObjectSP
@@ -151,9 +165,8 @@ bool ValueObjectVariable::UpdateValue() {
                 target);
     }
     Value old_value(m_value);
-    if (expr.Evaluate(&exe_ctx, nullptr, nullptr, nullptr,
-                      loclist_base_load_addr, nullptr, nullptr, m_value,
-                      &m_error)) {
+    if (expr.Evaluate(&exe_ctx, nullptr, loclist_base_load_addr, nullptr,
+                      nullptr, m_value, &m_error)) {
       m_resolved_value = m_value;
       m_value.SetContext(Value::eContextTypeVariable, variable);
 
@@ -231,34 +244,16 @@ bool ValueObjectVariable::UpdateValue() {
       case Value::eValueTypeFileAddress:
       case Value::eValueTypeLoadAddress:
       case Value::eValueTypeHostAddress:
-        // The DWARF expression result was an address in the inferior
-        // process. If this variable is an aggregate type, we just need
-        // the address as the main value as all child variable objects
-        // will rely upon this location and add an offset and then read
-        // their own values as needed. If this variable is a simple
-        // type, we read all data for it into m_data.
-        // Make sure this type has a value before we try and read it
+        // The DWARF expression result was an address in the inferior process.
+        // If this variable is an aggregate type, we just need the address as
+        // the main value as all child variable objects will rely upon this
+        // location and add an offset and then read their own values as needed.
+        // If this variable is a simple type, we read all data for it into
+        // m_data. Make sure this type has a value before we try and read it
 
         // If we have a file address, convert it to a load address if we can.
-        if (value_type == Value::eValueTypeFileAddress && process_is_alive) {
-          lldb::addr_t file_addr =
-              m_value.GetScalar().ULongLong(LLDB_INVALID_ADDRESS);
-          if (file_addr != LLDB_INVALID_ADDRESS) {
-            SymbolContext var_sc;
-            variable->CalculateSymbolContext(&var_sc);
-            if (var_sc.module_sp) {
-              ObjectFile *objfile = var_sc.module_sp->GetObjectFile();
-              if (objfile) {
-                Address so_addr(file_addr, objfile->GetSectionList());
-                lldb::addr_t load_addr = so_addr.GetLoadAddress(target);
-                if (load_addr != LLDB_INVALID_ADDRESS) {
-                  m_value.SetValueType(Value::eValueTypeLoadAddress);
-                  m_value.GetScalar() = load_addr;
-                }
-              }
-            }
-          }
-        }
+        if (value_type == Value::eValueTypeFileAddress && process_is_alive)
+          m_value.ConvertToLoadAddress(GetModule().get(), target);
 
         if (!CanProvideValue()) {
           // this value object represents an aggregate type whose
@@ -340,7 +335,7 @@ const char *ValueObjectVariable::GetLocationAsCString() {
 }
 
 bool ValueObjectVariable::SetValueFromCString(const char *value_str,
-                                              Error &error) {
+                                              Status &error) {
   if (!UpdateValueIfNeeded()) {
     error.SetErrorString("unable to update value before writing");
     return false;
@@ -369,7 +364,7 @@ bool ValueObjectVariable::SetValueFromCString(const char *value_str,
     return ValueObject::SetValueFromCString(value_str, error);
 }
 
-bool ValueObjectVariable::SetData(DataExtractor &data, Error &error) {
+bool ValueObjectVariable::SetData(DataExtractor &data, Status &error) {
   if (!UpdateValueIfNeeded()) {
     error.SetErrorString("unable to update value before writing");
     return false;

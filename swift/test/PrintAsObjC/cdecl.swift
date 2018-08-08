@@ -1,5 +1,4 @@
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -enable-source-import -emit-module -emit-module-doc -o %t %s -disable-objc-attr-requires-foundation-module
 // RUN: %target-swift-frontend(mock-sdk: %clang-importer-sdk) -parse-as-library %t/cdecl.swiftmodule -typecheck -emit-objc-header-path %t/cdecl.h -import-objc-header %S/../Inputs/empty.h -disable-objc-attr-requires-foundation-module
 // RUN: %FileCheck %s < %t/cdecl.h
@@ -43,6 +42,17 @@ public func function_pointer_recurring_nightmare(x: @escaping @convention(c) (@c
 @_cdecl("has_keyword_arg_names")
 func keywordArgNames(auto: Int, union: Int) {}
 
+@objc
+class C {}
+
+// CHECK-LABEL: C * _Null_unspecified return_iuo(void) SWIFT_WARN_UNUSED_RESULT;
+@_cdecl("return_iuo")
+func returnIUO() -> C! { return C() }
+
 // CHECK-LABEL: void return_never(void) SWIFT_NORETURN;
 @_cdecl("return_never")
 func returnNever() -> Never { fatalError() }
+
+// CHECK-LABEL: void takes_iuo(C * _Null_unspecified c);
+@_cdecl("takes_iuo")
+func takesIUO(c: C!) {}

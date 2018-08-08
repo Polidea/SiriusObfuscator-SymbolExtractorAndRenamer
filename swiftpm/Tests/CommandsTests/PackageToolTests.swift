@@ -12,7 +12,8 @@ import XCTest
 import Foundation
 
 import Basic
-import Commands
+@testable import Commands
+import Xcodeproj
 import PackageModel
 import SourceControl
 import TestSupport
@@ -27,6 +28,10 @@ final class PackageToolTests: XCTestCase {
 
     func testUsage() throws {
         XCTAssert(try execute(["--help"]).contains("USAGE: swift package"))
+    }
+
+    func testSeeAlso() throws {
+        XCTAssert(try execute(["--help"]).contains("SEE ALSO: swift build, swift run, swift test"))
     }
 
     func testVersion() throws {
@@ -77,8 +82,9 @@ final class PackageToolTests: XCTestCase {
     }
 
     func testDescribe() throws {
-        fixture(name: "ClangModules/SwiftCMixed") { prefix in
-            let output = try execute(["describe", "--type=json"], packagePath: prefix)
+        fixture(name: "CFamilyTargets/SwiftCMixed") { prefix in
+            let result = try SwiftPMProduct.SwiftPackage.executeProcess(["describe", "--type=json"], packagePath: prefix)
+            let output = try result.utf8Output()
             let json = try JSON(bytes: ByteString(encodingAsUTF8: output))
 
             XCTAssertEqual(json["name"]?.string, "SwiftCMixed")
@@ -121,24 +127,22 @@ final class PackageToolTests: XCTestCase {
     func testShowDependencies() throws {
         fixture(name: "DependencyResolution/External/Complex") { prefix in
             let packageRoot = prefix.appending(component: "app")
-            let textOutput = try execute(["show-dependencies", "--format=text"], packagePath: packageRoot)
+            let textOutput = try SwiftPMProduct.SwiftPackage.executeProcess(["show-dependencies", "--format=text"], packagePath: packageRoot).utf8Output()
             XCTAssert(textOutput.contains("FisherYates@1.2.3"))
 
-            // FIXME: We have to fetch first otherwise the fetching output is mingled with the JSON data.
-            let jsonOutput = try execute(["show-dependencies", "--format=json"], packagePath: packageRoot)
-            print("output = \(jsonOutput)")
+            let jsonOutput = try SwiftPMProduct.SwiftPackage.executeProcess(["show-dependencies", "--format=json"], packagePath: packageRoot).utf8Output()
             let json = try JSON(bytes: ByteString(encodingAsUTF8: jsonOutput))
             guard case let .dictionary(contents) = json else { XCTFail("unexpected result"); return }
             guard case let .string(name)? = contents["name"] else { XCTFail("unexpected result"); return }
             XCTAssertEqual(name, "Dealer")
             guard case let .string(path)? = contents["path"] else { XCTFail("unexpected result"); return }
             XCTAssertEqual(resolveSymlinks(AbsolutePath(path)), resolveSymlinks(packageRoot))
-        }
+        } 
     }
 
     func testInitEmpty() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init", "--type", "empty"])
@@ -150,7 +154,7 @@ final class PackageToolTests: XCTestCase {
 
     func testInitExecutable() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init", "--type", "executable"])
@@ -162,13 +166,15 @@ final class PackageToolTests: XCTestCase {
 
             XCTAssertTrue(fs.exists(manifest))
             XCTAssertEqual(try fs.getDirectoryContents(path.appending(component: "Sources").appending(component: "Foo")), ["main.swift"])
-            XCTAssertEqual(try fs.getDirectoryContents(path.appending(component: "Tests")), [])
+            XCTAssertEqual(
+                try fs.getDirectoryContents(path.appending(component: "Tests")).sorted(),
+                ["FooTests", "LinuxMain.swift"])
         }
     }
 
     func testInitLibrary() throws {
         mktmpdir { tmpPath in
-            var fs = localFileSystem
+            let fs = localFileSystem
             let path = tmpPath.appending(component: "Foo")
             try fs.createDirectory(path)
             _ = try execute(["-C", path.asString, "init"])
@@ -379,8 +385,8 @@ final class PackageToolTests: XCTestCase {
                 XCTAssertEqual(pinsStore.pins.map{$0}.count, 2)
                 for pkg in ["bar", "baz"] {
                     let pin = pinsStore.pinsMap[pkg]!
-                    XCTAssertEqual(pin.package, pkg)
-                    XCTAssert(pin.repository.url.hasSuffix(pkg))
+                    XCTAssertEqual(pin.packageRef.identity, pkg)
+                    XCTAssert(pin.packageRef.repository.url.hasSuffix(pkg))
                     XCTAssertEqual(pin.state.version, "1.2.3")
                 }
             }
@@ -435,6 +441,87 @@ final class PackageToolTests: XCTestCase {
         }
     }
 
+    func testSymlinkedDependency() {
+        mktmpdir { path in
+            let fs = localFileSystem
+            let root = path.appending(components: "root")
+            let dep = path.appending(components: "dep")
+            let depSym = path.appending(components: "depSym")
+
+            // Create root package.
+            try fs.writeFileContents(root.appending(components: "Sources", "root", "main.swift")) { $0 <<< "" }
+            try fs.writeFileContents(root.appending(component: "Package.swift")) {
+                $0 <<< """
+                // swift-tools-version:4.0
+                import PackageDescription
+                let package = Package(
+                name: "root",
+                dependencies: [.package(url: "../depSym", from: "1.0.0")],
+                targets: [.target(name: "root", dependencies: ["dep"])]
+                )
+
+                """
+            }
+
+            // Create dependency.
+            try fs.writeFileContents(dep.appending(components: "Sources", "dep", "lib.swift")) { $0 <<< "" }
+            try fs.writeFileContents(dep.appending(component: "Package.swift")) {
+                $0 <<< """
+                // swift-tools-version:4.0
+                import PackageDescription
+                let package = Package(
+                name: "dep",
+                products: [.library(name: "dep", targets: ["dep"])],
+                targets: [.target(name: "dep")]
+                )
+                """
+            }
+            do {
+                let depGit = GitRepository(path: dep)
+                try depGit.create()
+                try depGit.stageEverything()
+                try depGit.commit()
+                try depGit.tag(name: "1.0.0")
+            }
+
+            // Create symlink to the dependency.
+            try createSymlink(depSym, pointingAt: dep)
+
+            _ = try execute(["resolve"], packagePath: root)
+        }
+    }
+
+    func testWatchmanXcodeprojgen() {
+        mktmpdir { path in
+            let fs = localFileSystem
+            let diagnostics = DiagnosticsEngine()
+
+            let scriptsDir = path.appending(component: "scripts")
+            let packageRoot = path.appending(component: "root")
+
+            let helper = WatchmanHelper(
+                diagnostics: diagnostics,
+                watchmanScriptsDir: scriptsDir,
+                packageRoot: packageRoot)
+
+            let script = try helper.createXcodegenScript(
+                XcodeprojOptions(xcconfigOverrides: .init("/tmp/overrides.xcconfig")))
+
+            XCTAssertEqual(try fs.readFileContents(script), """
+                #!/usr/bin/env bash
+
+
+                # Autogenerated by SwiftPM. Do not edit!
+
+
+                set -eu
+
+                swift package generate-xcodeproj --xcconfig-overrides /tmp/overrides.xcconfig
+
+                """)
+        }
+    }
+
     static var allTests = [
         ("testDescribe", testDescribe),
         ("testUsage", testUsage),
@@ -452,5 +539,7 @@ final class PackageToolTests: XCTestCase {
         ("testPackageReset", testPackageReset),
         ("testPinning", testPinning),
         ("testPinningBranchAndRevision", testPinningBranchAndRevision),
+        ("testSymlinkedDependency", testSymlinkedDependency),
+        ("testWatchmanXcodeprojgen", testWatchmanXcodeprojgen),
     ]
 }

@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.4.3)
 
+# TODO: Fix RPATH usage to be CMP0068 compliant
+# Disable Policy CMP0068 for CMake 3.9
+# rdar://37725888
+if(POLICY CMP0068)
+  cmake_policy(SET CMP0068 OLD)
+endif()
+
 # Add path for custom CMake modules.
 list(APPEND CMAKE_MODULE_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
@@ -10,6 +17,8 @@ cmake_host_system_information(
 set_property(GLOBAL PROPERTY JOB_POOLS local_jobs=${localhost_logical_cores})
 # Put linking in that category
 set_property(GLOBAL PROPERTY JOB_POOL_LINK local_jobs)
+
+ENABLE_LANGUAGE(C)
 
 # First include general CMake utilities.
 include(SwiftUtils)
@@ -66,7 +75,11 @@ else()
 endif()
 
 option(SWIFT_BUILD_PERF_TESTSUITE
-    "Create targets for swift performance benchmarks."
+    "Create in-tree targets for building swift performance benchmarks."
+    FALSE)
+
+option(SWIFT_BUILD_EXTERNAL_PERF_TESTSUITE
+    "Create out-of-tree targets for building swift performance benchmarks."
     FALSE)
 
 option(SWIFT_INCLUDE_TESTS "Create targets for building/running tests." TRUE)
@@ -80,6 +93,13 @@ option(SWIFT_INCLUDE_DOCS
 #
 # TODO: Please categorize these!
 #
+
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE "Debug" CACHE STRING
+      "Build type for Swift [Debug, RelWithDebInfo, Release, MinSizeRel]"
+      FORCE)
+  message(STATUS "No build type was specified, will default to ${CMAKE_BUILD_TYPE}")
+endif()
 
 set(SWIFT_STDLIB_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING
     "Build type for the Swift standard library and SDK overlays [Debug, RelWithDebInfo, Release, MinSizeRel]")
@@ -108,7 +128,7 @@ set_property(CACHE SWIFT_ANALYZE_CODE_COVERAGE PROPERTY
 # SWIFT_VERSION is deliberately /not/ cached so that an existing build directory
 # can be reused when a new version of Swift comes out (assuming the user hasn't
 # manually set it as part of their own CMake configuration).
-set(SWIFT_VERSION "4.0.3")
+set(SWIFT_VERSION "4.2")
 
 set(SWIFT_VENDOR "" CACHE STRING
     "The vendor name of the Swift compiler")
@@ -118,12 +138,12 @@ set(CLANG_COMPILER_VERSION "" CACHE STRING
     "The internal version of the Clang compiler")
 
 # Indicate whether Swift should attempt to use the lld linker.
-set(SWIFT_ENABLE_LLD_LINKER FALSE CACHE BOOL
+set(SWIFT_ENABLE_LLD_LINKER TRUE CACHE BOOL
     "Enable using the lld linker when available")
 
 # Indicate whether Swift should attempt to use the gold linker.
 # This is not used on Darwin.
-set(SWIFT_ENABLE_GOLD_LINKER FALSE CACHE BOOL
+set(SWIFT_ENABLE_GOLD_LINKER TRUE CACHE BOOL
     "Enable using the gold linker when available")
 
 set(SWIFT_SDKS "" CACHE STRING
@@ -170,18 +190,20 @@ set(SWIFT_ANDROID_DEPLOY_DEVICE_PATH "" CACHE STRING
   "Path on an Android device where build products will be pushed. These are used when running the test suite against the device")
 
 #
-# User-configurable ICU specific options for Android, FreeBSD, Linux.
+# User-configurable ICU specific options for Android, FreeBSD, Linux and Haiku.
 #
 
-foreach(sdk ANDROID;FREEBSD;LINUX;WINDOWS)
-  set(SWIFT_${sdk}_ICU_UC "" CACHE STRING
-      "Path to a directory containing the icuuc library for ${sdk}")
-  set(SWIFT_${sdk}_ICU_UC_INCLUDE "" CACHE STRING
-      "Path to a directory containing headers for icuuc for ${sdk}")
-  set(SWIFT_${sdk}_ICU_I18N "" CACHE STRING
-      "Path to a directory containing the icui18n library for ${sdk}")
-  set(SWIFT_${sdk}_ICU_I18N_INCLUDE "" CACHE STRING
-      "Path to a directory containing headers icui18n for ${sdk}")
+foreach(sdk ANDROID;FREEBSD;LINUX;WINDOWS;HAIKU)
+  foreach(arch aarch64;armv6;armv7;i686;powerpc64;powerpc64le;s390x;x86_64)
+    set(SWIFT_${sdk}_${arch}_ICU_UC "" CACHE STRING
+        "Path to a directory containing the icuuc library for ${sdk}")
+    set(SWIFT_${sdk}_${arch}_ICU_UC_INCLUDE "" CACHE STRING
+        "Path to a directory containing headers for icuuc for ${sdk}")
+    set(SWIFT_${sdk}_${arch}_ICU_I18N "" CACHE STRING
+        "Path to a directory containing the icui18n library for ${sdk}")
+    set(SWIFT_${sdk}_${arch}_ICU_I18N_INCLUDE "" CACHE STRING
+        "Path to a directory containing headers icui18n for ${sdk}")
+  endforeach()
 endforeach()
 
 #
@@ -194,6 +216,10 @@ option(SWIFT_EMBED_BITCODE_SECTION
 
 option(SWIFT_RUNTIME_CRASH_REPORTER_CLIENT
     "Whether to enable CrashReporter integration"
+    FALSE)
+
+option(SWIFT_DARWIN_ENABLE_STABLE_ABI_BIT
+    "Enable the Swift stable ABI's class marker bit"
     FALSE)
 
 set(SWIFT_DARWIN_XCRUN_TOOLCHAIN "XcodeDefault" CACHE STRING
@@ -240,10 +266,6 @@ option(SWIFT_RUNTIME_CLOBBER_FREED_OBJECTS
     "Overwrite memory for deallocated Swift objects"
     "${SWIFT_RUNTIME_CLOBBER_FREED_OBJECTS_default}")
 
-option(SWIFT_SERIALIZE_STDLIB_UNITTEST
-    "Compile the StdlibUnittest module with -sil-serialize-all to increase the test coverage for the optimizer"
-    FALSE)
-
 option(SWIFT_STDLIB_SIL_DEBUGGING
     "Compile the Swift standard library with -gsil to enable debugging and profiling on SIL level"
     FALSE)
@@ -273,14 +295,6 @@ option(SWIFT_RUNTIME_ENABLE_LEAK_CHECKER
   "Should the runtime be built with support for non-thread-safe leak detecting entrypoints"
   FALSE)
 
-option(SWIFT_STDLIB_ENABLE_RESILIENCE
-    "Build the standard libraries and overlays with resilience enabled; see docs/LibraryEvolution.rst"
-    FALSE)
-
-option(SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
-    "Build the runtime with a copy-on-write implementation for opaque existentials"
-    TRUE)
-
 option(SWIFT_STDLIB_USE_NONATOMIC_RC
     "Build the standard libraries and overlays with nonatomic reference count operations enabled"
     FALSE)
@@ -289,19 +303,17 @@ option(SWIFT_STDLIB_ENABLE_SIL_OWNERSHIP
   "Build the standard libraries and overlays with sil ownership enabled."
   FALSE)
 
-option(SWIFT_STDLIB_SIL_SERIALIZE_ALL
-    "Build the standard libraries and overlays serializing all method bodies"
-    TRUE)
+option(SWIFT_ENABLE_GUARANTEED_NORMAL_ARGUMENTS
+  "Build the standard libraries, overlays, and runtime with normal arguments at +0"
+  TRUE)
 
-if(SWIFT_SERIALIZE_STDLIB_UNITTEST AND SWIFT_STDLIB_ENABLE_RESILIENCE)
-  message(WARNING "Ignoring SWIFT_SERIALIZE_STDLIB_UNITTEST because SWIFT_STDLIB_ENABLE_RESILIENCE is set")
-  set(SWIFT_SERIALIZE_STDLIB_UNITTEST FALSE)
-endif()
+option(SWIFT_ENABLE_RUNTIME_FUNCTION_COUNTERS
+  "Enable runtime function counters and expose the API."
+  FALSE)
 
-if(SWIFT_STDLIB_SIL_SERIALIZE_ALL AND SWIFT_STDLIB_ENABLE_RESILIENCE)
-  message(WARNING "Ignoring SWIFT_STDLIB_SIL_SERIALIZE_ALL because SWIFT_STDLIB_ENABLE_RESILIENCE is set")
-  set(SWIFT_STDLIB_SIL_SERIALIZE_ALL FALSE)
-endif()
+option(SWIFT_ENABLE_STDLIBCORE_EXCLUSIVITY_CHECKING
+  "Build stdlibCore with exclusivity checking enabled"
+  FALSE)
 
 #
 # End of user-configurable options.
@@ -371,6 +383,10 @@ endif()
 
 if(SWIFT_BUILT_STANDALONE)
   project(Swift C CXX ASM)
+endif()
+
+if(MSVC OR "${CMAKE_SIMULATE_ID}" STREQUAL MSVC)
+  include(ClangClCompileRules)
 endif()
 
 precondition(CMAKE_SYSTEM_NAME)
@@ -540,6 +556,8 @@ else()
     set(SWIFT_HOST_VARIANT_SDK_default "CYGWIN")
   elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
     set(SWIFT_HOST_VARIANT_SDK_default "WINDOWS")
+  elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Haiku")
+    set(SWIFT_HOST_VARIANT_SDK_default "HAIKU")
   elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
     set(SWIFT_HOST_VARIANT_SDK_default "OSX")
   else()
@@ -681,6 +699,16 @@ elseif("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "WINDOWS")
   set(SWIFT_PRIMARY_VARIANT_SDK_default  "${SWIFT_HOST_VARIANT_SDK}")
   set(SWIFT_PRIMARY_VARIANT_ARCH_default "${SWIFT_HOST_VARIANT_ARCH}")
 
+elseif("${SWIFT_HOST_VARIANT_SDK}" STREQUAL "HAIKU")
+
+  set(CMAKE_EXECUTABLE_FORMAT "ELF")
+  set(SWIFT_HOST_VARIANT "haiku" CACHE STRING
+      "Deployment OS for Swift host tools (the compiler) [haiku].")
+
+  configure_sdk_unix(HAIKU "Haiku" "haiku" "haiku" "x86_64" "x86_64-unknown-haiku" "/")
+  set(SWIFT_PRIMARY_VARIANT_SDK_default  "${SWIFT_HOST_VARIANT_SDK}")
+  set(SWIFT_PRIMARY_VARIANT_ARCH_default "x86_64")
+
 elseif("${SWIFT_HOST_VARIANT_SDK}" MATCHES "(OSX|IOS*|TVOS*|WATCHOS*)")
 
   set(SWIFT_HOST_VARIANT "macosx" CACHE STRING
@@ -735,10 +763,10 @@ if(swift_build_android AND NOT "${SWIFT_ANDROID_NDK_PATH}" STREQUAL "")
 
   set(SWIFT_ANDROID_PREBUILT_PATH
       "${SWIFT_ANDROID_NDK_PATH}/toolchains/arm-linux-androideabi-${SWIFT_ANDROID_NDK_GCC_VERSION}/prebuilt/${_swift_android_prebuilt_suffix}")
-
+  
   # Resolve the correct linker based on the file name of CMAKE_LINKER (being 'ld' or 'ld.gold' the options)
   get_filename_component(SWIFT_ANDROID_LINKER_NAME "${CMAKE_LINKER}" NAME)
-  set(SWIFT_SDK_ANDROID_ARCH_armv7_LINKER
+  set(SWIFT_SDK_ANDROID_ARCH_armv7_LINKER 
       "${SWIFT_ANDROID_NDK_PATH}/toolchains/arm-linux-androideabi-${SWIFT_ANDROID_NDK_GCC_VERSION}/prebuilt/${_swift_android_prebuilt_suffix}/bin/arm-linux-androideabi-${SWIFT_ANDROID_LINKER_NAME}")
 
   configure_sdk_unix(ANDROID "Android" "android" "android" "armv7" "armv7-none-linux-androideabi" "${SWIFT_ANDROID_SDK_PATH}")
@@ -755,7 +783,7 @@ endif()
 # Should we cross-compile the standard library for Windows?
 is_sdk_requested(WINDOWS swift_build_windows)
 if(swift_build_windows AND NOT "${CMAKE_SYSTEM_NAME}" STREQUAL "Windows")
-  configure_sdk_windows(WINDOWS "Windows" "msvc" i686)
+  configure_sdk_windows(WINDOWS "Windows" "msvc" "aarch64;armv7;i686;x86_64")
 endif()
 
 if("${SWIFT_SDKS}" STREQUAL "")
@@ -787,32 +815,56 @@ if(SWIFT_PARALLEL_LINK_JOBS)
 endif()
 
 # Set the CMAKE_OSX_* variables in a way that minimizes conflicts.
-if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+if("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin" AND NOT CMAKE_CROSSCOMPILING)
   set(CMAKE_OSX_SYSROOT "${SWIFT_SDK_${SWIFT_HOST_VARIANT_SDK}_PATH}")
   set(CMAKE_OSX_ARCHITECTURES "")
   set(CMAKE_OSX_DEPLOYMENT_TARGET "")
 endif()
 
 message(STATUS "Building host Swift tools for ${SWIFT_HOST_VARIANT_SDK} ${SWIFT_HOST_VARIANT_ARCH}")
-message(STATUS "  Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "  Assertions: ${LLVM_ENABLE_ASSERTIONS}")
-message(STATUS "  LTO:        ${SWIFT_TOOLS_ENABLE_LTO}")
+message(STATUS "  Build type:     ${CMAKE_BUILD_TYPE}")
+message(STATUS "  Assertions:     ${LLVM_ENABLE_ASSERTIONS}")
+message(STATUS "  LTO:            ${SWIFT_TOOLS_ENABLE_LTO}")
+message(STATUS "  +0 Normal Args: ${SWIFT_ENABLE_GUARANTEED_NORMAL_ARGUMENTS}")
 message(STATUS "")
 
-message(STATUS "Building Swift standard library and SDK overlays for SDKs: ${SWIFT_SDKS}")
-message(STATUS "  Build type: ${SWIFT_STDLIB_BUILD_TYPE}")
-message(STATUS "  Assertions: ${SWIFT_STDLIB_ASSERTIONS}")
-message(STATUS "")
+if (SWIFT_BUILD_STDLIB OR SWIFT_BUILD_SDK_OVERLAY)
 
-message(STATUS "Building Swift runtime with:")
-message(STATUS "  Leak Detection Checker Entrypoints: ${SWIFT_RUNTIME_ENABLE_LEAK_CHECKER}")
-message(STATUS "")
+  message(STATUS "Building Swift standard library and overlays for SDKs: ${SWIFT_SDKS}")
+  message(STATUS "  Build type:       ${SWIFT_STDLIB_BUILD_TYPE}")
+  message(STATUS "  Assertions:       ${SWIFT_STDLIB_ASSERTIONS}")
+  message(STATUS "  +0 Normal Args:   ${SWIFT_ENABLE_GUARANTEED_NORMAL_ARGUMENTS}")
+  message(STATUS "")
+
+  message(STATUS "Building Swift runtime with:")
+  message(STATUS "  Leak Detection Checker Entrypoints: ${SWIFT_RUNTIME_ENABLE_LEAK_CHECKER}")
+  message(STATUS "  +0 Normal Args:                     ${SWIFT_ENABLE_GUARANTEED_NORMAL_ARGUMENTS}")
+  message(STATUS "")
+
+else()
+
+  message(STATUS "Not building Swift standard library, SDK overlays, and runtime")
+  message(STATUS "")
+
+endif()
 
 #
 # Find required dependencies.
 #
-if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND "${SWIFT_PATH_TO_LIBICU_BUILD}" STREQUAL "")
-  find_package(ICU REQUIRED COMPONENTS uc i18n)
+
+# ICU is provided through CoreFoundation on Darwin.  On other hosts, assume that
+# we are compiling for the build as the host.  In such a case, if the ICU
+# unicode and i18n include and library paths are not defined, perform a standard
+# package lookup.  Otherwise, rely on the paths specified by the user.  These
+# need to be defined when cross-compiling.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  if("${SWIFT_PATH_TO_LIBICU_BUILD}" STREQUAL "" AND
+     ("${SWIFT_${SWIFT_HOST_VARIANT_SDK_default}_ICU_UC_INCLUDE}" STREQUAL "" OR
+      "${SWIFT_${SWIFT_HOST_VARIANT_SDK_default}_ICU_UC}" STREQUAL "" OR
+      "${SWIFT_${SWIFT_HOST_VARIANT_SDK_default}_ICU_I18N_INCLUDE}" STREQUAL "" OR
+      "${SWIFT_${SWIFT_HOST_VARIANT_SDK_default}_ICU_I18N}" STREQUAL ""))
+    find_package(ICU REQUIRED COMPONENTS uc i18n)
+  endif()
 endif()
 
 find_package(PythonInterp REQUIRED)
@@ -851,22 +903,54 @@ if(NOT DEFINED SWIFT_API_NOTES_INPUTS)
 endif()
 
 # Add all of the subdirectories, where we actually do work.
+
+###############
+# PLEASE READ #
+###############
+#
+# We have to include stdlib/ before tools/.
+# Do not move add_subdirectory(stdlib) after add_subdirectory(tools)!                                             
+#
+# We must include stdlib/ before tools/ because stdlib/CMakeLists.txt
+# declares the swift-stdlib-* set of targets. These targets will then
+# implicitly depend on any targets declared with IS_STDLIB or
+# TARGET_LIBRARY.
+#
+# One such library that declares IS_STDLIB is SwiftSyntax, living in
+# tools/SwiftSyntax. If we include stdlib/ after tools/,
+# the swift-stdlib-* set of targets will not have been generated yet,
+# causing the implicit dependency for SwiftSyntax to silently not be
+# created. This then will cause SwiftSyntax to fail to build.
+#
+# https://bugs.swift.org/browse/SR-5975
+add_subdirectory(stdlib)
+
 if(SWIFT_INCLUDE_TOOLS)
   add_subdirectory(include)
   add_subdirectory(lib)
+  
+  # Always include this after including stdlib/!
+  # Refer to the large comment above the add_subdirectory(stdlib) call.
+  # https://bugs.swift.org/browse/SR-5975
   add_subdirectory(tools)
 endif()
 
 add_subdirectory(utils)
-add_subdirectory(stdlib)
 
 if(SWIFT_BUILD_DYNAMIC_STDLIB AND SWIFT_INCLUDE_TESTS)
   add_subdirectory(tools/swift-reflection-test)
 endif()
 
-if(SWIFT_BUILD_PERF_TESTSUITE AND "${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
-  add_subdirectory(benchmark)
+if ("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
+  if(SWIFT_BUILD_PERF_TESTSUITE)
+    add_subdirectory(benchmark)
+  endif()
+  if(SWIFT_BUILD_EXTERNAL_PERF_TESTSUITE)
+    include(SwiftExternalBenchmarkBuild)
+    add_external_benchmark_suite()
+  endif()
 endif()
+
 if(SWIFT_INCLUDE_TESTS)
   add_subdirectory(test)
   add_subdirectory(unittests)

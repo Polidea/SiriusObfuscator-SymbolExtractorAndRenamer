@@ -10,15 +10,15 @@
 #ifndef liblldb_ObjectFile_h_
 #define liblldb_ObjectFile_h_
 
-#include "lldb/Core/DataExtractor.h"
 #include "lldb/Core/FileSpecList.h"
 #include "lldb/Core/ModuleChild.h"
 #include "lldb/Core/PluginInterface.h"
-#include "lldb/Core/UUID.h"
-#include "lldb/Host/Endian.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Symbol/Symtab.h"
 #include "lldb/Symbol/UnwindTable.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Endian.h"
+#include "lldb/Utility/FileSpec.h"
+#include "lldb/Utility/UUID.h"
 #include "lldb/lldb-private.h"
 
 namespace lldb_private {
@@ -350,6 +350,12 @@ public:
   ///     The symbol table for this object file.
   //------------------------------------------------------------------
   virtual Symtab *GetSymtab() = 0;
+
+  //------------------------------------------------------------------
+  /// Perform relocations on the section if necessary.
+  ///
+  //------------------------------------------------------------------
+  virtual void RelocateSection(lldb_private::Section *section);
 
   //------------------------------------------------------------------
   /// Appends a Symbol for the specified so_addr to the symbol table.
@@ -787,20 +793,26 @@ public:
   static lldb::DataBufferSP ReadMemory(const lldb::ProcessSP &process_sp,
                                        lldb::addr_t addr, size_t byte_size);
 
+  // This function returns raw file contents. Do not use it if you want
+  // transparent decompression of section contents.
   size_t GetData(lldb::offset_t offset, size_t length,
                  DataExtractor &data) const;
 
+  // This function returns raw file contents. Do not use it if you want
+  // transparent decompression of section contents.
   size_t CopyData(lldb::offset_t offset, size_t length, void *dst) const;
 
-  virtual size_t ReadSectionData(const Section *section,
+  // This function will transparently decompress section data if the section if
+  // compressed.
+  virtual size_t ReadSectionData(Section *section,
                                  lldb::offset_t section_offset, void *dst,
-                                 size_t dst_len) const;
+                                 size_t dst_len);
 
-  virtual size_t ReadSectionData(const Section *section,
-                                 DataExtractor &section_data) const;
-
-  size_t MemoryMapSectionData(const Section *section,
-                              DataExtractor &section_data) const;
+  // This function will transparently decompress section data if the section if
+  // compressed. Note that for compressed section the resulting data size may be
+  // larger than what Section::GetFileSize reports.
+  virtual size_t ReadSectionData(Section *section,
+                                 DataExtractor &section_data);
 
   bool IsInMemory() const { return m_memory_addr != LLDB_INVALID_ADDRESS; }
 
@@ -813,6 +825,20 @@ public:
   static lldb::SymbolType GetSymbolTypeFromName(
       llvm::StringRef name,
       lldb::SymbolType symbol_type_hint = lldb::eSymbolTypeUndefined);
+
+  //------------------------------------------------------------------
+  /// Loads this objfile to memory.
+  ///
+  /// Loads the bits needed to create an executable image to the memory.
+  /// It is useful with bare-metal targets where target does not have the
+  /// ability to start a process itself.
+  ///
+  /// @param[in] target
+  ///     Target where to load.
+  ///
+  /// @return
+  //------------------------------------------------------------------
+  virtual Status LoadInMemory(Target &target, bool set_pc);
 
 protected:
   //------------------------------------------------------------------
@@ -852,6 +878,9 @@ protected:
   bool SetModulesArchitecture(const ArchSpec &new_arch);
 
   ConstString GetNextSyntheticSymbolName();
+
+  static lldb::DataBufferSP MapFileData(const FileSpec &file, uint64_t Size,
+                                        uint64_t Offset);
 
 private:
   DISALLOW_COPY_AND_ASSIGN(ObjectFile);

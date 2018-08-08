@@ -26,10 +26,25 @@
 #include <endian.h>
 #define OSLittleEndian __LITTLE_ENDIAN
 #define OSBigEndian __BIG_ENDIAN
+#elif defined(__FreeBSD__)
+#include <sys/endian.h>
+#define OSLittleEndian _LITTLE_ENDIAN
+#define OSBigEndian _BIG_ENDIAN
+#elif defined(_WIN32)
+#define OSLittleEndian 1234
+#define OSBigEndian 4321
+#endif
+
+#if defined(__linux__) || defined(__FreeBSD__)
 #define OSSwapLittleToHostInt16 le16toh
 #define OSSwapBigToHostInt16 be16toh
 #define OSSwapHostToLittleInt16 htole16
 #define OSSwapHostToBigInt16 htobe16
+#elif defined(_WIN32)
+#define OSSwapLittleToHostInt16
+#define OSSwapBigToHostInt16 ntohs
+#define OSSwapHostToLittleInt16
+#define OSSwapHostToBigInt16 htons
 #endif
 
 #if defined(__LITTLE_ENDIAN__)

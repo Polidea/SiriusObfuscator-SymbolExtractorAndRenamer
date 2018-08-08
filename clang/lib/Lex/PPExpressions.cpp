@@ -160,6 +160,51 @@ static bool EvaluateDefined(PPValue &Result, Token &PeekTok, DefinedTracker &DT,
     PP.LexNonComment(PeekTok);
   }
 
+  // [cpp.cond]p4:
+  //   Prior to evaluation, macro invocations in the list of preprocessing
+  //   tokens that will become the controlling constant expression are replaced
+  //   (except for those macro names modified by the 'defined' unary operator),
+  //   just as in normal text. If the token 'defined' is generated as a result
+  //   of this replacement process or use of the 'defined' unary operator does
+  //   not match one of the two specified forms prior to macro replacement, the
+  //   behavior is undefined.
+  // This isn't an idle threat, consider this program:
+  //   #define FOO
+  //   #define BAR defined(FOO)
+  //   #if BAR
+  //   ...
+  //   #else
+  //   ...
+  //   #endif
+  // clang and gcc will pick the #if branch while Visual Studio will take the
+  // #else branch.  Emit a warning about this undefined behavior.
+  if (beginLoc.isMacroID()) {
+    bool IsFunctionTypeMacro =
+        PP.getSourceManager()
+            .getSLocEntry(PP.getSourceManager().getFileID(beginLoc))
+            .getExpansion()
+            .isFunctionMacroExpansion();
+    // For object-type macros, it's easy to replace
+    //   #define FOO defined(BAR)
+    // with
+    //   #if defined(BAR)
+    //   #define FOO 1
+    //   #else
+    //   #define FOO 0
+    //   #endif
+    // and doing so makes sense since compilers handle this differently in
+    // practice (see example further up).  But for function-type macros,
+    // there is no good way to write
+    //   # define FOO(x) (defined(M_ ## x) && M_ ## x)
+    // in a different way, and compilers seem to agree on how to behave here.
+    // So warn by default on object-type macros, but only warn in -pedantic
+    // mode on function-type macros.
+    if (IsFunctionTypeMacro)
+      PP.Diag(beginLoc, diag::warn_defined_in_function_type_macro);
+    else
+      PP.Diag(beginLoc, diag::warn_defined_in_object_type_macro);
+  }
+
   // Invoke the 'defined' callback.
   if (PPCallbacks *Callbacks = PP.getPPCallbacks()) {
     Callbacks->Defined(macroToken, Macro,
@@ -192,35 +237,32 @@ static bool EvaluateValue(PPValue &Result, Token &PeekTok, DefinedTracker &DT,
     PP.setCodeCompletionReached();
     PP.LexNonComment(PeekTok);
   }
-      
-  // If this token's spelling is a pp-identifier, check to see if it is
-  // 'defined' or if it is a macro.  Note that we check here because many
-  // keywords are pp-identifiers, so we can't check the kind.
-  if (IdentifierInfo *II = PeekTok.getIdentifierInfo()) {
-    // Handle "defined X" and "defined(X)".
-    if (II->isStr("defined"))
-      return(EvaluateDefined(Result, PeekTok, DT, ValueLive, PP));
-    
-    // If this identifier isn't 'defined' or one of the special
-    // preprocessor keywords and it wasn't macro expanded, it turns
-    // into a simple 0, unless it is the C++ keyword "true", in which case it
-    // turns into "1".
-    if (ValueLive &&
-        II->getTokenID() != tok::kw_true &&
-        II->getTokenID() != tok::kw_false)
-      PP.Diag(PeekTok, diag::warn_pp_undef_identifier) << II;
-    Result.Val = II->getTokenID() == tok::kw_true;
-    Result.Val.setIsUnsigned(false);  // "0" is signed intmax_t 0.
-    Result.setIdentifier(II);
-    Result.setRange(PeekTok.getLocation());
-    DT.IncludedUndefinedIds = (II->getTokenID() != tok::kw_true &&
-                               II->getTokenID() != tok::kw_false);
-    PP.LexNonComment(PeekTok);
-    return false;
-  }
 
   switch (PeekTok.getKind()) {
-  default:  // Non-value token.
+  default:
+    // If this token's spelling is a pp-identifier, check to see if it is
+    // 'defined' or if it is a macro.  Note that we check here because many
+    // keywords are pp-identifiers, so we can't check the kind.
+    if (IdentifierInfo *II = PeekTok.getIdentifierInfo()) {
+      // Handle "defined X" and "defined(X)".
+      if (II->isStr("defined"))
+        return EvaluateDefined(Result, PeekTok, DT, ValueLive, PP);
+
+      if (!II->isCPlusPlusOperatorKeyword()) {
+        // If this identifier isn't 'defined' or one of the special
+        // preprocessor keywords and it wasn't macro expanded, it turns
+        // into a simple 0
+        if (ValueLive)
+          PP.Diag(PeekTok, diag::warn_pp_undef_identifier) << II;
+        Result.Val = 0;
+        Result.Val.setIsUnsigned(false); // "0" is signed intmax_t 0.
+        Result.setIdentifier(II);
+        Result.setRange(PeekTok.getLocation());
+        DT.IncludedUndefinedIds = true;
+        PP.LexNonComment(PeekTok);
+        return false;
+      }
+    }
     PP.Diag(PeekTok, diag::err_pp_expr_bad_token_start_expr);
     return true;
   case tok::eod:
@@ -436,6 +478,14 @@ static bool EvaluateValue(PPValue &Result, Token &PeekTok, DefinedTracker &DT,
       DT.State = DefinedTracker::DefinedMacro;
     return false;
   }
+  case tok::kw_true:
+  case tok::kw_false:
+    Result.Val = PeekTok.getKind() == tok::kw_true;
+    Result.Val.setIsUnsigned(false); // "0" is signed intmax_t 0.
+    Result.setIdentifier(PeekTok.getIdentifierInfo());
+    Result.setRange(PeekTok.getLocation());
+    PP.LexNonComment(PeekTok);
+    return false;
 
   // FIXME: Handle #assert
   }

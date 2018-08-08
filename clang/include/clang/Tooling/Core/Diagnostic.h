@@ -33,7 +33,7 @@ struct DiagnosticMessage {
   DiagnosticMessage(llvm::StringRef Message = "");
 
   /// \brief Constructs a diagnostic message with anoffset to the diagnostic
-  /// within the file where the problem occured.
+  /// within the file where the problem occurred.
   ///
   /// \param Loc Should be a file location, it is not meaningful for a macro
   /// location.
@@ -58,9 +58,9 @@ struct Diagnostic {
   Diagnostic(llvm::StringRef DiagnosticName, Level DiagLevel,
              StringRef BuildDirectory);
 
-  Diagnostic(llvm::StringRef DiagnosticName, DiagnosticMessage &Message,
-             llvm::StringMap<Replacements> &Fix,
-             SmallVector<DiagnosticMessage, 1> &Notes, Level DiagLevel,
+  Diagnostic(llvm::StringRef DiagnosticName, const DiagnosticMessage &Message,
+             const llvm::StringMap<Replacements> &Fix,
+             const SmallVector<DiagnosticMessage, 1> &Notes, Level DiagLevel,
              llvm::StringRef BuildDirectory);
 
   /// \brief Name identifying the Diagnostic.

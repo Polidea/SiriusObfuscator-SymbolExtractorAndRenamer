@@ -6,12 +6,10 @@
 
 define void @cmp_2_floats(<2 x float> %a, <2 x float> %b) {
 ; CHECK-LABEL: cmp_2_floats:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movaps %xmm0, %xmm2
 ; CHECK-NEXT:    cmpordps %xmm0, %xmm0
-; CHECK-NEXT:    insertps {{.*#+}} xmm0 = xmm0[0,1],zero,xmm0[1]
-; CHECK-NEXT:    pslld $31, %xmm0
-; CHECK-NEXT:    blendvps %xmm2, %xmm1
+; CHECK-NEXT:    blendvps %xmm0, %xmm2, %xmm1
 ; CHECK-NEXT:    movlps %xmm1, (%rax)
 ; CHECK-NEXT:    retq
 entry:
@@ -23,10 +21,10 @@ entry:
 
 define void @cmp_2_doubles(<2 x double> %a, <2 x double> %b) {
 ; CHECK-LABEL: cmp_2_doubles:
-; CHECK:       # BB#0: # %entry
+; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    movapd %xmm0, %xmm2
 ; CHECK-NEXT:    cmpordpd %xmm0, %xmm0
-; CHECK-NEXT:    blendvpd %xmm2, %xmm1
+; CHECK-NEXT:    blendvpd %xmm0, %xmm2, %xmm1
 ; CHECK-NEXT:    movapd %xmm1, (%rax)
 ; CHECK-NEXT:    retq
 entry:
@@ -38,7 +36,7 @@ entry:
 
 define void @mp_11193(<8 x float> * nocapture %aFOO, <8 x float>* nocapture %RET) nounwind {
 ; CHECK-LABEL: mp_11193:
-; CHECK:       # BB#0: # %allocas
+; CHECK:       # %bb.0: # %allocas
 ; CHECK-NEXT:    movl $-1082130432, (%rsi) # imm = 0xBF800000
 ; CHECK-NEXT:    retq
 allocas:

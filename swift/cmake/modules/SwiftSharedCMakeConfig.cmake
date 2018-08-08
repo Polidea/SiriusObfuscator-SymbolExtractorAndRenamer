@@ -68,9 +68,9 @@ macro(swift_common_standalone_build_config_llvm product is_cross_compiling)
     set(${product}_NATIVE_LLVM_TOOLS_PATH "${LLVM_TOOLS_BINARY_DIR}")
   endif()
 
-  find_program(SWIFT_TABLEGEN_EXE "llvm-tblgen" "${${product}_NATIVE_LLVM_TOOLS_PATH}"
+  find_program(LLVM_TABLEGEN_EXE "llvm-tblgen" "${${product}_NATIVE_LLVM_TOOLS_PATH}"
     NO_DEFAULT_PATH)
-  if ("${SWIFT_TABLEGEN_EXE}" STREQUAL "SWIFT_TABLEGEN_EXE-NOTFOUND")
+  if ("${LLVM_TABLEGEN_EXE}" STREQUAL "LLVM_TABLEGEN_EXE-NOTFOUND")
     message(FATAL_ERROR "Failed to find tablegen in ${${product}_NATIVE_LLVM_TOOLS_PATH}")
   endif()
 
@@ -78,9 +78,17 @@ macro(swift_common_standalone_build_config_llvm product is_cross_compiling)
   include(AddSwiftTableGen) # This imports TableGen from LLVM.
   include(HandleLLVMOptions)
 
-  # HACK: this ugly tweaking is to prevent the propagation of the flag from LLVM
-  # into swift.  The use of this flag pollutes all targets, and we are not able
-  # to remove it on a per-target basis which breaks cross-compilation.
+  # HACK: Not all targets support -z,defs as a linker flag. 
+  #
+  # Normally, LLVM would only add it as an option for known ELF targets;
+  # however, due to the custom scheme Swift uses for cross-compilation, the 
+  # CMAKE_SHARED_LINKER_FLAGS are determined based on the host system and 
+  # then applied to all targets. This causes issues in cross-compiling to
+  # Windows from a Linux host.
+  # 
+  # To work around this, we unconditionally remove the flag here and then 
+  # selectively add it to the per-target link flags; this is currently done
+  # in add_swift_library within AddSwift.cmake.
   string(REGEX REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
 
   set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
@@ -201,6 +209,9 @@ macro(swift_common_standalone_build_config product is_cross_compiling)
   swift_common_standalone_build_config_llvm(${product} ${is_cross_compiling})
   swift_common_standalone_build_config_clang(${product} ${is_cross_compiling})
   swift_common_standalone_build_config_cmark(${product})
+
+  # Enable groups for IDE generators (Xcode and MSVC).
+  set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 endmacro()
 
 # Common cmake project config for unified builds.
@@ -219,7 +230,6 @@ macro(swift_common_unified_build_config product)
   set(${product}_NATIVE_LLVM_TOOLS_PATH "${CMAKE_BINARY_DIR}/bin")
   set(${product}_NATIVE_CLANG_TOOLS_PATH "${CMAKE_BINARY_DIR}/bin")
   set(LLVM_PACKAGE_VERSION ${PACKAGE_VERSION})
-  set(SWIFT_TABLEGEN_EXE llvm-tblgen)
   set(LLVM_CMAKE_DIR "${CMAKE_SOURCE_DIR}/cmake/modules")
 
   # If cmark was checked out into tools/cmark, expect to build it as
@@ -257,6 +267,11 @@ endmacro()
 # Common cmake project config for additional warnings.
 #
 macro(swift_common_cxx_warnings)
+  # Make unhandled switch cases be an error in assert builds
+  if(DEFINED LLVM_ENABLE_ASSERTIONS)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror=switch")
+  endif()
+
   check_cxx_compiler_flag("-Werror -Wdocumentation" CXX_SUPPORTS_DOCUMENTATION_FLAG)
   append_if(CXX_SUPPORTS_DOCUMENTATION_FLAG "-Wdocumentation" CMAKE_CXX_FLAGS)
 
@@ -305,7 +320,7 @@ function(swift_common_llvm_config target)
     else()
       # HACK: Otherwise (for example, for executables), use a plain signature,
       # because LLVM CMake does that already.
-      target_link_libraries("${target}" ${libnames})
+      target_link_libraries("${target}" PRIVATE ${libnames})
     endif()
   else()
     # If Swift was not built standalone, dispatch to 'llvm_config()'.

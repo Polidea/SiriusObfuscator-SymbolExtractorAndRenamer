@@ -103,7 +103,7 @@ insertDeallocStackAtEndOf(SmallVectorImpl<SILInstruction *> &FunctionExits,
                           AllocStackInst *AllocStack) {
   // Insert dealloc_stack in the exit blocks.
   for (auto *Exit : FunctionExits) {
-    SILBuilder Builder(Exit);
+    SILBuilderWithScope Builder(Exit);
     Builder.createDeallocStack(AllocStack->getLoc(), AllocStack);
   }
 }
@@ -111,8 +111,7 @@ insertDeallocStackAtEndOf(SmallVectorImpl<SILInstruction *> &FunctionExits,
 /// Hack to workaround a clang LTO bug.
 LLVM_ATTRIBUTE_NOINLINE
 void moveAllocStackToBeginningOfBlock(AllocStackInst* AS, SILBasicBlock *BB) {
-  AS->removeFromParent();
-  BB->push_front(AS);
+  AS->moveFront(BB);
 }
 
 /// Assign a single alloc_stack instruction to all the alloc_stacks in the
@@ -145,19 +144,7 @@ void Partition::assignStackLocation(
 
 /// Returns a single dealloc_stack user of the alloc_stack or nullptr otherwise.
 static SILInstruction *getSingleDeallocStack(AllocStackInst *ASI) {
-  SILInstruction *Dealloc = nullptr;
-  for (auto *U : ASI->getUses()) {
-    auto *Inst = U->getUser();
-    if (isa<DeallocStackInst>(Inst)) {
-      if (Dealloc == nullptr) {
-        Dealloc = Inst;
-        continue;
-      }
-      // Already saw a dealloc_stack.
-      return nullptr;
-    }
-  }
-  return Dealloc;
+  return ASI->getSingleDeallocStack();
 }
 
 namespace {
@@ -361,7 +348,13 @@ void HoistAllocStack::collectHoistableInstructions() {
           FunctionExits.push_back(Term);
         continue;
       }
-
+      // Don't perform alloc_stack hoisting in functions with availability.
+      if (auto *Apply = dyn_cast<ApplyInst>(&Inst)) {
+        if (Apply->hasSemantics("availability.osversion")) {
+          AllocStackToHoist.clear();
+          return;
+        }
+      }
       auto *ASI = dyn_cast<AllocStackInst>(&Inst);
       if (!ASI) {
         continue;
@@ -388,8 +381,7 @@ void HoistAllocStack::hoist() {
     auto *EntryBB = F->getEntryBlock();
     for (auto *AllocStack : AllocStackToHoist) {
       // Insert at the beginning of the entry block.
-      AllocStack->removeFromParent();
-      EntryBB->push_front(AllocStack);
+      AllocStack->moveFront(EntryBB);
       // Delete dealloc_stacks.
       eraseDeallocStacks(AllocStack);
     }

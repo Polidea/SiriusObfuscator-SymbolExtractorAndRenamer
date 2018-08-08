@@ -21,17 +21,20 @@ using namespace sema;
 
 DelayedDiagnostic
 DelayedDiagnostic::makeAvailability(AvailabilityResult AR,
-                                    SourceLocation Loc,
-                                    const NamedDecl *D,
+                                    ArrayRef<SourceLocation> Locs,
+                                    const NamedDecl *ReferringDecl,
+                                    const NamedDecl *OffendingDecl,
                                     const ObjCInterfaceDecl *UnknownObjCClass,
                                     const ObjCPropertyDecl  *ObjCProperty,
                                     StringRef Msg,
                                     bool ObjCPropertyAccess) {
+  assert(!Locs.empty());
   DelayedDiagnostic DD;
   DD.Kind = Availability;
   DD.Triggered = false;
-  DD.Loc = Loc;
-  DD.AvailabilityData.Decl = D;
+  DD.Loc = Locs.front();
+  DD.AvailabilityData.ReferringDecl = ReferringDecl;
+  DD.AvailabilityData.OffendingDecl = OffendingDecl;
   DD.AvailabilityData.UnknownObjCClass = UnknownObjCClass;
   DD.AvailabilityData.ObjCProperty = ObjCProperty;
   char *MessageData = nullptr;
@@ -39,9 +42,14 @@ DelayedDiagnostic::makeAvailability(AvailabilityResult AR,
     MessageData = new char [Msg.size()];
     memcpy(MessageData, Msg.data(), Msg.size());
   }
-
   DD.AvailabilityData.Message = MessageData;
   DD.AvailabilityData.MessageLen = Msg.size();
+
+  DD.AvailabilityData.SelectorLocs = new SourceLocation[Locs.size()];
+  memcpy(DD.AvailabilityData.SelectorLocs, Locs.data(),
+         sizeof(SourceLocation) * Locs.size());
+  DD.AvailabilityData.NumSelectorLocs = Locs.size();
+
   DD.AvailabilityData.AR = AR;
   DD.AvailabilityData.ObjCPropertyAccess = ObjCPropertyAccess;
   return DD;
@@ -55,6 +63,7 @@ void DelayedDiagnostic::Destroy() {
 
   case Availability:
     delete[] AvailabilityData.Message;
+    delete[] AvailabilityData.SelectorLocs;
     break;
 
   case ForbiddenType:

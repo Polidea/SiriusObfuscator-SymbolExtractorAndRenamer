@@ -20,6 +20,7 @@
 #include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/ModuleSummaryIndex.h"
+#include "llvm/Support/CachePruning.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Target/TargetOptions.h"
@@ -140,27 +141,29 @@ public:
 
   struct CachingOptions {
     std::string Path;                    // Path to the cache, empty to disable.
-    int PruningInterval = 1200;          // seconds, -1 to disable pruning.
-    unsigned int Expiration = 7 * 24 * 3600;     // seconds (1w default).
-    unsigned MaxPercentageOfAvailableSpace = 75; // percentage.
+    CachePruningPolicy Policy;
   };
 
   /// Provide a path to a directory where to store the cached files for
   /// incremental build.
   void setCacheDir(std::string Path) { CacheOptions.Path = std::move(Path); }
 
-  /// Cache policy: interval (seconds) between two prune of the cache. Set to a
-  /// negative value (default) to disable pruning. A value of 0 will be ignored.
+  /// Cache policy: interval (seconds) between two prunes of the cache. Set to a
+  /// negative value to disable pruning. A value of 0 will be ignored.
   void setCachePruningInterval(int Interval) {
-    if (Interval)
-      CacheOptions.PruningInterval = Interval;
+    if (Interval == 0)
+      return;
+    if(Interval < 0)
+      CacheOptions.Policy.Interval.reset();
+    else
+      CacheOptions.Policy.Interval = std::chrono::seconds(Interval);
   }
 
   /// Cache policy: expiration (in seconds) for an entry.
   /// A value of 0 will be ignored.
   void setCacheEntryExpiration(unsigned Expiration) {
     if (Expiration)
-      CacheOptions.Expiration = Expiration;
+      CacheOptions.Policy.Expiration = std::chrono::seconds(Expiration);
   }
 
   /**
@@ -178,7 +181,7 @@ public:
    */
   void setMaxCacheSizeRelativeToAvailableSpace(unsigned Percentage) {
     if (Percentage)
-      CacheOptions.MaxPercentageOfAvailableSpace = Percentage;
+      CacheOptions.Policy.MaxSizePercentageOfAvailableSpace = Percentage;
   }
 
   /**@}*/

@@ -15,6 +15,11 @@
 //         http://en.wikipedia.org/wiki/SHA-1
 import TestsUtils
 
+public let HashTest = BenchmarkInfo(
+  name: "HashTest",
+  runFunction: run_HashTest,
+  tags: [.validation, .algorithm])
+
 class Hash {
   /// \brief C'tor.
   init(_ bs: Int) {
@@ -109,8 +114,8 @@ class Hash {
   final
   func rol(_ x: UInt32, _ c: UInt32) -> UInt32 {
     // TODO: use the &>> operator.
-    let a = UInt32(truncatingBitPattern: Int64(x) << Int64(c))
-    let b = UInt32(truncatingBitPattern: Int64(x) >> (32 - Int64(c)))
+    let a = UInt32(truncatingIfNeeded: Int64(x) << Int64(c))
+    let b = UInt32(truncatingIfNeeded: Int64(x) >> (32 - Int64(c)))
     return a|b
   }
 
@@ -118,8 +123,8 @@ class Hash {
   final
   func ror(_ x: UInt32, _ c: UInt32) -> UInt32 {
     // TODO: use the &>> operator.
-    let a = UInt32(truncatingBitPattern: Int64(x) >> Int64(c))
-    let b = UInt32(truncatingBitPattern: Int64(x) << (32 - Int64(c)))
+    let a = UInt32(truncatingIfNeeded: Int64(x) >> Int64(c))
+    let b = UInt32(truncatingIfNeeded: Int64(x) << (32 - Int64(c)))
     return a|b
   }
 }
@@ -172,10 +177,10 @@ class MD5 : Hash {
   }
 
   func appendBytes(_ Val: Int, _ Message: inout Array<UInt8>, _ Offset : Int) {
-    Message[Offset] = UInt8(truncatingBitPattern: Val)
-    Message[Offset + 1] = UInt8(truncatingBitPattern: Val >> 8)
-    Message[Offset + 2] = UInt8(truncatingBitPattern: Val >> 16)
-    Message[Offset + 3] = UInt8(truncatingBitPattern: Val >> 24)
+    Message[Offset] = UInt8(truncatingIfNeeded: Val)
+    Message[Offset + 1] = UInt8(truncatingIfNeeded: Val >> 8)
+    Message[Offset + 2] = UInt8(truncatingIfNeeded: Val >> 16)
+    Message[Offset + 3] = UInt8(truncatingIfNeeded: Val >> 24)
   }
 
   override

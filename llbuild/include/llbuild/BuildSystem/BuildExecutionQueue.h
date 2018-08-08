@@ -27,6 +27,7 @@ namespace buildsystem {
 class BuildExecutionQueueDelegate;
 class Command;
 enum class CommandResult;
+struct CommandExtendedResult;
 
 /// Opaque type which allows the queue implementation to maintain additional
 /// state and associate subsequent requests (e.g., \see executeProcess()) with
@@ -114,6 +115,11 @@ public:
   /// overlayed on top base environment supplied when creating the queue. If
   /// false, only the supplied environment will be passed to the subprocess.
   ///
+  /// \param canSafelyInterrupt If true, whether it is safe to attempt to SIGINT
+  /// the process to cancel it. If false, the process won't be interrupted
+  /// during cancellation and will be given a chance to complete (if it fails to
+  /// complete it will ultimately be sent a SIGKILL).
+  ///
   /// \returns Result of the process execution.
   //
   // FIXME: This interface will need to get more complicated, and provide the
@@ -122,7 +128,8 @@ public:
   executeProcess(QueueJobContext* context,
                  ArrayRef<StringRef> commandLine,
                  ArrayRef<std::pair<StringRef, StringRef>> environment,
-                 bool inheritEnvironment = true) = 0;
+                 bool inheritEnvironment = true,
+                 bool canSafelyInterrupt = true) = 0;
 
   /// @}
 
@@ -230,14 +237,11 @@ public:
   /// become invalid as soon as the client returns from this API call.
   ///
   /// \param result - Whether the process suceeded, failed or was cancelled.
-  /// \param exitStatus - The raw exit status of the process, or -1 if an error
-  /// was encountered.
   //
   // FIXME: Need to include additional information on the status here, e.g., the
   // signal status, and the process output (if buffering).
   virtual void commandProcessFinished(Command*, ProcessHandle handle,
-                                      CommandResult result,
-                                      int exitStatus) = 0;
+                                      const CommandExtendedResult& result) = 0;
 };
 
 /// Create an execution queue that schedules jobs to individual lanes with a

@@ -29,6 +29,10 @@ namespace swift {
 
 class FunctionSignaturePartialSpecializer;
 
+namespace OptRemark {
+class Emitter;
+} // namespace OptRemark
+
 /// Tries to specialize an \p Apply of a generic function. It can be a full
 /// apply site or a partial apply.
 /// Replaced and now dead instructions are returned in \p DeadApplies.
@@ -38,7 +42,8 @@ class FunctionSignaturePartialSpecializer;
 /// This is the top-level entry point for specializing an existing call site.
 void trySpecializeApplyOfGeneric(
     ApplySite Apply, DeadInstructionSet &DeadApplies,
-    llvm::SmallVectorImpl<SILFunction *> &NewFunctions);
+    llvm::SmallVectorImpl<SILFunction *> &NewFunctions,
+    OptRemark::Emitter &ORE);
 
 /// Helper class to describe re-abstraction of function parameters done during
 /// specialization.
@@ -117,7 +122,8 @@ class ReabstractionInfo {
 
   void createSubstitutedAndSpecializedTypes();
   bool prepareAndCheck(ApplySite Apply, SILFunction *Callee,
-                       SubstitutionList ParamSubs);
+                       SubstitutionList ParamSubs,
+                       OptRemark::Emitter *ORE = nullptr);
   void performFullSpecializationPreparation(SILFunction *Callee,
                                             SubstitutionList ParamSubs);
   void performPartialSpecializationPreparation(SILFunction *Caller,
@@ -134,7 +140,8 @@ public:
   /// invalid type.
   ReabstractionInfo(ApplySite Apply, SILFunction *Callee,
                     SubstitutionList ParamSubs,
-                    bool ConvertIndirectToDirect = true);
+                    bool ConvertIndirectToDirect = true,
+                    OptRemark::Emitter *ORE = nullptr);
 
   /// Constructs the ReabstractionInfo for generic function \p Callee with
   /// additional requirements. Requirements may contain new layout,
@@ -242,6 +249,11 @@ public:
   static bool canBeSpecialized(ApplySite Apply, SILFunction *Callee,
                                SubstitutionList ParamSubs);
 
+  /// Returns the apply site for the current generic specialization.
+  ApplySite getApply() const {
+    return Apply;
+  }
+
   void verify() const;
 };
 
@@ -291,9 +303,9 @@ public:
 // Prespecialized symbol lookup.
 // =============================================================================
 
-/// Checks if a given mangled name could be a name of a whitelisted
-/// specialization.
-bool isWhitelistedSpecialization(StringRef SpecName);
+/// Checks if a given mangled name could be a name of a known
+/// prespecialization for -Onone support.
+bool isKnownPrespecialization(StringRef SpecName);
 
 /// Create a new apply based on an old one, but with a different
 /// function being applied.

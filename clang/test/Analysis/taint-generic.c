@@ -1,10 +1,16 @@
 // RUN: %clang_analyze_cc1  -analyzer-checker=alpha.security.taint,core,alpha.security.ArrayBoundV2 -Wno-format-security -verify %s
+// RUN: %clang_analyze_cc1  -DFILE_IS_STRUCT -analyzer-checker=alpha.security.taint,core,alpha.security.ArrayBoundV2 -Wno-format-security -verify %s
 
 int scanf(const char *restrict format, ...);
 int getchar(void);
 
 typedef struct _FILE FILE;
+#ifdef FILE_IS_STRUCT
+extern struct _FILE *stdin;
+#else
 extern FILE *stdin;
+#endif
+
 int fscanf(FILE *restrict stream, const char *restrict format, ...);
 int sprintf(char *str, const char *format, ...);
 void setproctitle(const char *fmt, ...);
@@ -192,20 +198,41 @@ void testStruct() {
 
 void testStructArray() {
   struct {
-    char buf[16];
-    struct {
-      int length;
-    } st[1];
-  } tainted;
+    int length;
+  } tainted[4];
 
-  char buffer[16];
+  char dstbuf[16], srcbuf[16];
   int sock;
 
   sock = socket(AF_INET, SOCK_STREAM, 0);
-  read(sock, &tainted.buf[0], sizeof(tainted.buf));
-  read(sock, &tainted.st[0], sizeof(tainted.st));
-  // FIXME: tainted.st[0].length should be marked tainted
-  __builtin_memcpy(buffer, tainted.buf, tainted.st[0].length); // no-warning
+  __builtin_memset(srcbuf, 0, sizeof(srcbuf));
+
+  read(sock, &tainted[0], sizeof(tainted));
+  __builtin_memcpy(dstbuf, srcbuf, tainted[0].length); // expected-warning {{Untrusted data is used to specify the buffer size}}
+
+  __builtin_memset(&tainted, 0, sizeof(tainted));
+  read(sock, &tainted, sizeof(tainted));
+  __builtin_memcpy(dstbuf, srcbuf, tainted[0].length); // expected-warning {{Untrusted data is used to specify the buffer size}}
+
+  __builtin_memset(&tainted, 0, sizeof(tainted));
+  // If we taint element 1, we should not raise an alert on taint for element 0 or element 2
+  read(sock, &tainted[1], sizeof(tainted));
+  __builtin_memcpy(dstbuf, srcbuf, tainted[0].length); // no-warning
+  __builtin_memcpy(dstbuf, srcbuf, tainted[2].length); // no-warning
+}
+
+void testUnion() {
+  union {
+    int x;
+    char y[4];
+  } tainted;
+
+  char buffer[4];
+
+  int sock = socket(AF_INET, SOCK_STREAM, 0);
+  read(sock, &tainted.y, sizeof(tainted.y));
+  // FIXME: overlapping regions aren't detected by isTainted yet
+  __builtin_memcpy(buffer, tainted.y, tainted.x);
 }
 
 int testDivByZero() {

@@ -14,16 +14,12 @@
 
 import Dispatch
 
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import Glibc
-    import XCTest
-#else
-    import CoreFoundation
-    import SwiftFoundation
+#if canImport(Darwin)
     import Darwin
-    import SwiftXCTest
+#elseif canImport(Glibc)
+    import Glibc
 #endif
+
 
 public let globalDispatchQueue = DispatchQueue.global()
 public let dispatchQueueMake: (String) -> DispatchQueue = { DispatchQueue.init(label: $0) }
@@ -37,8 +33,15 @@ struct _HTTPUtils {
     static let EMPTY = ""
 }
 
+extension UInt16 {
+    public init(networkByteOrder input: UInt16) {
+        self.init(bigEndian: input)
+    }
+}
+
 class _TCPSocket {
-  
+
+    private let sendFlags: CInt
     private var listenSocket: Int32!
     private var socketAddress = UnsafeMutablePointer<sockaddr_in>.allocate(capacity: 1) 
     private var connectionSocket: Int32!
@@ -53,56 +56,85 @@ class _TCPSocket {
 
     private func attempt(_ name: String, file: String = #file, line: UInt = #line, valid: (CInt) -> Bool,  _ b: @autoclosure () -> CInt) throws -> CInt {
         let r = b()
-        guard valid(r) else { throw ServerError(operation: name, errno: r, file: file, line: line) }
+        guard valid(r) else {
+            throw ServerError(operation: name, errno: errno, file: file, line: line)
+        }
         return r
     }
 
-    init(port: UInt16) throws {
-        #if os(Linux)
+    public private(set) var port: UInt16
+
+    init(port: UInt16?) throws {
+#if canImport(Darwin)
+        sendFlags = 0
+#else
+        sendFlags = CInt(MSG_NOSIGNAL)
+#endif
+
+#if os(Linux) && !os(Android)
             let SOCKSTREAM = Int32(SOCK_STREAM.rawValue)
-        #else
+#else
             let SOCKSTREAM = SOCK_STREAM
-        #endif
+#endif
+        self.port = port ?? 0
         listenSocket = try attempt("socket", valid: isNotNegative, socket(AF_INET, SOCKSTREAM, Int32(IPPROTO_TCP)))
-        var on: Int = 1
-        _ = try attempt("setsockopt", valid: isZero, setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<Int>.size)))
+        var on: CInt = 1
+        _ = try attempt("setsockopt", valid: isZero, setsockopt(listenSocket, SOL_SOCKET, SO_REUSEADDR, &on, socklen_t(MemoryLayout<CInt>.size)))
+
         let sa = createSockaddr(port)
         socketAddress.initialize(to: sa)
         try socketAddress.withMemoryRebound(to: sockaddr.self, capacity: MemoryLayout<sockaddr>.size, { 
             let addr = UnsafePointer<sockaddr>($0)
             _ = try attempt("bind", valid: isZero, bind(listenSocket, addr, socklen_t(MemoryLayout<sockaddr>.size)))
+            _ = try attempt("listen", valid: isZero, listen(listenSocket, SOMAXCONN))
         })
+
+        var actualSA = sockaddr_in()
+        withUnsafeMutablePointer(to: &actualSA) { ptr in
+            ptr.withMemoryRebound(to: sockaddr.self, capacity: 1) { (ptr: UnsafeMutablePointer<sockaddr>) in
+                var len = socklen_t(MemoryLayout<sockaddr>.size)
+                getsockname(listenSocket, ptr, &len)
+            }
+        }
+
+        self.port = UInt16(networkByteOrder: actualSA.sin_port)
     }
 
-    private func createSockaddr(_ port: UInt16) -> sockaddr_in {
+    private func createSockaddr(_ port: UInt16?) -> sockaddr_in {
         // Listen on the loopback address so that OSX doesnt pop up a dialog
         // asking to accept incoming connections if the firewall is enabled.
         let addr = UInt32(INADDR_LOOPBACK).bigEndian
-        #if os(Linux)
-            return sockaddr_in(sin_family: sa_family_t(AF_INET), sin_port: htons(port), sin_addr: in_addr(s_addr: addr), sin_zero: (0,0,0,0,0,0,0,0))
+        let netPort = UInt16(bigEndian: port ?? 0)
+        #if os(Android)
+            return sockaddr_in(sin_family: sa_family_t(AF_INET), sin_port: netPort, sin_addr: in_addr(s_addr: addr), __pad: (0,0,0,0,0,0,0,0))
+        #elseif os(Linux)
+            return sockaddr_in(sin_family: sa_family_t(AF_INET), sin_port: netPort, sin_addr: in_addr(s_addr: addr), sin_zero: (0,0,0,0,0,0,0,0))
         #else
-            return sockaddr_in(sin_len: 0, sin_family: sa_family_t(AF_INET), sin_port: CFSwapInt16HostToBig(port), sin_addr: in_addr(s_addr: addr), sin_zero: (0,0,0,0,0,0,0,0))
+            return sockaddr_in(sin_len: 0, sin_family: sa_family_t(AF_INET), sin_port: netPort, sin_addr: in_addr(s_addr: addr), sin_zero: (0,0,0,0,0,0,0,0))
         #endif
     }
 
     func acceptConnection(notify: ServerSemaphore) throws {
-        _ = try attempt("listen", valid: isZero, listen(listenSocket, SOMAXCONN))
         try socketAddress.withMemoryRebound(to: sockaddr.self, capacity: MemoryLayout<sockaddr>.size, {
             let addr = UnsafeMutablePointer<sockaddr>($0)
             var sockLen = socklen_t(MemoryLayout<sockaddr>.size) 
-            notify.signal()
             connectionSocket = try attempt("accept", valid: isNotNegative, accept(listenSocket, addr, &sockLen))
+#if canImport(Dawin)
+            // Disable SIGPIPEs when writing to closed sockets
+            var on: CInt = 1
+            _ = try attempt("setsockopt", valid: isZero, setsockopt(connectionSocket, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<CInt>.size)))
+#endif
         })
     }
  
     func readData() throws -> String {
         var buffer = [UInt8](repeating: 0, count: 4096)
-        _ = try attempt("read", valid: isNotNegative, CInt(read(connectionSocket, &buffer, 4096)))
+        _ = try attempt("read", valid: isNotNegative, CInt(read(connectionSocket, &buffer, buffer.count)))
         return String(cString: &buffer)
     }
     
     func split(_ str: String, _ count: Int) -> [String] {
-        return stride(from: 0, to: str.characters.count, by: count).map { i -> String in
+        return stride(from: 0, to: str.count, by: count).map { i -> String in
             let startIndex = str.index(str.startIndex, offsetBy: i)
             let endIndex   = str.index(startIndex, offsetBy: count, limitedBy: str.endIndex) ?? str.endIndex
             return String(str[startIndex..<endIndex])
@@ -111,14 +143,14 @@ class _TCPSocket {
 
     func writeRawData(_ data: Data) throws {
         _ = try data.withUnsafeBytes { ptr in
-            try attempt("write", valid: isNotNegative, CInt(write(connectionSocket, ptr, data.count)))
+            try attempt("send", valid: isNotNegative, CInt(send(connectionSocket, ptr, data.count, sendFlags)))
         }
     }
    
     func writeData(header: String, body: String, sendDelay: TimeInterval? = nil, bodyChunks: Int? = nil) throws {
-        var header = Array(header.utf8)
-        _  = try attempt("write", valid: isNotNegative, CInt(write(connectionSocket, &header, header.count)))
-        
+        var _header = Array(header.utf8)
+        _  = try attempt("send", valid: isNotNegative, CInt(send(connectionSocket, &_header, _header.count, sendFlags)))
+
         if let sendDelay = sendDelay, let bodyChunks = bodyChunks {
             let count = max(1, Int(Double(body.utf8.count) / Double(bodyChunks)))
             let texts = split(body, count)
@@ -126,29 +158,42 @@ class _TCPSocket {
             for item in texts {
                 sleep(UInt32(sendDelay))
                 var bytes = Array(item.utf8)
-                _  = try attempt("write", valid: isNotNegative, CInt(write(connectionSocket, &bytes, bytes.count)))
+                _  = try attempt("send", valid: isNotNegative, CInt(send(connectionSocket, &bytes, bytes.count, sendFlags)))
             }
         } else {
             var bytes = Array(body.utf8)
-            _  = try attempt("write", valid: isNotNegative, CInt(write(connectionSocket, &bytes, bytes.count)))
+            _  = try attempt("send", valid: isNotNegative, CInt(send(connectionSocket, &bytes, bytes.count, sendFlags)))
         }
     }
 
-    func shutdown() {
-        close(connectionSocket)
+    func closeClient() {
+        if let connectionSocket = self.connectionSocket {
+            close(connectionSocket)
+            self.connectionSocket = nil
+        }
+    }
+
+    func shutdownListener() {
+        closeClient()
+        shutdown(listenSocket, CInt(SHUT_RDWR))
         close(listenSocket)
     }
 }
 
 class _HTTPServer {
 
-    let socket: _TCPSocket 
+    let socket: _TCPSocket
+    var port: UInt16 {
+        get {
+            return self.socket.port
+        }
+    }
     
-    init(port: UInt16) throws {
+    init(port: UInt16?) throws {
         socket = try _TCPSocket(port: port)
     }
 
-    public class func create(port: UInt16) throws -> _HTTPServer {
+    public class func create(port: UInt16?) throws -> _HTTPServer {
         return try _HTTPServer(port: port)
     }
 
@@ -157,32 +202,23 @@ class _HTTPServer {
     }
 
     public func stop() {
-        socket.shutdown()
+        socket.closeClient()
+        socket.shutdownListener()
     }
    
     public func request() throws -> _HTTPRequest {
-       return _HTTPRequest(request: try socket.readData()) 
+       return try _HTTPRequest(request: socket.readData())
     }
 
     public func respond(with response: _HTTPResponse, startDelay: TimeInterval? = nil, sendDelay: TimeInterval? = nil, bodyChunks: Int? = nil) throws {
-        let semaphore = DispatchSemaphore(value: 0)
-        let deadlineTime: DispatchTime
-            
-        if let startDelay = startDelay {
-           deadlineTime = .now() + .seconds(Int(startDelay))
-        } else {
-            deadlineTime = .now()
+        if let delay = startDelay {
+            Thread.sleep(forTimeInterval: delay)
         }
-
-        DispatchQueue.main.asyncAfter(deadline: deadlineTime) {
-            do {
-                try self.socket.writeData(header: response.header, body: response.body, sendDelay: sendDelay, bodyChunks: bodyChunks)
-                semaphore.signal()
-            } catch { }
+        do {
+            try self.socket.writeData(header: response.header, body: response.body, sendDelay: sendDelay, bodyChunks: bodyChunks)
+        } catch {
         }
-        semaphore.wait()
-        
-    } 
+    }
 
     func respondWithBrokenResponses(uri: String) throws {
         let responseData: Data
@@ -260,11 +296,13 @@ struct _HTTPRequest {
     let headers: [String]
 
     public init(request: String) {
-        let lines = request.components(separatedBy: _HTTPUtils.CRLF2)[0].components(separatedBy: _HTTPUtils.CRLF)
-        headers = Array(lines[0...lines.count-2])
-        method = Method(rawValue: headers[0].components(separatedBy: " ")[0])!
-        uri = headers[0].components(separatedBy: " ")[1]
-        body = lines.last!
+        let headerEnd = (request as NSString).range(of: _HTTPUtils.CRLF2)
+        let header = (request as NSString).substring(to: headerEnd.location)
+        headers = header.components(separatedBy: _HTTPUtils.CRLF)
+        let action = headers[0]
+        method = Method(rawValue: action.components(separatedBy: " ")[0])!
+        uri = action.components(separatedBy: " ")[1]
+        body = (request as NSString).substring(from: headerEnd.location + headerEnd.length)
     }
 
     public func getCommaSeparatedHeaders() -> String {
@@ -275,12 +313,23 @@ struct _HTTPRequest {
         return allHeaders
     }
 
+    public func getHeader(for key: String) -> String? {
+        let lookup = key.lowercased()
+        for header in headers {
+            let parts = header.components(separatedBy: ":")
+            if parts[0].lowercased() == lookup {
+                return parts[1].trimmingCharacters(in: CharacterSet(charactersIn: " "))
+            }
+        }
+        return nil
+    }
 }
 
 struct _HTTPResponse {
     enum Response : Int {
         case OK = 200
         case REDIRECT = 302
+        case NOTFOUND = 404
     }
     private let responseCode: Response
     private let headers: String
@@ -299,33 +348,53 @@ struct _HTTPResponse {
 }
 
 public class TestURLSessionServer {
-    let capitals: [String:String] = ["Nepal":"Kathmandu",
-                                     "Peru":"Lima",
-                                     "Italy":"Rome",
-                                     "USA":"Washington, D.C.",
-				     "UnitedStates": "USA",
+    let capitals: [String:String] = ["Nepal": "Kathmandu",
+                                     "Peru": "Lima",
+                                     "Italy": "Rome",
+                                     "USA": "Washington, D.C.",
+                                     "UnitedStates": "USA",
+                                     "UnitedKingdom": "UK",
+                                     "UK": "London",
                                      "country.txt": "A country is a region that is identified as a distinct national entity in political geography"]
     let httpServer: _HTTPServer
     let startDelay: TimeInterval?
     let sendDelay: TimeInterval?
     let bodyChunks: Int?
+    var port: UInt16 {
+        get {
+            return self.httpServer.port
+        }
+    }
     
-    public init (port: UInt16, startDelay: TimeInterval? = nil, sendDelay: TimeInterval? = nil, bodyChunks: Int? = nil) throws {
+    public init (port: UInt16?, startDelay: TimeInterval? = nil, sendDelay: TimeInterval? = nil, bodyChunks: Int? = nil) throws {
         httpServer = try _HTTPServer.create(port: port)
         self.startDelay = startDelay
         self.sendDelay = sendDelay
         self.bodyChunks = bodyChunks
     }
-    public func start(started: ServerSemaphore) throws {
-        started.signal()
-        try httpServer.listen(notify: started)
-    }
-   
+
     public func readAndRespond() throws {
         let req = try httpServer.request()
+
+        if let value = req.getHeader(for: "x-pause") {
+            if let wait = Double(value), wait > 0 {
+                Thread.sleep(forTimeInterval: wait)
+            }
+        }
+
         if req.uri.hasPrefix("/LandOfTheLostCities/") {
             /* these are all misbehaving servers */
             try httpServer.respondWithBrokenResponses(uri: req.uri)
+        } else if req.uri == "/NSString-ISO-8859-1-data.txt" {
+            // Serve this directly as binary data to avoid any String encoding conversions.
+            if let url = testBundle().url(forResource: "NSString-ISO-8859-1-data", withExtension: "txt"),
+                let content = try? Data(contentsOf: url) {
+                var responseData = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=ISO-8859-1\r\nContent-Length: \(content.count)\r\n\r\n".data(using: .ascii)!
+                responseData.append(content)
+                try httpServer.socket.writeRawData(responseData)
+            } else {
+                try httpServer.respond(with: _HTTPResponse(response: .NOTFOUND, body: "Not Found"))
+            }
         } else {
             try httpServer.respond(with: process(request: req), startDelay: self.startDelay, sendDelay: self.sendDelay, bodyChunks: self.bodyChunks)
         }
@@ -348,7 +417,7 @@ public class TestURLSessionServer {
         }
 
         if uri == "/country.txt" {
-            let text = capitals[String(uri.characters.dropFirst())]!
+            let text = capitals[String(uri.dropFirst())]!
             return _HTTPResponse(response: .OK, headers: "Content-Length: \(text.data(using: .utf8)!.count)", body: text)
         }
 
@@ -357,8 +426,18 @@ public class TestURLSessionServer {
             return _HTTPResponse(response: .OK, headers: "Content-Length: \(text.data(using: .utf8)!.count)", body: text)
         }
 
-	if uri == "/UnitedStates" {
-            let value = capitals[String(uri.characters.dropFirst())]!
+        if uri == "/requestCookies" {
+            let text = request.getCommaSeparatedHeaders()
+            return _HTTPResponse(response: .OK, headers: "Content-Length: \(text.data(using: .utf8)!.count)\r\nSet-Cookie: fr=anjd&232; Max-Age=7776000; path=/\r\nSet-Cookie: nm=sddf&232; Max-Age=7776000; path=/; domain=.swift.org; secure; httponly\r\n", body: text)
+        }
+
+        if uri == "/setCookies" {
+            let text = request.getCommaSeparatedHeaders()
+            return _HTTPResponse(response: .OK, headers: "Content-Length: \(text.data(using: .utf8)!.count)", body: text)
+        }
+
+        if uri == "/UnitedStates" {
+            let value = capitals[String(uri.dropFirst())]!
             let text = request.getCommaSeparatedHeaders()
             let host = request.headers[1].components(separatedBy: " ")[1]
             let ip = host.components(separatedBy: ":")[0]
@@ -368,7 +447,47 @@ public class TestURLSessionServer {
             let httpResponse = _HTTPResponse(response: .REDIRECT, headers: "Location: http://\(newHost + "/" + value)", body: text)
             return httpResponse 
         }
-        return _HTTPResponse(response: .OK, body: capitals[String(uri.characters.dropFirst())]!) 
+
+        if uri == "/DTDs/PropertyList-1.0.dtd" {
+            let dtd = """
+    <!ENTITY % plistObject "(array | data | date | dict | real | integer | string | true | false )" >
+    <!ELEMENT plist %plistObject;>
+    <!ATTLIST plist version CDATA "1.0" >
+
+    <!-- Collections -->
+    <!ELEMENT array (%plistObject;)*>
+    <!ELEMENT dict (key, %plistObject;)*>
+    <!ELEMENT key (#PCDATA)>
+
+    <!--- Primitive types -->
+    <!ELEMENT string (#PCDATA)>
+    <!ELEMENT data (#PCDATA)> <!-- Contents interpreted as Base-64 encoded -->
+    <!ELEMENT date (#PCDATA)> <!-- Contents should conform to a subset of ISO 8601 (in particular, YYYY '-' MM '-' DD 'T' HH ':' MM ':' SS 'Z'.  Smaller units may be omitted with a loss of precision) -->
+
+    <!-- Numerical primitives -->
+    <!ELEMENT true EMPTY>  <!-- Boolean constant true -->
+    <!ELEMENT false EMPTY> <!-- Boolean constant false -->
+    <!ELEMENT real (#PCDATA)> <!-- Contents should represent a floating point number matching ("+" | "-")? d+ ("."d*)? ("E" ("+" | "-") d+)? where d is a digit 0-9.  -->
+    <!ELEMENT integer (#PCDATA)> <!-- Contents should represent a (possibly signed) integer number in base 10 -->
+"""
+            return _HTTPResponse(response: .OK, body: dtd)
+        }
+
+        if uri == "/UnitedKingdom" {
+            let value = capitals[String(uri.dropFirst())]!
+            let text = request.getCommaSeparatedHeaders()
+            //Response header with only path to the location to redirect.
+            let httpResponse = _HTTPResponse(response: .REDIRECT, headers: "Location: \(value)", body: text)
+            return httpResponse
+        }
+        if uri == "/redirect-with-default-port" {
+            let text = request.getCommaSeparatedHeaders()
+            let host = request.headers[1].components(separatedBy: " ")[1]
+            let ip = host.components(separatedBy: ":")[0]
+            let httpResponse = _HTTPResponse(response: .REDIRECT, headers: "Location: http://\(ip)/redirected-with-default-port", body: text)
+            return httpResponse
+        }
+        return _HTTPResponse(response: .OK, body: capitals[String(uri.dropFirst())]!)
     }
 
     func stop() {
@@ -396,8 +515,8 @@ extension ServerError : CustomStringConvertible {
 public class ServerSemaphore {
     let dispatchSemaphore = DispatchSemaphore(value: 0)
 
-    public func wait() {
-        dispatchSemaphore.wait()
+    public func wait(timeout: DispatchTime) -> DispatchTimeoutResult {
+        return dispatchSemaphore.wait(timeout: timeout)
     }
 
     public func signal() {
@@ -406,37 +525,73 @@ public class ServerSemaphore {
 }
 
 class LoopbackServerTest : XCTestCase {
-    static var serverPort: Int = -1
+    private static let staticSyncQ = DispatchQueue(label: "org.swift.TestFoundation.HTTPServer.StaticSyncQ")
+
+    private static var _serverPort: Int = -1
+    private static let serverReady = ServerSemaphore()
+    private static var _serverActive = false
+    private static var testServer: TestURLSessionServer? = nil
+
+
+    static var serverPort: Int {
+        get {
+            return staticSyncQ.sync { _serverPort }
+        }
+        set {
+            staticSyncQ.sync { _serverPort = newValue }
+        }
+    }
+
+    static var serverActive: Bool {
+        get { return staticSyncQ.sync { _serverActive } }
+        set { staticSyncQ.sync { _serverActive = newValue }}
+    }
+
+    static func terminateServer() {
+        serverActive = false
+        testServer?.stop()
+        testServer = nil
+    }
 
     override class func setUp() {
         super.setUp()
         func runServer(with condition: ServerSemaphore, startDelay: TimeInterval? = nil, sendDelay: TimeInterval? = nil, bodyChunks: Int? = nil) throws {
-            let start = 21961
-            for port in start...(start+100) { //we must find at least one port to bind
+            let server = try TestURLSessionServer(port: nil, startDelay: startDelay, sendDelay: sendDelay, bodyChunks: bodyChunks)
+            testServer = server
+            serverPort = Int(server.port)
+            serverReady.signal()
+            serverActive = true
+
+            while serverActive {
                 do {
-                    serverPort = port
-                    let test = try TestURLSessionServer(port: UInt16(port), startDelay: startDelay, sendDelay: sendDelay, bodyChunks: bodyChunks)
-                    try test.start(started: condition)
-                    try test.readAndRespond()
-                    test.stop()
-                } catch let e as ServerError {
-                    if e.operation == "bind" { continue }
-                    throw e
+                    try server.httpServer.listen(notify: condition)
+                    try server.readAndRespond()
+                    server.httpServer.socket.closeClient()
+                } catch {
                 }
             }
+            serverPort = -2
+
         }
 
-        let serverReady = ServerSemaphore()
         globalDispatchQueue.async {
             do {
                 try runServer(with: serverReady)
-
             } catch {
-                XCTAssertTrue(true)
-                return
             }
         }
 
-        serverReady.wait()
+        let timeout = DispatchTime(uptimeNanoseconds: DispatchTime.now().uptimeNanoseconds + 2_000_000_000)
+
+        while serverPort == -2 {
+            guard serverReady.wait(timeout: timeout) == .success else {
+                fatalError("Timedout waiting for server to be ready")
+            }
+        }
+    }
+
+    override class func tearDown() {
+        super.tearDown()
+        terminateServer()
     }
 }

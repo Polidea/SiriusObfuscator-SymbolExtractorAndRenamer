@@ -79,6 +79,10 @@ ASAN_FLAG(
     "Number of seconds to sleep between printing an error report and "
     "terminating the program. Useful for debugging purposes (e.g. when one "
     "needs to attach gdb).")
+ASAN_FLAG(
+    int, sleep_after_init, 0,
+    "Number of seconds to sleep after AddressSanitizer is initialized. "
+    "Useful for debugging purposes (e.g. when one needs to attach gdb).")
 ASAN_FLAG(bool, check_malloc_usable_size, true,
           "Allows the users to work around the bug in Nvidia drivers prior to "
           "295.*.")
@@ -143,14 +147,16 @@ ASAN_FLAG(int, detect_odr_violation, 2,
           "If >=2, detect violation of One-Definition-Rule (ODR); "
           "If ==1, detect ODR-violation only if the two variables "
           "have different sizes")
-ASAN_FLAG(bool, dump_instruction_bytes, false,
-          "If true, dump 16 bytes starting at the instruction that caused SEGV")
-ASAN_FLAG(bool, dump_registers, true,
-          "If true, dump values of CPU registers when SEGV happens. Only "
-          "available on OS X for now.")
 ASAN_FLAG(const char *, suppressions, "", "Suppressions file name.")
 ASAN_FLAG(bool, halt_on_error, true,
           "Crash the program after printing the first error report "
           "(WARNING: USE AT YOUR OWN RISK!)")
 ASAN_FLAG(bool, use_odr_indicator, false,
           "Use special ODR indicator symbol for ODR violation detection")
+ASAN_FLAG(bool, allocator_frees_and_returns_null_on_realloc_zero, true,
+          "realloc(p, 0) is equivalent to free(p) by default (Same as the "
+          "POSIX standard). If set to false, realloc(p, 0) will return a "
+          "pointer to an allocated space which can not be used.")
+ASAN_FLAG(bool, verify_asan_link_order, true,
+          "Check position of ASan runtime in library list (needs to be disabled"
+          " when other library has to be preloaded system-wide)")

@@ -11,10 +11,10 @@
 #ifndef liblldb_LibCxx_h_
 #define liblldb_LibCxx_h_
 
-#include "lldb/Core/Stream.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/TypeSummary.h"
 #include "lldb/DataFormatters/TypeSynthetic.h"
+#include "lldb/Utility/Stream.h"
 
 namespace lldb_private {
 namespace formatters {
@@ -93,6 +93,10 @@ private:
 };
 
 SyntheticChildrenFrontEnd *
+LibcxxBitsetSyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                     lldb::ValueObjectSP);
+
+SyntheticChildrenFrontEnd *
 LibcxxSharedPtrSyntheticFrontEndCreator(CXXSyntheticChildren *,
                                         lldb::ValueObjectSP);
 
@@ -103,6 +107,10 @@ LibcxxStdVectorSyntheticFrontEndCreator(CXXSyntheticChildren *,
 SyntheticChildrenFrontEnd *
 LibcxxStdListSyntheticFrontEndCreator(CXXSyntheticChildren *,
                                       lldb::ValueObjectSP);
+
+SyntheticChildrenFrontEnd *
+LibcxxStdForwardListSyntheticFrontEndCreator(CXXSyntheticChildren *,
+                                             lldb::ValueObjectSP);
 
 SyntheticChildrenFrontEnd *
 LibcxxStdMapSyntheticFrontEndCreator(CXXSyntheticChildren *,
@@ -118,6 +126,12 @@ LibcxxInitializerListSyntheticFrontEndCreator(CXXSyntheticChildren *,
 
 SyntheticChildrenFrontEnd *LibcxxFunctionFrontEndCreator(CXXSyntheticChildren *,
                                                          lldb::ValueObjectSP);
+
+SyntheticChildrenFrontEnd *LibcxxQueueFrontEndCreator(CXXSyntheticChildren *,
+                                                      lldb::ValueObjectSP);
+
+SyntheticChildrenFrontEnd *LibcxxTupleFrontEndCreator(CXXSyntheticChildren *,
+                                                      lldb::ValueObjectSP);
 
 } // namespace formatters
 } // namespace lldb_private

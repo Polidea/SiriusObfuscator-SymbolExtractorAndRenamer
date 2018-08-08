@@ -27,16 +27,6 @@ word_bits = int(CMAKE_SIZEOF_VOID_P) * 8
 builtinIntLiteralBits = 2048
 }%
 
-// TODO: remove once integer proposal is available ----------------------------
-// FIXME(integers): ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-%for bits in [32,64]:
-extension UInt${bits} {
-  var signBitIndex: Int {
-    return ${bits-1} - leadingZeroBitCount
-  }
-}
-%end
-
 % for self_type in all_floating_point_types():
 %{
 Self = self_type.stdlib_name
@@ -64,7 +54,7 @@ else:
 }%
 
 % if bits == 80:
-#if (!os(Windows) || CYGWIN) && (arch(i386) || arch(x86_64))
+#if !os(Windows) && (arch(i386) || arch(x86_64))
 % end
 
 ${SelfDocComment}
@@ -74,37 +64,61 @@ public struct ${Self} {
   var _value: Builtin.FPIEEE${bits}
 
   /// Creates a value initialized to zero.
-  @_transparent public
-  init() {
+  @inlinable // FIXME(sil-serialize-all)
+  @_transparent
+  public init() {
     let zero: Int64 = 0
     self._value = Builtin.sitofp_Int64_FPIEEE${bits}(zero._value)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public // @testable
-  init(_bits v: Builtin.FPIEEE${bits}) {
-    self._value = v
+  init(_ _value: Builtin.FPIEEE${bits}) {
+    self._value = _value
   }
 }
 
 extension ${Self} : CustomStringConvertible {
   /// A textual representation of the value.
+  @inlinable // FIXME(sil-serialize-all)
   public var description: String {
-    return _float${bits}ToString(self, debug: false)
+    if isFinite {
+      return _float${bits}ToString(self, debug: false)
+    } else if isNaN {
+      return "nan"
+    } else if sign == .minus {
+      return "-inf"
+    } else {
+      return "inf"
+    }
   }
 }
 
 extension ${Self} : CustomDebugStringConvertible {
   /// A textual representation of the value, suitable for debugging.
+  @inlinable // FIXME(sil-serialize-all)
   public var debugDescription: String {
-    return _float${bits}ToString(self, debug: true)
+    if isFinite || isNaN {
+      return _float${bits}ToString(self, debug: true)
+    } else if sign == .minus {
+      return "-inf"
+    } else {
+      return "inf"
+    }
   }
 }
 
 extension ${Self}: BinaryFloatingPoint {
 
+  /// A type that can represent the absolute value of any possible value of
+  /// this type.
   public typealias Magnitude = ${Self}
+
+  /// A type that can represent any written exponent.
   public typealias Exponent = Int
+
+  /// A type that represents the encoded significand of a value.
   public typealias RawSignificand = ${RawSignificand}
 
   /// The number of bits used to represent the type's exponent.
@@ -130,6 +144,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // Prints "127"
   ///     print(Float.leastNormalMagnitude.exponent)
   ///     // Prints "-126"
+  @inlinable // FIXME(sil-serialize-all)
   public static var exponentBitCount: Int {
     return ${ExponentBitCount}
   }
@@ -150,28 +165,31 @@ extension ${Self}: BinaryFloatingPoint {
   /// instance. Unlike other floating-point types, the `Float80` type
   /// explicitly stores the leading integral significand bit.
 %end
+  @inlinable // FIXME(sil-serialize-all)
   public static var significandBitCount: Int {
     return ${SignificandBitCount}
   }
 
   //  Implementation details.
-  @_versioned
-  static var _infinityExponent: UInt {
+  @inlinable // FIXME(sil-serialize-all)
+  internal static var _infinityExponent: UInt {
     @inline(__always) get { return 1 &<< UInt(exponentBitCount) - 1 }
   }
 
-  static var _exponentBias: UInt {
+  @inlinable // FIXME(sil-serialize-all)
+  internal static var _exponentBias: UInt {
     @inline(__always) get { return _infinityExponent &>> 1 }
   }
 
-  static var _significandMask: ${RawSignificand} {
+  @inlinable // FIXME(sil-serialize-all)
+  internal static var _significandMask: ${RawSignificand} {
     @inline(__always) get {
       return 1 &<< ${RawSignificand}(significandBitCount) - 1
     }
   }
 
-  @_versioned
-  static var _quietNaNMask: ${RawSignificand} {
+  @inlinable // FIXME(sil-serialize-all)
+  internal static var _quietNaNMask: ${RawSignificand} {
     @inline(__always) get {
       return 1 &<< ${RawSignificand}(significandBitCount - 1)
     }
@@ -191,6 +209,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// [IEEE 754 specification][spec].
   ///
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
+  @inlinable // FIXME(sil-serialize-all)
   public var bitPattern: UInt${bits} {
     return UInt${bits}(Builtin.bitcast_FPIEEE${bits}_Int${bits}(_value))
   }
@@ -203,8 +222,9 @@ extension ${Self}: BinaryFloatingPoint {
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
   ///
   /// - Parameter bitPattern: The integer encoding of a `${Self}` instance.
+  @inlinable // FIXME(sil-serialize-all)
   public init(bitPattern: UInt${bits}) {
-    self.init(_bits: Builtin.bitcast_Int${bits}_FPIEEE${bits}(bitPattern._value))
+    self.init(Builtin.bitcast_Int${bits}_FPIEEE${bits}(bitPattern._value))
   }
 
   /// The sign of the floating-point value.
@@ -220,6 +240,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// necessarily the same as `x < 0`. In particular, `x.sign == .minus` if
   /// `x` is -0, and while `x < 0` is always `false` if `x` is NaN, `x.sign`
   /// could be either `.plus` or `.minus`.
+  @inlinable // FIXME(sil-serialize-all)
   public var sign: FloatingPointSign {
     let shift = ${Self}.significandBitCount + ${Self}.exponentBitCount
     return FloatingPointSign(rawValue: Int(bitPattern &>> ${RawSignificand}(shift)))!
@@ -231,6 +252,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// The raw encoding of the value's exponent field.
   ///
   /// This value is unadjusted by the type's exponent bias.
+  @inlinable // FIXME(sil-serialize-all)
   public var exponentBitPattern: UInt {
     return UInt(bitPattern &>> UInt${bits}(${Self}.significandBitCount)) &
       ${Self}._infinityExponent
@@ -241,6 +263,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// The `significandBitPattern` property does not include the leading
   /// integral bit of the significand, even for types like `Float80` that
   /// store it explicitly.
+  @inlinable // FIXME(sil-serialize-all)
   public var significandBitPattern: ${RawSignificand} {
     return ${RawSignificand}(bitPattern) & ${Self}._significandMask
   }
@@ -259,6 +282,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     the new value.
   ///   - significandBitPattern: The bit pattern to use for the significand
   ///     field of the new value.
+  @inlinable // FIXME(sil-serialize-all)
   public init(sign: FloatingPointSign,
               exponentBitPattern: UInt,
               significandBitPattern: ${RawSignificand}) {
@@ -284,27 +308,48 @@ extension ${Self}: BinaryFloatingPoint {
   /// conform to the `FloatingPoint` protocol.
   ///
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
+  @inlinable // FIXME(sil-serialize-all)
   public var isCanonical: Bool {
     return true
   }
 %else:
   // Internal implementation details of x86 Float80
-  struct _Float80Representation {
-    var explicitSignificand: UInt64
-    var signAndExponent: UInt16
-    var _padding: (UInt16, UInt16, UInt16) = (0, 0, 0)
-    var sign: FloatingPointSign {
+  @_fixed_layout // FIXME(sil-serialize-all)
+  @usableFromInline // FIXME(sil-serialize-all)
+  internal struct _Representation {
+    @usableFromInline // FIXME(sil-serialize-all)
+    internal var _storage: (UInt64, UInt16, /* pad */ UInt16, UInt16, UInt16)
+
+    @inlinable // FIXME(sil-serialize-all)
+    @_transparent
+    internal var explicitSignificand: UInt64 { return _storage.0 }
+
+    @inlinable // FIXME(sil-serialize-all)
+    @_transparent
+    internal var signAndExponent: UInt16 { return _storage.1 }
+
+    @inlinable // FIXME(sil-serialize-all)
+    @_transparent
+    internal var sign: FloatingPointSign {
       return FloatingPointSign(rawValue: Int(signAndExponent &>> 15))!
     }
-    var exponentBitPattern: UInt { return UInt(signAndExponent) & 0x7fff }
-    init(explicitSignificand: UInt64, signAndExponent: UInt16) {
-      self.explicitSignificand = explicitSignificand
-      self.signAndExponent = signAndExponent
+
+    @inlinable // FIXME(sil-serialize-all)
+    @_transparent
+    internal var exponentBitPattern: UInt {
+      return UInt(signAndExponent) & 0x7fff
+    }
+
+    @inlinable // FIXME(sil-serialize-all)
+    @_transparent
+    internal init(explicitSignificand: UInt64, signAndExponent: UInt16) {
+      _storage = (explicitSignificand, signAndExponent, 0, 0, 0)
     }
   }
 
-  var _representation: _Float80Representation {
-    return unsafeBitCast(self, to: _Float80Representation.self)
+  @inlinable // FIXME(sil-serialize-all)
+  internal var _representation: _Representation {
+    return unsafeBitCast(self, to: _Representation.self)
   }
 
   /// The sign of the floating-point value.
@@ -320,17 +365,20 @@ extension ${Self}: BinaryFloatingPoint {
   /// necessarily the same as `x < 0`. In particular, `x.sign == .minus` if
   /// `x` is -0, and while `x < 0` is always `false` if `x` is NaN, `x.sign`
   /// could be either `.plus` or `.minus`.
+  @inlinable // FIXME(sil-serialize-all)
   public var sign: FloatingPointSign {
     return _representation.sign
   }
 
-  static var _explicitBitMask: UInt64 {
+  @inlinable // FIXME(sil-serialize-all)
+  internal static var _explicitBitMask: UInt64 {
     @inline(__always) get { return 1 &<< 63 }
   }
 
   /// The raw encoding of the value's exponent field.
   ///
   /// This value is unadjusted by the type's exponent bias.
+  @inlinable // FIXME(sil-serialize-all)
   public var exponentBitPattern: UInt {
     let provisional = _representation.exponentBitPattern
     if provisional == 0 {
@@ -359,6 +407,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// The `significandBitPattern` property does not include the leading
   /// integral bit of the significand, even for types like `Float80` that
   /// store it explicitly.
+  @inlinable // FIXME(sil-serialize-all)
   public var significandBitPattern: UInt64 {
     if _representation.exponentBitPattern > 0 &&
       _representation.explicitSignificand < Float80._explicitBitMask {
@@ -386,6 +435,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     the new value.
   ///   - significandBitPattern: The bit pattern to use for the significand
   ///     field of the new value.
+  @inlinable // FIXME(sil-serialize-all)
   public init(sign: FloatingPointSign,
               exponentBitPattern: UInt,
               significandBitPattern: UInt64) {
@@ -393,8 +443,8 @@ extension ${Self}: BinaryFloatingPoint {
     let exponent = UInt16(exponentBitPattern)
     var significand = significandBitPattern
     if exponent != 0 { significand |= Float80._explicitBitMask }
-    let rep = _Float80Representation(explicitSignificand: significand,
-      signAndExponent: signBit|exponent)
+    let rep = _Representation(
+      explicitSignificand: significand, signAndExponent: signBit|exponent)
     self = unsafeBitCast(rep, to: Float80.self)
   }
 
@@ -408,6 +458,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// conform to the `FloatingPoint` protocol.
   ///
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
+  @inlinable // FIXME(sil-serialize-all)
   public var isCanonical: Bool {
     if exponentBitPattern == 0 {
       // If exponent field is zero, canonical numbers have the explicit
@@ -429,10 +480,23 @@ extension ${Self}: BinaryFloatingPoint {
   ///     let y = x * 2
   ///     // y == Double.infinity
   ///     // y > x
+  @inlinable // FIXME(sil-serialize-all)
   public static var infinity: ${Self} {
+%if bits == 32:
+    return ${Self}(bitPattern: 0b0_11111111_00000000000000000000000)
+%elif bits == 64:
+    return ${Self}(
+      bitPattern: 0b0_11111111111_0000000000000000000000000000000000000000000000000000)
+%elif bits == 80:
+    let rep = _Representation(
+      explicitSignificand: ${Self}._explicitBitMask,
+      signAndExponent: 0b0_111111111111111)
+    return unsafeBitCast(rep, to: ${Self}.self)
+%else:
     return ${Self}(sign: .plus,
       exponentBitPattern: _infinityExponent,
       significandBitPattern: 0)
+%end
   }
 
   /// A quiet NaN ("not a number").
@@ -455,8 +519,21 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // Prints "false"
   ///     print(y.isNaN)
   ///     // Prints "true"
+  @inlinable // FIXME(sil-serialize-all)
   public static var nan: ${Self} {
+%if bits == 32:
+    return ${Self}(bitPattern: 0b0_11111111_10000000000000000000000)
+%elif bits == 64:
+    return ${Self}(
+      bitPattern: 0b0_11111111111_1000000000000000000000000000000000000000000000000000)
+%elif bits == 80:
+    let rep = _Representation(
+      explicitSignificand: ${Self}._explicitBitMask | ${Self}._quietNaNMask,
+      signAndExponent: 0b0_111111111111111)
+    return unsafeBitCast(rep, to: ${Self}.self)
+%else:
     return ${Self}(nan: 0, signaling: false)
+%end
   }
 
   /// A signaling NaN ("not a number").
@@ -474,12 +551,13 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// Other than these signaling operations, a signaling NaN behaves in the
   /// same manner as a quiet NaN.
+  @inlinable // FIXME(sil-serialize-all)
   public static var signalingNaN: ${Self} {
     return ${Self}(nan: 0, signaling: true)
   }
 
   @available(*, unavailable, renamed: "nan")
-  public static var quietNaN: ${Self} { Builtin.unreachable()}
+  public static var quietNaN: ${Self} { Builtin.unreachable() }
 
   /// The greatest finite number representable by this type.
   ///
@@ -489,10 +567,19 @@ extension ${Self}: BinaryFloatingPoint {
   /// This value corresponds to type-specific C macros such as `FLT_MAX` and
   /// `DBL_MAX`. The naming of those macros is slightly misleading, because
   /// `infinity` is greater than this value.
+  @inlinable // FIXME(sil-serialize-all)
   public static var greatestFiniteMagnitude: ${Self} {
+%if bits == 32:
+    return 0x1.fffffep127
+%elif bits == 64:
+    return 0x1.fffffffffffffp1023
+%elif bits == 80:
+    return 0x1.fffffffffffffffep16383
+%else:
     return ${Self}(sign: .plus,
       exponentBitPattern: _infinityExponent - 1,
       significandBitPattern: _significandMask)
+%end
   }
 
   /// The mathematical constant pi.
@@ -504,6 +591,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   ///     print(Double.pi)
   ///     // Prints "3.14159265358979"
+  @inlinable // FIXME(sil-serialize-all)
   public static var pi: ${Self} {
 %if bits == 32:
     // Note: this is not the correctly rounded (to nearest) value of pi,
@@ -511,11 +599,11 @@ extension ${Self}: BinaryFloatingPoint {
     // in angles in the wrong quadrant if users aren't careful.  This is
     // not a problem for Double or Float80, as pi rounds down in both of
     // those formats.
-    return Float(0x1.921fb4p1)
+    return 0x1.921fb4p1
 %elif bits == 64:
-    return Double(0x1.921fb54442d18p1)
+    return 0x1.921fb54442d18p1
 %elif bits == 80:
-    return Float80(0x1.921fb54442d1846ap1)
+    return 0x1.921fb54442d1846ap1
 %end
   }
 
@@ -538,8 +626,18 @@ extension ${Self}: BinaryFloatingPoint {
   /// different languages, which can lead to confusion, and because it
   /// suggests that it is a good tolerance to use for comparisons, which it
   /// almost never is.
+  @inlinable // FIXME(sil-serialize-all)
   public var ulp: ${Self} {
-    if !isFinite { return ${Self}.nan }
+%if bits != 80:
+    guard _fastPath(isFinite) else { return .nan }
+    if _fastPath(isNormal) {
+      let bitPattern_ = bitPattern & ${Self}.infinity.bitPattern
+      return ${Self}(bitPattern: bitPattern_) * 0x1p-${SignificandBitCount}
+    }
+    // On arm, flush subnormal values to 0.
+    return .leastNormalMagnitude * 0x1p-${SignificandBitCount}
+%else:
+    guard _fastPath(isFinite) else { return .nan }
     if exponentBitPattern > UInt(${Self}.significandBitCount) {
       // self is large enough that self.ulp is normal, so we just compute its
       // exponent and construct it with a significand of zero.
@@ -559,6 +657,7 @@ extension ${Self}: BinaryFloatingPoint {
     return ${Self}(sign: .plus,
       exponentBitPattern: 0,
       significandBitPattern: 1)
+%end
   }
 
   /// The least positive normal number.
@@ -570,10 +669,19 @@ extension ${Self}: BinaryFloatingPoint {
   /// This value corresponds to type-specific C macros such as `FLT_MIN` and
   /// `DBL_MIN`. The naming of those macros is slightly misleading, because
   /// subnormals, zeros, and negative numbers are smaller than this value.
+  @inlinable // FIXME(sil-serialize-all)
   public static var leastNormalMagnitude: ${Self} {
+%if bits == 32:
+    return 0x1p-126
+%elif bits == 64:
+    return 0x1p-1022
+%elif bits == 80:
+    return 0x1p-16382
+%else:
     return ${Self}(sign: .plus,
       exponentBitPattern: 1,
       significandBitPattern: 0)
+%end
   }
 
   /// The least positive number.
@@ -582,14 +690,39 @@ extension ${Self}: BinaryFloatingPoint {
   /// greater than zero. If the type supports subnormal values,
   /// `leastNonzeroMagnitude` is smaller than `leastNormalMagnitude`;
   /// otherwise they are equal.
+  @inlinable // FIXME(sil-serialize-all)
   public static var leastNonzeroMagnitude: ${Self} {
 #if arch(arm)
     return leastNormalMagnitude
 #else
+%if bits == 32:
+    return 0x1p-149
+%elif bits == 64:
+    return 0x1p-1074
+%elif bits == 80:
+    return 0x1p-16445
+%else:
     return ${Self}(sign: .plus,
       exponentBitPattern: 0,
       significandBitPattern: 1)
+%end
 #endif
+  }
+
+  /// The unit in the last place of 1.0.
+  ///
+  /// The positive difference between 1.0 and the next greater representable
+  /// number. The `ulpOfOne` constant corresponds to the C macros
+  /// `FLT_EPSILON`, `DBL_EPSILON`, and others with a similar purpose.
+  @inlinable // FIXME(sil-serialize-all)
+  public static var ulpOfOne: ${Self} {
+%if bits == 32:
+    return 0x1p-23
+%elif bits == 64:
+    return 0x1p-52
+%elif bits == 80:
+    return 0x1p-63
+%end
   }
 
   /// The exponent of the floating-point value.
@@ -618,13 +751,16 @@ extension ${Self}: BinaryFloatingPoint {
   /// specification][spec].
   ///
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
+  @inlinable // FIXME(sil-serialize-all)
   public var exponent: Int {
     if !isFinite { return .max }
     if isZero { return .min }
     let provisional = Int(exponentBitPattern) - Int(${Self}._exponentBias)
     if isNormal { return provisional }
-    let shift = ${Self}.significandBitCount - significandBitPattern.signBitIndex
-    return provisional + 1 - Int(shift)
+    let shift =
+      ${Self}.significandBitCount -
+        Int(significandBitPattern._binaryLogarithm())
+    return provisional + 1 - shift
   }
 
   /// The significand of the floating-point value.
@@ -655,6 +791,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///   the fractional part of a logarithm.
   ///
   /// [spec]: http://ieeexplore.ieee.org/servlet/opac?punumber=4610933
+  @inlinable // FIXME(sil-serialize-all)
   public var significand: ${Self} {
     if isNaN { return self }
     if isNormal {
@@ -663,10 +800,12 @@ extension ${Self}: BinaryFloatingPoint {
         significandBitPattern: significandBitPattern)
     }
     if isSubnormal {
-      let shift = ${Self}.significandBitCount - significandBitPattern.signBitIndex
+      let shift =
+        ${RawSignificand}(${Self}.significandBitCount) -
+          significandBitPattern._binaryLogarithm()
       return ${Self}(sign: .plus,
         exponentBitPattern: ${Self}._exponentBias,
-        significandBitPattern: significandBitPattern &<< ${RawSignificand}(shift))
+        significandBitPattern: significandBitPattern &<< shift)
     }
     // zero or infinity.
     return ${Self}(sign: .plus,
@@ -717,6 +856,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///   - sign: The sign to use for the new value.
   ///   - exponent: The new value's exponent.
   ///   - significand: The new value's significand.
+  @inlinable // FIXME(sil-serialize-all)
   public init(sign: FloatingPointSign, exponent: Int, significand: ${Self}) {
     var result = significand
     if sign == .minus { result = -result }
@@ -766,6 +906,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///   - payload: The payload to use for the new NaN value.
   ///   - signaling: Pass `true` to create a signaling NaN or `false` to create
   ///     a quiet NaN.
+  @inlinable // FIXME(sil-serialize-all)
   public init(nan payload: RawSignificand, signaling: Bool) {
     // We use significandBitCount - 2 bits for NaN payload.
     _precondition(payload < (${Self}._quietNaNMask &>> 1),
@@ -787,18 +928,25 @@ extension ${Self}: BinaryFloatingPoint {
   /// - If `x` is `-leastNonzeroMagnitude`, then `x.nextUp` is `-0.0`.
   /// - If `x` is zero, then `x.nextUp` is `leastNonzeroMagnitude`.
   /// - If `x` is `greatestFiniteMagnitude`, then `x.nextUp` is `infinity`.
+  @inlinable // FIXME(sil-serialize-all)
   public var nextUp: ${Self} {
-    if isNaN { return self }
-    if sign == .minus {
+%if bits != 80:
+    // Silence signaling NaNs, map -0 to +0.
+    let x = self + 0
 #if arch(arm)
-      // On arm, subnormals are flushed to zero.
-      if (exponentBitPattern == 1 && significandBitPattern == 0) ||
-         (exponentBitPattern == 0 && significandBitPattern != 0) {
-        return ${Self}(sign: .minus,
-          exponentBitPattern: 0,
-          significandBitPattern: 0)
-      }
+    // On arm, treat subnormal values as zero.
+    if _slowPath(x == 0) { return .leastNonzeroMagnitude }
+    if _slowPath(x == -.leastNonzeroMagnitude) { return -0.0 }
 #endif
+    if _fastPath(x < .infinity) {
+      let increment = Int${bits}(bitPattern: x.bitPattern) &>> ${bits - 1} | 1
+      let bitPattern_ = x.bitPattern &+ UInt${bits}(bitPattern: increment)
+      return ${Self}(bitPattern: bitPattern_)
+    }
+    return x
+%else:
+    if isNaN { /* Silence signaling NaNs. */ return self + 0 }
+    if sign == .minus {
       if significandBitPattern == 0 {
         if exponentBitPattern == 0 {
           return .leastNonzeroMagnitude
@@ -817,15 +965,10 @@ extension ${Self}: BinaryFloatingPoint {
         exponentBitPattern: exponentBitPattern + 1,
         significandBitPattern: 0)
     }
-#if arch(arm)
-    // On arm, subnormals are skipped.
-    if exponentBitPattern == 0 {
-      return .leastNonzeroMagnitude
-    }
-#endif
     return ${Self}(sign: .plus,
       exponentBitPattern: exponentBitPattern,
       significandBitPattern: significandBitPattern + 1)
+%end
   }
 
   /// Rounds the value to an integral value using the specified rounding rule.
@@ -862,6 +1005,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // w1 == 7.0
   ///
   /// - Parameter rule: The rounding rule to use.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func round(_ rule: FloatingPointRoundingRule) {
     switch rule {
@@ -893,39 +1037,69 @@ extension ${Self}: BinaryFloatingPoint {
   ///     var x = 21.5
   ///     x.negate()
   ///     // x == -21.5
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func negate() {
     _value = Builtin.fneg_FPIEEE${bits}(self._value)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func +=(_ lhs: inout ${Self}, _ rhs: ${Self}) {
     lhs._value = Builtin.fadd_FPIEEE${bits}(lhs._value, rhs._value)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func -=(_ lhs: inout ${Self}, _ rhs: ${Self}) {
     lhs._value = Builtin.fsub_FPIEEE${bits}(lhs._value, rhs._value)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func *=(_ lhs: inout ${Self}, _ rhs: ${Self}) {
     lhs._value = Builtin.fmul_FPIEEE${bits}(lhs._value, rhs._value)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func /=(_ lhs: inout ${Self}, _ rhs: ${Self}) {
     lhs._value = Builtin.fdiv_FPIEEE${bits}(lhs._value, rhs._value)
   }
 
+  /// Replaces this value with the remainder of itself divided by the given
+  /// value.
+  ///
+  /// For two finite values `x` and `y`, the remainder `r` of dividing `x` by
+  /// `y` satisfies `x == y * q + r`, where `q` is the integer nearest to
+  /// `x / y`. If `x / y` is exactly halfway between two integers, `q` is
+  /// chosen to be even. Note that `q` is *not* `x / y` computed in
+  /// floating-point arithmetic, and that `q` may not be representable in any
+  /// available integer type.
+  ///
+  /// The following example calculates the remainder of dividing 8.625 by 0.75:
+  ///
+  ///     var x = 8.625
+  ///     print(x / 0.75)
+  ///     // Prints "11.5"
+  ///
+  ///     let q = (x / 0.75).rounded(.toNearestOrEven)
+  ///     // q == 12.0
+  ///     x.formRemainder(dividingBy: 0.75)
+  ///     // x == -0.375
+  ///
+  ///     let x1 = 0.75 * q + x
+  ///     // x1 == 8.625
+  ///
+  /// If this value and `other` are finite numbers, the remainder is in the
+  /// closed range `-abs(other / 2)...abs(other / 2)`. The
+  /// `formRemainder(dividingBy:)` method is always exact.
+  ///
+  /// - Parameter other: The value to use when dividing this value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func formRemainder(dividingBy other: ${Self}) {
-%if bits == 80:
-    var other = other
-    _swift_stdlib_remainderl(&self, &other)
-%else:
-    self = _swift_stdlib_remainder${cFuncSuffix}(self, other)
-%end
+    self = _stdlib_remainder${cFuncSuffix}(self, other)
   }
 
   /// Replaces this value with the remainder of itself divided by the given
@@ -957,6 +1131,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// method is always exact.
   ///
   /// - Parameter other: The value to use when dividing this value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func formTruncatingRemainder(dividingBy other: ${Self}) {
     _value = Builtin.frem_FPIEEE${bits}(self._value, other._value)
@@ -964,13 +1139,10 @@ extension ${Self}: BinaryFloatingPoint {
 
   /// Replaces this value with its square root, rounded to a representable
   /// value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func formSquareRoot( ) {
-%if bits == 80:
-    _swift_stdlib_squareRootl(&self)
-%else:
-    self = _swift_stdlib_squareRoot${cFuncSuffix}(self)
-%end
+    self = _stdlib_squareRoot${cFuncSuffix}(self)
   }
 
   /// Adds the product of the two given values to this value in place, computed
@@ -979,6 +1151,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// - Parameters:
   ///   - lhs: One of the values to multiply before adding to this value.
   ///   - rhs: The other value to multiply.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public mutating func addProduct(_ lhs: ${Self}, _ rhs: ${Self}) {
     _value = Builtin.int_fma_FPIEEE${bits}(lhs._value, rhs._value, _value)
@@ -1008,6 +1181,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// - Parameter other: The value to compare with this value.
   /// - Returns: `true` if `other` has the same value as this instance;
   ///   otherwise, `false`.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public func isEqual(to other: ${Self}) -> Bool {
     return Bool(Builtin.fcmp_oeq_FPIEEE${bits}(self._value, other._value))
@@ -1041,6 +1215,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// - Parameter other: The value to compare with this value.
   /// - Returns: `true` if `other` is less than this value; otherwise, `false`.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public func isLess(than other: ${Self}) -> Bool {
     return Bool(Builtin.fcmp_olt_FPIEEE${bits}(self._value, other._value))
@@ -1072,6 +1247,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// - Parameter other: The value to compare with this value.
   /// - Returns: `true` if `other` is less than this value; otherwise, `false`.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public func isLessThanOrEqualTo(_ other: ${Self}) -> Bool {
     return Bool(Builtin.fcmp_ole_FPIEEE${bits}(self._value, other._value))
@@ -1082,6 +1258,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// A *normal* value is a finite number that uses the full precision
   /// available to values of a type. Zero is neither a normal nor a subnormal
   /// number.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isNormal: Bool {
     return exponentBitPattern > 0 && isFinite
@@ -1091,6 +1268,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// All values other than NaN and infinity are considered finite, whether
   /// normal or subnormal.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isFinite: Bool {
     return exponentBitPattern < ${Self}._infinityExponent
@@ -1105,6 +1283,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     let x = -0.0
   ///     x.isZero        // true
   ///     x == 0.0        // true
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isZero: Bool {
     return exponentBitPattern == 0 && significandBitPattern == 0
@@ -1119,6 +1298,7 @@ extension ${Self}: BinaryFloatingPoint {
   /// Zero is neither a normal nor a subnormal number. Subnormal numbers are
   /// often called *denormal* or *denormalized*---these are different names
   /// for the same concept.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isSubnormal:  Bool {
     return exponentBitPattern == 0 && significandBitPattern != 0
@@ -1128,6 +1308,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// Note that `isFinite` and `isInfinite` do not form a dichotomy, because
   /// they are not total: If `x` is `NaN`, then both properties are `false`.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isInfinite:  Bool {
     return !isFinite && significandBitPattern == 0
@@ -1156,6 +1337,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // Prints "true"
   ///
   /// This property is `true` for both quiet and signaling NaNs.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isNaN:  Bool {
     return !isFinite && significandBitPattern != 0
@@ -1165,6 +1347,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///
   /// Signaling NaNs typically raise the Invalid flag when used in general
   /// computing operations.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var isSignalingNaN: Bool {
     return isNaN && (significandBitPattern & ${Self}._quietNaNMask) == 0
@@ -1189,17 +1372,31 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // y == 16.0
   ///     // y.significand == 1.0
   ///     // y.exponent == 4
+  @inlinable // FIXME(sil-serialize-all)
   public var binade: ${Self} {
-    if !isFinite { return .nan }
+%if bits != 80:
+    guard _fastPath(isFinite) else { return .nan }
+#if !arch(arm)
+    if _slowPath(isSubnormal) {
+      let bitPattern_ =
+        (self * 0x1p${SignificandBitCount}).bitPattern
+          & (-${Self}.infinity).bitPattern
+      return ${Self}(bitPattern: bitPattern_) * 0x1p-${SignificandBitCount}
+    }
+#endif
+    return ${Self}(bitPattern: bitPattern & (-${Self}.infinity).bitPattern)
+%else:
+    guard _fastPath(isFinite) else { return .nan }
     if exponentBitPattern != 0 {
       return ${Self}(sign: sign, exponentBitPattern: exponentBitPattern,
         significandBitPattern: 0)
     }
     if significandBitPattern == 0 { return self }
     // For subnormals, we isolate the leading significand bit.
-    let index = significandBitPattern.signBitIndex
+    let index = significandBitPattern._binaryLogarithm()
     return ${Self}(sign: sign, exponentBitPattern: 0,
-      significandBitPattern: 1 &<< RawSignificand(index))
+      significandBitPattern: 1 &<< index)
+%end
   }
 
   /// The number of bits required to represent the value's significand.
@@ -1216,14 +1413,16 @@ extension ${Self}: BinaryFloatingPoint {
   ///   `x.significandWidth` is 2.
   /// - If `x` is Float.pi, `x.significand` is `1.10010010000111111011011` in
   ///   binary, and `x.significandWidth` is 23.
+  @inlinable // FIXME(sil-serialize-all)
   public var significandWidth: Int {
     let trailingZeroBits = significandBitPattern.trailingZeroBitCount
     if isNormal {
       guard significandBitPattern != 0 else { return 0 }
-      return ${Self}.significandBitCount - trailingZeroBits
+      return ${Self}.significandBitCount &- trailingZeroBits
     }
     if isSubnormal {
-      return significandBitPattern.signBitIndex - trailingZeroBits
+      let leadingZeroBits = significandBitPattern.leadingZeroBitCount
+      return ${RawSignificand}.bitWidth &- (trailingZeroBits &+ leadingZeroBits &+ 1)
     }
     return -1
   }
@@ -1241,6 +1440,7 @@ extension ${Self}: BinaryFloatingPoint {
   ///     // x == 21.25
   ///
   /// - Parameter value: The new floating-point value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(floatLiteral value: ${Self}) {
     self = value
@@ -1248,10 +1448,11 @@ extension ${Self}: BinaryFloatingPoint {
 }
 
 extension ${Self} : _ExpressibleByBuiltinIntegerLiteral, ExpressibleByIntegerLiteral {
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public
   init(_builtinIntegerLiteral value: Builtin.Int${builtinIntLiteralBits}){
-    self = ${Self}(_bits: Builtin.itofp_with_overflow_Int${builtinIntLiteralBits}_FPIEEE${bits}(value))
+    self = ${Self}(Builtin.itofp_with_overflow_Int${builtinIntLiteralBits}_FPIEEE${bits}(value))
   }
 
   /// Creates a new value from the given integer literal.
@@ -1267,23 +1468,27 @@ extension ${Self} : _ExpressibleByBuiltinIntegerLiteral, ExpressibleByIntegerLit
   ///     // x == 100.0
   ///
   /// - Parameter value: The new value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(integerLiteral value: Int64) {
-    self = ${Self}(_bits: Builtin.sitofp_Int64_FPIEEE${bits}(value._value))
+    self = ${Self}(Builtin.sitofp_Int64_FPIEEE${bits}(value._value))
   }
 }
 
-#if (!os(Windows) || CYGWIN) && (arch(i386) || arch(x86_64))
+% if bits != 80:
+#if !os(Windows) && (arch(i386) || arch(x86_64))
+% end
 
 % builtinFloatLiteralBits = 80
 extension ${Self} : _ExpressibleByBuiltinFloatLiteral {
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public
   init(_builtinFloatLiteral value: Builtin.FPIEEE${builtinFloatLiteralBits}) {
 %   if bits == builtinFloatLiteralBits:
-    self = ${Self}(_bits: value)
+    self = ${Self}(value)
 %   elif bits < builtinFloatLiteralBits:
-    self = ${Self}(_bits: Builtin.fptrunc_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
+    self = ${Self}(Builtin.fptrunc_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
 %   else:
     // FIXME: This is actually losing precision <rdar://problem/14073102>.
     self = ${Self}(Builtin.fpext_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
@@ -1291,17 +1496,20 @@ extension ${Self} : _ExpressibleByBuiltinFloatLiteral {
   }
 }
 
+% if bits != 80:
 #else
 
 % builtinFloatLiteralBits = 64
 extension ${Self} : _ExpressibleByBuiltinFloatLiteral {
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public
   init(_builtinFloatLiteral value: Builtin.FPIEEE${builtinFloatLiteralBits}) {
 %   if bits == builtinFloatLiteralBits:
-    self = ${Self}(_bits: value)
+    self = ${Self}(value)
 %   elif bits < builtinFloatLiteralBits:
-    self = ${Self}(_bits: Builtin.fptrunc_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
+    // FIXME: This can result in double rounding errors (SR-7124).
+    self = ${Self}(Builtin.fptrunc_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
 %   else:
     // FIXME: This is actually losing precision <rdar://problem/14073102>.
     self = ${Self}(Builtin.fpext_FPIEEE${builtinFloatLiteralBits}_FPIEEE${bits}(value))
@@ -1310,32 +1518,36 @@ extension ${Self} : _ExpressibleByBuiltinFloatLiteral {
 }
 
 #endif
+% end
 
 extension ${Self} : Hashable {
-  /// The number's hash value.
+  /// Hashes the essential components of this value by feeding them into the
+  /// given hasher.
   ///
-  /// Hash values are not guaranteed to be equal across different executions of
-  /// your program. Do not save hash values to use during a future execution.
-  public var hashValue: Int {
+  /// - Parameter hasher: The hasher to use when combining the components
+  ///   of this instance.
+  @inlinable // FIXME(sil-serialize-all)
+  public func hash(into hasher: inout Hasher) {
+    var v = self
     if isZero {
       // To satisfy the axiom that equality implies hash equality, we need to
       // finesse the hash value of -0.0 to match +0.0.
-      return 0
-    } else {
-    %if bits <= word_bits:
-      return Int(bitPattern: UInt(bitPattern))
-    %elif bits == 64: # Double -> 32-bit Int
-      return Int(truncatingIfNeeded: bitPattern &>> 32) ^
-             Int(truncatingIfNeeded: bitPattern)
-    %elif word_bits == 32: # Float80 -> 32-bit Int
-      return Int(truncatingIfNeeded: significandBitPattern &>> 32) ^
-             Int(truncatingIfNeeded: significandBitPattern) ^
-             Int(_representation.signAndExponent)
-    %else: # Float80 -> 64-bit Int
-      return Int(bitPattern: UInt(significandBitPattern)) ^
-             Int(_representation.signAndExponent)
-    %end
+      v = 0
     }
+  %if bits == 80:
+    hasher.combine(v._representation.signAndExponent)
+    hasher.combine(v.significandBitPattern)
+  %else:
+    hasher.combine(v.bitPattern)
+  %end
+  }
+
+}
+
+extension ${Self}: _HasCustomAnyHashableRepresentation {
+  // Not @inlinable
+  public func _toCustomAnyHashable() -> AnyHashable? {
+    return AnyHashable(_box: _${Self}AnyHashableBox(self))
   }
 }
 
@@ -1360,24 +1572,18 @@ extension ${Self} {
   ///     // Use 'abs(_:)' instead of 'magnitude'
   ///     print("Missed the target by \(abs(margin)) meters.")
   ///     // Prints "Missed the target by 0.25 meters."
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public var magnitude: ${Self} {
-    return ${Self}(_bits: Builtin.int_fabs_FPIEEE${bits}(_value))
-  }
-
-  /// Creates the closest representable value to the given integer.
-  ///
-  /// - Parameter value: The integer to represent as a floating-point value.
-  // FIXME(integers): implement properly
-  public init?<T : BinaryInteger>(exactly source: T) {
-    fatalError()
+    return ${Self}(Builtin.int_fabs_FPIEEE${bits}(_value))
   }
 }
 
 extension ${Self} {
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static prefix func - (x: ${Self}) -> ${Self} {
-    return ${Self}(_bits: Builtin.fneg_FPIEEE${bits}(x._value))
+    return ${Self}(Builtin.fneg_FPIEEE${bits}(x._value))
   }
 }
 
@@ -1396,6 +1602,7 @@ extension ${Self} {
   /// Creates the closest representable value to the given integer.
   ///
   /// - Parameter value: The integer to represent as a floating-point value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(_ v: ${That}) {
     _value = Builtin.${sign}itofp_${ThatBuiltinName}_FPIEEE${bits}(v._value)
@@ -1410,12 +1617,14 @@ extension ${Self} {
 %   if srcBits < SignificandBitCount:
   @available(*, message: "Converting ${That} to ${Self} will always succeed.")
 %   end
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public init?(exactly value: ${That}) {
     _value = Builtin.${sign}itofp_${ThatBuiltinName}_FPIEEE${bits}(value._value)
 
-%   if srcBits < SignificandBitCount:
-    if ${That}(self) != value {
+%   if srcBits >= SignificandBitCount:
+    guard let roundTrip = ${That}(exactly: self),
+      roundTrip == value else {
       return nil
     }
 %   end
@@ -1429,8 +1638,8 @@ extension ${Self} {
 %   srcBits = src_type.bits
 %   That = src_type.stdlib_name
 
-%   if srcBits == 80:
-#if (!os(Windows) || CYGWIN) && (arch(i386) || arch(x86_64))
+%   if (srcBits == 80) and (bits != 80):
+#if !os(Windows) && (arch(i386) || arch(x86_64))
 %   end
 
 %   if srcBits == bits:
@@ -1455,6 +1664,7 @@ extension ${Self} {
   ///     // z.isNaN == true
   ///
   /// - Parameter other: The value to use for the new instance.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public init(_ other: ${That}) {
 %   if srcBits > bits:
@@ -1481,6 +1691,7 @@ extension ${Self} {
   ///     // z == nil
   ///
   /// - Parameter other: The value to use for the new instance.
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public init?(exactly other: ${That}) {
     self.init(other)
@@ -1492,7 +1703,7 @@ extension ${Self} {
     }
   }
 
-%   if srcBits == 80:
+%   if (srcBits == 80) and (bits != 80):
 #endif
 %   end
 % end
@@ -1509,6 +1720,7 @@ extension ${Self} {
 //  definitions in the standard lib, or both.
 
 extension ${Self} {
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func + (lhs: ${Self}, rhs: ${Self}) -> ${Self} {
     var lhs = lhs
@@ -1516,6 +1728,7 @@ extension ${Self} {
     return lhs
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func - (lhs: ${Self}, rhs: ${Self}) -> ${Self} {
     var lhs = lhs
@@ -1523,6 +1736,7 @@ extension ${Self} {
     return lhs
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func * (lhs: ${Self}, rhs: ${Self}) -> ${Self} {
     var lhs = lhs
@@ -1530,6 +1744,7 @@ extension ${Self} {
     return lhs
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public static func / (lhs: ${Self}, rhs: ${Self}) -> ${Self} {
     var lhs = lhs
@@ -1558,6 +1773,7 @@ extension ${Self} : Strideable {
   ///
   /// - Parameter other: A value to calculate the distance to.
   /// - Returns: The distance between this value and `other`.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public func distance(to other: ${Self}) -> ${Self} {
     return other - self
@@ -1578,9 +1794,85 @@ extension ${Self} : Strideable {
   ///
   /// - Parameter amount: The distance to advance this value.
   /// - Returns: A new value that is `amount` added to this value.
+  @inlinable // FIXME(sil-serialize-all)
   @_transparent
   public func advanced(by amount: ${Self}) -> ${Self} {
     return self + amount
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// AnyHashable
+//===----------------------------------------------------------------------===//
+
+internal struct _${Self}AnyHashableBox: _AnyHashableBox {
+  internal typealias Base = ${Self}
+  internal let _value: Base
+
+  internal init(_ value: Base) {
+    self._value = value
+  }
+
+  internal var _canonicalBox: _AnyHashableBox {
+    // Float and Double are bridged with NSNumber, so we have to follow
+    // NSNumber's rules for equality.  I.e., we need to make sure equal
+    // numerical values end up in identical boxes after canonicalization, so
+    // that _isEqual will consider them equal and they're hashed the same way.
+    //
+    // Note that these AnyHashable boxes don't currently feed discriminator bits
+    // to the hasher, so we allow repeatable collisions. E.g., -1 will always
+    // collide with UInt64.max.
+    if _value < 0 {
+      if let i = Int64(exactly: _value) {
+        return _IntegerAnyHashableBox(i)
+      }
+    } else {
+      if let i = UInt64(exactly: _value) {
+        return _IntegerAnyHashableBox(i)
+      }
+    }
+    if let d = Double(exactly: _value) {
+      return _DoubleAnyHashableBox(d)
+    }
+    // If a value can't be represented by a Double, keep it in its original
+    // representation so that it won't compare equal to approximations. (So that
+    // we don't round off Float80 values.)
+    return self
+  }
+
+  internal func _isEqual(to box: _AnyHashableBox) -> Bool? {
+    _sanityCheck(Int64(exactly: _value) == nil, "self isn't canonical")
+    _sanityCheck(UInt64(exactly: _value) == nil, "self isn't canonical")
+    if let box = box as? _${Self}AnyHashableBox {
+      return _value == box._value
+    }
+    return nil
+  }
+
+  internal var _hashValue: Int {
+    return Swift._hashValue(for: _value)
+  }
+
+  internal func _hash(into hasher: inout Hasher) {
+    _sanityCheck(Int64(exactly: _value) == nil, "self isn't canonical")
+    _sanityCheck(UInt64(exactly: _value) == nil, "self isn't canonical")
+    hasher.combine(_value)
+  }
+
+  internal var _base: Any {
+    return _value
+  }
+
+  internal func _unbox<T: Hashable>() -> T? {
+    return _value as? T
+  }
+
+  internal func _downCastConditional<T>(
+    into result: UnsafeMutablePointer<T>
+  ) -> Bool {
+    guard let value = _value as? T else { return false }
+    result.initialize(to: value)
+    return true
   }
 }
 
@@ -1614,6 +1906,7 @@ public postfix func -- (lhs: inout ${Self}) -> ${Self} {
 }
 
 extension ${Self} {
+  @inlinable // FIXME(sil-serialize-all)
   @available(swift, deprecated: 3.1, obsoleted: 4.0, message: "Please use the `abs(_:)` free function")
   @_transparent
   public static func abs(_ x: ${Self}) -> ${Self} {
@@ -1622,18 +1915,34 @@ extension ${Self} {
 }
 
 % if bits == 80:
+#else
+
+${SelfDocComment}
+@_fixed_layout
+@available(*, unavailable, message: "Float80 is only available on non-Windows x86 targets.")
+public struct ${Self} {
+  /// Creates a value initialized to zero.
+  @inlinable // FIXME(sil-serialize-all)
+  @_transparent
+  public init() {
+    fatalError("${Self} is not available")
+  }
+}
+
 #endif
 % end
 % end # for bits in all_floating_point_types
 
 @_transparent
-@available(*, unavailable, message: "Use truncatingRemainder instead")
+@available(*, unavailable,
+  message: "For floating point numbers use truncatingRemainder instead")
 public func % <T : BinaryFloatingPoint>(lhs: T, rhs: T) -> T {
   fatalError("% is not available.")
 }
 
 @_transparent
-@available(*, unavailable, message: "Use formTruncatingRemainder instead")
+@available(*, unavailable,
+  message: "For floating point numbers use formTruncatingRemainder instead")
 public func %= <T : BinaryFloatingPoint> (lhs: inout T, rhs: T) {
   fatalError("%= is not available.")
 }

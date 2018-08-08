@@ -12,7 +12,7 @@
 
 import CoreFoundation
 
-extension String : _ObjectTypeBridgeable {
+extension String : _ObjectiveCBridgeable {
     
     public typealias _ObjectType = NSString
     public func _bridgeToObjectiveC() -> _ObjectType {
@@ -29,29 +29,28 @@ extension String : _ObjectTypeBridgeable {
             result = source._storage
         } else if type(of: source) == _NSCFString.self {
             let cf = unsafeBitCast(source, to: CFString.self)
-            let str = CFStringGetCStringPtr(cf, CFStringEncoding(kCFStringEncodingUTF8))
-            if str != nil {
-                result = String(cString: str!)
+            if let str = CFStringGetCStringPtr(cf, CFStringEncoding(kCFStringEncodingUTF8)) {
+                result = String(cString: str)
             } else {
                 let length = CFStringGetLength(cf)
                 let buffer = UnsafeMutablePointer<UniChar>.allocate(capacity: length)
                 CFStringGetCharacters(cf, CFRangeMake(0, length), buffer)
                 
-                let str = String._fromCodeUnitSequence(UTF16.self, input: UnsafeBufferPointer(start: buffer, count: length))
+                let str = String(decoding: UnsafeBufferPointer(start: buffer, count: length), as: UTF16.self)
                 buffer.deinitialize(count: length)
-                buffer.deallocate(capacity: length)
+                buffer.deallocate()
                 result = str
             }
         } else if type(of: source) == _NSCFConstantString.self {
             let conststr = unsafeDowncast(source, to: _NSCFConstantString.self)
-            let str = String._fromCodeUnitSequence(UTF8.self, input: UnsafeBufferPointer(start: conststr._ptr, count: Int(conststr._length)))
+            let str = String(decoding: UnsafeBufferPointer(start: conststr._ptr, count: Int(conststr._length)), as: UTF8.self)
             result = str
         } else {
             let len = source.length
             var characters = [unichar](repeating: 0, count: len)
             result = characters.withUnsafeMutableBufferPointer() { (buffer: inout UnsafeMutableBufferPointer<unichar>) -> String? in
-                source.getCharacters(buffer.baseAddress!, range: NSMakeRange(0, len))
-                return String._fromCodeUnitSequence(UTF16.self, input: buffer)
+                source.getCharacters(buffer.baseAddress!, range: NSRange(location: 0, length: len))
+                return String(decoding: buffer, as: UTF16.self)
             }
         }
         return result != nil
@@ -67,4 +66,3 @@ extension String : _ObjectTypeBridgeable {
         }
     }
 }
-

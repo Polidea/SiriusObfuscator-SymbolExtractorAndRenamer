@@ -7,15 +7,6 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
 struct SwiftCustomNSError: Error, CustomNSError {
 }
 
@@ -30,6 +21,7 @@ class TestNSError : XCTestCase {
             ("test_CustomNSError_errorCode", test_CustomNSError_errorCode),
             ("test_CustomNSError_errorCodeRawInt", test_CustomNSError_errorCodeRawInt),
             ("test_CustomNSError_errorCodeRawUInt", test_CustomNSError_errorCodeRawUInt),
+            ("test_errorConvenience", test_errorConvenience)
         ]
     }
     
@@ -49,7 +41,8 @@ class TestNSError : XCTestCase {
     }
 
     func test_CustomNSError_domain() {
-        XCTAssertEqual(SwiftCustomNSError.errorDomain, "TestFoundation.SwiftCustomNSError")
+        let name = testBundleName()
+        XCTAssertEqual(SwiftCustomNSError.errorDomain, "\(name).SwiftCustomNSError")
     }
 
     func test_CustomNSError_userInfo() {
@@ -87,5 +80,21 @@ class TestNSError : XCTestCase {
         }
 
         XCTAssertEqual(SwiftError.fortyTwo.errorCode, 42)
+    }
+
+    func test_errorConvenience() {
+        let error = CocoaError.error(.fileReadNoSuchFile, url: URL(fileURLWithPath: #file))
+
+        if let nsError = error as? NSError {
+            XCTAssertEqual(nsError._domain, NSCocoaErrorDomain)
+            XCTAssertEqual(nsError._code, CocoaError.fileReadNoSuchFile.rawValue)
+            if let filePath = nsError.userInfo[NSURLErrorKey] as? URL {
+                XCTAssertEqual(filePath, URL(fileURLWithPath: #file))
+            } else {
+                XCTFail()
+            }
+        } else {
+            XCTFail()
+        }
     }
 }

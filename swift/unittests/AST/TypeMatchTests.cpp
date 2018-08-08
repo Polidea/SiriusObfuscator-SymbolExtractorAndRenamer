@@ -22,9 +22,9 @@ using namespace swift::unittest;
 TEST(TypeMatch, IdenticalTypes) {
   TestContext C;
 
-  auto check = [&C](Type ty) {
-    return ty->matches(ty, TypeMatchOptions(), /*resolver*/nullptr) &&
-        ty->matches(ty, TypeMatchFlags::AllowOverride, /*resolver*/nullptr);
+  auto check = [](Type ty) {
+    return ty->matches(ty, TypeMatchOptions()) &&
+           ty->matches(ty, TypeMatchFlags::AllowOverride);
   };
 
   EXPECT_TRUE(check(C.Ctx.TheEmptyTupleType));
@@ -49,10 +49,9 @@ TEST(TypeMatch, IdenticalTypes) {
 TEST(TypeMatch, UnrelatedTypes) {
   TestContext C;
 
-  auto check = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr) &&
-        derived->matches(base, TypeMatchFlags::AllowOverride,
-                         /*resolver*/nullptr);
+  auto check = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchOptions()) &&
+           derived->matches(base, TypeMatchFlags::AllowOverride);
   };
 
   EXPECT_FALSE(check(C.Ctx.TheEmptyTupleType, C.Ctx.TheRawPointerType));
@@ -101,10 +100,9 @@ TEST(TypeMatch, UnrelatedTypes) {
 TEST(TypeMatch, Classes) {
   TestContext C;
 
-  auto check = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
+  auto check = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchFlags::AllowOverride) &&
+           !derived->matches(base, TypeMatchOptions());
   };
 
   auto *baseClass = C.makeNominal<ClassDecl>("Base");
@@ -143,10 +141,9 @@ TEST(TypeMatch, Classes) {
 TEST(TypeMatch, Optionals) {
   TestContext C{DeclareOptionalTypes};
 
-  auto check = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
+  auto check = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchFlags::AllowOverride) &&
+           !derived->matches(base, TypeMatchOptions());
   };
 
   auto *baseClass = C.makeNominal<ClassDecl>("Base");
@@ -172,99 +169,21 @@ TEST(TypeMatch, Optionals) {
   EXPECT_FALSE(check(optToOpt, baseToBase));
 }
 
-TEST(TypeMatch, IUONearMatch) {
-  TestContext C{DeclareOptionalTypes};
-
-  auto check = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
-  };
-  auto checkIUO = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowNonOptionalForIUOParam,
-                            /*resolver*/nullptr);
-  };
-  auto checkIUOOverride = [&C](Type base, Type derived) {
-    TypeMatchOptions matchMode = TypeMatchFlags::AllowOverride;
-    matchMode |= TypeMatchFlags::AllowNonOptionalForIUOParam;
-    return derived->matches(base, matchMode, /*resolver*/nullptr);
-  };
-
-  auto *baseClass = C.makeNominal<ClassDecl>("Base");
-  Type baseTy = baseClass->getDeclaredInterfaceType();
-  Type optTy = ImplicitlyUnwrappedOptionalType::get(baseTy);
-
-  Type baseToVoid = FunctionType::get(baseTy, C.Ctx.TheEmptyTupleType);
-  Type optToVoid = FunctionType::get(optTy, C.Ctx.TheEmptyTupleType);
-  EXPECT_TRUE(check(baseToVoid, optToVoid));
-  EXPECT_FALSE(checkIUO(baseToVoid, optToVoid));
-  EXPECT_TRUE(checkIUOOverride(baseToVoid, optToVoid));
-  EXPECT_FALSE(check(optToVoid, baseToVoid));
-  EXPECT_TRUE(checkIUO(optToVoid, baseToVoid));
-  EXPECT_TRUE(checkIUOOverride(optToVoid, baseToVoid));
-
-  Type voidToBase = FunctionType::get(C.Ctx.TheEmptyTupleType, baseTy);
-  Type voidToOpt = FunctionType::get(C.Ctx.TheEmptyTupleType, optTy);
-  EXPECT_FALSE(check(voidToBase, voidToOpt));
-  EXPECT_FALSE(checkIUO(voidToBase, voidToOpt));
-  EXPECT_FALSE(checkIUOOverride(voidToBase, voidToOpt));
-  EXPECT_TRUE(check(voidToOpt, voidToBase));
-  EXPECT_FALSE(checkIUO(voidToOpt, voidToBase));
-  EXPECT_TRUE(checkIUOOverride(voidToOpt, voidToBase));
-
-  Type baseToBase = FunctionType::get(baseTy, baseTy);
-  Type optToOpt = FunctionType::get(optTy, optTy);
-  EXPECT_FALSE(check(baseToBase, optToOpt));
-  EXPECT_FALSE(checkIUO(baseToBase, optToOpt));
-  EXPECT_FALSE(checkIUOOverride(baseToBase, optToOpt));
-  EXPECT_FALSE(check(optToOpt, baseToBase));
-  EXPECT_FALSE(checkIUO(optToOpt, baseToBase));
-  EXPECT_TRUE(checkIUOOverride(optToOpt, baseToBase));
-
-  Type tupleOfBase = TupleType::get({baseTy, baseTy}, C.Ctx);
-  Type tupleOfOpt = TupleType::get({optTy, optTy}, C.Ctx);
-
-  Type baseTupleToVoid = FunctionType::get(tupleOfBase,C.Ctx.TheEmptyTupleType);
-  Type optTupleToVoid = FunctionType::get(tupleOfOpt, C.Ctx.TheEmptyTupleType);
-  EXPECT_TRUE(check(baseTupleToVoid, optTupleToVoid));
-  EXPECT_FALSE(checkIUO(baseTupleToVoid, optTupleToVoid));
-  EXPECT_TRUE(checkIUOOverride(baseTupleToVoid, optTupleToVoid));
-  EXPECT_FALSE(check(optTupleToVoid, baseTupleToVoid));
-  EXPECT_TRUE(checkIUO(optTupleToVoid, baseTupleToVoid));
-  EXPECT_TRUE(checkIUOOverride(optTupleToVoid, baseTupleToVoid));
-
-  Type nestedBaseTuple = TupleType::get({C.Ctx.TheEmptyTupleType, tupleOfBase},
-                                        C.Ctx);
-  Type nestedOptTuple = TupleType::get({C.Ctx.TheEmptyTupleType, tupleOfOpt},
-                                        C.Ctx);
-  Type nestedBaseTupleToVoid = FunctionType::get(nestedBaseTuple,
-                                                 C.Ctx.TheEmptyTupleType);
-  Type nestedOptTupleToVoid = FunctionType::get(nestedOptTuple,
-                                                C.Ctx.TheEmptyTupleType);
-  EXPECT_TRUE(check(nestedBaseTupleToVoid, nestedOptTupleToVoid));
-  EXPECT_FALSE(checkIUO(nestedBaseTupleToVoid, nestedOptTupleToVoid));
-  EXPECT_TRUE(checkIUOOverride(nestedBaseTupleToVoid, nestedOptTupleToVoid));
-  EXPECT_FALSE(check(nestedOptTupleToVoid, nestedBaseTupleToVoid));
-  EXPECT_FALSE(checkIUO(nestedOptTupleToVoid, nestedBaseTupleToVoid));
-  EXPECT_FALSE(checkIUOOverride(nestedOptTupleToVoid, nestedBaseTupleToVoid));
-}
-
 TEST(TypeMatch, OptionalMismatch) {
   TestContext C{DeclareOptionalTypes};
 
-  auto check = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
+  auto check = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchFlags::AllowOverride) &&
+           !derived->matches(base, TypeMatchOptions());
   };
-  auto checkOpt = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowTopLevelOptionalMismatch,
-                            /*resolver*/nullptr);
+  auto checkOpt = [](Type base, Type derived) {
+    return derived->matches(base,
+                            TypeMatchFlags::AllowTopLevelOptionalMismatch);
   };
-  auto checkOptOverride = [&C](Type base, Type derived) {
+  auto checkOptOverride = [](Type base, Type derived) {
     TypeMatchOptions matchMode = TypeMatchFlags::AllowOverride;
     matchMode |= TypeMatchFlags::AllowTopLevelOptionalMismatch;
-    return derived->matches(base, matchMode, /*resolver*/nullptr);
+    return derived->matches(base, matchMode);
   };
 
   auto *baseClass = C.makeNominal<ClassDecl>("Base");
@@ -327,10 +246,9 @@ TEST(TypeMatch, OptionalMismatch) {
 TEST(TypeMatch, OptionalMismatchTuples) {
   TestContext C{DeclareOptionalTypes};
 
-  auto checkOverride = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
+  auto checkOverride = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchFlags::AllowOverride) &&
+           !derived->matches(base, TypeMatchOptions());
   };
 
   auto *baseClass = C.makeNominal<ClassDecl>("Base");
@@ -358,9 +276,9 @@ TEST(TypeMatch, OptionalMismatchTuples) {
   EXPECT_FALSE(checkOverride(optBaseTuple, optOptTuple));
   EXPECT_FALSE(checkOverride(optBaseTuple, baseOptTuple));
 
-  auto checkOpt = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowTopLevelOptionalMismatch,
-                            /*resolver*/nullptr);
+  auto checkOpt = [](Type base, Type derived) {
+    return derived->matches(base,
+                            TypeMatchFlags::AllowTopLevelOptionalMismatch);
   };
 
   EXPECT_TRUE(checkOpt(baseBaseTuple, optOptTuple));
@@ -389,14 +307,13 @@ TEST(TypeMatch, OptionalMismatchTuples) {
 TEST(TypeMatch, OptionalMismatchFunctions) {
   TestContext C{DeclareOptionalTypes};
 
-  auto checkOverride = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowOverride,
-                            /*resolver*/nullptr) &&
-        !derived->matches(base, TypeMatchOptions(), /*resolver*/nullptr);
+  auto checkOverride = [](Type base, Type derived) {
+    return derived->matches(base, TypeMatchFlags::AllowOverride) &&
+           !derived->matches(base, TypeMatchOptions());
   };
-  auto checkOpt = [&C](Type base, Type derived) {
-    return derived->matches(base, TypeMatchFlags::AllowTopLevelOptionalMismatch,
-                            /*resolver*/nullptr);
+  auto checkOpt = [](Type base, Type derived) {
+    return derived->matches(base,
+                            TypeMatchFlags::AllowTopLevelOptionalMismatch);
   };
 
   Type voidToVoid = FunctionType::get(C.Ctx.TheEmptyTupleType,
@@ -413,15 +330,13 @@ TEST(TypeMatch, NoEscapeMismatchFunctions) {
 
   // Note the reversed names here: parameters must be contravariant for the
   // functions that take them to be covariant.
-  auto checkOverride = [&C](Type paramOfDerived, Type paramOfBase) {
-    return paramOfBase->matches(paramOfDerived, TypeMatchFlags::AllowOverride,
-                                /*resolver*/nullptr);
+  auto checkOverride = [](Type paramOfDerived, Type paramOfBase) {
+    return paramOfBase->matches(paramOfDerived, TypeMatchFlags::AllowOverride);
   };
-  auto checkMismatch = [&C](Type paramOfDerived, Type paramOfBase) {
+  auto checkMismatch = [](Type paramOfDerived, Type paramOfBase) {
     return paramOfBase->matches(
         paramOfDerived,
-        TypeMatchFlags::IgnoreNonEscapingForOptionalFunctionParam,
-        /*resolver*/nullptr);
+        TypeMatchFlags::IgnoreNonEscapingForOptionalFunctionParam);
   };
 
   Type voidToVoidFn = FunctionType::get(C.Ctx.TheEmptyTupleType,

@@ -15,10 +15,7 @@
 // Other libraries and framework includes
 // Project includes
 
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Core/Module.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Core/Value.h"
 #include "lldb/Expression/DiagnosticManager.h"
 #include "lldb/Expression/FunctionCaller.h"
@@ -29,6 +26,9 @@
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/StreamString.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -155,7 +155,7 @@ lldb::addr_t AppleGetPendingItemsHandler::SetupGetPendingItemsFunction(
 
     if (!m_get_pending_items_impl_code.get()) {
       if (g_get_pending_items_function_code != NULL) {
-        Error error;
+        Status error;
         m_get_pending_items_impl_code.reset(
             exe_ctx.GetTargetRef().GetUtilityFunctionForLanguage(
                 g_get_pending_items_function_code, eLanguageTypeObjC,
@@ -183,7 +183,7 @@ lldb::addr_t AppleGetPendingItemsHandler::SetupGetPendingItemsFunction(
       }
 
       // Next make the runner function for our implementation utility function.
-      Error error;
+      Status error;
       ClangASTContext *clang_ast_context =
           thread.GetProcess()->GetTarget().GetScratchClangASTContext();
       CompilerType get_pending_items_return_type =
@@ -234,7 +234,7 @@ AppleGetPendingItemsHandler::GetPendingItemsReturnInfo
 AppleGetPendingItemsHandler::GetPendingItems(Thread &thread, addr_t queue,
                                              addr_t page_to_free,
                                              uint64_t page_to_free_size,
-                                             Error &error) {
+                                             Status &error) {
   lldb::StackFrameSP thread_cur_frame = thread.GetStackFrameAtIndex(0);
   ProcessSP process_sp(thread.CalculateProcess());
   TargetSP target_sp(thread.CalculateTarget());

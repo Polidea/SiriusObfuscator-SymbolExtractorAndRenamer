@@ -13,14 +13,15 @@
 #include "FoundationValueTypes.h"
 #include "ObjCRuntimeSyntheticProvider.h"
 
-#include "lldb/Core/DataExtractor.h"
-#include "lldb/Core/Error.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
+#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Target/ObjCLanguageRuntime.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/SwiftLanguageRuntime.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/DataExtractor.h"
+#include "lldb/Utility/Status.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -37,7 +38,7 @@ bool lldb_private::formatters::swift::Date_SummaryProvider(
     return false;
 
   DataExtractor data_extractor;
-  Error error;
+  Status error;
   if (!time_sp->GetData(data_extractor, error))
     return false;
 
@@ -177,7 +178,7 @@ bool lldb_private::formatters::swift::Measurement_SummaryProvider(
       lldb::eDynamicDontRunTarget, true);
 
   DataExtractor data_extractor;
-  Error error;
+  Status error;
   if (!value_sp->GetData(data_extractor, error))
     return false;
 
@@ -251,65 +252,27 @@ bool lldb_private::formatters::swift::UUID_SummaryProvider(
 
 bool lldb_private::formatters::swift::Data_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
-  static ConstString g__wrapped("_wrapped");
-  static ConstString g___wrapped("__wrapped");
-  static ConstString g_Immutable("Immutable");
-  static ConstString g_Mutable("Mutable");
+  static ConstString g__backing("_backing");
+  static ConstString g__length("_length");
   static ConstString g__value("_value");
 
-  ValueObjectSP selected_case_sp =
-      valobj.GetChildAtNamePath({g__wrapped, g___wrapped});
-  if (!selected_case_sp)
+  ValueObjectSP backing_sp = valobj.GetChildAtNamePath(g__backing);
+  if (!backing_sp)
     return false;
 
-  ConstString selected_case(selected_case_sp->GetValueAsCString());
-  if (selected_case == g_Immutable) {
-    if (ValueObjectSP immutable_sp =
-            selected_case_sp->GetChildAtNamePath({g_Immutable, g__value})) {
-      std::string summary;
-      if (immutable_sp->GetSummaryAsCString(summary, options)) {
-        stream.Printf("%s", summary.c_str());
-        return true;
-      }
-    }
-  } else if (selected_case == g_Mutable) {
-    if (ValueObjectSP mutable_sp =
-            selected_case_sp->GetChildAtNamePath({g_Mutable, g__value})) {
-      ProcessSP process_sp(valobj.GetProcessSP());
-      if (!process_sp)
-        return false;
-      TargetSP target_sp(valobj.GetTargetSP());
-      if (!target_sp)
-        return false;
-      if (SwiftLanguageRuntime *swift_runtime =
-              valobj.GetProcessSP()->GetSwiftLanguageRuntime()) {
-        lldb::addr_t value =
-            mutable_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
-        if (value != LLDB_INVALID_ADDRESS) {
-          value = swift_runtime->MaskMaybeBridgedPointer(value);
-          DataExtractor buffer(&value, process_sp->GetAddressByteSize(),
-                               process_sp->GetByteOrder(),
-                               process_sp->GetAddressByteSize());
-          if (ClangASTContext *clang_ast_ctx =
-                  target_sp->GetScratchClangASTContext()) {
-            if (CompilerType id_type =
-                    clang_ast_ctx->GetBasicType(lldb::eBasicTypeObjCID)) {
-              if (ValueObjectSP nsdata_sp =
-                      ValueObject::CreateValueObjectFromData(
-                          "nsdata", buffer, process_sp, id_type)) {
-                nsdata_sp = nsdata_sp->GetQualifiedRepresentationIfAvailable(
-                    lldb::eDynamicDontRunTarget, false);
-                std::string summary;
-                if (nsdata_sp->GetSummaryAsCString(summary, options)) {
-                  stream.Printf("%s", summary.c_str());
-                  return true;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
+  ValueObjectSP length_sp = backing_sp->GetChildAtNamePath(g__length);
+  if (!length_sp)
+    return false;
+
+  ValueObjectSP value_sp = length_sp->GetChildAtNamePath(g__value);
+  if (!value_sp)
+    return false;
+
+  bool success = false;
+  uint64_t len = value_sp->GetValueAsUnsigned(0, &success);
+  if (success) {
+    stream.Printf("%llu bytes", len);
+    return true;
   }
 
   return false;

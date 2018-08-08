@@ -6,11 +6,11 @@
  
  See http://swift.org/LICENSE.txt for license information
  See http://swift.org/CONTRIBUTORS.txt for Swift project authors
- */
+*/
 
 import TestSupport
 import XCTest
-import libc
+import SPMLibc
 
 @testable import Basic
 
@@ -71,10 +71,10 @@ class ProcessTests: XCTestCase {
     func testFindExecutable() throws {
         mktmpdir { path in
             // This process should always work.
-            XCTAssertTrue(Process().findExecutable("ls"))
+            XCTAssertTrue(Process.findExecutable("ls") != nil)
 
-            XCTAssertFalse(Process().findExecutable("nonExistantProgram"))
-            XCTAssertFalse(Process().findExecutable(""))
+            XCTAssertEqual(Process.findExecutable("nonExistantProgram"), nil)
+            XCTAssertEqual(Process.findExecutable(""), nil)
 
             // Create a local nonexecutable file to test.
             let tempExecutable = path.appending(component: "nonExecutableProgram")
@@ -85,7 +85,7 @@ class ProcessTests: XCTestCase {
                 """)
 
             try withCustomEnv(["PATH": path.asString]) {
-                XCTAssertFalse(Process().findExecutable("nonExecutableProgram"))
+                XCTAssertEqual(Process.findExecutable("nonExecutableProgram"), nil)
             }
         }
     }

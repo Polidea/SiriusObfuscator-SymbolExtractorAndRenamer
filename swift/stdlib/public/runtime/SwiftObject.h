@@ -30,10 +30,19 @@
 
 #if SWIFT_OBJC_INTEROP
 
+#if __APPLE__ && !SWIFT_DARWIN_ENABLE_STABLE_ABI_BIT
+// Pre-stable ABI uses un-mangled name for SwiftObject
+#else
+// Source code: "SwiftObject"
+// Real class name: mangled "Swift._SwiftObject"
+#define SwiftObject _TtCs12_SwiftObject
+#endif
+
 #if __has_attribute(objc_root_class)
 __attribute__((__objc_root_class__))
 #endif
 SWIFT_RUNTIME_EXPORT @interface SwiftObject<NSObject> {
+ @private
   Class isa;
   SWIFT_HEAPOBJECT_NON_OBJC_MEMBERS;
 }
@@ -58,6 +67,9 @@ SWIFT_RUNTIME_EXPORT @interface SwiftObject<NSObject> {
 - (BOOL)conformsToProtocol:(Protocol *)aProtocol;
 
 - (BOOL)respondsToSelector:(SEL)aSelector;
++ (BOOL)instancesRespondToSelector:(SEL)aSelector;
+- (IMP)methodForSelector:(SEL)aSelector;
++ (IMP)instanceMethodForSelector:(SEL)aSelector;
 
 - (instancetype)retain;
 - (oneway void)release;
@@ -70,14 +82,7 @@ SWIFT_RUNTIME_EXPORT @interface SwiftObject<NSObject> {
 
 namespace swift {
 
-struct String { void *x, *y, *z; };
-
-/// Helper from the standard library for stringizing an arbitrary object.
-extern "C" SWIFT_CC(swift)
-void swift_getSummary(String *out, OpaqueValue *value, const Metadata *T);
-
-// Convert a Swift String to an NSString.
-NSString *convertStringToNSString(String *swiftString);
+NSString *getDescription(OpaqueValue *value, const Metadata *type);
 
 }
 

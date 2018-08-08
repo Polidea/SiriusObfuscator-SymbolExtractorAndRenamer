@@ -28,6 +28,7 @@ add_swift_library(swiftIRGen STATIC
   GenProto.cpp
   GenReflection.cpp
   GenStruct.cpp
+  GenThunk.cpp
   GenTuple.cpp
   GenType.cpp
   GenValueWitness.cpp
@@ -40,6 +41,9 @@ add_swift_library(swiftIRGen STATIC
   Linking.cpp
   LoadableByAddress.cpp
   LocalTypeData.cpp
+  MetadataLayout.cpp
+  MetadataRequest.cpp
+  Outlining.cpp
   StructLayout.cpp
   SwiftTargetInfo.cpp
   TypeLayoutVerifier.cpp

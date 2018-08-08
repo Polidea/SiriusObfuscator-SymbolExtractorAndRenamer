@@ -242,7 +242,7 @@ swift::findSwiftValueConformances(const ExistentialTypeMetadata *existentialType
     if (!cls) cls = _getSwiftValueClass();
 
     // Check whether the class conforms to the protocol.
-    if (![cls conformsToProtocol: (Protocol*) protocol])
+    if (![cls conformsToProtocol: protocol_const_cast(protocol)])
       return false;
   }
 
@@ -316,7 +316,7 @@ swift::findSwiftValueConformances(const ExistentialTypeMetadata *existentialType
     return NO;
   }
 
-  return swift_stdlib_Hashable_isEqual_indirect(
+  return _swift_stdlib_Hashable_isEqual_indirect(
       getSwiftValuePayload(self,
                            getSwiftValuePayloadAlignMask(selfHeader->type)),
       getSwiftValuePayload(other,
@@ -330,36 +330,25 @@ swift::findSwiftValueConformances(const ExistentialTypeMetadata *existentialType
   if (!hashableConformance) {
     return (NSUInteger)self;
   }
-  return swift_stdlib_Hashable_hashValue_indirect(
+  return _swift_stdlib_Hashable_hashValue_indirect(
       getSwiftValuePayload(self,
                            getSwiftValuePayloadAlignMask(selfHeader->type)),
       selfHeader->type, hashableConformance);
 }
 
 static NSString *getValueDescription(_SwiftValue *self) {
-  String tmp;
   const Metadata *type;
   const OpaqueValue *value;
   std::tie(type, value) = getValueFromSwiftValue(self);
 
   // Copy the value, since it will be consumed by getSummary.
   ValueBuffer copyBuf;
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
   auto copy = type->allocateBufferIn(&copyBuf);
   type->vw_initializeWithCopy(copy, const_cast<OpaqueValue *>(value));
-#else
-  auto copy = type->vw_initializeBufferWithCopy(&copyBuf,
-                                              const_cast<OpaqueValue*>(value));
-#endif
 
-  swift_getSummary(&tmp, copy, type);
-
-#ifdef SWIFT_RUNTIME_ENABLE_COW_EXISTENTIALS
+  NSString *string = getDescription(copy, type);
   type->deallocateBufferIn(&copyBuf);
-#else
-  type->vw_deallocateBuffer(&copyBuf);
-#endif
-  return convertStringToNSString(&tmp);
+  return string;
 }
 
 - (NSString *)description {
@@ -375,10 +364,10 @@ static NSString *getValueDescription(_SwiftValue *self) {
   return getSwiftValueTypeMetadata(self);
 }
 - (NSString *)_swiftTypeName {
-  TwoWordPair<const char *, uintptr_t> typeName
+  TypeNamePair typeName
     = swift_getTypeName(getSwiftValueTypeMetadata(self), true);
 
-  return [NSString stringWithUTF8String: typeName.first];
+  return [NSString stringWithUTF8String: typeName.data];
 }
 - (const OpaqueValue *)_swiftValue {
   return getValueFromSwiftValue(self).second;

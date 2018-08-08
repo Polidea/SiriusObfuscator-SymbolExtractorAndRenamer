@@ -14,6 +14,8 @@
 
 #include "llbuild/Basic/LLVM.h"
 
+#include "llvm/ADT/Hashing.h"
+
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llbuild;
@@ -28,6 +30,7 @@ StringRef BuildValue::stringForKind(BuildValue::Kind kind) {
     CASE(MissingInput);
     CASE(DirectoryContents);
     CASE(DirectoryTreeSignature);
+    CASE(DirectoryTreeStructureSignature);
     CASE(MissingOutput);
     CASE(FailedInput);
     CASE(SuccessfulCommand);
@@ -45,7 +48,7 @@ StringRef BuildValue::stringForKind(BuildValue::Kind kind) {
 void BuildValue::dump(raw_ostream& os) const {
   os << "BuildValue(" << stringForKind(kind);
   if (kindHasCommandSignature()) {
-    os << ", signature=" << commandSignature;
+    os << ", signature=" << commandSignature.value;
   }
   if (kindHasOutputInfo()) {
     os << ", outputInfos=[";

@@ -30,7 +30,7 @@ internal func __NSCalendarInit(_ identifier: String) -> NSCalendar? {
 public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxing {
     public typealias ReferenceType = NSCalendar
     
-    internal var _autoupdating: Bool
+    private var _autoupdating: Bool
     internal var _handle: _MutableHandle<NSCalendar>
     
     /// Calendar supports many different kinds of calendars. Each is identified by an identifier here.
@@ -588,7 +588,7 @@ public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxi
     public func compare(_ date1: Date, to date2: Date, toUnitGranularity unit: NSCalendar.Unit) -> ComparisonResult { fatalError() }
     
     
-    /// Compares the given dates down to the given component, reporting them `orderedSame` if they are the same in the given component and all larger components, otherwise either `orderedAscending` or `orderedAscending`.
+    /// Compares the given dates down to the given component, reporting them `orderedSame` if they are the same in the given component and all larger components, otherwise either `orderedAscending` or `orderedDescending`.
     ///
     /// - parameter date1: A date to compare.
     /// - parameter date2: A date to compare.
@@ -890,25 +890,25 @@ public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxi
         
         switch matchingPolicy {
         case .nextTime:
-            let _ = result.insert(.matchNextTime)
+            result.insert(.matchNextTime)
         case .nextTimePreservingSmallerComponents:
-            let _ = result.insert(.matchNextTimePreservingSmallerUnits)
+            result.insert(.matchNextTimePreservingSmallerUnits)
         case .previousTimePreservingSmallerComponents:
-            let _ = result.insert(.matchPreviousTimePreservingSmallerUnits)
+            result.insert(.matchPreviousTimePreservingSmallerUnits)
         case .strict:
-            let _ = result.insert(.matchStrictly)
+            result.insert(.matchStrictly)
         }
         
         switch repeatedTimePolicy {
         case .first:
-            let _ = result.insert(.matchFirst)
+            result.insert(.matchFirst)
         case .last:
-            let _ = result.insert(.matchLast)
+            result.insert(.matchLast)
         }
         
         switch direction {
         case .backward:
-            let _ = result.insert(.searchBackwards)
+            result.insert(.searchBackwards)
         case .forward:
             break
         }
@@ -937,7 +937,7 @@ public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxi
         
         var result = NSCalendar.Unit()
         for u in units {
-            let _ = result.insert(unitMap[u]!)
+            result.insert(unitMap[u]!)
         }
         return result
     }
@@ -1051,7 +1051,7 @@ public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxi
     }
     
     internal static func _toNSCalendarIdentifier(_ identifier: Identifier) -> NSCalendar.Identifier {
-        if #available(OSX 10.10, iOS 8.0, *) {
+        if #available(macOS 10.10, iOS 8.0, *) {
             let identifierMap: [Identifier : NSCalendar.Identifier] =
                 [.gregorian: .gregorian,
                  .buddhist: .buddhist,
@@ -1091,7 +1091,7 @@ public struct Calendar : Hashable, Equatable, ReferenceConvertible, _MutableBoxi
     }
     
     internal static func _fromNSCalendarIdentifier(_ identifier: NSCalendar.Identifier) -> Identifier {
-        if #available(OSX 10.10, iOS 8.0, *) {
+        if #available(macOS 10.10, iOS 8.0, *) {
             let identifierMap: [NSCalendar.Identifier : Identifier] =
                 [.gregorian: .gregorian,
                  .buddhist: .buddhist,
@@ -1156,14 +1156,14 @@ extension Calendar : CustomDebugStringConvertible, CustomStringConvertible, Cust
             (label: "kind", value: _kindDescription),
             (label: "locale", value: locale as Any),
             (label: "timeZone", value: timeZone),
-            (label: "firstWeekDay", value: firstWeekday),
+            (label: "firstWeekday", value: firstWeekday),
             (label: "minimumDaysInFirstWeek", value: minimumDaysInFirstWeek)
         ]
         return Mirror(self, children: children, displayStyle: Mirror.DisplayStyle.struct)
     }
 }
 
-extension Calendar: _ObjectTypeBridgeable {
+extension Calendar: _ObjectiveCBridgeable {
     public typealias _ObjectType = NSCalendar
     
     @_semantics("convertToObjectiveC")

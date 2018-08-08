@@ -31,6 +31,7 @@ struct _BridgeStorage<
   public // @testable
   typealias ObjC = ObjCClass
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   init(native: Native, bits: Int) {
@@ -44,6 +45,7 @@ struct _BridgeStorage<
       native, UInt(bits) << _objectPointerLowSpareBitShift)
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   init(objC: ObjC) {
@@ -51,6 +53,7 @@ struct _BridgeStorage<
     rawValue = _makeObjCBridgeObject(objC)
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   init(native: Native) {
@@ -58,6 +61,7 @@ struct _BridgeStorage<
     rawValue = Builtin.reinterpretCast(native)
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var spareBits: Int {
   @inline(__always) get {
@@ -67,26 +71,31 @@ struct _BridgeStorage<
     }
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   mutating func isUniquelyReferencedNative() -> Bool {
     return _isUnique(&rawValue)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   mutating func isUniquelyReferencedOrPinnedNative() -> Bool {
     return _isUniqueOrPinned(&rawValue)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var isNative: Bool {
     @inline(__always) get {
-      return (_bitPattern(rawValue) &
-              (_objCTaggedPointerBits | _objectPointerIsObjCBit)) == 0
+      let result = Builtin.classifyBridgeObject(rawValue)
+      return !Bool(Builtin.or_Int1(result.isObjCObject,
+                                   result.isObjCTaggedPointer))
     }
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   func isNativeWithClearedSpareBits(_ bits: Int) -> Bool {
@@ -95,6 +104,7 @@ struct _BridgeStorage<
              (UInt(bits)) << _objectPointerLowSpareBitShift)) == 0
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var isObjC: Bool {
     @inline(__always) get {
@@ -102,6 +112,7 @@ struct _BridgeStorage<
     }
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var nativeInstance: Native {
     @inline(__always) get {
@@ -110,6 +121,7 @@ struct _BridgeStorage<
     }
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var nativeInstance_noSpareBits: Native {
     @inline(__always) get {
@@ -119,6 +131,7 @@ struct _BridgeStorage<
     }
   }
   
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   mutating func isUniquelyReferenced_native_noSpareBits() -> Bool {
@@ -126,6 +139,7 @@ struct _BridgeStorage<
     return _isUnique_native(&rawValue)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   @inline(__always)
   public // @testable
   mutating func isUniquelyReferencedOrPinned_native_noSpareBits() -> Bool {
@@ -133,6 +147,7 @@ struct _BridgeStorage<
     return _isUniqueOrPinned_native(&rawValue)
   }
 
+  @inlinable // FIXME(sil-serialize-all)
   public // @testable
   var objCInstance: ObjC {
     @inline(__always) get {
@@ -142,14 +157,15 @@ struct _BridgeStorage<
   }
   
   //===--- private --------------------------------------------------------===//
+  @inlinable // FIXME(sil-serialize-all)
   internal var _isTagged: Bool {
     @inline(__always) get {
-      return (_bitPattern(rawValue) & _objCTaggedPointerBits) != 0
+      return Bool(Builtin.classifyBridgeObject(rawValue).isObjCTaggedPointer)
     }
   }
 
   // rawValue is passed inout to _isUnique.  Although its value
   // is unchanged, it must appear mutable to the optimizer.
-  @_versioned
+  @usableFromInline
   internal var rawValue: Builtin.BridgeObject
 }

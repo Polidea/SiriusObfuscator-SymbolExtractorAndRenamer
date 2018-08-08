@@ -13,14 +13,15 @@ func nonOptContext() -> Foo {
   case ():
     return .someVar
   case (): // expected-warning {{case is already handled by previous patterns; consider removing it}}
-    return .someOptVar // expected-error 2 {{value of optional type 'Foo' not unwrapped; did you mean to use '!' or '?'?}} {{23-23=!}}
+    // FIXME: Customize this diagnostic for the optional case.
+    return .someOptVar // expected-error 1 {{member 'someOptVar' in 'Foo' produces result of type 'Foo?', but context expects 'Foo'}}
   // TODO
   //case ():
   //  return .someOptVar!
   case (): // expected-warning {{case is already handled by previous patterns; consider removing it}}
     return .someFunc()
   case (): // expected-warning {{case is already handled by previous patterns; consider removing it}}
-    return .someOptFunc() // expected-error{{}} {{26-26=!}}
+    return .someOptFunc() // expected-error{{member 'someOptFunc' in 'Foo' produces result of type 'Foo?', but context expects 'Foo'}}
   // TODO
   //case ():
   //  return .someOptFunc()!
@@ -67,3 +68,24 @@ func nestedOptContext() -> Foo?? {
   return .none
 }
 
+// <rdar://problem/35945827>
+
+// This should diagnose instead of crashing in SILGen
+protocol Horse {
+  static var palomino: Horse { get }
+}
+
+func rideAHorse(_ horse: Horse?) {}
+
+rideAHorse(.palomino)
+// expected-error@-1 {{static member 'palomino' cannot be used on protocol metatype 'Horse.Protocol'}}
+
+// FIXME: This should work if the static member is part of a class though
+class Donkey {
+  static var mule: Donkey & Horse { while true {} }
+}
+
+func rideAMule(_ mule: (Horse & Donkey)?) {}
+
+rideAMule(.mule)
+// expected-error@-1 {{static member 'mule' cannot be used on protocol metatype '(Donkey & Horse).Protocol'}}

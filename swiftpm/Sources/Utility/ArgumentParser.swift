@@ -52,7 +52,7 @@ extension ArgumentParserError: CustomStringConvertible {
 /// initializer.
 public enum ArgumentConversionError: Swift.Error {
 
-    /// The value is unkown.
+    /// The value is unknown.
     case unknown(value: String)
 
     /// The value could not be converted to the target type.
@@ -110,12 +110,15 @@ public enum Shell: String, StringEnumArgument {
 /// - none:        Offers no completions at all; e.g. for string identifier
 /// - unspecified: No specific completions, will offer tool's completions
 /// - filename:    Offers filename completions
+/// - function:    Custom function for generating completions. Must be
+///                provided in the script's scope.
 /// - values:      Offers completions from predefined list. A description
 ///                can be provided which is shown in some shells, like zsh.
 public enum ShellCompletion {
     case none
     case unspecified
     case filename
+    case function(String)
     case values([(value: String, description: String)])
 }
 
@@ -194,7 +197,11 @@ public struct PathArgument: ArgumentKind {
 
     public init(argument: String) throws {
         // FIXME: This should check for invalid paths.
-        path = AbsolutePath(argument, relativeTo: currentWorkingDirectory)
+        if let cwd = localFileSystem.currentWorkingDirectory {
+            path = AbsolutePath(argument, relativeTo: cwd)
+        } else {
+            path = try AbsolutePath(validating: argument)
+        }
     }
 
     public static var completion: ShellCompletion = .filename
@@ -267,6 +274,9 @@ protocol ArgumentProtocol: Hashable {
     /// The usage text associated with this argument. Used to generate complete help string.
     var usage: String? { get }
 
+    /// The shell completions to offer as values for this argument.
+    var completion: ShellCompletion { get }
+
     /// Parses and returns the argument values from the parser.
     ///
     // FIXME: Because `ArgumentKindTy`` can't conform to `ArgumentKind`, this
@@ -311,12 +321,15 @@ public final class OptionArgument<Kind>: ArgumentProtocol {
 
     let usage: String?
 
-    init(name: String, shortName: String?, strategy: ArrayParsingStrategy, usage: String?) {
+    let completion: ShellCompletion
+
+    init(name: String, shortName: String?, strategy: ArrayParsingStrategy, usage: String?, completion: ShellCompletion) {
         precondition(!isPositional(argument: name))
         self.name = name
         self.shortName = shortName
         self.strategy = strategy
         self.usage = usage
+        self.completion = completion
     }
 
     func parse(_ kind: ArgumentKind.Type, with parser: inout ArgumentParserProtocol) throws -> [ArgumentKind] {
@@ -365,12 +378,15 @@ public final class PositionalArgument<Kind>: ArgumentProtocol {
 
     let usage: String?
 
-    init(name: String, strategy: ArrayParsingStrategy, optional: Bool, usage: String?) {
+    let completion: ShellCompletion
+
+    init(name: String, strategy: ArrayParsingStrategy, optional: Bool, usage: String?, completion: ShellCompletion) {
         precondition(isPositional(argument: name))
         self.name = name
         self.strategy = strategy
         self.isOptional = optional
         self.usage = usage
+        self.completion = completion
     }
 
     func parse(_ kind: ArgumentKind.Type, with parser: inout ArgumentParserProtocol) throws -> [ArgumentKind] {
@@ -416,6 +432,8 @@ final class AnyArgument: ArgumentProtocol, CustomStringConvertible {
 
     let usage: String?
 
+    let completion: ShellCompletion
+
     /// The argument kind this holds, used while initializing that argument.
     let kind: ArgumentKind.Type
 
@@ -432,6 +450,7 @@ final class AnyArgument: ArgumentProtocol, CustomStringConvertible {
         self.strategy = argument.strategy
         self.isOptional = argument.isOptional
         self.usage = argument.usage
+        self.completion = argument.completion
         self.parseClosure = argument.parse(_:with:)
         isArray = false
     }
@@ -444,6 +463,7 @@ final class AnyArgument: ArgumentProtocol, CustomStringConvertible {
         self.strategy = argument.strategy
         self.isOptional = argument.isOptional
         self.usage = argument.usage
+        self.completion = argument.completion
         self.parseClosure = argument.parse(_:with:)
         isArray = true
     }
@@ -486,7 +506,7 @@ public final class ArgumentParser {
     /// A class representing result of the parsed arguments.
     public class Result: CustomStringConvertible {
         /// Internal representation of arguments mapped to their values.
-        private var results = [AnyArgument: Any]()
+        private var results = [String: Any]()
 
         /// Result of the parent parent parser, if any.
         private var parentResult: Result?
@@ -514,16 +534,16 @@ public final class ArgumentParser {
         ///     simplifications in the parsing code.
         fileprivate func add(_ values: [ArgumentKind], for argument: AnyArgument) throws {
             if argument.isArray {
-                var array = results[argument] as? [ArgumentKind] ?? []
+                var array = results[argument.name] as? [ArgumentKind] ?? []
                 array.append(contentsOf: values)
-                results[argument] = array
+                results[argument.name] = array
             } else {
                 // We expect only one value for non-array arguments.
                 guard let value = values.only else {
                     assertionFailure()
                     return
                 }
-                results[argument] = value
+                results[argument.name] = value
             }
         }
 
@@ -531,22 +551,39 @@ public final class ArgumentParser {
         ///
         /// Since the options are optional, their result may or may not be present.
         public func get<T>(_ argument: OptionArgument<T>) -> T? {
-            return (results[AnyArgument(argument)] as? T) ?? parentResult?.get(argument)
+            return (results[argument.name] as? T) ?? parentResult?.get(argument)
         }
 
         /// Array variant for option argument's get(_:).
         public func get<T>(_ argument: OptionArgument<[T]>) -> [T]? {
-            return (results[AnyArgument(argument)] as? [T]) ?? parentResult?.get(argument)
+            return (results[argument.name] as? [T]) ?? parentResult?.get(argument)
         }
 
         /// Get a positional argument's value.
         public func get<T>(_ argument: PositionalArgument<T>) -> T? {
-            return results[AnyArgument(argument)] as? T
+            return results[argument.name] as? T
         }
 
         /// Array variant for positional argument's get(_:).
         public func get<T>(_ argument: PositionalArgument<[T]>) -> [T]? {
-            return results[AnyArgument(argument)] as? [T]
+            return results[argument.name] as? [T]
+        }
+
+        /// Get an argument's value using its name.
+        /// - throws: An ArgumentParserError.invalidValue error if the parsed argument does not match the expected type.
+        public func get<T>(_ name: String) throws -> T? {
+            guard let value = results[name] else {
+                // if we have a parent and this is an option argument, look in the parent result
+                if let parentResult = parentResult, name.hasPrefix("-") {
+                    return try parentResult.get(name)
+                } else {
+                    return nil
+                }
+            }
+            guard let typedValue = value as? T else {
+                throw ArgumentParserError.invalidValue(argument: name, error: .typeMismatch(value: String(describing: value), expectedType: T.self))
+            }
+            return typedValue
         }
 
         /// Get the subparser which was chosen for the given parser.
@@ -581,6 +618,9 @@ public final class ArgumentParser {
 
     /// Overview text of this parser.
     let overview: String
+    
+    /// See more text of this parser.
+    let seeAlso: String?
 
     /// If this parser is a subparser.
     private let isSubparser: Bool
@@ -597,11 +637,13 @@ public final class ArgumentParser {
     ///   Otherwise, first command line argument will be used.
     ///   - usage: The "usage" line of the generated usage text.
     ///   - overview: The "overview" line of the generated usage text.
-    public init(commandName: String? = nil, usage: String, overview: String) {
+    ///   - seeAlso: The "see also" line of generated usage text.
+    public init(commandName: String? = nil, usage: String, overview: String, seeAlso: String? = nil) {
         self.isSubparser = false
         self.commandName = commandName
         self.usage = usage
         self.overview = overview
+        self.seeAlso = seeAlso
     }
 
     /// Create a subparser with its help text.
@@ -610,6 +652,7 @@ public final class ArgumentParser {
         self.commandName = nil
         self.usage = ""
         self.overview = overview
+        self.seeAlso = nil
     }
 
     /// Adds an option to the parser.
@@ -617,11 +660,12 @@ public final class ArgumentParser {
         option: String,
         shortName: String? = nil,
         kind: T.Type,
-        usage: String? = nil
+        usage: String? = nil,
+        completion: ShellCompletion? = nil
     ) -> OptionArgument<T> {
         assert(!optionArguments.contains(where: { $0.name == option }), "Can not define an option twice")
 
-        let argument = OptionArgument<T>(name: option, shortName: shortName, strategy: .oneByOne, usage: usage)
+        let argument = OptionArgument<T>(name: option, shortName: shortName, strategy: .oneByOne, usage: usage, completion: completion ?? T.completion)
         optionArguments.append(AnyArgument(argument))
         return argument
     }
@@ -632,11 +676,12 @@ public final class ArgumentParser {
         shortName: String? = nil,
         kind: [T].Type,
         strategy: ArrayParsingStrategy = .upToNextOption,
-        usage: String? = nil
+        usage: String? = nil,
+        completion: ShellCompletion? = nil
     ) -> OptionArgument<[T]> {
         assert(!optionArguments.contains(where: { $0.name == option }), "Can not define an option twice")
 
-        let argument = OptionArgument<[T]>(name: option, shortName: shortName, strategy: strategy, usage: usage)
+        let argument = OptionArgument<[T]>(name: option, shortName: shortName, strategy: strategy, usage: usage, completion: completion ?? T.completion)
         optionArguments.append(AnyArgument(argument))
         return argument
     }
@@ -648,7 +693,8 @@ public final class ArgumentParser {
         positional: String,
         kind: T.Type,
         optional: Bool = false,
-        usage: String? = nil
+        usage: String? = nil,
+        completion: ShellCompletion? = nil
     ) -> PositionalArgument<T> {
         precondition(subparsers.isEmpty, "Positional arguments are not supported with subparsers")
         precondition(canAcceptPositionalArguments, "Can not accept more positional arguments")
@@ -657,7 +703,7 @@ public final class ArgumentParser {
             canAcceptPositionalArguments = false
         }
 
-        let argument = PositionalArgument<T>(name: positional, strategy: .oneByOne, optional: optional, usage: usage)
+        let argument = PositionalArgument<T>(name: positional, strategy: .oneByOne, optional: optional, usage: usage, completion: completion ?? T.completion)
         positionalArguments.append(AnyArgument(argument))
         return argument
     }
@@ -670,7 +716,8 @@ public final class ArgumentParser {
         kind: [T].Type,
         optional: Bool = false,
         strategy: ArrayParsingStrategy = .upToNextOption,
-        usage: String? = nil
+        usage: String? = nil,
+        completion: ShellCompletion? = nil
     ) -> PositionalArgument<[T]> {
         precondition(subparsers.isEmpty, "Positional arguments are not supported with subparsers")
         precondition(canAcceptPositionalArguments, "Can not accept more positional arguments")
@@ -679,7 +726,7 @@ public final class ArgumentParser {
             canAcceptPositionalArguments = false
         }
 
-        let argument = PositionalArgument<[T]>(name: positional, strategy: strategy, optional: optional, usage: usage)
+        let argument = PositionalArgument<[T]>(name: positional, strategy: strategy, optional: optional, usage: usage, completion: completion ?? T.completion)
         positionalArguments.append(AnyArgument(argument))
         return argument
     }
@@ -809,10 +856,11 @@ public final class ArgumentParser {
         let padding = 2
 
         let maxWidth: Int
-        // Figure out the max width based on argument length or choose the default width if max width is longer
-        // than the default width.
-        if let maxArgument = (positionalArguments + optionArguments).map({ $0.name.count }).max(),
-            maxArgument < maxWidthDefault {
+        // Determine the max width based on argument length or choose the
+        // default width if max width is longer than the default width.
+        if let maxArgument = (positionalArguments + optionArguments).map({
+            [$0.name, $0.shortName].compactMap({ $0 }).joined(separator: ", ").count
+        }).max(), maxArgument < maxWidthDefault {
             maxWidth = maxArgument + padding + 1
         } else {
             maxWidth = maxWidthDefault
@@ -823,15 +871,15 @@ public final class ArgumentParser {
             // Start with a new line and add some padding.
             stream <<< "\n" <<< Format.asRepeating(string: " ", count: padding)
             let count = argument.count
-            // If the argument name is more than the set width take the whole
-            // line for it, otherwise we can fit everything in one line.
+            // If the argument is longer than the max width, print the usage
+            // on a new line. Otherwise, print the usage on the same line.
             if count >= maxWidth - padding {
                 stream <<< argument <<< "\n"
-                // Align full width because we on a new line.
+                // Align full width because usage is to be printed on a new line.
                 stream <<< Format.asRepeating(string: " ", count: maxWidth + padding)
             } else {
                 stream <<< argument
-                // Align to the remaining empty space we have.
+                // Align to the remaining empty space on the line.
                 stream <<< Format.asRepeating(string: " ", count: maxWidth - count)
             }
             stream <<< usage
@@ -850,10 +898,10 @@ public final class ArgumentParser {
         if optionArguments.count > 0 {
             stream <<< "\n\n"
             stream <<< "OPTIONS:"
-            for argument in optionArguments.lazy.sorted(by: {$0.name < $1.name}) {
+            for argument in optionArguments.lazy.sorted(by: { $0.name < $1.name }) {
                 guard let usage = argument.usage else { continue }
                 // Create name with its shortname, if available.
-                let name = [argument.name, argument.shortName].flatMap({ $0 }).joined(separator: ", ")
+                let name = [argument.name, argument.shortName].compactMap({ $0 }).joined(separator: ", ")
                 print(formatted: name, usage: usage, on: stream)
             }
 
@@ -875,12 +923,18 @@ public final class ArgumentParser {
 
         if positionalArguments.count > 0 {
             stream <<< "\n\n"
-            stream <<< "COMMANDS:"
-            for argument in positionalArguments.lazy.sorted(by: {$0.name < $1.name}) {
+            stream <<< "POSITIONAL ARGUMENTS:"
+            for argument in positionalArguments {
                 guard let usage = argument.usage else { continue }
                 print(formatted: argument.name, usage: usage, on: stream)
             }
         }
+        
+        if let seeAlso = seeAlso {
+            stream <<< "\n\n"
+            stream <<< "SEE ALSO: \(seeAlso)"
+        }
+        
         stream <<< "\n"
         stream.flush()
     }
@@ -889,7 +943,7 @@ public final class ArgumentParser {
 /// A class to bind ArgumentParser's arguments to an option structure.
 public final class ArgumentBinder<Options> {
     /// The signature of body closure.
-    private typealias BodyClosure = (inout Options, ArgumentParser.Result) -> Void
+    private typealias BodyClosure = (inout Options, ArgumentParser.Result) throws -> Void
 
     /// This array holds the closures which should be executed to fill the options structure.
     private var bodies = [BodyClosure]()
@@ -901,46 +955,46 @@ public final class ArgumentBinder<Options> {
     /// Bind an option argument.
     public func bind<T>(
         option: OptionArgument<T>,
-        to body: @escaping (inout Options, T) -> Void
+        to body: @escaping (inout Options, T) throws -> Void
     ) {
         addBody {
             guard let result = $1.get(option) else { return }
-            body(&$0, result)
+            try body(&$0, result)
         }
     }
 
     /// Bind an array option argument.
     public func bindArray<T>(
         option: OptionArgument<[T]>,
-        to body: @escaping (inout Options, [T]) -> Void
+        to body: @escaping (inout Options, [T]) throws -> Void
     ) {
         addBody {
             guard let result = $1.get(option) else { return }
-            body(&$0, result)
+            try body(&$0, result)
         }
     }
 
     /// Bind a positional argument.
     public func bind<T>(
         positional: PositionalArgument<T>,
-        to body: @escaping (inout Options, T) -> Void
+        to body: @escaping (inout Options, T) throws -> Void
     ) {
         addBody {
             // All the positional argument will always be present.
             guard let result = $1.get(positional) else { return }
-            body(&$0, result)
+            try body(&$0, result)
         }
     }
 
     /// Bind an array positional argument.
     public func bindArray<T>(
         positional: PositionalArgument<[T]>,
-        to body: @escaping (inout Options, [T]) -> Void
+        to body: @escaping (inout Options, [T]) throws -> Void
     ) {
         addBody {
             // All the positional argument will always be present.
             guard let result = $1.get(positional) else { return }
-            body(&$0, result)
+            try body(&$0, result)
         }
     }
 
@@ -948,13 +1002,13 @@ public final class ArgumentBinder<Options> {
     public func bindPositional<T, U>(
         _ first: PositionalArgument<T>,
         _ second: PositionalArgument<U>,
-        to body: @escaping (inout Options, T, U) -> Void
+        to body: @escaping (inout Options, T, U) throws -> Void
     ) {
         addBody {
             // All the positional arguments will always be present.
             guard let first = $1.get(first) else { return }
             guard let second = $1.get(second) else { return }
-            body(&$0, first, second)
+            try body(&$0, first, second)
         }
     }
 
@@ -963,14 +1017,14 @@ public final class ArgumentBinder<Options> {
         _ first: PositionalArgument<T>,
         _ second: PositionalArgument<U>,
         _ third: PositionalArgument<V>,
-        to body: @escaping (inout Options, T, U, V) -> Void
+        to body: @escaping (inout Options, T, U, V) throws -> Void
     ) {
         addBody {
             // All the positional arguments will always be present.
             guard let first = $1.get(first) else { return }
             guard let second = $1.get(second) else { return }
             guard let third = $1.get(third) else { return }
-            body(&$0, first, second, third)
+            try body(&$0, first, second, third)
         }
     }
 
@@ -978,10 +1032,10 @@ public final class ArgumentBinder<Options> {
     public func bind<T, U>(
         _ first: OptionArgument<T>,
         _ second: OptionArgument<U>,
-        to body: @escaping (inout Options, T?, U?) -> Void
+        to body: @escaping (inout Options, T?, U?) throws -> Void
     ) {
         addBody {
-            body(&$0, $1.get(first), $1.get(second))
+            try body(&$0, $1.get(first), $1.get(second))
         }
     }
 
@@ -990,10 +1044,10 @@ public final class ArgumentBinder<Options> {
         _ first: OptionArgument<T>,
         _ second: OptionArgument<U>,
         _ third: OptionArgument<V>,
-        to body: @escaping (inout Options, T?, U?, V?) -> Void
+        to body: @escaping (inout Options, T?, U?, V?) throws -> Void
     ) {
         addBody {
-            body(&$0, $1.get(first), $1.get(second), $1.get(third))
+            try body(&$0, $1.get(first), $1.get(second), $1.get(third))
         }
     }
 
@@ -1001,10 +1055,10 @@ public final class ArgumentBinder<Options> {
     public func bindArray<T, U>(
         _ first: OptionArgument<[T]>,
         _ second: OptionArgument<[U]>,
-        to body: @escaping (inout Options, [T], [U]) -> Void
+        to body: @escaping (inout Options, [T], [U]) throws -> Void
     ) {
         addBody {
-            body(&$0, $1.get(first) ?? [], $1.get(second) ?? [])
+            try body(&$0, $1.get(first) ?? [], $1.get(second) ?? [])
         }
     }
 
@@ -1013,21 +1067,21 @@ public final class ArgumentBinder<Options> {
         _ first: OptionArgument<[T]>,
         _ second: OptionArgument<[U]>,
         _ third: OptionArgument<[V]>,
-        to body: @escaping (inout Options, [T], [U], [V]) -> Void
+        to body: @escaping (inout Options, [T], [U], [V]) throws -> Void
      ) {
         addBody {
-            body(&$0, $1.get(first) ?? [], $1.get(second) ?? [], $1.get(third) ?? [])
+            try body(&$0, $1.get(first) ?? [], $1.get(second) ?? [], $1.get(third) ?? [])
         }
     }
 
     /// Bind a subparser.
     public func bind(
         parser: ArgumentParser,
-        to body: @escaping (inout Options, String) -> Void
+        to body: @escaping (inout Options, String) throws -> Void
     ) {
         addBody {
             guard let result = $1.subparser(parser) else { return }
-            body(&$0, result)
+            try body(&$0, result)
         }
     }
 
@@ -1036,8 +1090,16 @@ public final class ArgumentBinder<Options> {
         bodies.append(body)
     }
 
-    /// Fill the result into the options structure.
-    public func fill(_ result: ArgumentParser.Result, into options: inout Options) {
-        bodies.forEach { $0(&options, result) }
+    /// Fill the result into the options structure,
+    /// throwing if one of the user-provided binder function throws.
+    public func fill(parseResult result: ArgumentParser.Result, into options: inout Options) throws {
+        try bodies.forEach { try $0(&options, result) }
     }
+
+    /// Fill the result into the options structure.
+    @available(*, deprecated, renamed: "fill(parseResult:into:)")
+    public func fill(_ result: ArgumentParser.Result, into options: inout Options) {
+        try! fill(parseResult: result, into: &options)
+    }
+
 }

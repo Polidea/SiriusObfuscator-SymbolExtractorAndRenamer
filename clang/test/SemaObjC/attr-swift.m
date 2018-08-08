@@ -214,4 +214,12 @@ extern void *wilma3(void) __attribute__((swift_error(nonzero_result))); // expec
 extern void *wilma4(void) __attribute__((swift_error(zero_result))); // expected-error {{'swift_error' attribute can only be applied to a function with an error parameter}}
 
 
-extern _Bool suzanne __attribute__((swift_error(none))); // expected-error {{'swift_error' attribute only applies to functions and methods}}
+extern _Bool suzanne __attribute__((swift_error(none))); // expected-error {{'swift_error' attribute only applies to functions and Objective-C methods}}
+
+// --- swift_bridged_typedef ---
+@interface NSString
+@end
+
+typedef NSString *NSMyAmazingStringAlias __attribute__((swift_bridged_typedef));
+
+struct __attribute__((swift_bridged_typedef)) NotATypedef { }; // expected-error{{'swift_bridged_typedef' attribute only applies to typedefs}}

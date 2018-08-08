@@ -43,7 +43,7 @@ SubstringTests.test("Equality") {
   expectNotEqual(s.dropLast(2), s.dropLast(1))
   expectEqual(s.dropFirst(1), s.dropFirst(1))
   expectTrue(s != s[...].dropFirst(1))
-  let i = emoji.index(of: "😄")!
+  let i = emoji.firstIndex(of: "😄")!
   expectEqual("😄👍🏽" as String, emoji[i...].prefix(2))
   expectTrue("😄👍🏽🇫🇷👩‍👩‍👧‍👦🙈😡🇧🇪" as String == emoji[i...].dropLast(2))
   expectTrue("🇫🇷👩‍👩‍👧‍👦🙈😡🇧🇪" as String == emoji[i...].dropLast(2).dropFirst(2))
@@ -93,11 +93,11 @@ SubstringTests.test("Comparison") {
 }
 
 SubstringTests.test("Filter") {
-	var name = "😂Edward Woodward".dropFirst()
-	var filtered = name.filter { $0 != "d" }
-	expectType(Substring.self, &name)
-	expectType(String.self, &filtered)
-	expectEqual("Ewar Woowar", filtered)
+  var name = "😂Edward Woodward".dropFirst()
+  var filtered = name.filter { $0 != "d" }
+  expectType(Substring.self, &name)
+  expectType(String.self, &filtered)
+  expectEqual("Ewar Woowar", filtered)
 }
 
 SubstringTests.test("CharacterView") {
@@ -172,22 +172,53 @@ SubstringTests.test("UTF16View") {
   expectEqual("", String(u.dropLast(10))!)
 }
 
-SubstringTests.test("UTF8View") {
+SubstringTests.test("Mutate Substring through utf16 view") {
   let s = "abcdefg"
-  let t = s.utf8.dropFirst(2)
-  let u = t.dropFirst(2)
-  
-  checkMatch(s.utf8, t, t.startIndex)
-  checkMatch(s.utf8, t, t.index(after: t.startIndex))
-  
-  checkMatch(s.utf8, t, u.startIndex)
-  checkMatch(t, u, u.startIndex)
-  checkMatch(t, u, u.index(after: u.startIndex))
+  var ss = s[...]
+  expectEqual(s.startIndex, ss.startIndex)
+  expectEqual(s.count, ss.count)
+  let first = ss.utf16.removeFirst()
+  expectEqual(s.index(after: s.startIndex), ss.startIndex)
+  expectEqual(s.count - 1, ss.count)
+}
 
-  expectEqual("", String(t.dropFirst(10))!)
-  expectEqual("", String(t.dropLast(10))!)
-  expectEqual("", String(u.dropFirst(10))!)
-  expectEqual("", String(u.dropLast(10))!)
+SubstringTests.test("Mutate Substring through unicodeScalars view") {
+  let s = "abcdefg"
+  var ss = s[...]
+  expectEqual(s.startIndex, ss.startIndex)
+  expectEqual(s.count, ss.count)
+  ss.unicodeScalars.append("h")
+  expectEqual(s.startIndex, ss.startIndex)
+  expectEqual(s.count + 1, ss.count)
+  expectEqual(ss.last, "h")
+  expectEqual(s.last, "g")
+}
+
+SubstringTests.test("UTF8View") {
+  let strs = [
+    "abcdefg", // Small ASCII
+    "abéÏ", // Small Unicode
+    "012345678901234567890", // Large ASCII
+    "abéÏ012345678901234567890", // Large Unicode
+  ]
+
+  for s in strs {
+    let count = s.count
+    let t = s.utf8.dropFirst(2)
+    let u = t.dropFirst(2)
+
+    checkMatch(s.utf8, t, t.startIndex)
+    checkMatch(s.utf8, t, t.index(after: t.startIndex))
+
+    checkMatch(s.utf8, t, u.startIndex)
+    checkMatch(t, u, u.startIndex)
+    checkMatch(t, u, u.index(after: u.startIndex))
+
+    expectEqual("", String(t.dropFirst(100))!)
+    expectEqual("", String(t.dropLast(100))!)
+    expectEqual("", String(u.dropFirst(100))!)
+    expectEqual("", String(u.dropLast(100))!)
+  }
 }
 
 SubstringTests.test("Persistent Content") {

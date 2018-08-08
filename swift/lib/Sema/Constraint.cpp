@@ -358,6 +358,9 @@ void Constraint::print(llvm::raw_ostream &Out, SourceManager *sm) const {
       Out << "decl-via-unwrapped-optional ";
       printDecl();
       break;
+    case OverloadChoiceKind::DynamicMemberLookup:
+      Out << "dynamic member lookup '" << overload.getName() << "'";
+      break;
     case OverloadChoiceKind::BaseType:
       Out << "base type";
       break;
@@ -462,8 +465,6 @@ StringRef swift::constraints::getName(ConversionRestrictionKind kind) {
     return "[inout-to-pointer]";
   case ConversionRestrictionKind::PointerToPointer:
     return "[pointer-to-pointer]";
-  case ConversionRestrictionKind::ForceUnchecked:
-    return "[force-unchecked]";
   case ConversionRestrictionKind::ArrayUpcast:
     return "[array-upcast]";
   case ConversionRestrictionKind::DictionaryUpcast:
@@ -486,25 +487,38 @@ Fix Fix::getForcedDowncast(ConstraintSystem &cs, Type toType) {
   return Fix(FixKind::ForceDowncast, index);
 }
 
+Fix Fix::getUnwrapOptionalBase(ConstraintSystem &cs, DeclName memberName) {
+  unsigned index = cs.FixedDeclNames.size();
+  cs.FixedDeclNames.push_back(memberName);
+  return Fix(FixKind::UnwrapOptionalBase, index);
+}
+
 Type Fix::getTypeArgument(ConstraintSystem &cs) const {
   assert(getKind() == FixKind::ForceDowncast);
   return cs.FixedTypes[Data];
 }
 
+/// If this fix has a name argument, retrieve it.
+DeclName Fix::getDeclNameArgument(ConstraintSystem &cs) const {
+  assert(getKind() == FixKind::UnwrapOptionalBase);
+  return cs.FixedDeclNames[Data];
+}
+
 StringRef Fix::getName(FixKind kind) {
   switch (kind) {
-  case FixKind::None:
-    return "prevent fixes";
   case FixKind::ForceOptional:
     return "fix: force optional";
-  case FixKind::OptionalChaining:
-    return "fix: optional chaining";
+  case FixKind::UnwrapOptionalBase:
+    return "fix: unwrap optional base of member lookup";
   case FixKind::ForceDowncast:
     return "fix: force downcast";
   case FixKind::AddressOf:
     return "fix: add address-of";
   case FixKind::CoerceToCheckedCast:
     return "fix: as to as!";
+  case FixKind::ExplicitlyEscaping:
+  case FixKind::ExplicitlyEscapingToAny:
+    return "fix: add @escaping";
   }
 
   llvm_unreachable("Unhandled FixKind in switch.");
@@ -610,10 +624,6 @@ Constraint *Constraint::create(ConstraintSystem &cs, ConstraintKind kind,
   assert((kind != ConstraintKind::LiteralConformsTo) ||
          second->is<ProtocolType>());
 
-  // Bridging constraints require bridging to be enabled.
-  assert(kind != ConstraintKind::BridgingConversion
-         || cs.TC.Context.LangOpts.EnableObjCInterop);
-
   // Create the constraint.
   unsigned size = totalSizeToAlloc<TypeVariableType*>(typeVars.size());
   void *mem = cs.getAllocator().Allocate(size, alignof(Constraint));
@@ -640,6 +650,25 @@ Constraint *Constraint::create(ConstraintSystem &cs, ConstraintKind kind,
                                 locator, typeVars);
 }
 
+Constraint *Constraint::createMemberOrOuterDisjunction(
+    ConstraintSystem &cs, ConstraintKind kind, Type first, Type second,
+    DeclName member, DeclContext *useDC, FunctionRefKind functionRefKind,
+    ArrayRef<OverloadChoice> outerAlternatives, ConstraintLocator *locator) {
+  auto memberConstraint = createMember(cs, kind, first, second, member,
+                             useDC, functionRefKind, locator);
+
+  if (outerAlternatives.empty())
+    return memberConstraint;
+
+  SmallVector<Constraint *, 4> constraints;
+  constraints.push_back(memberConstraint);
+  memberConstraint->setFavored();
+  for (auto choice : outerAlternatives) {
+    constraints.push_back(
+        Constraint::createBindOverload(cs, first, choice, useDC, locator));
+  }
+  return Constraint::createDisjunction(cs, constraints, locator, ForgetChoice);
+}
 
 Constraint *Constraint::createMember(ConstraintSystem &cs, ConstraintKind kind, 
                                      Type first, Type second, DeclName member,

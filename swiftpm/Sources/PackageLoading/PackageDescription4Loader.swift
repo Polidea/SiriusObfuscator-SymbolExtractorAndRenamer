@@ -66,10 +66,10 @@ extension PackageDescription4.Package {
         }
 
         // Parse the compatible swift versions.
-        var swiftLanguageVersions: [Int]? = nil
+        var swiftLanguageVersions: [String]? = nil
         if case .array(let array)? = package["swiftLanguageVersions"] {
             swiftLanguageVersions = array.map({
-                guard case .int(let value) = $0 else { fatalError("swiftLanguageVersions contains non int element") }
+                guard case .string(let value) = $0 else { fatalError("swiftLanguageVersions contains non string element") }
                 return value
             })
         }
@@ -96,17 +96,18 @@ extension PackageDescription4.Package {
             }
         }
 
-        return PackageDescription4.Package(
+        let p = PackageDescription4.Package(
             name: name,
             pkgConfig: pkgConfig,
             providers: providers,
             products: products,
             dependencies: dependencies,
             targets: targets,
-            swiftLanguageVersions: swiftLanguageVersions,
             cLanguageStandard: cLanguageStandard,
             cxxLanguageStandard: cxxLanguageStandard
         )
+        p.swiftLanguageVersions = swiftLanguageVersions
+        return p
     }
 }
 
@@ -141,16 +142,25 @@ extension PackageDescription4.Package.Dependency {
             guard case .string(let identifier)? = requirementDict["identifier"] else { fatalError() }
             requirement = .exactItem(Version(identifier)!)
 
-        default: fatalError()
+        case .string("localPackage")?:
+            requirement = .localPackageItem
+
+        default: fatalError("Unexpected requirement dict \(requirementDict)")
         }
 
+        let isBaseURLRemote = baseURL.flatMap(URL.scheme) != nil
+
         func fixURL() -> String {
+            // If base URL is remote (http/ssh), we can't do any "fixing".
+            if isBaseURLRemote {
+                return url
+            }
+            // If the dependency URL is not remote, try to "fix" it.
             if let baseURL = baseURL, URL.scheme(url) == nil {
                 // If the URL has no scheme, we treat it as a path (either absolute or relative to the base URL).
                 return AbsolutePath(url, relativeTo: AbsolutePath(baseURL)).asString
-            } else {
-                return url
             }
+            return url
         }
 
         return PackageDescription4.Package.Dependency.package(url: fixURL(), requirement)
@@ -159,13 +169,19 @@ extension PackageDescription4.Package.Dependency {
 
 extension PackageDescription4.SystemPackageProvider {
     fileprivate static func fromJSON(_ json: JSON) -> PackageDescription4.SystemPackageProvider {
-        let values: [String] = try! json.get("values")
-        let name: String = try! json.get("name")
+        return try! .init(json: json)
+    }
+}
+
+extension PackageDescription4.SystemPackageProvider: JSONMappable {
+    public init(json: JSON) throws {
+        let values: [String] = try json.get("values")
+        let name: String = try json.get("name")
         switch name {
         case "brew":
-            return .brewItem(values)
+            self = .brewItem(values)
         case "apt":
-            return .aptItem(values)
+            self = .aptItem(values)
         default:
             fatalError("unexpected string")
         }
@@ -181,7 +197,7 @@ extension PackageDescription4.Target {
         }
 
         let name: String = try! json.get("name")
-        let isTest: Bool = try! json.get("isTest")
+        let type = try! TargetType(rawValue: json.get("type"))!
         let publicHeadersPath: String? = json.get("publicHeadersPath")
 
         let path: String? = json.get("path")
@@ -193,21 +209,34 @@ extension PackageDescription4.Target {
             sources = try! sourcesData.map(String.init)
         }
 
-        if isTest {
-            return PackageDescription4.Target.testTarget(
+        switch type {
+        case .regular:
+            return .target(
                 name: name,
                 dependencies: dependencies,
                 path: path,
                 exclude: exclude,
-                sources: sources)
+                sources: sources,
+                publicHeadersPath: publicHeadersPath
+            )
+
+        case .test:
+            return .testTarget(
+                name: name,
+                dependencies: dependencies,
+                path: path,
+                exclude: exclude,
+                sources: sources
+            )
+
+        case .system:
+            return .systemLibrary(
+                name: name,
+                path: path,
+                pkgConfig: json.get("pkgConfig"),
+                providers: try? json.get("providers")
+            )
         }
-        return PackageDescription4.Target.target(
-            name: name,
-            dependencies: dependencies,
-            path: path,
-            exclude: exclude,
-            sources: sources,
-            publicHeadersPath: publicHeadersPath)
     }
 }
 

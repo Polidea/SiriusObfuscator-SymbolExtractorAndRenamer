@@ -182,7 +182,7 @@ private:
   //------------------------------------------------------------------
 
   void ScanContext(ExecutionContext &exe_ctx,
-                   lldb_private::Error &err) override;
+                   lldb_private::Status &err) override;
 
   bool AddArguments(ExecutionContext &exe_ctx, std::vector<lldb::addr_t> &args,
                     lldb::addr_t struct_address,
@@ -192,7 +192,7 @@ private:
 
   class ResultDelegate : public Materializer::PersistentVariableDelegate {
   public:
-    ResultDelegate();
+    ResultDelegate(lldb::TargetSP target) : m_target_sp(target) {}
     ConstString GetName() override;
     void DidDematerialize(lldb::ExpressionVariableSP &variable) override;
 
@@ -202,6 +202,7 @@ private:
   private:
     PersistentExpressionState *m_persistent_state;
     lldb::ExpressionVariableSP m_variable;
+    lldb::TargetSP m_target_sp;
   };
 
   ResultDelegate m_result_delegate;

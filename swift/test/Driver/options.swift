@@ -4,8 +4,12 @@
 // NO_FILES: this mode requires at least one input file
 
 // RUN: not %target-swift-frontend -parse-sil -emit-sil 2>&1 | %FileCheck -check-prefix=SIL_FILES %s
-// RUN: not %target-swift-frontend -parse-sil -emit-sil %s %s 2>&1 | %FileCheck -check-prefix=SIL_FILES %s
 // SIL_FILES: this mode requires a single input file
+
+// RUN: not %target-swift-frontend -parse-sil -emit-sil %s %s 2>&1 | %FileCheck -check-prefix=DUPLICATE_FILES %s
+// RUN: not %target-swift-frontend -parse-sil -emit-sil %s %S/../Inputs/empty.swift 2>&1 | %FileCheck -check-prefix=SIL_FILES %s
+// DUPLICATE_FILES: duplicate input file 'SOURCE_DIR/test/Driver/options.swift'
+
 
 // RUN: not %target-swift-frontend -emit-silgen -parse-as-library %S/Inputs/invalid-module-name.swift 2>&1 | %FileCheck -check-prefix=INVALID_MODULE_NAME %s
 // INVALID_MODULE_NAME: error: module name "invalid-module-name" is not a valid identifier; use -module-name flag to specify an alternate name
@@ -85,20 +89,20 @@
 // I_MODE: error: the flag '-i' is no longer required and has been removed; use 'swift input-filename'
 
 // RUN: not %swift_driver -### -c %s 2>&1 | %FileCheck -check-prefix=C_MODE %s
-// C_MODE: error: unsupported option '-c'
+// C_MODE: error: option '-c' is not supported by 'swift'; did you mean to use 'swiftc'?
 // RUN: not %swift_driver -### -emit-object %s 2>&1 | %FileCheck -check-prefix=OBJ_MODE %s
-// OBJ_MODE: error: unsupported option '-emit-object'
+// OBJ_MODE: error: option '-emit-object' is not supported by 'swift'; did you mean to use 'swiftc'?
 // RUN: not %swift_driver -### -emit-executable %s 2>&1 | %FileCheck -check-prefix=EXEC_MODE %s
-// EXEC_MODE: error: unsupported option '-emit-executable'
+// EXEC_MODE: error: option '-emit-executable' is not supported by 'swift'; did you mean to use 'swiftc'?
 // RUN: not %swift_driver -### -o %t %s 2>&1 | %FileCheck -check-prefix=ARG_o %s
-// ARG_o: error: unsupported option '-o'
+// ARG_o: error: option '-o' is not supported by 'swift'; did you mean to use 'swiftc'?
 
 // RUN: not %swiftc_driver -### -repl 2>&1 | %FileCheck -check-prefix=REPL_MODE_SWIFTC %s
-// REPL_MODE_SWIFTC: error: unsupported option '-repl'
+// REPL_MODE_SWIFTC: error: option '-repl' is not supported by 'swiftc'; did you mean to use 'swift'?
 // RUN: not %swiftc_driver -### -lldb-repl 2>&1 | %FileCheck -check-prefix=LLDB_REPL_MODE_SWIFTC %s
-// LLDB_REPL_MODE_SWIFTC: error: unsupported option '-lldb-repl'
+// LLDB_REPL_MODE_SWIFTC: error: option '-lldb-repl' is not supported by 'swiftc'; did you mean to use 'swift'?
 // RUN: not %swiftc_driver -### -deprecated-integrated-repl 2>&1 | %FileCheck -check-prefix=INT_REPL_MODE_SWIFTC %s
-// INT_REPL_MODE_SWIFTC: error: unsupported option '-deprecated-integrated-repl'
+// INT_REPL_MODE_SWIFTC: error: option '-deprecated-integrated-repl' is not supported by 'swiftc'; did you mean to use 'swift'?
 
 // RUN: %swift_driver -g -### %s 2>&1 | %FileCheck -check-prefix=OPTIONS_BEFORE_FILE %s
 // OPTIONS_BEFORE_FILE: -g
@@ -117,3 +121,15 @@
 // RUN: %swiftc_driver -driver-print-jobs -enforce-exclusivity=checked %s | %FileCheck -check-prefix=EXCLUSIVITY_CHECKED %s
 // EXCLUSIVITY_CHECKED: swift
 // EXCLUSIVITY_CHECKED: -enforce-exclusivity=checked
+
+// RUN: %swiftc_driver -driver-print-jobs -remove-runtime-asserts %s | %FileCheck -check-prefix=REMOVE_RUNTIME_ASSERTS %s
+// REMOVE_RUNTIME_ASSERTS: swift
+// REMOVE_RUNTIME_ASSERTS: -frontend {{.*}} -remove-runtime-asserts
+
+// RUN: %swiftc_driver -driver-print-jobs -assume-single-threaded %s | %FileCheck -check-prefix=ASSUME_SINGLE_THREADED %s
+// ASSUME_SINGLE_THREADED: swift
+// ASSUME_SINGLE_THREADED: -frontend {{.*}} -assume-single-threaded
+
+// RUN: not %swiftc_driver -incremental -autolink-force-load %s 2>&1 | %FileCheck -check-prefix=AUTOLINK_FORCE_LOAD %s
+// RUN: not %swiftc_driver -autolink-force-load -incremental %s 2>&1 | %FileCheck -check-prefix=AUTOLINK_FORCE_LOAD %s
+// AUTOLINK_FORCE_LOAD: error: '-autolink-force-load' is not supported with '-incremental'

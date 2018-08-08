@@ -12,6 +12,11 @@
 
 import TestsUtils
 
+public let PopFront = [
+  BenchmarkInfo(name: "PopFrontArray", runFunction: run_PopFrontArray, tags: [.validation, .api, .Array]),
+  BenchmarkInfo(name: "PopFrontUnsafePointer", runFunction: run_PopFrontUnsafePointer, tags: [.validation, .api]),
+]
+
 let reps = 1
 let arrayCount = 1024
 
@@ -51,6 +56,6 @@ public func run_PopFrontUnsafePointer(_ N: Int) {
       CheckResults(result == arrayCount)
     }
   }
-  a.deallocate(capacity: arrayCount)
+  a.deallocate()
 }
 

@@ -11,53 +11,55 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftPrivate
-#if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
+#if os(macOS) || os(iOS) || os(watchOS) || os(tvOS)
 import Darwin
-#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || CYGWIN
+#elseif os(Linux) || os(FreeBSD) || os(PS4) || os(Android) || os(Cygwin) || os(Haiku)
 import Glibc
 #endif
 
 
-#if !os(Windows) || CYGWIN
-// posix_spawn is not available on Android or Windows.
-#if !os(Android)
-// swift_posix_spawn isn't available in the public watchOS SDK, we sneak by the
+#if !os(Windows)
+// posix_spawn is not available on Windows.
+// posix_spawn is not available on Android.
+// posix_spawn is not available on Haiku.
+#if !os(Android) && !os(Haiku)
+// posix_spawn isn't available in the public watchOS SDK, we sneak by the
 // unavailable attribute declaration here of the APIs that we need.
 
 // FIXME: Come up with a better way to deal with APIs that are pointers on some
 // platforms but not others.
 #if os(Linux)
-typealias swift_posix_spawn_file_actions_t = posix_spawn_file_actions_t
+typealias _stdlib_posix_spawn_file_actions_t = posix_spawn_file_actions_t
 #else
-typealias swift_posix_spawn_file_actions_t = posix_spawn_file_actions_t?
+typealias _stdlib_posix_spawn_file_actions_t = posix_spawn_file_actions_t?
 #endif
 
-@_silgen_name("swift_posix_spawn_file_actions_init")
-func swift_posix_spawn_file_actions_init(
-  _ file_actions: UnsafeMutablePointer<swift_posix_spawn_file_actions_t>
+@_silgen_name("_stdlib_posix_spawn_file_actions_init")
+internal func _stdlib_posix_spawn_file_actions_init(
+  _ file_actions: UnsafeMutablePointer<_stdlib_posix_spawn_file_actions_t>
 ) -> CInt
 
-@_silgen_name("swift_posix_spawn_file_actions_destroy")
-func swift_posix_spawn_file_actions_destroy(
-  _ file_actions: UnsafeMutablePointer<swift_posix_spawn_file_actions_t>
+@_silgen_name("_stdlib_posix_spawn_file_actions_destroy")
+internal func _stdlib_posix_spawn_file_actions_destroy(
+  _ file_actions: UnsafeMutablePointer<_stdlib_posix_spawn_file_actions_t>
 ) -> CInt
 
-@_silgen_name("swift_posix_spawn_file_actions_addclose")
-func swift_posix_spawn_file_actions_addclose(
-  _ file_actions: UnsafeMutablePointer<swift_posix_spawn_file_actions_t>,
+@_silgen_name("_stdlib_posix_spawn_file_actions_addclose")
+internal func _stdlib_posix_spawn_file_actions_addclose(
+  _ file_actions: UnsafeMutablePointer<_stdlib_posix_spawn_file_actions_t>,
   _ filedes: CInt) -> CInt
 
-@_silgen_name("swift_posix_spawn_file_actions_adddup2")
-func swift_posix_spawn_file_actions_adddup2(
-  _ file_actions: UnsafeMutablePointer<swift_posix_spawn_file_actions_t>,
+@_silgen_name("_stdlib_posix_spawn_file_actions_adddup2")
+internal func _stdlib_posix_spawn_file_actions_adddup2(
+  _ file_actions: UnsafeMutablePointer<_stdlib_posix_spawn_file_actions_t>,
   _ filedes: CInt,
   _ newfiledes: CInt) -> CInt
 
-@_silgen_name("swift_posix_spawn")
-func swift_posix_spawn(
+@_silgen_name("_stdlib_posix_spawn")
+internal func _stdlib_posix_spawn(
   _ pid: UnsafeMutablePointer<pid_t>?,
   _ file: UnsafePointer<Int8>,
-  _ file_actions: UnsafePointer<swift_posix_spawn_file_actions_t>?,
+  _ file_actions: UnsafePointer<_stdlib_posix_spawn_file_actions_t>?,
   _ attrp: UnsafePointer<posix_spawnattr_t>?,
   _ argv: UnsafePointer<UnsafeMutablePointer<Int8>?>,
   _ envp: UnsafePointer<UnsafeMutablePointer<Int8>?>?) -> CInt
@@ -82,7 +84,7 @@ public func spawnChild(_ args: [String])
   let childStdin = posixPipe()
   let childStderr = posixPipe()
 
-#if os(Android)
+#if os(Android) || os(Haiku)
   // posix_spawn isn't available on Android. Instead, we fork and exec.
   // To correctly communicate the exit status of the child process to this
   // (parent) process, we'll use this pipe.
@@ -111,7 +113,7 @@ public func spawnChild(_ args: [String])
     // code after this block will never be executed, and the parent write pipe
     // will be closed.
     withArrayOfCStrings([CommandLine.arguments[0]] + args) {
-      execve(CommandLine.arguments[0], $0, _getEnviron())
+      execve(CommandLine.arguments[0], $0, environ)
     }
 
     // If execve() encountered an error, we write the errno encountered to the
@@ -140,44 +142,44 @@ public func spawnChild(_ args: [String])
   }
 #else
   var fileActions = _make_posix_spawn_file_actions_t()
-  if swift_posix_spawn_file_actions_init(&fileActions) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_init() failed")
+  if _stdlib_posix_spawn_file_actions_init(&fileActions) != 0 {
+    preconditionFailure("_stdlib_posix_spawn_file_actions_init() failed")
   }
 
   // Close the write end of the pipe on the child side.
-  if swift_posix_spawn_file_actions_addclose(
+  if _stdlib_posix_spawn_file_actions_addclose(
     &fileActions, childStdin.writeFD) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_addclose() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_addclose() failed")
   }
 
   // Remap child's stdin.
-  if swift_posix_spawn_file_actions_adddup2(
+  if _stdlib_posix_spawn_file_actions_adddup2(
     &fileActions, childStdin.readFD, STDIN_FILENO) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_adddup2() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_adddup2() failed")
   }
 
   // Close the read end of the pipe on the child side.
-  if swift_posix_spawn_file_actions_addclose(
+  if _stdlib_posix_spawn_file_actions_addclose(
     &fileActions, childStdout.readFD) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_addclose() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_addclose() failed")
   }
 
   // Remap child's stdout.
-  if swift_posix_spawn_file_actions_adddup2(
+  if _stdlib_posix_spawn_file_actions_adddup2(
     &fileActions, childStdout.writeFD, STDOUT_FILENO) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_adddup2() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_adddup2() failed")
   }
 
   // Close the read end of the pipe on the child side.
-  if swift_posix_spawn_file_actions_addclose(
+  if _stdlib_posix_spawn_file_actions_addclose(
     &fileActions, childStderr.readFD) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_addclose() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_addclose() failed")
   }
 
   // Remap child's stderr.
-  if swift_posix_spawn_file_actions_adddup2(
+  if _stdlib_posix_spawn_file_actions_adddup2(
     &fileActions, childStderr.writeFD, STDERR_FILENO) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_adddup2() failed")
+    preconditionFailure("_stdlib_posix_spawn_file_actions_adddup2() failed")
   }
 
   var pid: pid_t = -1
@@ -190,16 +192,16 @@ public func spawnChild(_ args: [String])
     }
   }
   let spawnResult = withArrayOfCStrings(childArgs) {
-    swift_posix_spawn(
-      &pid, childArgs[0], &fileActions, nil, $0, _getEnviron())
+    _stdlib_posix_spawn(
+      &pid, childArgs[0], &fileActions, nil, $0, environ)
   }
   if spawnResult != 0 {
     print(String(cString: strerror(spawnResult)))
-    preconditionFailure("swift_posix_spawn() failed")
+    preconditionFailure("_stdlib_posix_spawn() failed")
   }
 
-  if swift_posix_spawn_file_actions_destroy(&fileActions) != 0 {
-    preconditionFailure("swift_posix_spawn_file_actions_destroy() failed")
+  if _stdlib_posix_spawn_file_actions_destroy(&fileActions) != 0 {
+    preconditionFailure("_stdlib_posix_spawn_file_actions_destroy() failed")
   }
 #endif
 
@@ -221,15 +223,15 @@ public func spawnChild(_ args: [String])
   return (pid, childStdin.writeFD, childStdout.readFD, childStderr.readFD)
 }
 
-#if !os(Android)
+#if !os(Android) && !os(Haiku)
 #if os(Linux)
 internal func _make_posix_spawn_file_actions_t()
-  -> swift_posix_spawn_file_actions_t {
+  -> _stdlib_posix_spawn_file_actions_t {
   return posix_spawn_file_actions_t()
 }
 #else
 internal func _make_posix_spawn_file_actions_t()
-  -> swift_posix_spawn_file_actions_t {
+  -> _stdlib_posix_spawn_file_actions_t {
   return nil
 }
 #endif
@@ -264,7 +266,7 @@ public enum ProcessTerminationStatus : CustomStringConvertible {
 
 public func posixWaitpid(_ pid: pid_t) -> ProcessTerminationStatus {
   var status: CInt = 0
-#if CYGWIN
+#if os(Cygwin)
   withUnsafeMutablePointer(to: &status) {
     statusPtr in
     let statusPtrWrapper = __wait_status_ptr_t(__int_ptr: statusPtr)
@@ -290,25 +292,6 @@ public func posixWaitpid(_ pid: pid_t) -> ProcessTerminationStatus {
   preconditionFailure("did not understand what happened to child process")
 }
 
-#if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
-@_silgen_name("swift_SwiftPrivateLibcExtras_NSGetEnviron")
-func _NSGetEnviron() -> UnsafeMutablePointer<UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>>
-#endif
-
-internal func _getEnviron() -> UnsafeMutablePointer<UnsafeMutablePointer<CChar>?> {
-#if os(OSX) || os(iOS) || os(watchOS) || os(tvOS)
-  return _NSGetEnviron().pointee
-#elseif os(FreeBSD)
-  return environ
-#elseif os(PS4)
-  return environ
-#elseif os(Android)
-  return environ
-#elseif CYGWIN
-  return environ
-#else
-  return __environ
-#endif
-}
+// !os(Windows)
 #endif
 

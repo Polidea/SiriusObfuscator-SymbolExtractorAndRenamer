@@ -11,11 +11,13 @@
 
 #include <algorithm>
 
+#include "llvm/ADT/StringRef.h"
+#include "clang/Basic/CharInfo.h"
+
 #include "Plugins/ExpressionParser/Clang/ClangModulesDeclVendor.h"
 #include "Plugins/ExpressionParser/Clang/ClangPersistentVariables.h"
 #include "Plugins/ExpressionParser/Clang/ClangUserExpression.h"
 #include "Plugins/ExpressionParser/Swift/SwiftASTManipulator.h"
-#include "lldb/Core/StreamString.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/Block.h"
@@ -28,6 +30,7 @@
 #include "lldb/Target/Platform.h"
 #include "lldb/Target/StackFrame.h"
 #include "lldb/Target/Target.h"
+#include "lldb/Utility/StreamString.h"
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Path.h"
@@ -182,14 +185,29 @@ static void AddMacros(const DebugMacros *dm, CompileUnit *comp_unit,
   }
 }
 
+static bool ExprBodyContainsVar(llvm::StringRef var, llvm::StringRef body) {
+  int from = 0;
+  while ((from = body.find(var, from)) != llvm::StringRef::npos) {
+    if ((from != 0 && clang::isIdentifierBody(body[from-1])) ||
+        (from + var.size() != body.size() &&
+         clang::isIdentifierBody(body[from+var.size()]))) {
+      ++from;
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 static void AddLocalVariableDecls(const lldb::VariableListSP &var_list_sp,
-                                  StreamString &stream) {
+                                  StreamString &stream, const std::string &expr) {
   for (size_t i = 0; i < var_list_sp->GetSize(); i++) {
     lldb::VariableSP var_sp = var_list_sp->GetVariableAtIndex(i);
 
     ConstString var_name = var_sp->GetName();
     if (!var_name || var_name == ConstString("this") ||
-        var_name == ConstString(".block_descriptor"))
+        var_name == ConstString(".block_descriptor") ||
+        !ExprBodyContainsVar(var_name.AsCString(), expr))
       continue;
 
     stream.Printf("using $__lldb_local_vars::%s;\n", var_name.AsCString());
@@ -245,7 +263,7 @@ bool ExpressionSourceCode::SaveExpressionTextToTempFile(
       }
     }
     if (!success)
-      FileSystem::Unlink(FileSpec(buffer.c_str(), true));
+      llvm::sys::fs::remove(expr_source_path);
   }
   if (!success)
     expr_source_path.clear();
@@ -253,6 +271,18 @@ bool ExpressionSourceCode::SaveExpressionTextToTempFile(
     expr_source_path = buffer.str().str();
 
   return success;
+}
+
+/// Format the OS name the way that Swift availability attributes do.
+static llvm::StringRef getAvailabilityName(llvm::Triple::OSType os) {
+  switch (os) {
+  case llvm::Triple::MacOSX: return "macOS";
+  case llvm::Triple::IOS: return "iOS";
+  case llvm::Triple::TvOS: return "tvOS";
+  case llvm::Triple::WatchOS: return "watchOS";
+  default:
+    return llvm::Triple::getOSTypeName(os);
+  }
 }
 
 bool ExpressionSourceCode::GetText(
@@ -343,7 +373,7 @@ bool ExpressionSourceCode::GetText(
       if (target->GetInjectLocalVariables(&exe_ctx)) {
         lldb::VariableListSP var_list_sp =
             frame->GetInScopeVariableList(false, true);
-        AddLocalVariableDecls(var_list_sp, lldb_local_var_decls);
+        AddLocalVariableDecls(var_list_sp, lldb_local_var_decls, m_body);
       }
     }
   }
@@ -448,8 +478,22 @@ bool ExpressionSourceCode::GetText(
       }
       break;
     case lldb::eLanguageTypeSwift: {
+      llvm::SmallString<16> buffer;
+      llvm::raw_svector_ostream os_vers(buffer);
+
+      auto arch_spec = target->GetArchitecture();
+      auto triple = arch_spec.GetTriple();
+      if (triple.isOSDarwin()) {
+        if (auto process_sp = exe_ctx.GetProcessSP()) {
+          uint32_t major, minor, patch;
+          process_sp->GetHostOSVersion(major, minor, patch);
+          os_vers << getAvailabilityName(triple.getOS()) << " ";
+          os_vers << major << "." << minor << "." << patch;
+        }
+      }
       SwiftASTManipulator::WrapExpression(wrap_stream, m_body.c_str(),
                                           language_flags, options, generic_info,
+                                          os_vers.str(),
                                           first_body_line);
     }
     }

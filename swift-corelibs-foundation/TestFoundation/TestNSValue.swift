@@ -7,16 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
-
 class TestNSValue : XCTestCase {
     static var allTests: [(String, (TestNSValue) -> () throws -> Void)] {
         return [
@@ -66,7 +56,7 @@ class TestNSValue : XCTestCase {
     }
     
     func test_valueWithNSRange() {
-        let range = NSMakeRange(1, 2)
+        let range = NSRange(location: 1, length: 2)
         let value = NSValue(range: range)
         XCTAssertEqual(value.rangeValue.location, range.location)
         XCTAssertEqual(value.rangeValue.length, range.length)

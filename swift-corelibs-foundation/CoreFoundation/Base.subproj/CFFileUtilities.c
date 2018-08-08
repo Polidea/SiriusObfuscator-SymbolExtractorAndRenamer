@@ -1,7 +1,7 @@
 /*	CFFileUtilities.c
-	Copyright (c) 1999-2016, Apple Inc. and the Swift project authors
+	Copyright (c) 1999-2017, Apple Inc. and the Swift project authors
  
-	Portions Copyright (c) 2014-2016 Apple Inc. and the Swift project authors
+	Portions Copyright (c) 2014-2017, Apple Inc. and the Swift project authors
 	Licensed under Apache License v2.0 with Runtime Library Exception
 	See http://swift.org/LICENSE.txt for license information
 	See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
@@ -594,6 +594,10 @@ CF_PRIVATE SInt32 _CFGetFileProperties(CFAllocatorRef alloc, CFURLRef pathURL, B
     return _CFGetPathProperties(alloc, path, exists, posixMode, size, modTime, ownerID, dirContents);
 }
 
+CF_PRIVATE bool _CFURLExists(CFURLRef url) {
+    Boolean exists;
+    return url && (0 == _CFGetFileProperties(kCFAllocatorSystemDefault, url, &exists, NULL, NULL, NULL, NULL, NULL)) && exists;
+}
 
 #if DEPLOYMENT_TARGET_WINDOWS
 #define WINDOWS_PATH_SEMANTICS
@@ -1092,15 +1096,22 @@ CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean appendSla
                 for (CFIndex i = 0; i < CFArrayGetCount(stuffToPrefix); i++) {
                     CFStringRef onePrefix = CFArrayGetValueAtIndex(stuffToPrefix, i);
                     // Note: CFStringGetBytes does not null-terminate - we will do that below
-                    startAt += CFStringGetBytes(onePrefix, CFRangeMake(0, CFStringGetLength(onePrefix)), CFStringFileSystemEncoding(), 0, false, (UInt8 *)fullPathToFile + startAt, sizeof(fullPathToFile) - startAt, NULL);
-                    if (startAt > 0) {
-                        // Add a / if the string did not have one
-                        if (fullPathToFile[startAt - 1] != (char)_CFGetSlash()) {
-                            fullPathToFile[startAt++] = (char)_CFGetSlash();
+                    CFIndex usedBufLen = 0;
+                    startAt += CFStringGetBytes(onePrefix, CFRangeMake(0, CFStringGetLength(onePrefix)), CFStringFileSystemEncoding(), 0, false, (UInt8 *)fullPathToFile + startAt, sizeof(fullPathToFile) - startAt, &usedBufLen);
+                    if (startAt > 0) { // Add a / if the string did not have one
+                        // In some cases, startAt and usedBufLen differ (e.g. the num of bytes returned is less than the number written to the buffer).
+                        if (startAt < usedBufLen) {
+                            if (fullPathToFile[usedBufLen - 1] != (char)_CFGetSlash()) {
+                                fullPathToFile[usedBufLen] = (char)_CFGetSlash();
+                                startAt += (usedBufLen - startAt) + 1;
+                            }
+                        } else {
+                            if (fullPathToFile[startAt - 1] != (char)_CFGetSlash()) {
+                                fullPathToFile[startAt++] = (char)_CFGetSlash();
+                            }
                         }
                     }
                 }
-                
                 fullPathToFile[startAt] = 0;
             }
             
@@ -1167,7 +1178,8 @@ CF_PRIVATE void _CFIterateDirectory(CFStringRef directoryPath, Boolean appendSla
 #endif
 }
 
-#if DEPLOYMENT_RUNTIME_SWIFT
+
+#if !DEPLOYMENT_RUNTIME_OBJC
 
 // https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html
 // Version 0.8
@@ -1186,7 +1198,7 @@ static CFStringRef _CFXDGCreateHome(void) {
 }
 
 /// a single base directory relative to which user-specific data files should be written. This directory is defined by the environment variable $XDG_DATA_HOME.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFStringRef _CFXDGCreateDataHomePath(void) {
     // $XDG_DATA_HOME defines the base directory relative to which user specific data files should be stored. If $XDG_DATA_HOME is either not set or empty, a default equal to $HOME/.local/share should be used.
     const char *dataHome = __CFgetenv("XDG_DATA_HOME");
@@ -1201,7 +1213,7 @@ CFStringRef _CFXDGCreateDataHomePath(void) {
 }
 
 /// a single base directory relative to which user-specific configuration files should be written. This directory is defined by the environment variable $XDG_CONFIG_HOME.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFStringRef _CFXDGCreateConfigHomePath(void) {
     // $XDG_CONFIG_HOME defines the base directory relative to which user specific configuration files should be stored. If $XDG_CONFIG_HOME is either not set or empty, a default equal to $HOME/.config should be used.
     const char *configHome = __CFgetenv("XDG_CONFIG_HOME");
@@ -1216,7 +1228,7 @@ CFStringRef _CFXDGCreateConfigHomePath(void) {
 }
 
 /// a set of preference ordered base directories relative to which data files should be searched. This set of directories is defined by the environment variable $XDG_DATA_DIRS.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFArrayRef _CFXDGCreateDataDirectoriesPaths(void) {
     // $XDG_DATA_DIRS defines the preference-ordered set of base directories to search for data files in addition to the $XDG_DATA_HOME base directory. The directories in $XDG_DATA_DIRS should be seperated with a colon ':'.
     // If $XDG_DATA_DIRS is either not set or empty, a value equal to /usr/local/share/:/usr/share/ should be used.
@@ -1240,7 +1252,7 @@ CFArrayRef _CFXDGCreateDataDirectoriesPaths(void) {
 
 
 /// a set of preference ordered base directories relative to which configuration files should be searched. This set of directories is defined by the environment variable $XDG_CONFIG_DIRS.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFArrayRef _CFXDGCreateConfigDirectoriesPaths(void) {
     // $XDG_CONFIG_DIRS defines the preference-ordered set of base directories to search for configuration files in addition to the $XDG_CONFIG_HOME base directory. The directories in $XDG_CONFIG_DIRS should be seperated with a colon ':'.
     // If $XDG_CONFIG_DIRS is either not set or empty, a value equal to /etc/xdg should be used.
@@ -1262,7 +1274,7 @@ CFArrayRef _CFXDGCreateConfigDirectoriesPaths(void) {
 }
 
 /// a single base directory relative to which user-specific non-essential (cached) data should be written. This directory is defined by the environment variable $XDG_CACHE_HOME.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFStringRef _CFXDGCreateCacheDirectoryPath(void) {
     //$XDG_CACHE_HOME defines the base directory relative to which user specific non-essential data files should be stored. If $XDG_CACHE_HOME is either not set or empty, a default equal to $HOME/.cache should be used.
     const char *cacheHome = __CFgetenv("XDG_CACHE_HOME");
@@ -1278,7 +1290,7 @@ CFStringRef _CFXDGCreateCacheDirectoryPath(void) {
 }
 
 /// a single base directory relative to which user-specific runtime files and other file objects should be placed. This directory is defined by the environment variable $XDG_RUNTIME_DIR.
-CF_SWIFT_EXPORT
+CF_CROSS_PLATFORM_EXPORT
 CFStringRef _CFXDGCreateRuntimeDirectoryPath(void) {
     const char *runtimeDir = __CFgetenv("XDG_RUNTIME_DIR");
     if (runtimeDir && strnlen(runtimeDir, CFMaxPathSize) > 1 && runtimeDir[0] == '/') {
@@ -1344,4 +1356,5 @@ CF_PRIVATE CFArrayRef _CFCreateCFArrayByTokenizingString(const char *values, cha
     return CFArrayCreate(kCFAllocatorSystemDefault, NULL, 0, &kCFTypeArrayCallBacks);
 }
 
-#endif
+#endif // !DEPLOYMENT_RUNTIME_OBJC
+

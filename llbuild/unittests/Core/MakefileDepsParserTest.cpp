@@ -103,7 +103,7 @@ TEST(MakefileDepsParserTest, basic) {
   // Check error case if leading garbage.
   actions.errors.clear();
   actions.records.clear();
-  input = "  =$ a";
+  input = "  $ a";
   MakefileDepsParser(input.data(), input.size(), actions).parse();
   EXPECT_EQ(1U, actions.errors.size());
   EXPECT_EQ(actions.errors[0],
@@ -134,7 +134,24 @@ TEST(MakefileDepsParserTest, basic) {
   EXPECT_EQ(1U, actions.records.size());
   EXPECT_EQ(RuleRecord("a", { "b" }),
             actions.records[0]);
+
+  // Check that we can parse filenames with special characters.
+  actions.errors.clear();
+  actions.records.clear();
+  input = "/=>\\ ;|%.o : /=>\\ ;|%.swift";
+  MakefileDepsParser(input.data(), input.size(), actions).parse();
+  EXPECT_EQ(0U, actions.errors.size());
+  EXPECT_EQ(1U, actions.records.size());
+  EXPECT_EQ(RuleRecord("/=> ;|%.o", { "/=> ;|%.swift" }), actions.records[0]);
   
+  // Check that we can parse filenames with colons.
+  actions.errors.clear();
+  actions.records.clear();
+  input = "a: b:c";
+  MakefileDepsParser(input.data(), input.size(), actions).parse();
+  EXPECT_EQ(0U, actions.errors.size());
+  EXPECT_EQ(1U, actions.records.size());
+  EXPECT_EQ(RuleRecord("a", { "b:c" }), actions.records[0]);
 }
 
 }

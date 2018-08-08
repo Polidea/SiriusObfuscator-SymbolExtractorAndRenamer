@@ -19,8 +19,8 @@ All targets should be declared in the `Package.swift` manifest file.  Unless the
 relative path of the target is declared, the Package Manager will look for
 a directory matching the name of the target in these places:
 
-Regular targets: package root, Sources, Source, src, srcs.  
-Test targets: Tests, package root, Sources, Source, src, srcs. 
+Regular targets: Sources, Source, src, srcs.  
+Test targets: Tests, Sources, Source, src, srcs.
 
 ## Package Manifest File Format Reference
 
@@ -84,7 +84,7 @@ environment variable, `PKG_CONFIG_PATH`, which will be searched before the
 standard locations.
 
 _NOTE: This feature does not require pkg-config to be installed. However, if
-installed it will used to find additional platform specific pc file locations
+installed it will be used to find additional platform specific pc file locations
 which might be unknown to SwiftPM._
 
 #### providers
@@ -176,7 +176,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/SwiftyJSON/SwiftyJSON.git", from: "1.0.0"),
     ],
-    target: [
+    targets: [
         .target(name: "Foo", dependencies: ["SwiftyJSON"]),
     ]
 )
@@ -242,8 +242,8 @@ The above manifest declares two target, `Foo` and `Bar`. `Bar` is a test target
 which depends on `Foo`. The Package Manager will automatically search for the
 targets inside package in the [predefined search paths](#target-format-reference).
 
-A target dependency can either be another target in the same package or a target
-in one of its package dependencies. All target depenencies, internal or
+A target dependency can either be another target in the same package or a product
+in one of its package dependencies. All target dependencies, internal or
 external, must be explicitly declared.
 
 A target can be further customized with these properties:
@@ -301,7 +301,7 @@ Version(
 	_ minor: Int,
 	_ patch: Int,
 	prereleaseIdentifiers: [String] = [],
-	buildMetadataIdentifier: [String] = []
+	buildMetadataIdentifiers: [String] = []
 )
 ```
 
@@ -311,10 +311,9 @@ changes.
 backwards-compatible manner.  
 \- *patch*: The patch version, incremented when you make backwards-compatible
 bug fixes.  
-\- *prereleaseIdentifiers*: Used to denote a pre-released version for eg:
-alpha, beta, etc.  
-\- *buildMetadataIdentifier*: Optional build meta data for eg: timestamp, hash,
-etc.  
+\- *prereleaseIdentifiers*: Used to denote a pre-release version; for example,
+alpha, beta.  
+\- *buildMetadataIdentifiers*: Optional build metadata; for example, timestamp, hash.  
 
 A `Version` struct can be initialized using a string literal in following
 format:

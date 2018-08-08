@@ -19,8 +19,10 @@
 #include "llbuild/BuildSystem/BuildExecutionQueue.h"
 #include "llbuild/BuildSystem/BuildFile.h"
 #include "llbuild/BuildSystem/BuildKey.h"
+#include "llbuild/BuildSystem/BuildValue.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Path.h"
@@ -49,6 +51,7 @@ void BuildSystemInvocation::getUsage(int optionWidth, raw_ostream& os) {
     { "--db <PATH>", "enable building against the database at PATH" },
     { "-f <PATH>", "load the build task file at PATH" },
     { "--serial", "do not build in parallel" },
+    { "--scheduler <SCHEDULER>", "set scheduler algorithm" },
     { "-v, --verbose", "show verbose status information" },
     { "--trace <PATH>", "trace build engine operation to PATH" },
   };
@@ -113,6 +116,23 @@ void BuildSystemInvocation::parse(llvm::ArrayRef<std::string> args,
       args = args.slice(1);
     } else if (option == "--serial") {
       useSerialBuild = true;
+    } else if (option == "--scheduler") {
+      if (args.empty()) {
+        error("missing argument to '" + option + "'");
+        break;
+      }
+      auto algorithm = args[0];
+      if (algorithm == "commandNamePriority" || algorithm == "default") {
+        llbuild::buildsystem::setSchedulerAlgorithm(
+            llbuild::buildsystem::SchedulerAlgorithm::CommandNamePriority);
+      } else if (algorithm == "fifo") {
+        llbuild::buildsystem::setSchedulerAlgorithm(
+            llbuild::buildsystem::SchedulerAlgorithm::FIFO);
+      } else {
+        error("unknown scheduler algorithm '" + algorithm + "'");
+        break;
+      }
+      args = args.slice(1);
     } else if (option == "-v" || option == "--verbose") {
       showVerboseStatus = true;
     } else if (option == "--trace") {
@@ -152,11 +172,15 @@ std::string BuildSystemInvocation::formatDetectedCycle(const std::vector<core::R
         os << "custom task '" << key.getCustomTaskName() << "'";
         break;
       case BuildKey::Kind::DirectoryContents:
-        os << "directory-contents '" << key.getDirectoryContentsPath() << "'";
+        os << "directory-contents '" << key.getDirectoryPath() << "'";
         break;
       case BuildKey::Kind::DirectoryTreeSignature:
         os << "directory-tree-signature '"
-        << key.getDirectoryTreeSignaturePath() << "'";
+        << key.getDirectoryPath() << "'";
+        break;
+      case BuildKey::Kind::DirectoryTreeStructureSignature:
+        os << "directory-tree-structure-signature '"
+        << key.getDirectoryPath() << "'";
         break;
       case BuildKey::Kind::Node:
         os << "node '" << key.getNodeName() << "'";
@@ -224,12 +248,11 @@ public:
   }
 
   virtual void commandProcessFinished(Command* command, ProcessHandle handle,
-                                      CommandResult result,
-                                      int exitStatus) override {
+                                      const CommandExtendedResult& result) override {
     static_cast<BuildSystemFrontendDelegate*>(&getSystem().getDelegate())->
       commandProcessFinished(
           command, BuildSystemFrontendDelegate::ProcessHandle { handle.id },
-          result, exitStatus);
+          result);
   }
 };
 
@@ -369,7 +392,7 @@ BuildSystemFrontendDelegate::error(StringRef filename,
   if (!filename.empty() && at.start) {
     // FIXME: We ignore errors here, for now, this will be resolved when we move
     // to SourceMgr completely.
-    auto buffer = getFileSystem().getFileContents(filename);
+    auto buffer = impl->system->getFileSystem().getFileContents(filename);
     if (buffer) {
       unsigned offset = at.start - impl->bufferBeingParsed.data();
       if (offset + at.length < buffer->getBufferSize()) {
@@ -401,13 +424,15 @@ BuildSystemFrontendDelegate::createExecutionQueue() {
   }
     
   // Get the number of CPUs to use.
-  unsigned numCPUs = std::thread::hardware_concurrency();
-  unsigned numLanes;
-  if (numCPUs == 0) {
-    error("<unknown>", {}, "unable to detect number of CPUs");
-    numLanes = 1;
-  } else {
-    numLanes = numCPUs;
+  unsigned numLanes = getSchedulerLaneWidth();
+  if (numLanes == 0) {
+    unsigned numCPUs = std::thread::hardware_concurrency();
+    if (numCPUs == 0) {
+      error("<unknown>", {}, "unable to detect number of CPUs");
+      numLanes = 1;
+    } else {
+      numLanes = numCPUs;
+    }
   }
     
   return std::unique_ptr<BuildExecutionQueue>(
@@ -506,6 +531,48 @@ void BuildSystemFrontendDelegate::commandHadWarning(Command* command, StringRef 
 void BuildSystemFrontendDelegate::commandFinished(Command*, CommandResult) {
 }
 
+void BuildSystemFrontendDelegate::commandCannotBuildOutputDueToMissingInputs(
+     Command * command, Node *output, SmallPtrSet<Node *, 1> inputs) {
+  std::string message;
+  llvm::raw_string_ostream messageStream(message);
+
+  messageStream << "cannot build '";
+  messageStream << output->getName().str();
+  messageStream << "' due to missing inputs: ";
+
+  for (Node* input : inputs) {
+    if (input != *inputs.begin()) {
+      messageStream << ", ";
+    }
+    messageStream << "'" << input->getName() << "'";
+  }
+
+  messageStream.flush();
+  fwrite(message.data(), message.size(), 1, stderr);
+  fflush(stderr);
+}
+
+void BuildSystemFrontendDelegate::cannotBuildNodeDueToMultipleProducers(
+     Node *output, std::vector<Command*> commands) {
+  std::string message;
+  llvm::raw_string_ostream messageStream(message);
+
+  messageStream << "unable to build node: '";
+  messageStream << output->getName();
+  messageStream << "' (node is produced by multiple commands: '";
+
+  for (Command* cmd : commands) {
+    if (cmd != *commands.begin()) {
+      messageStream << ", ";
+    }
+    messageStream << "'" << cmd->getName() << "'";
+  }
+
+  messageStream.flush();
+  fwrite(message.data(), message.size(), 1, stderr);
+  fflush(stderr);
+}
+
 void BuildSystemFrontendDelegate::commandJobStarted(Command*) {
 }
 
@@ -515,7 +582,14 @@ void BuildSystemFrontendDelegate::commandJobFinished(Command*) {
 void BuildSystemFrontendDelegate::commandProcessStarted(Command*,
                                                         ProcessHandle) {
 }
-  
+
+bool BuildSystemFrontendDelegate::
+shouldResolveCycle(const std::vector<core::Rule*>& items,
+                   core::Rule* candidateRule,
+                   core::Rule::CycleAction action) {
+  return false;
+}
+
 void BuildSystemFrontendDelegate::
 commandProcessHadError(Command* command, ProcessHandle handle,
                        const Twine& message) {
@@ -541,8 +615,7 @@ commandProcessHadOutput(Command* command, ProcessHandle handle,
 
 void BuildSystemFrontendDelegate::
 commandProcessFinished(Command*, ProcessHandle handle,
-                       CommandResult result,
-                       int exitStatus) {
+                       const CommandExtendedResult& result) {
   auto impl = static_cast<BuildSystemFrontendDelegateImpl*>(this->impl);
   std::unique_lock<std::mutex> lock(impl->processOutputBuffersMutex);
 
@@ -561,8 +634,9 @@ commandProcessFinished(Command*, ProcessHandle handle,
 
 BuildSystemFrontend::
 BuildSystemFrontend(BuildSystemFrontendDelegate& delegate,
-                    const BuildSystemInvocation& invocation)
-    : delegate(delegate), invocation(invocation)
+                    const BuildSystemInvocation& invocation,
+                    std::unique_ptr<basic::FileSystem> fileSystem)
+  : delegate(delegate), invocation(invocation), fileSystem(std::move(fileSystem))
 {
   auto delegateImpl =
     static_cast<BuildSystemFrontendDelegateImpl*>(delegate.impl);
@@ -579,21 +653,27 @@ bool BuildSystemFrontend::initialize() {
   }
 
   // Create the build system.
-  buildSystem.emplace(delegate);
-
-  // Load the build file.
-  if (!buildSystem->loadDescription(invocation.buildFilePath))
-    return false;
+  buildSystem.emplace(delegate, std::move(fileSystem));
 
   // Register the system back pointer.
   //
   // FIXME: Eliminate this.
   auto delegateImpl =
-    static_cast<BuildSystemFrontendDelegateImpl*>(delegate.impl);
+  static_cast<BuildSystemFrontendDelegateImpl*>(delegate.impl);
   delegateImpl->system = buildSystem.getPointer();
-  
+
+  // Load the build file.
+  if (!buildSystem->loadDescription(invocation.buildFilePath))
+    return false;
+
   // Enable tracing, if requested.
   if (!invocation.traceFilePath.empty()) {
+    const auto dir = llvm::sys::path::parent_path(invocation.traceFilePath);
+    if (!buildSystem->getFileSystem().createDirectories(dir)) {
+      getDelegate().error(Twine("unable to create tracing directory: " + dir));
+      return false;
+    }
+
     std::string error;
     if (!buildSystem->enableTracing(invocation.traceFilePath, &error)) {
       getDelegate().error(Twine("unable to enable tracing: ") + error);
@@ -625,14 +705,13 @@ bool BuildSystemFrontend::initialize() {
   return true;
 }
 
-bool BuildSystemFrontend::build(StringRef targetToBuild) {
-
+bool BuildSystemFrontend::setupBuild() {
   auto delegateImpl =
-    static_cast<BuildSystemFrontendDelegateImpl*>(delegate.impl);
+  static_cast<BuildSystemFrontendDelegateImpl*>(delegate.impl);
 
   // We expect build to be called in these states only.
   assert(delegateImpl->getStatus() == BuildSystemFrontendDelegateImpl::Status::Uninitialized
-    || delegateImpl->getStatus() == BuildSystemFrontendDelegateImpl::Status::Initialized);
+         || delegateImpl->getStatus() == BuildSystemFrontendDelegateImpl::Status::Initialized);
 
   // Set the delegate status to initialized.
   delegateImpl->setStatus(BuildSystemFrontendDelegateImpl::Status::Initialized);
@@ -648,7 +727,35 @@ bool BuildSystemFrontend::build(StringRef targetToBuild) {
 
   // If delegate was told to cancel while we were initializing, abort now.
   if (delegateImpl->getStatus() == BuildSystemFrontendDelegateImpl::Status::Cancelled) {
-      return false;
+    return false;
+  }
+
+  return true;
+}
+
+bool BuildSystemFrontend::buildNode(StringRef nodeToBuild) {
+  if (!setupBuild()) {
+    return false;
+  }
+
+  auto buildValue = buildSystem->build(BuildKey::makeNode(nodeToBuild));
+  if (!buildValue.hasValue()) {
+    return false;
+  }
+
+  if (!buildValue.getValue().isExistingInput()) {
+    if (buildValue.getValue().isMissingInput()) {
+      delegate.error((Twine("missing input '") + nodeToBuild + "' and no rule to build it"));
+    }
+    return false;
+  }
+
+  return delegate.getNumFailedCommands() == 0 && delegate.getNumErrors() == 0;
+}
+
+bool BuildSystemFrontend::build(StringRef targetToBuild) {
+  if (!setupBuild()) {
+    return false;
   }
 
   // Build the target; if something unspecified failed about the build, return

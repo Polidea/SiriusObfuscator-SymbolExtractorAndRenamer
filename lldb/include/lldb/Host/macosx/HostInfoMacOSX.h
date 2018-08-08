@@ -10,8 +10,8 @@
 #ifndef lldb_Host_macosx_HostInfoMacOSX_h_
 #define lldb_Host_macosx_HostInfoMacOSX_h_
 
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Host/posix/HostInfoPosix.h"
+#include "lldb/Utility/FileSpec.h"
 
 namespace lldb_private {
 
@@ -30,7 +30,6 @@ public:
   static bool GetOSBuildString(std::string &s);
   static bool GetOSKernelDescription(std::string &s);
   static FileSpec GetProgramFileSpec();
-  static uint32_t GetMaxThreadNameLength();
 
 protected:
   static bool ComputeSupportExeDirectory(FileSpec &file_spec);
@@ -40,9 +39,15 @@ protected:
   static bool ComputeHeaderDirectory(FileSpec &file_spec);
   static bool ComputePythonDirectory(FileSpec &file_spec);
   static bool ComputeClangDirectory(FileSpec &file_spec);
-  static bool ComputeSwiftDirectory(FileSpec &file_spec);
+  static bool ComputeClangDirectory(FileSpec &lldb_shlib_spec,
+                                    FileSpec &file_spec, bool verify);
   static bool ComputeSystemPluginsDirectory(FileSpec &file_spec);
   static bool ComputeUserPluginsDirectory(FileSpec &file_spec);
+
+  /// Swift additions.
+  /// @{
+  static bool ComputeSwiftDirectory(FileSpec &file_spec);
+  /// @}
 };
 }
 

@@ -44,12 +44,7 @@ extension String {
   ///
   /// - Parameter cString: A pointer to a null-terminated UTF-8 code sequence.
   public init(cString: UnsafePointer<CChar>) {
-    let len = UTF8._nullCodeUnitOffset(in: cString)
-    let (result, _) = cString.withMemoryRebound(to: UInt8.self, capacity: len) {
-      _decodeCString(
-        $0, as: UTF8.self, length: len, repairingInvalidCodeUnits: true)!
-    }
-    self = result
+    self = _decodeValidCString(cString, repair: true)
   }
 
   /// Creates a new string by copying the null-terminated UTF-8 data referenced
@@ -58,8 +53,7 @@ extension String {
   /// This is identical to init(cString: UnsafePointer<CChar> but operates on an
   /// unsigned sequence of bytes.
   public init(cString: UnsafePointer<UInt8>) {
-    self = String.decodeCString(
-      cString, as: UTF8.self, repairingInvalidCodeUnits: true)!.result
+    self = _decodeValidCString(cString, repair: true)
   }
 
   /// Creates a new string by copying and validating the null-terminated UTF-8
@@ -89,16 +83,10 @@ extension String {
   ///
   /// - Parameter cString: A pointer to a null-terminated UTF-8 code sequence.
   public init?(validatingUTF8 cString: UnsafePointer<CChar>) {
-    let len = UTF8._nullCodeUnitOffset(in: cString)
-    guard let (result, _) =
-    cString.withMemoryRebound(to: UInt8.self, capacity: len, {
-        _decodeCString($0, as: UTF8.self, length: len,
-          repairingInvalidCodeUnits: false)
-      })
-    else {
+    guard let str = _decodeCString(cString, repair: false) else {
       return nil
     }
-    self = result
+    self = str
   }
 
   /// Creates a new string by copying the null-terminated data referenced by
@@ -143,6 +131,8 @@ extension String {
   /// - Returns: A tuple with the new string and a Boolean value that indicates
   ///   whether any repairs were made. If `isRepairing` is `false` and an
   ///   ill-formed sequence is detected, this method returns `nil`.
+  @_specialize(where Encoding == Unicode.UTF8)
+  @_specialize(where Encoding == Unicode.UTF16)
   public static func decodeCString<Encoding : _UnicodeEncoding>(
     _ cString: UnsafePointer<Encoding.CodeUnit>?,
     as encoding: Encoding.Type,
@@ -169,7 +159,7 @@ public func _persistCString(_ p: UnsafePointer<CChar>?) -> [CChar]? {
   guard let s = p else {
     return nil
   }
-  let count = Int(_swift_stdlib_strlen(s))
+  let count = Int(_stdlib_strlen(s))
   var result = [CChar](repeating: 0, count: count + 1)
   for i in 0..<count {
     result[i] = s[i]
@@ -177,11 +167,49 @@ public func _persistCString(_ p: UnsafePointer<CChar>?) -> [CChar]? {
   return result
 }
 
+internal func _decodeValidCString(
+  _ cString: UnsafePointer<Int8>, repair: Bool
+) -> String {
+  let len = UTF8._nullCodeUnitOffset(in: cString)
+  return cString.withMemoryRebound(to: UInt8.self, capacity: len) {
+    (ptr: UnsafePointer<UInt8>) -> String in
+    let bufPtr = UnsafeBufferPointer(start: ptr, count: len)
+    return String._fromWellFormedUTF8CodeUnitSequence(bufPtr, repair: repair)
+  }
+}
+
+internal func _decodeValidCString(
+  _ cString: UnsafePointer<UInt8>, repair: Bool
+) -> String {
+  let len = UTF8._nullCodeUnitOffset(in: cString)
+  let bufPtr = UnsafeBufferPointer(start: cString, count: len)
+  return String._fromWellFormedUTF8CodeUnitSequence(bufPtr, repair: repair)
+}
+
+internal func _decodeCString(
+  _ cString: UnsafePointer<Int8>, repair: Bool
+) -> String? {
+  let len = UTF8._nullCodeUnitOffset(in: cString)
+  return cString.withMemoryRebound(to: UInt8.self, capacity: len) {
+    (ptr: UnsafePointer<UInt8>) -> String? in
+    let bufPtr = UnsafeBufferPointer(start: ptr, count: len)
+    return String._fromUTF8CodeUnitSequence(bufPtr, repair: repair)
+  }
+}
+
+internal func _decodeCString(
+  _ cString: UnsafePointer<UInt8>, repair: Bool
+) -> String? {
+  let len = UTF8._nullCodeUnitOffset(in: cString)
+  let bufPtr = UnsafeBufferPointer(start: cString, count: len)
+  return String._fromUTF8CodeUnitSequence(bufPtr, repair: repair)
+}
+
 /// Creates a new string by copying the null-terminated data referenced by
 /// the given pointer using the specified encoding.
 ///
 /// This internal helper takes the string length as an argument.
-func _decodeCString<Encoding : _UnicodeEncoding>(
+internal func _decodeCString<Encoding : _UnicodeEncoding>(
   _ cString: UnsafePointer<Encoding.CodeUnit>,
   as encoding: Encoding.Type, length: Int,
   repairingInvalidCodeUnits isRepairing: Bool = true)
@@ -190,23 +218,7 @@ func _decodeCString<Encoding : _UnicodeEncoding>(
   let buffer = UnsafeBufferPointer<Encoding.CodeUnit>(
     start: cString, count: length)
 
-  let (stringBuffer, hadError) = _StringBuffer.fromCodeUnits(
+  let (guts, hadError) = _StringGuts.fromCodeUnits(
     buffer, encoding: encoding, repairIllFormedSequences: isRepairing)
-  return stringBuffer.map {
-    (result: String(_storage: $0), repairsMade: hadError)
-  }
-}
-
-extension String {
-  @available(*, unavailable, message: "Please use String.init?(validatingUTF8:) instead. Note that it no longer accepts NULL as a valid input. Also consider using String(cString:), that will attempt to repair ill-formed code units.")
-  public static func fromCString(_ cs: UnsafePointer<CChar>) -> String? {
-    Builtin.unreachable()
-  }
-
-  @available(*, unavailable, message: "Please use String.init(cString:) instead. Note that it no longer accepts NULL as a valid input. See also String.decodeCString if you need more control.")
-  public static func fromCStringRepairingIllFormedUTF8(
-    _ cs: UnsafePointer<CChar>
-  ) -> (String?, hadError: Bool) {
-    Builtin.unreachable()
-  }
+  return guts.map { (result: String($0), repairsMade: hadError) }
 }

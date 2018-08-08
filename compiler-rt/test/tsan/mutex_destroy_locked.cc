@@ -12,11 +12,10 @@ int main() {
 
 // CHECK: WARNING: ThreadSanitizer: destroy of a locked mutex
 // CHECK:     #0 pthread_mutex_destroy
-// CHECK:   * #1 main
+// CHECK:     #1 main
 // CHECK:   and:
 // CHECK:     #0 pthread_mutex_lock
-// CHECK:   * #1 main
-// CHECK:   Issue is caused by frames marked with "*".
+// CHECK:     #1 main
 // CHECK:   Mutex {{.*}} created at:
 // CHECK:     #0 pthread_mutex_init
 // CHECK:     #1 main

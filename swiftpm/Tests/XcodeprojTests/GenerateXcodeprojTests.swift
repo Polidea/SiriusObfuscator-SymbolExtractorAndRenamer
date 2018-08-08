@@ -18,6 +18,14 @@ import Utility
 import XCTest
 
 class GenerateXcodeprojTests: XCTestCase {
+    func testBuildXcodeprojPath() {
+        let outdir = AbsolutePath("/path/to/project")
+        let projectName = "Bar"
+        let xcodeprojPath = Xcodeproj.buildXcodeprojPath(outputDir: outdir, projectName: projectName)
+        let expectedPath = AbsolutePath("/path/to/project/Bar.xcodeproj")
+        XCTAssertEqual(xcodeprojPath, expectedPath)
+    }
+    
     func testXcodebuildCanParseIt() {
       #if os(macOS)
         mktmpdir { dstdir in
@@ -28,7 +36,8 @@ class GenerateXcodeprojTests: XCTestCase {
             XCTAssertFalse(diagnostics.hasErrors)
 
             let projectName = "DummyProjectName"
-            let outpath = try Xcodeproj.generate(outputDir: dstdir, projectName: projectName, graph: graph, options: XcodeprojOptions())
+            let outpath = Xcodeproj.buildXcodeprojPath(outputDir: dstdir, projectName: projectName)
+            try Xcodeproj.generate(projectName: projectName, xcodeprojPath: outpath, graph: graph, options: XcodeprojOptions(), diagnostics: diagnostics)
 
             XCTAssertDirectoryExists(outpath)
             XCTAssertEqual(outpath, dstdir.appending(component: projectName + ".xcodeproj"))
@@ -38,21 +47,22 @@ class GenerateXcodeprojTests: XCTestCase {
             let output = try Process.checkNonZeroExit(
                 args: "env", "-u", "TOOLCHAINS", "xcodebuild", "-list", "-project", outpath.asString).chomp()
 
-            XCTAssertEqual(output, """
+            XCTAssertTrue(output.hasPrefix("""
                Information about project "DummyProjectName":
                    Targets:
-                       FooPackageDescription
                        DummyModuleName
-               
+                       Foo
+                       FooPackageDescription
+
                    Build Configurations:
                        Debug
                        Release
                
-                   If no build configuration is specified and -scheme is not passed then "Debug" is used.
+                   If no build configuration is specified and -scheme is not passed then "Release" is used.
                
                    Schemes:
-                       DummyProjectName-Package
-               """)
+                       Foo-Package
+               """), output)
         }
       #endif
     }
@@ -66,7 +76,7 @@ class GenerateXcodeprojTests: XCTestCase {
         let options = XcodeprojOptions(xcconfigOverrides: AbsolutePath("/doesntexist"))
         do {
             _ = try xcodeProject(xcodeprojPath: AbsolutePath.root.appending(component: "xcodeproj"),
-                                 graph: graph, extraDirs: [], options: options, fileSystem: fileSystem)
+                                 graph: graph, extraDirs: [], options: options, fileSystem: fileSystem, diagnostics: diagnostics)
             XCTFail("Project generation should have failed")
         } catch ProjectGenerationError.xcconfigOverrideNotFound(let path) {
             XCTAssertEqual(options.xcconfigOverrides, path)
@@ -84,7 +94,7 @@ class GenerateXcodeprojTests: XCTestCase {
         XCTAssertFalse(diagnostics.hasErrors)
 
         _ = try xcodeProject(xcodeprojPath: AbsolutePath.root.appending(component: "xcodeproj"),
-                             graph: graph, extraDirs: [], options: XcodeprojOptions(), fileSystem: fileSystem,
+                             graph: graph, extraDirs: [], options: XcodeprojOptions(), fileSystem: fileSystem, diagnostics: diagnostics,
                              warningStream: warningStream)
 
         let warnings = warningStream.bytes.asReadableString

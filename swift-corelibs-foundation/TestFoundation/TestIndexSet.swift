@@ -7,16 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-import Foundation
-import XCTest
-#else
-import SwiftFoundation
-import SwiftXCTest
-#endif
-
-
 class TestIndexSet : XCTestCase {
     
     static var allTests: [(String, (TestIndexSet) -> () throws -> Void)] {
@@ -40,6 +30,7 @@ class TestIndexSet : XCTestCase {
             ("testIndexRange", testIndexRange),
             ("testMutation", testMutation),
             ("testContainsAndIntersects", testContainsAndIntersects),
+            ("testContainsIndexSet", testContainsIndexSet),
             ("testIteration", testIteration),
             ("testRangeIteration", testRangeIteration),
             ("testSubrangeIteration", testSubrangeIteration),
@@ -57,6 +48,13 @@ class TestIndexSet : XCTestCase {
             ("test_AnyHashableContainingIndexSet", test_AnyHashableContainingIndexSet),
             ("test_AnyHashableCreatedFromNSIndexSet", test_AnyHashableCreatedFromNSIndexSet),
             ("test_unconditionallyBridgeFromObjectiveC", test_unconditionallyBridgeFromObjectiveC),
+            ("testInsertNonOverlapping", testInsertNonOverlapping),
+            ("testInsertOverlapping", testInsertOverlapping),
+            ("testInsertOverlappingExtend", testInsertOverlappingExtend),
+            ("testInsertOverlappingMultiple", testInsertOverlappingMultiple),
+            ("testRemoveNonOverlapping", testRemoveNonOverlapping),
+            ("testRemoveOverlapping", testRemoveOverlapping),
+            ("testRemoveSplitting", testRemoveSplitting),
         ]
     }
     
@@ -73,7 +71,7 @@ class TestIndexSet : XCTestCase {
         let set3 = NSMutableIndexSet()
         set3.add(2)
         set3.add(5)
-        set3.add(in: NSMakeRange(4, 7))
+        set3.add(in: NSRange(location: 4, length: 7))
         set3.add(8)
         XCTAssertEqual(set3.count, 8)
         XCTAssertEqual(set3.firstIndex, 2)
@@ -121,9 +119,9 @@ class TestIndexSet : XCTestCase {
         disjointSet.add(2)
         disjointSet.add(5)
         disjointSet.add(8)
-        disjointSet.add(in: NSMakeRange(7, 3))
+        disjointSet.add(in: NSRange(location: 7, length: 3))
         disjointSet.add(11)
-        disjointSet.add(in: NSMakeRange(13, 2))
+        disjointSet.add(in: NSRange(location: 13, length: 2))
         result = Array<Int>()
         disjointSet.enumerate(options: []) { (idx, _) in
             result.append(idx)
@@ -141,10 +139,10 @@ class TestIndexSet : XCTestCase {
     }
     
     func test_removal() {
-        let removalSet = NSMutableIndexSet(indexesIn: NSMakeRange(0, 10))
+        let removalSet = NSMutableIndexSet(indexesIn: NSRange(location: 0, length: 10))
         removalSet.remove(0)
-        removalSet.remove(in: NSMakeRange(9, 5))
-        removalSet.remove(in: NSMakeRange(2, 4))
+        removalSet.remove(in: NSRange(location: 9, length: 5))
+        removalSet.remove(in: NSRange(location: 2, length: 4))
         XCTAssertEqual(removalSet.count, 4)
         XCTAssertEqual(removalSet.firstIndex, 1)
         XCTAssertEqual(removalSet.lastIndex, 8)
@@ -180,7 +178,7 @@ class TestIndexSet : XCTestCase {
         }
         
         
-        let testInputA2 = [NSMakeRange(0, 1),NSMakeRange(5, 4),NSMakeRange(42, 1)]
+        let testInputA2 = [NSRange(location: 0, length: 1),NSRange(location: 5, length: 4),NSRange(location: 42, length: 1)]
         i = 0
         
         testSetA.enumerateRanges(options: []) { (range, _) in
@@ -190,10 +188,10 @@ class TestIndexSet : XCTestCase {
             i += 1
         }
         
-        let testSetB = NSMutableIndexSet(indexesIn: NSMakeRange(0,5))
-        testSetB.add(in: NSMakeRange(42, 3))
-        testSetB.add(in: NSMakeRange(2, 2))
-        testSetB.add(in: NSMakeRange(18, 1))
+        let testSetB = NSMutableIndexSet(indexesIn: NSRange(location: 0, length: 5))
+        testSetB.add(in: NSRange(location: 42, length: 3))
+        testSetB.add(in: NSRange(location: 2, length: 2))
+        testSetB.add(in: NSRange(location: 18, length: 1))
         
         let testInputB1 = [0,1,2,3,4,18,42,43,44]
         i = 0
@@ -209,7 +207,7 @@ class TestIndexSet : XCTestCase {
         }
         
         
-        let testInputB2 = [NSMakeRange(0, 5),NSMakeRange(18, 1),NSMakeRange(42, 3)]
+        let testInputB2 = [NSRange(location: 0, length: 5),NSRange(location: 18, length: 1),NSRange(location: 42, length: 3)]
         i = 0
         
         testSetB.enumerateRanges(options: []) { (range, _) in
@@ -399,6 +397,42 @@ class TestIndexSet : XCTestCase {
         XCTAssertFalse(someIndexes.intersects(integersIn: 0..<0))
         XCTAssertFalse(someIndexes.intersects(integersIn: 10...12))
         XCTAssertFalse(someIndexes.intersects(integersIn: 10..<12))
+    }
+
+    func testContainsIndexSet() {
+        var someIndexes = IndexSet()
+        someIndexes.insert(integersIn: 1..<2)
+        someIndexes.insert(integersIn: 100..<200)
+        someIndexes.insert(integersIn: 1000..<2000)
+
+        let contained1 = someIndexes
+        let contained2 = IndexSet(integersIn: 120..<150)
+
+        var contained3 = IndexSet()
+        contained3.insert(integersIn: 100..<200)
+        contained3.insert(integersIn: 1500..<1600)
+
+        let notContained1 = IndexSet(integer: 9)
+        let notContained2 = IndexSet(integersIn: 150..<300)
+        var notContained3 = IndexSet()
+        notContained3.insert(integersIn: 1..<2)
+        notContained3.insert(integersIn: 100..<200)
+        notContained3.insert(integersIn: 1000..<2000)
+        notContained3.insert(integersIn: 3000..<5000)
+
+        XCTAssertTrue(someIndexes.contains(integersIn: contained1))
+        XCTAssertTrue(someIndexes.contains(integersIn: contained2))
+        XCTAssertTrue(someIndexes.contains(integersIn: contained3))
+
+        XCTAssertFalse(someIndexes.contains(integersIn: notContained1))
+        XCTAssertFalse(someIndexes.contains(integersIn: notContained2))
+        XCTAssertFalse(someIndexes.contains(integersIn: notContained3))
+
+        let emptySet = IndexSet()
+
+        XCTAssertTrue(emptySet.contains(integersIn: emptySet))
+        XCTAssertTrue(someIndexes.contains(integersIn: emptySet))
+        XCTAssertFalse(emptySet.contains(integersIn: someIndexes))
     }
     
     func testIteration() {
@@ -1082,4 +1116,120 @@ class TestIndexSet : XCTestCase {
     func test_unconditionallyBridgeFromObjectiveC() {
         XCTAssertEqual(IndexSet(), IndexSet._unconditionallyBridgeFromObjectiveC(nil))
     }
+
+    func testInsertNonOverlapping() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+
+        tested.insert(200)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<201)
+        expected.insert(integersIn: 1000..<2000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testInsertOverlapping() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+        tested.insert(integersIn: 10000..<20000)
+
+        tested.insert(integersIn: 150..<1500)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<2000)
+        expected.insert(integersIn: 10000..<20000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testInsertOverlappingExtend() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+
+        tested.insert(integersIn: 50..<500)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 50..<500)
+        expected.insert(integersIn: 1000..<2000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testInsertOverlappingMultiple() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+        tested.insert(integersIn: 10000..<20000)
+
+        tested.insert(integersIn: 150..<3000)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<3000)
+        expected.insert(integersIn: 10000..<20000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testRemoveNonOverlapping() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+
+        tested.remove(199)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<199)
+        expected.insert(integersIn: 1000..<2000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testRemoveOverlapping() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+
+        tested.remove(integersIn: 150..<1500)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<150)
+        expected.insert(integersIn: 1500..<2000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
+    func testRemoveSplitting() {
+        var tested = IndexSet()
+        tested.insert(integersIn: 1..<2)
+        tested.insert(integersIn: 100..<200)
+        tested.insert(integersIn: 1000..<2000)
+
+        tested.remove(integersIn: 150..<160)
+
+        var expected = IndexSet()
+        expected.insert(integersIn: 1..<2)
+        expected.insert(integersIn: 100..<150)
+        expected.insert(integersIn: 160..<200)
+        expected.insert(integersIn: 1000..<2000)
+
+        XCTAssertEqual(tested, expected)
+    }
+
 }

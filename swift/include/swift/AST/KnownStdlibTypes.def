@@ -50,6 +50,7 @@ KNOWN_STDLIB_TYPE_DECL(Sequence, NominalTypeDecl, 1)
 KNOWN_STDLIB_TYPE_DECL(Dictionary, NominalTypeDecl, 2)
 KNOWN_STDLIB_TYPE_DECL(AnyHashable, NominalTypeDecl, 0)
 KNOWN_STDLIB_TYPE_DECL(MutableCollection, ProtocolDecl, 1)
+KNOWN_STDLIB_TYPE_DECL(Hasher, NominalTypeDecl, 0)
 
 KNOWN_STDLIB_TYPE_DECL(AnyKeyPath, NominalTypeDecl, 0)
 KNOWN_STDLIB_TYPE_DECL(PartialKeyPath, NominalTypeDecl, 1)
@@ -58,7 +59,6 @@ KNOWN_STDLIB_TYPE_DECL(WritableKeyPath, NominalTypeDecl, 2)
 KNOWN_STDLIB_TYPE_DECL(ReferenceWritableKeyPath, NominalTypeDecl, 2)
 
 KNOWN_STDLIB_TYPE_DECL(Optional, EnumDecl, 1)
-KNOWN_STDLIB_TYPE_DECL(ImplicitlyUnwrappedOptional, EnumDecl, 1)
 
 KNOWN_STDLIB_TYPE_DECL(OptionSet, NominalTypeDecl, 1)
 
@@ -77,5 +77,6 @@ KNOWN_STDLIB_TYPE_DECL(Encoder, ProtocolDecl, 1)
 KNOWN_STDLIB_TYPE_DECL(Decoder, ProtocolDecl, 1)
 KNOWN_STDLIB_TYPE_DECL(KeyedEncodingContainer, NominalTypeDecl, 1)
 KNOWN_STDLIB_TYPE_DECL(KeyedDecodingContainer, NominalTypeDecl, 1)
+KNOWN_STDLIB_TYPE_DECL(RangeReplaceableCollection, ProtocolDecl, 1)
 
 #undef KNOWN_STDLIB_TYPE_DECL

@@ -48,6 +48,8 @@ enum class SyntaxNodeKind : uint8_t {
   BuildConfigKeyword,
   /// An identifier in a #if condition.
   BuildConfigId,
+  /// #-keywords like #warning, #sourceLocation
+  PoundDirectiveKeyword,
   /// Any occurrence of '@<attribute-name>' anywhere.
   AttributeId,
   /// A "resolved/active" attribute. Mis-applied attributes will be AttributeId.
@@ -90,11 +92,15 @@ enum class SyntaxStructureKind : uint8_t {
   InstanceVariable,
   StaticVariable,
   ClassVariable,
+  LocalVariable,
   EnumCase,
   EnumElement,
+  TypeAlias,
+  Subscript,
+  AssociatedType,
+  GenericTypeParam,
 
   ForEachStatement,
-  ForStatement,
   WhileStatement,
   RepeatWhileStatement,
   IfStatement,
@@ -108,6 +114,8 @@ enum class SyntaxStructureKind : uint8_t {
   ArrayExpression,
   DictionaryExpression,
   ObjectLiteralExpression,
+  TupleExpression,
+  ClosureExpression
 };
 
 enum class SyntaxStructureElementKind : uint8_t {
@@ -135,16 +143,19 @@ struct SyntaxStructureNode {
   CharSourceRange BodyRange;
   CharSourceRange NameRange;
   CharSourceRange TypeRange;
+  CharSourceRange DocRange;
   std::vector<CharSourceRange> InheritedTypeRanges;
   std::vector<SyntaxStructureElement> Elements;
 
-  bool isVariable() const {
+  bool hasSubstructure() const {
     switch (Kind) {
     case SyntaxStructureKind::GlobalVariable:
     case SyntaxStructureKind::InstanceVariable:
     case SyntaxStructureKind::StaticVariable:
     case SyntaxStructureKind::ClassVariable:
+    case SyntaxStructureKind::LocalVariable:
     case SyntaxStructureKind::Parameter:
+    case SyntaxStructureKind::Subscript:
       return true;
     default:
       return false;

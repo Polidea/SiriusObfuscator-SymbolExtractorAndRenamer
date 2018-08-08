@@ -278,8 +278,8 @@ class CGDebugInfo {
                                 llvm::DIFile *F,
                                 SmallVectorImpl<llvm::Metadata *> &E,
                                 llvm::DIType *RecordTy, const RecordDecl *RD);
-  void CollectRecordNestedRecord(const RecordDecl *RD,
-                                 SmallVectorImpl<llvm::Metadata *> &E);
+  void CollectRecordNestedType(const TypeDecl *RD,
+                               SmallVectorImpl<llvm::Metadata *> &E);
   void CollectRecordFields(const RecordDecl *Decl, llvm::DIFile *F,
                            SmallVectorImpl<llvm::Metadata *> &E,
                            llvm::DICompositeType *RecordTy);
@@ -367,7 +367,7 @@ public:
   void EmitFunctionDecl(GlobalDecl GD, SourceLocation Loc, QualType FnType);
 
   /// Constructs the debug code for exiting a function.
-  void EmitFunctionEnd(CGBuilderTy &Builder);
+  void EmitFunctionEnd(CGBuilderTy &Builder, llvm::Function *Fn);
 
   /// Emit metadata to indicate the beginning of a new lexical block
   /// and push the block onto the stack.
@@ -398,8 +398,8 @@ public:
   /// Emit call to \c llvm.dbg.declare for the block-literal argument
   /// to a block invocation function.
   void EmitDeclareOfBlockLiteralArgVariable(const CGBlockInfo &block,
-                                            llvm::Value *Arg, unsigned ArgNo,
-                                            llvm::Value *LocalAddr,
+                                            StringRef Name, unsigned ArgNo,
+                                            llvm::AllocaInst *LocalAddr,
                                             CGBuilderTy &Builder);
 
   /// Emit information about a global variable.
@@ -436,9 +436,21 @@ public:
   void completeType(const RecordDecl *RD);
   void completeRequiredType(const RecordDecl *RD);
   void completeClassData(const RecordDecl *RD);
+  void completeClass(const RecordDecl *RD);
 
   void completeTemplateDefinition(const ClassTemplateSpecializationDecl &SD);
+  void completeUnusedClass(const CXXRecordDecl &D);
 
+  /// Create debug info for a macro defined by a #define directive or a macro
+  /// undefined by a #undef directive.
+  llvm::DIMacro *CreateMacro(llvm::DIMacroFile *Parent, unsigned MType,
+                             SourceLocation LineLoc, StringRef Name,
+                             StringRef Value);
+
+  /// Create debug info for a file referenced by an #include directive.
+  llvm::DIMacroFile *CreateTempMacroFile(llvm::DIMacroFile *Parent,
+                                         SourceLocation LineLoc,
+                                         SourceLocation FileLoc);
 private:
   /// Emit call to llvm.dbg.declare for a variable declaration.
   void EmitDeclare(const VarDecl *decl, llvm::Value *AI,
@@ -545,6 +557,9 @@ private:
   CollectAnonRecordDecls(const RecordDecl *RD, llvm::DIFile *Unit,
                          unsigned LineNo, StringRef LinkageName,
                          llvm::GlobalVariable *Var, llvm::DIScope *DContext);
+
+  /// Get the printing policy for producing names for debug info.
+  PrintingPolicy getPrintingPolicy() const;
 
   /// Get function name for the given FunctionDecl. If the name is
   /// constructed on demand (e.g., C++ destructor) then the name is

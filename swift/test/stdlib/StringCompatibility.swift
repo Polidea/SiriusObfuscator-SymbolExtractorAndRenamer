@@ -1,6 +1,8 @@
-// RUN: rm -rf %t ; mkdir -p %t
+// RUN: %empty-directory(%t)
 // RUN: %target-build-swift %s -o %t/a.out3 -swift-version 3 && %target-run %t/a.out3
 // RUN: %target-build-swift %s -o %t/a.out4 -swift-version 4 && %target-run %t/a.out4
+
+// REQUIRES: executable_test
 
 import StdlibUnittest
 
@@ -15,17 +17,20 @@ struct MyString {
 extension MyString : BidirectionalCollection {
   typealias Iterator = String.Iterator
   typealias Index = String.Index
-  typealias IndexDistance = String.IndexDistance
+  typealias SubSequence = MyString
   func makeIterator() -> Iterator { return base.makeIterator() }
   var startIndex: String.Index { return base.startIndex }
   var endIndex: String.Index { return base.startIndex }
   subscript(i: Index) -> Character { return base[i] }
+  subscript(indices: Range<Index>) -> MyString {
+    return MyString(base: String(self.base[indices]))
+  }
   func index(after i: Index) -> Index { return base.index(after: i) }
   func index(before i: Index) -> Index { return base.index(before: i) }
-  func index(_ i: Index, offsetBy n: IndexDistance) -> Index {
+  func index(_ i: Index, offsetBy n: Int) -> Index {
     return base.index(i, offsetBy: n)
   }
-  func distance(from i: Index, to j: Index) -> IndexDistance {
+  func distance(from i: Index, to j: Index) -> Int {
     return base.distance(from: i, to: j)
   }
 }
@@ -111,8 +116,6 @@ extension MyString : Hashable {
   }
 }
 
-#if _runtime(_ObjC)
-
 extension MyString {
   public func hasPrefix(_ prefix: String) -> Bool {
     return self.base.hasPrefix(prefix)
@@ -122,8 +125,6 @@ extension MyString {
     return self.base.hasSuffix(suffix)
   }
 }
-
-#endif
 
 extension MyString : StringProtocol {
   typealias UTF8Index = String.UTF8Index

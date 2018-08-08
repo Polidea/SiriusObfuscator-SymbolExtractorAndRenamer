@@ -9,7 +9,7 @@
       key.name: "<#MyCls#>",
       key.offset: 0,
       key.length: 35,
-      key.runtime_name: "_TtC8__main__9<#MyCls#>",
+      key.runtime_name: "_TtC4main9<#MyCls#>",
       key.nameoffset: 6,
       key.namelength: 9,
       key.bodyoffset: 34,
@@ -57,6 +57,14 @@
             }
           ],
           key.substructure: [
+            {
+              key.kind: source.lang.swift.decl.var.local,
+              key.name: "<#name#>",
+              key.offset: 63,
+              key.length: 8,
+              key.nameoffset: 63,
+              key.namelength: 8
+            },
             {
               key.kind: source.lang.swift.stmt.brace,
               key.offset: 85,

@@ -9,15 +9,15 @@
 // See https://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 //===----------------------------------------------------------------------===//
-// RUN: rm -rf %t
-// RUN: mkdir -p %t
+// RUN: %empty-directory(%t)
+// RUN: cp %s %t/main.swift
 //
 // RUN: if [ %target-runtime == "objc" ]; \
 // RUN: then \
 // RUN:   %target-clang %S/Inputs/Mirror/Mirror.mm -c -o %t/Mirror.mm.o -g && \
-// RUN:   %target-build-swift %s -I %S/Inputs/Mirror/ -Xlinker %t/Mirror.mm.o -o %t/Mirror; \
+// RUN:   %target-build-swift %t/main.swift %S/Inputs/Mirror/MirrorOther.swift -I %S/Inputs/Mirror/ -Xlinker %t/Mirror.mm.o -o %t/Mirror; \
 // RUN: else \
-// RUN:   %target-build-swift %s -o %t/Mirror; \
+// RUN:   %target-build-swift %t/main.swift %S/Inputs/Mirror/MirrorOther.swift -o %t/Mirror; \
 // RUN: fi
 // RUN: %target-run %t/Mirror
 // REQUIRES: executable_test
@@ -53,8 +53,8 @@ mirrors.test("RandomAccessStructure") {
 let letters = "abcdefghijklmnopqrstuvwxyz "
 
 func find(_ substring: String, within domain: String) -> String.Index? {
-  let domainCount = domain.characters.count
-  let substringCount = substring.characters.count
+  let domainCount = domain.count
+  let substringCount = substring.count
 
   if (domainCount < substringCount) { return nil }
   var sliceStart = domain.startIndex
@@ -77,19 +77,19 @@ mirrors.test("ForwardStructure") {
     var customMirror: Mirror {
       return Mirror(
         self,
-        unlabeledChildren: Set(letters.characters),
+        unlabeledChildren: Set(letters),
         displayStyle: .`set`)
     }
   }
 
   let w = DoubleYou().customMirror
   expectEqual(.`set`, w.displayStyle)
-  expectEqual(letters.characters.count, numericCast(w.children.count))
+  expectEqual(letters.count, numericCast(w.children.count))
   
   // Because we don't control the order of a Set, we need to do a
   // fancy dance in order to validate the result.
   let description = w.testDescription
-  for c in letters.characters {
+  for c in letters {
     let expected = "nil: \"\(c)\""
     expectNotNil(find(expected, within: description))
   }
@@ -100,7 +100,7 @@ mirrors.test("BidirectionalStructure") {
     var customMirror: Mirror {
       return Mirror(
         self,
-        unlabeledChildren: letters.characters,
+        unlabeledChildren: letters,
         displayStyle: .collection)
     }
   }
@@ -112,7 +112,7 @@ mirrors.test("BidirectionalStructure") {
   let description = y.testDescription
   expectEqual(
     "[nil: \"a\", nil: \"b\", nil: \"c\", nil: \"",
-    description[description.startIndex..<description.characters.index(of: "d")!])
+    description[description.startIndex..<description.firstIndex(of: "d")!])
 }
 
 mirrors.test("LabeledStructure") {
@@ -465,6 +465,31 @@ mirrors.test("class/ObjCCustomizedSuper/Synthesized") {
     }
   }
 }
+
+// rdar://problem/39629937
+@objc class ObjCClass : NSObject {
+  let value: Int
+
+  init(value: Int) { self.value = value }
+
+  override var description: String {
+    return "\(value)"
+  }
+}
+
+struct WrapObjCClassArray {
+  var array: [ObjCClass]
+}
+
+mirrors.test("struct/WrapNSArray") {
+  let nsArray: NSArray = [
+    ObjCClass(value: 1), ObjCClass(value: 2),
+    ObjCClass(value: 3), ObjCClass(value: 4)
+  ]
+  let s = String(describing: WrapObjCClassArray(array: nsArray as! [ObjCClass]))
+  expectEqual("WrapObjCClassArray(array: [1, 2, 3, 4])", s)
+}
+
 #endif // _runtime(_ObjC)
 
 //===--- Suppressed Superclass Mirrors ------------------------------------===//
@@ -724,7 +749,7 @@ mirrors.test("PlaygroundQuickLook") {
   case .text(let text):
 #if _runtime(_ObjC)
 // FIXME: Enable if non-objc hasSuffix is implemented.
-    expectTrue(text.contains("X #1 in"), text)
+    expectTrue(text.contains(").X"), text)
 #endif
   default:
     expectTrue(false)
@@ -783,4 +808,43 @@ mirrors.test("String.init") {
   expectEqual("42", String(reflecting: 42))
   expectEqual("\"42\"", String(reflecting: "42"))
 }
+
+struct a<b>  {
+    enum c{}
+}
+class d  {}
+struct e<f> {
+    var constraints: [Int: a<f>.c] = [:]
+}
+
+mirrors.test("GenericNestedTypeField") {
+  let x = e<d>()
+  
+  expectTrue(type(of: Mirror(reflecting: x).children.first!.value)
+              == [Int: a<d>.c].self)
+}
+
+extension OtherOuter {
+  struct Inner {}
+}
+
+extension OtherOuterGeneric {
+  struct Inner<U> {}
+}
+
+mirrors.test("SymbolicReferenceInsideType") {
+  let s = OtherStruct(a: OtherOuter.Inner(),
+                      b: OtherOuterGeneric<Int>.Inner<String>())
+
+  var output = ""
+  dump(s, to: &output)
+
+  let expected =
+    "▿ Mirror.OtherStruct\n" +
+    "  - a: Mirror.OtherOuter.Inner\n" +
+    "  - b: Mirror.OtherOuterGeneric<Swift.Int>.Inner<Swift.String>\n"
+
+  expectEqual(expected, output)
+}
+
 runAllTests()

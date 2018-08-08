@@ -7,15 +7,6 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-
-#if DEPLOYMENT_RUNTIME_OBJC || os(Linux)
-    import Foundation
-    import XCTest
-#else
-    import SwiftFoundation
-    import SwiftXCTest
-#endif
-
 public class NSUserClass : NSObject, NSSecureCoding {
     var ivar : Int
     
@@ -50,7 +41,7 @@ public class NSUserClass : NSObject, NSSecureCoding {
     }
 }
 
-public class UserClass : CustomStringConvertible, Equatable, Hashable, NSSecureCoding {
+public class UserClass : NSObject, NSSecureCoding {
     var ivar : Int
     
     public class var supportsSecureCoding: Bool {
@@ -63,24 +54,26 @@ public class UserClass : CustomStringConvertible, Equatable, Hashable, NSSecureC
     
     init(_ value: Int) {
         self.ivar = value
+        super.init()
     }
     
     public required init?(coder aDecoder: NSCoder) {
         self.ivar = aDecoder.decodeInteger(forKey: "$ivar")
+        super.init()
     }
     
-    public var description: String {
+    public override var description: String {
         get {
             return "UserClass \(ivar)"
         }
     }
     
-    public static func ==(lhs: UserClass, rhs: UserClass) -> Bool {
-        return lhs.ivar == rhs.ivar
-    }
-    
-    public var hashValue: Int {
-        return ivar
+    public override func isEqual(_ other: Any?) -> Bool {
+      guard let other = other as? UserClass else {
+        return false
+      }
+      
+      return ivar == other.ivar
     }
 }
 
@@ -106,6 +99,9 @@ class TestNSKeyedArchiver : XCTestCase {
             ("test_archive_user_class", test_archive_user_class),
             ("test_archive_uuid_bvref", test_archive_uuid_byref),
             ("test_archive_uuid_byvalue", test_archive_uuid_byvalue),
+            ("test_archive_unhashable", test_archive_unhashable),
+            ("test_archiveRootObject_String", test_archiveRootObject_String),
+            ("test_archiveRootObject_URLRequest()", test_archiveRootObject_URLRequest),
         ]
     }
 
@@ -118,7 +114,7 @@ class TestNSKeyedArchiver : XCTestCase {
         XCTAssertTrue(encode(archiver))
         archiver.finishEncoding()
         
-        let unarchiver = NSKeyedUnarchiver(forReadingWithData: Data._unconditionallyBridgeFromObjectiveC(data))
+        let unarchiver = NSKeyedUnarchiver(forReadingWith: Data._unconditionallyBridgeFromObjectiveC(data))
         XCTAssertTrue(decode(unarchiver))
         
         // Archiving using the default initializer
@@ -127,10 +123,10 @@ class TestNSKeyedArchiver : XCTestCase {
         XCTAssertTrue(encode(archiver1))
         let archivedData = archiver1.encodedData
         
-        let unarchiver1 = NSKeyedUnarchiver(forReadingWithData: archivedData)
+        let unarchiver1 = NSKeyedUnarchiver(forReadingWith: archivedData)
         XCTAssertTrue(decode(unarchiver1))
     }
-    
+
     private func test_archive(_ object: Any, classes: [AnyClass], allowsSecureCoding: Bool = true, outputFormat: PropertyListSerialization.PropertyListFormat) {
         test_archive({ archiver -> Bool in
                 archiver.requiresSecureCoding = allowsSecureCoding
@@ -220,12 +216,15 @@ class TestNSKeyedArchiver : XCTestCase {
     }
 
     func test_archive_mutable_dictionary() {
-        let mdictionary = NSMutableDictionary(dictionary: [
-            "one": NSNumber(value: Int(1)),
-            "two": NSNumber(value: Int(2)),
-            "three": NSNumber(value: Int(3)),
-        ])
-        
+        let one: NSNumber = NSNumber(value: Int(1))
+        let two: NSNumber = NSNumber(value: Int(2))
+        let three: NSNumber = NSNumber(value: Int(3))
+        let dict: [String : Any] = [
+            "one": one,
+            "two": two,
+            "three": three,
+        ]
+        let mdictionary = NSMutableDictionary(dictionary: dict)
         test_archive(mdictionary)
     }
     
@@ -235,7 +234,7 @@ class TestNSKeyedArchiver : XCTestCase {
     }
 
     func test_archive_nsrange() {
-        let range = NSValue(range: NSMakeRange(1234, 5678))
+        let range = NSValue(range: NSRange(location: 1234, length: 5678))
         test_archive(range)
     }
     
@@ -284,18 +283,21 @@ class TestNSKeyedArchiver : XCTestCase {
                 
                 let s1 = String(cString: charPtr)
                 let s2 = String(cString: expectedCharPtr!)
-                
+
+#if !DEPLOYMENT_RUNTIME_OBJC
                 // On Darwin decoded strings would belong to the autorelease pool, but as we don't have
                 // one in SwiftFoundation let's explicitly deallocate it here.
-                expectedCharPtr!.deallocate(capacity: charArray.count)
-                
+                expectedCharPtr!.deallocate()
+#endif
                 return s1 == s2
         })
     }
     
     func test_archive_user_class() {
+#if !DARWIN_COMPATIBILITY_TESTS  // Causes SIGABRT
         let userClass = UserClass(1234)
         test_archive(userClass)
+#endif
     }
     
     func test_archive_ns_user_class() {
@@ -312,4 +314,55 @@ class TestNSKeyedArchiver : XCTestCase {
         let uuid = UUID()
         return test_archive(uuid, classes: [NSUUID.self])
     }
+
+    func test_archive_unhashable() {
+        let data = """
+            {
+              "args": {},
+              "headers": {
+                "Accept": "*/*",
+                "Accept-Encoding": "deflate, gzip",
+                "Accept-Language": "en",
+                "Connection": "close",
+                "Host": "httpbin.org",
+                "User-Agent": "TestFoundation (unknown version) curl/7.54.0"
+              },
+              "origin": "0.0.0.0",
+              "url": "https://httpbin.org/get"
+            }
+            """.data(using: .utf8)!
+        do {
+            let json = try JSONSerialization.jsonObject(with: data)
+            _ = NSKeyedArchiver.archivedData(withRootObject: json)
+            XCTAssert(true, "NSKeyedArchiver.archivedData handles unhashable")
+        }
+        catch {
+            XCTFail("test_archive_unhashable, de-serialization error \(error)")
+        }
+    }
+
+    func test_archiveRootObject_String() {
+        let filePath = NSTemporaryDirectory() + "testdir\(NSUUID().uuidString)"
+        let result = NSKeyedArchiver.archiveRootObject("Hello", toFile: filePath)
+        XCTAssertTrue(result)
+        do {
+            try FileManager.default.removeItem(atPath: filePath)
+        } catch {
+            XCTFail("Failed to clean up file")
+        }
+    }
+
+    func test_archiveRootObject_URLRequest() {
+        let filePath = NSTemporaryDirectory() + "testdir\(NSUUID().uuidString)"
+        let url = URL(string: "http://swift.org")!
+        let request = URLRequest(url: url)._bridgeToObjectiveC()
+        let result = NSKeyedArchiver.archiveRootObject(request, toFile: filePath)
+        XCTAssertTrue(result)
+        do {
+            try FileManager.default.removeItem(atPath: filePath)
+        } catch {
+            XCTFail("Failed to clean up file")
+        }
+    }
+
 }

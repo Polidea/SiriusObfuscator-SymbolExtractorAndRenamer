@@ -18,6 +18,15 @@
 // For comparison, we always create three arrays of 200,000 words.
 // An integer enum takes two words.
 
+import TestsUtils
+
+public let ArrayOfGenericPOD = BenchmarkInfo(
+  // Renamed benchmark to "2" when IUO test was removed, which
+  // effectively changed what we're benchmarking here.
+  name: "ArrayOfGenericPOD2",
+  runFunction: run_ArrayOfGenericPOD,
+  tags: [.validation, .api, .Array])
+
 class RefArray<T> {
   var array: [T]
 
@@ -32,15 +41,6 @@ class RefArray<T> {
 @inline(never)
 func genEnumArray() {
   _ = RefArray<Int?>(3)
-  // should be a nop
-}
-
-// Check the performance of destroying an array of implicit unwrapped
-// optional where the optional has a single payload of trivial
-// type. Destroying the elements should be a nop.
-@inline(never)
-func genIOUArray() {
-  _ = RefArray<Int!>(3)
   // should be a nop
 }
 
@@ -61,7 +61,6 @@ func genStructArray() {
 public func run_ArrayOfGenericPOD(_ N: Int) {
   for _ in 0...N {
     genEnumArray()
-    genIOUArray()
     genStructArray()
   }
 }

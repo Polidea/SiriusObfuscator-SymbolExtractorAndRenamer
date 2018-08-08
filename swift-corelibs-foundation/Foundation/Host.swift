@@ -8,7 +8,7 @@
 //
 
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
 import Darwin
 #elseif os(Linux) || CYGWIN
 import Glibc
@@ -28,6 +28,10 @@ open class Host: NSObject {
     internal var _names = [String]()
     internal var _addresses = [String]()
     
+#if os(Android)
+    static internal let NI_MAXHOST = 1025
+#endif
+    
     static internal let _current = Host(currentHostName(), .current)
     
     internal init(_ info: String?, _ type: ResolveType) {
@@ -38,8 +42,7 @@ open class Host: NSObject {
     static internal func currentHostName() -> String {
         let hname = UnsafeMutablePointer<Int8>.allocate(capacity: Int(NI_MAXHOST))
         defer {
-            hname.deinitialize()
-            hname.deallocate(capacity: Int(NI_MAXHOST))
+            hname.deallocate()
         }
         let r = gethostname(hname, Int(NI_MAXHOST))
         if r < 0 || hname[0] == 0 {
@@ -65,6 +68,9 @@ open class Host: NSObject {
     }
     
     internal func _resolveCurrent() {
+#if os(Android)
+        return
+#else
         var ifaddr: UnsafeMutablePointer<ifaddrs>? = nil
         if getifaddrs(&ifaddr) != 0 {
             return
@@ -73,8 +79,7 @@ open class Host: NSObject {
         let address = UnsafeMutablePointer<Int8>.allocate(capacity: Int(NI_MAXHOST))
         defer {
             freeifaddrs(ifaddr)
-            address.deinitialize()
-            address.deallocate(capacity: Int(NI_MAXHOST))
+            address.deallocate()
         }
         while let ifaValue = ifa?.pointee {
             if let ifa_addr = ifaValue.ifa_addr, ifaValue.ifa_flags & UInt32(IFF_LOOPBACK) == 0 {
@@ -88,9 +93,14 @@ open class Host: NSObject {
             }
             ifa = ifaValue.ifa_next
         }
+        _resolved = true
+#endif
     }
     
     internal func _resolve() {
+#if os(Android)
+        return
+#else
         if _resolved {
             return
         }
@@ -107,7 +117,7 @@ open class Host: NSObject {
             }
             var hints = addrinfo()
             hints.ai_family = PF_UNSPEC
-#if os(OSX) || os(iOS) || os(Android)
+#if os(macOS) || os(iOS) || os(Android)
             hints.ai_socktype = SOCK_STREAM
 #else
             hints.ai_socktype = Int32(SOCK_STREAM.rawValue)
@@ -126,8 +136,7 @@ open class Host: NSObject {
             var res: UnsafeMutablePointer<addrinfo>? = res0
             let host = UnsafeMutablePointer<Int8>.allocate(capacity: Int(NI_MAXHOST))
             defer {
-                host.deinitialize()
-                host.deallocate(capacity: Int(NI_MAXHOST))
+                host.deallocate()
             }
             while res != nil {
                 let info = res!.pointee
@@ -147,8 +156,9 @@ open class Host: NSObject {
                 lookupInfo(&_names, NI_NOFQDN|NI_NAMEREQD)
                 res = info.ai_next
             }
+            _resolved = true
         }
-        
+#endif   
     }
     
     open var name: String? {
@@ -173,4 +183,3 @@ open class Host: NSObject {
         return nil
     }
 }
-

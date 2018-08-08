@@ -41,7 +41,8 @@ class PackageGraphPerfTests: XCTestCasePerf {
                 path: AbsolutePath(url).appending(component: Manifest.filename),
                 url: url,
                 package: .v3(package),
-                version: "1.0.0"
+                version: "1.0.0",
+                manifestVersion: .v3
             )
             if pkg == 1 {
                 rootManifests = [manifest]
@@ -53,7 +54,7 @@ class PackageGraphPerfTests: XCTestCasePerf {
         measure {
             let diagnostics = DiagnosticsEngine()
             let g = PackageGraphLoader().load(
-                root: PackageGraphRoot(manifests: rootManifests),
+                root: PackageGraphRoot(input: PackageGraphRootInput(packages: rootManifests.map({$0.path})), manifests: rootManifests),
                 externalManifests: externalManifests,
                 diagnostics: diagnostics,
                 fileSystem: fs)

@@ -17,8 +17,10 @@
 #ifndef SWIFT_AST_GENERIC_SIGNATURE_H
 #define SWIFT_AST_GENERIC_SIGNATURE_H
 
+#include "swift/AST/PrintOptions.h"
 #include "swift/AST/Requirement.h"
 #include "swift/AST/SubstitutionList.h"
+#include "swift/AST/Types.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -93,8 +95,7 @@ public:
 /// generic parameters.
 class alignas(1 << TypeAlignInBits) GenericSignature final
   : public llvm::FoldingSetNode,
-    private llvm::TrailingObjects<GenericSignature, GenericTypeParamType *,
-                                  Requirement> {
+    private llvm::TrailingObjects<GenericSignature, Type, Requirement> {
   friend TrailingObjects;
 
   unsigned NumGenericParams;
@@ -104,7 +105,7 @@ class alignas(1 << TypeAlignInBits) GenericSignature final
   void *operator new(size_t Bytes) = delete;
   void operator delete(void *Data) = delete;
 
-  size_t numTrailingObjects(OverloadToken<GenericTypeParamType *>) const {
+  size_t numTrailingObjects(OverloadToken<Type>) const {
     return NumGenericParams;
   }
   size_t numTrailingObjects(OverloadToken<Requirement>) const {
@@ -112,8 +113,8 @@ class alignas(1 << TypeAlignInBits) GenericSignature final
   }
 
   /// Retrieve a mutable version of the generic parameters.
-  MutableArrayRef<GenericTypeParamType *> getGenericParamsBuffer() {
-    return {getTrailingObjects<GenericTypeParamType *>(), NumGenericParams};
+  MutableArrayRef<Type> getGenericParamsBuffer() {
+    return {getTrailingObjects<Type>(), NumGenericParams};
   }
 
   /// Retrieve a mutable version of the requirements.
@@ -121,18 +122,18 @@ class alignas(1 << TypeAlignInBits) GenericSignature final
     return {getTrailingObjects<Requirement>(), NumRequirements};
   }
 
-  GenericSignature(ArrayRef<GenericTypeParamType *> params,
+  GenericSignature(TypeArrayView<GenericTypeParamType> params,
                    ArrayRef<Requirement> requirements,
                    bool isKnownCanonical);
 
   mutable llvm::PointerUnion<GenericSignature *, ASTContext *>
     CanonicalSignatureOrASTContext;
   
-  static ASTContext &getASTContext(ArrayRef<GenericTypeParamType *> params,
+  static ASTContext &getASTContext(TypeArrayView<GenericTypeParamType> params,
                                    ArrayRef<Requirement> requirements);
 
   /// Retrieve the generic signature builder for the given generic signature.
-  GenericSignatureBuilder *getGenericSignatureBuilder(ModuleDecl &mod);
+  GenericSignatureBuilder *getGenericSignatureBuilder();
 
   friend class ArchetypeType;
 
@@ -142,37 +143,28 @@ public:
   static GenericSignature *get(ArrayRef<GenericTypeParamType *> params,
                                ArrayRef<Requirement> requirements,
                                bool isKnownCanonical = false);
+  static GenericSignature *get(TypeArrayView<GenericTypeParamType> params,
+                               ArrayRef<Requirement> requirements,
+                               bool isKnownCanonical = false);
 
   /// Create a new generic signature with the given type parameters and
   /// requirements, first canonicalizing the types.
   static CanGenericSignature getCanonical(
-                                      ArrayRef<GenericTypeParamType *> params,
-                                      ArrayRef<Requirement> requirements);
+                                     TypeArrayView<GenericTypeParamType> params,
+                                     ArrayRef<Requirement> requirements,
+                                     bool skipValidation = false);
 
   /// Retrieve the generic parameters.
-  ArrayRef<GenericTypeParamType *> getGenericParams() const {
-    return const_cast<GenericSignature *>(this)->getGenericParamsBuffer();
+  TypeArrayView<GenericTypeParamType> getGenericParams() const {
+    auto temp = const_cast<GenericSignature*>(this);
+    return TypeArrayView<GenericTypeParamType>(temp->getGenericParamsBuffer());
   }
 
   /// Retrieve the innermost generic parameters.
   ///
   /// Given a generic signature for a nested generic type, produce an
   /// array of the generic parameters for the innermost generic type.
-  ArrayRef<GenericTypeParamType *> getInnermostGenericParams() const;
-
-  /// Create a text string that describes the bindings of generic parameters
-  /// that are relevant to the given set of types, e.g.,
-  /// "[with T = Bar, U = Wibble]".
-  ///
-  /// \param types The types that will be scanned for generic type parameters,
-  /// which will be used in the resulting type.
-  ///
-  /// \param substitutions The generic parameter -> generic argument
-  /// substitutions that will have been applied to these types.
-  /// These are used to produce the "parameter = argument" bindings in the test.
-  std::string
-  gatherGenericParamBindingsText(ArrayRef<Type> types,
-                                 TypeSubstitutionFn substitutions) const;
+  TypeArrayView<GenericTypeParamType> getInnermostGenericParams() const;
 
   /// Retrieve the requirements.
   ArrayRef<Requirement> getRequirements() const {
@@ -256,7 +248,7 @@ public:
   /// Create a new generic environment that provides fresh contextual types
   /// (archetypes) that correspond to the interface types in this generic
   /// signature.
-  GenericEnvironment *createGenericEnvironment(ModuleDecl &mod);
+  GenericEnvironment *createGenericEnvironment();
 
   /// Uniquing for the ASTContext.
   void Profile(llvm::FoldingSetNodeID &ID) {
@@ -264,46 +256,61 @@ public:
   }
   
   /// Determine whether the given dependent type is required to be a class.
-  bool requiresClass(Type type, ModuleDecl &mod);
+  bool requiresClass(Type type);
 
   /// Determine the superclass bound on the given dependent type.
-  Type getSuperclassBound(Type type, ModuleDecl &mod);
+  Type getSuperclassBound(Type type);
 
   using ConformsToArray = SmallVector<ProtocolDecl *, 2>;
   /// Determine the set of protocols to which the given dependent type
   /// must conform.
-  ConformsToArray getConformsTo(Type type, ModuleDecl &mod);
+  ConformsToArray getConformsTo(Type type);
 
   /// Determine whether the given dependent type conforms to this protocol.
-  bool conformsToProtocol(Type type, ProtocolDecl *proto, ModuleDecl &mod);
+  bool conformsToProtocol(Type type, ProtocolDecl *proto);
 
   /// Determine whether the given dependent type is equal to a concrete type.
-  bool isConcreteType(Type type, ModuleDecl &mod);
+  bool isConcreteType(Type type);
 
   /// Return the concrete type that the given dependent type is constrained to,
   /// or the null Type if it is not the subject of a concrete same-type
   /// constraint.
-  Type getConcreteType(Type type, ModuleDecl &mod);
+  Type getConcreteType(Type type);
 
   /// Return the layout constraint that the given dependent type is constrained
   /// to, or the null LayoutConstraint if it is not the subject of layout
   /// constraint.
-  LayoutConstraint getLayoutConstraint(Type type, ModuleDecl &mod);
+  LayoutConstraint getLayoutConstraint(Type type);
 
   /// Return whether two type parameters represent the same type under this
   /// generic signature.
   ///
   /// The type parameters must be known to not be concrete within the context.
-  bool areSameTypeParameterInContext(Type type1, Type type2, ModuleDecl &mod);
+  bool areSameTypeParameterInContext(Type type1, Type type2);
+
+  /// Determine if \c sig can prove \c requirement, meaning that it can deduce
+  /// T: Foo or T == U (etc.) with the information it knows. This includes
+  /// checking against global state, if any/all of the types in the requirement
+  /// are concrete, not type parameters.
+  bool isRequirementSatisfied(Requirement requirement);
+
+  /// Return the requirements of this generic signature that are not also
+  /// satisfied by \c otherSig.
+  ///
+  /// \param otherSig Another generic signature whose generic parameters are
+  /// equivalent to or a subset of the generic parameters in this signature.
+  SmallVector<Requirement, 4> requirementsNotSatisfiedBy(
+                                               GenericSignature *otherSig);
 
   /// Return the canonical version of the given type under this generic
   /// signature.
-  CanType getCanonicalTypeInContext(Type type, ModuleDecl &mod);
-  bool isCanonicalTypeInContext(Type type, ModuleDecl &mod);
+  CanType getCanonicalTypeInContext(Type type);
+  bool isCanonicalTypeInContext(Type type);
 
   /// Return the canonical version of the given type under this generic
   /// signature.
-  CanType getCanonicalTypeInContext(Type type, GenericSignatureBuilder &builder);
+  CanType getCanonicalTypeInContext(Type type,
+                                    GenericSignatureBuilder &builder);
   bool isCanonicalTypeInContext(Type type, GenericSignatureBuilder &builder);
 
   /// Retrieve the conformance access path used to extract the conformance of
@@ -319,14 +326,20 @@ public:
   ///
   /// \seealso ConformanceAccessPath
   ConformanceAccessPath getConformanceAccessPath(Type type,
-                                                 ProtocolDecl *protocol,
-                                                 ModuleDecl &mod);
+                                                 ProtocolDecl *protocol);
+
+  /// Get the ordinal of a generic parameter in this generic signature.
+  ///
+  /// For example, if you have a generic signature for a nested context like:
+  ///   <t_0_0, t_0_1, t_1_0>
+  /// then this will return 0 for t_0_0, 1 for t_0_1, and 2 for t_1_0.
+  unsigned getGenericParamOrdinal(GenericTypeParamType *param);
 
   static void Profile(llvm::FoldingSetNodeID &ID,
-                      ArrayRef<GenericTypeParamType *> genericParams,
+                      TypeArrayView<GenericTypeParamType> genericParams,
                       ArrayRef<Requirement> requirements);
   
-  void print(raw_ostream &OS) const;
+  void print(raw_ostream &OS, PrintOptions Options = PrintOptions()) const;
   void dump() const;
   std::string getAsString() const;
 };
@@ -340,9 +353,9 @@ CanGenericSignature::CanGenericSignature(GenericSignature *Signature)
   
 inline ArrayRef<CanTypeWrapper<GenericTypeParamType>>
 CanGenericSignature::getGenericParams() const{
-  ArrayRef<GenericTypeParamType*> params = Signature->getGenericParams();
-  auto base = reinterpret_cast<const CanTypeWrapper<GenericTypeParamType>*>(
-                                                                params.data());
+  auto params = Signature->getGenericParams().getOriginalArray();
+  auto base = static_cast<const CanTypeWrapper<GenericTypeParamType>*>(
+                                                                 params.data());
   return {base, params.size()};
 }
 

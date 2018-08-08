@@ -15,6 +15,7 @@
 
 #include "llbuild/Basic/LLVM.h"
 #include "llbuild/BuildSystem/BuildSystem.h"
+#include "llbuild/BuildSystem/BuildNode.h"
 #include "llbuild/Core/BuildEngine.h"
 
 #include "llvm/ADT/ArrayRef.h"
@@ -58,11 +59,17 @@ enum class CommandResult;
 class BuildSystemFrontend {
   BuildSystemFrontendDelegate& delegate;
   const BuildSystemInvocation& invocation;
+  std::unique_ptr<basic::FileSystem> fileSystem;
   llvm::Optional<BuildSystem> buildSystem;
+
+private:
+
+  bool setupBuild();
 
 public:
   BuildSystemFrontend(BuildSystemFrontendDelegate& delegate,
-                      const BuildSystemInvocation& invocation);
+                      const BuildSystemInvocation& invocation,
+                      std::unique_ptr<basic::FileSystem> fileSystem);
 
   /// @name Accessors
   /// @{
@@ -92,6 +99,11 @@ public:
   /// \returns True on success, or false if there were errors.
   bool build(StringRef targetToBuild);
 
+  /// Build a single node using the specified invocation parameters.
+  ///
+  /// \returns True on success, or false if there were errors.
+  bool buildNode(StringRef nodeToBuild);
+
   /// @}
 };
 
@@ -111,11 +123,6 @@ private:
 
   /// Default implementation, cannot be overriden by subclasses.
   virtual void setFileContentsBeingParsed(StringRef buffer) override;
-
-  /// Provides a default error implementation which will delegate to the
-  /// provided source manager. Cannot be overriden by subclasses.
-  virtual void error(StringRef filename, const Token& at,
-                     const Twine& message) override;
   
 public:
   /// Create a frontend delegate.
@@ -129,9 +136,6 @@ public:
                               StringRef name,
                               uint32_t version);
   virtual ~BuildSystemFrontendDelegate();
-
-  /// Get the file system to use for access.
-  virtual basic::FileSystem& getFileSystem() override = 0;
 
   /// Called by the build system to get a tool definition, must be provided by
   /// subclasses.
@@ -156,6 +160,11 @@ public:
 
   /// Report a non-file specific error message.
   void error(const Twine& message);
+
+  /// Provides a default error implementation which will delegate to the
+  /// provided source manager.
+  virtual void error(StringRef filename, const Token& at,
+                     const Twine& message) override;
   
   /// @}
 
@@ -219,6 +228,16 @@ public:
   /// \param result - The result of command (e.g. success, failure, etc).
   virtual void commandFinished(Command*, CommandResult result) override;
 
+  /// Called by the build system to report a command could not build due to
+  /// missing inputs.
+  virtual void commandCannotBuildOutputDueToMissingInputs(Command*,
+               Node* output, SmallPtrSet<Node*, 1> inputs) override;
+
+  /// Called by the build system to report a node could not be built
+  /// because multiple commands are producing it.
+  virtual void cannotBuildNodeDueToMultipleProducers(Node* output,
+               std::vector<Command*>) override;
+
   /// Called when a command's job has been started.
   ///
   /// The system guarantees that any commandStart() call will be paired with
@@ -268,13 +287,11 @@ public:
   /// become invalid as soon as the client returns from this API call.
   ///
   /// \param result - Whether the process suceeded, failed or was cancelled.
-  /// \param exitStatus - The raw exit status of the process.
   //
   // FIXME: Need to include additional information on the status here, e.g., the
   // signal status, and the process output (if buffering).
   virtual void commandProcessFinished(Command*, ProcessHandle handle,
-                                      CommandResult result,
-                                      int exitStatus);
+                                      const CommandExtendedResult& result);
 
   /// Called when a cycle is detected by the build engine and it cannot make
   /// forward progress.
@@ -284,6 +301,23 @@ public:
   /// the cycle (i.e., the node participating in the cycle will appear twice).
   virtual void cycleDetected(const std::vector<core::Rule*>& items) = 0;
 
+  /// Called when a cycle is detected by the build engine to check if it should
+  /// attempt to resolve the cycle and continue
+  ///
+  /// \param items The ordered list of items comprising the cycle, starting from
+  /// the node which was requested to build and ending with the first node in
+  /// the cycle (i.e., the node participating in the cycle will appear twice).
+  /// \param candidateRule The rule the engine will use to attempt to break the
+  /// cycle.
+  /// \param action The action the engine will take on the candidateRule.
+  /// \returns True if the engine should attempt to resolve the cycle, false
+  /// otherwise. Resolution is attempted by either forcing items to be built, or
+  /// supplying a previously built result to a node in the cycle. The latter
+  /// action may yield unexpected results and thus this should be opted into
+  /// with care.
+  virtual bool shouldResolveCycle(const std::vector<core::Rule*>& items,
+                                  core::Rule* candidateRule,
+                                  core::Rule::CycleAction action);
   /// @}
   
   /// @name Accessors

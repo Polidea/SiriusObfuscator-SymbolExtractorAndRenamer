@@ -50,7 +50,7 @@
 #if USE_OBJC
 #define DISPATCH_OBJC_CLASS_DECL(name) \
 		extern void *DISPATCH_CLASS_SYMBOL(name) \
-				asm(DISPATCH_CLASS_RAW_SYMBOL_NAME(name))
+				__asm__(DISPATCH_CLASS_RAW_SYMBOL_NAME(name))
 #endif
 
 // define a new proper class
@@ -65,7 +65,7 @@
 		}; \
 		OS_OBJECT_EXTRA_VTABLE_DECL(name, name) \
 		extern const struct name##_vtable_s OS_OBJECT_CLASS_SYMBOL(name) \
-				asm(OS_OBJC_CLASS_RAW_SYMBOL_NAME(OS_OBJECT_CLASS(name)))
+				__asm__(OS_OBJC_CLASS_RAW_SYMBOL_NAME(OS_OBJECT_CLASS(name)))
 
 #if OS_OBJECT_SWIFT3
 #define OS_OBJECT_INTERNAL_CLASS_DECL(name, super, ...) \
@@ -101,7 +101,7 @@
 		struct name##_s; \
 		OS_OBJECT_EXTRA_VTABLE_DECL(name, super) \
 		extern const struct super##_vtable_s OS_OBJECT_CLASS_SYMBOL(name) \
-				asm(OS_OBJC_CLASS_RAW_SYMBOL_NAME(OS_OBJECT_CLASS(name)))
+				__asm__(OS_OBJC_CLASS_RAW_SYMBOL_NAME(OS_OBJECT_CLASS(name)))
 
 #define DISPATCH_SUBCLASS_DECL(name, super) \
 		OS_OBJECT_SUBCLASS_DECL(dispatch_##name, super)
@@ -340,7 +340,7 @@ DISPATCH_ENUM(dispatch_invoke_flags, uint32_t,
 #define _DISPATCH_INVOKE_AUTORELEASE_MASK	  0x00300000u
 );
 
-enum {
+DISPATCH_ENUM(dispatch_object_flags, unsigned long,
 	_DISPATCH_META_TYPE_MASK		= 0xffff0000, // mask for object meta-types
 	_DISPATCH_TYPEFLAGS_MASK		= 0x0000ff00, // mask for object typeflags
 	_DISPATCH_SUB_TYPE_MASK			= 0x000000ff, // mask for object sub-types
@@ -386,8 +386,7 @@ enum {
 
 	DISPATCH_SOURCE_KEVENT_TYPE			= 1 | _DISPATCH_SOURCE_TYPE,
 	DISPATCH_MACH_CHANNEL_TYPE			= 2 | _DISPATCH_SOURCE_TYPE,
-
-};
+);
 
 typedef struct _os_object_vtable_s {
 	_OS_OBJECT_CLASS_HEADER();
@@ -590,7 +589,7 @@ size_t _dispatch_objc_debug(dispatch_object_t dou, char* buf, size_t bufsiz);
  *   reached -1.
  */
 #define _os_atomic_refcnt_perform2o(o, f, op, n, m)   ({ \
-		typeof(o) _o = (o); \
+		__typeof__(o) _o = (o); \
 		int _ref_cnt = _o->f; \
 		if (fastpath(_ref_cnt != _OS_OBJECT_GLOBAL_REFCNT)) { \
 			_ref_cnt = os_atomic_##op##2o(_o, f, n, m); \

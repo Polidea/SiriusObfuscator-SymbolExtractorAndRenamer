@@ -22,7 +22,7 @@
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
-#include "lldb/Core/RegularExpression.h"
+#include "lldb/Utility/RegularExpression.h"
 #include "Plugins/Process/Utility/HistoryThread.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/NameLookup.h"
@@ -94,7 +94,7 @@ static std::string TranslateObjCNameToSwiftName(std::string className,
       /*KeepEmpty*/ false);
 
   llvm::SmallVector<swift::Identifier, 2> selectorIdentifiers;
-  for (auto i = 0; i < parts.size(); i++) {
+  for (size_t i = 0; i < parts.size(); i++) {
     selectorIdentifiers.push_back(ctx->GetIdentifier(parts[i]));
   }
 
@@ -118,20 +118,9 @@ static std::string TranslateObjCNameToSwiftName(std::string className,
 
       // If the decl is actually an accessor, use the property name instead.
       swift::AbstractFunctionDecl *decl = funcs.front();
-      if (auto func = llvm::dyn_cast<swift::FuncDecl>(decl)) {
-        swift::DeclContext *funcCtx = func->getParent();
-        // We need to loadAllMembers(), otherwise 'isAccessor' returns false.
-        if (auto extension = llvm::dyn_cast<swift::ExtensionDecl>(funcCtx)) {
-          extension->loadAllMembers();
-        } else if (auto nominal =
-                       llvm::dyn_cast<swift::NominalTypeDecl>(funcCtx)) {
-          nominal->loadAllMembers();
-        }
-
-        if (func->isAccessor()) {
-          result = func->getAccessorStorageDecl()->getFullName();
-          return;
-        }
+      if (auto accessor = llvm::dyn_cast<swift::AccessorDecl>(decl)) {
+        result = accessor->getStorage()->getFullName();
+        return;
       }
 
       result = decl->getFullName();
@@ -177,7 +166,7 @@ MainThreadCheckerRuntime::RetrieveReportData(ExecutionContextRef exe_ctx_ref) {
     return StructuredData::ObjectSP();
 
   std::string apiName = "";
-  Error read_error;
+  Status read_error;
   target.ReadCStringFromMemory(apiname_ptr, apiName, read_error);
   if (read_error.Fail())
     return StructuredData::ObjectSP();

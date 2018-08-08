@@ -233,19 +233,16 @@ void NilArgChecker::checkPreObjCMessage(const ObjCMethodCall &msg,
     if (StringSelectors.empty()) {
       ASTContext &Ctx = C.getASTContext();
       Selector Sels[] = {
-        getKeywordSelector(Ctx, "caseInsensitiveCompare", nullptr),
-        getKeywordSelector(Ctx, "compare", nullptr),
-        getKeywordSelector(Ctx, "compare", "options", nullptr),
-        getKeywordSelector(Ctx, "compare", "options", "range", nullptr),
-        getKeywordSelector(Ctx, "compare", "options", "range", "locale",
-                           nullptr),
-        getKeywordSelector(Ctx, "componentsSeparatedByCharactersInSet",
-                           nullptr),
-        getKeywordSelector(Ctx, "initWithFormat",
-                           nullptr),
-        getKeywordSelector(Ctx, "localizedCaseInsensitiveCompare", nullptr),
-        getKeywordSelector(Ctx, "localizedCompare", nullptr),
-        getKeywordSelector(Ctx, "localizedStandardCompare", nullptr),
+          getKeywordSelector(Ctx, "caseInsensitiveCompare"),
+          getKeywordSelector(Ctx, "compare"),
+          getKeywordSelector(Ctx, "compare", "options"),
+          getKeywordSelector(Ctx, "compare", "options", "range"),
+          getKeywordSelector(Ctx, "compare", "options", "range", "locale"),
+          getKeywordSelector(Ctx, "componentsSeparatedByCharactersInSet"),
+          getKeywordSelector(Ctx, "initWithFormat"),
+          getKeywordSelector(Ctx, "localizedCaseInsensitiveCompare"),
+          getKeywordSelector(Ctx, "localizedCompare"),
+          getKeywordSelector(Ctx, "localizedStandardCompare"),
       };
       for (Selector KnownSel : Sels)
         StringSelectors[KnownSel] = 0;
@@ -262,16 +259,15 @@ void NilArgChecker::checkPreObjCMessage(const ObjCMethodCall &msg,
 
     if (ArrayWithObjectSel.isNull()) {
       ASTContext &Ctx = C.getASTContext();
-      ArrayWithObjectSel = getKeywordSelector(Ctx, "arrayWithObject", nullptr);
-      AddObjectSel = getKeywordSelector(Ctx, "addObject", nullptr);
+      ArrayWithObjectSel = getKeywordSelector(Ctx, "arrayWithObject");
+      AddObjectSel = getKeywordSelector(Ctx, "addObject");
       InsertObjectAtIndexSel =
-        getKeywordSelector(Ctx, "insertObject", "atIndex", nullptr);
+          getKeywordSelector(Ctx, "insertObject", "atIndex");
       ReplaceObjectAtIndexWithObjectSel =
-        getKeywordSelector(Ctx, "replaceObjectAtIndex", "withObject", nullptr);
+          getKeywordSelector(Ctx, "replaceObjectAtIndex", "withObject");
       SetObjectAtIndexedSubscriptSel =
-        getKeywordSelector(Ctx, "setObject", "atIndexedSubscript", nullptr);
-      ArrayByAddingObjectSel =
-        getKeywordSelector(Ctx, "arrayByAddingObject", nullptr);
+          getKeywordSelector(Ctx, "setObject", "atIndexedSubscript");
+      ArrayByAddingObjectSel = getKeywordSelector(Ctx, "arrayByAddingObject");
     }
 
     if (S == ArrayWithObjectSel || S == AddObjectSel ||
@@ -292,13 +288,11 @@ void NilArgChecker::checkPreObjCMessage(const ObjCMethodCall &msg,
     if (DictionaryWithObjectForKeySel.isNull()) {
       ASTContext &Ctx = C.getASTContext();
       DictionaryWithObjectForKeySel =
-        getKeywordSelector(Ctx, "dictionaryWithObject", "forKey", nullptr);
-      SetObjectForKeySel =
-        getKeywordSelector(Ctx, "setObject", "forKey", nullptr);
+          getKeywordSelector(Ctx, "dictionaryWithObject", "forKey");
+      SetObjectForKeySel = getKeywordSelector(Ctx, "setObject", "forKey");
       SetObjectForKeyedSubscriptSel =
-        getKeywordSelector(Ctx, "setObject", "forKeyedSubscript", nullptr);
-      RemoveObjectForKeySel =
-        getKeywordSelector(Ctx, "removeObjectForKey", nullptr);
+          getKeywordSelector(Ctx, "setObject", "forKeyedSubscript");
+      RemoveObjectForKeySel = getKeywordSelector(Ctx, "removeObjectForKey");
     }
 
     if (S == DictionaryWithObjectForKeySel || S == SetObjectForKeySel) {
@@ -442,8 +436,7 @@ void CFNumberChecker::checkPreStmt(const CallExpr *CE,
     return;
 
   // Get the value of the "theType" argument.
-  const LocationContext *LCtx = C.getLocationContext();
-  SVal TheTypeVal = state->getSVal(CE->getArg(1), LCtx);
+  SVal TheTypeVal = C.getSVal(CE->getArg(1));
 
   // FIXME: We really should allow ranges of valid theType values, and
   //   bifurcate the state appropriately.
@@ -463,7 +456,7 @@ void CFNumberChecker::checkPreStmt(const CallExpr *CE,
   // Look at the value of the integer being passed by reference.  Essentially
   // we want to catch cases where the value passed in is not equal to the
   // size of the type being created.
-  SVal TheValueExpr = state->getSVal(CE->getArg(2), LCtx);
+  SVal TheValueExpr = C.getSVal(CE->getArg(2));
 
   // FIXME: Eventually we should handle arbitrary locations.  We can do this
   //  by having an enhanced memory model that does low-level typing.
@@ -577,7 +570,7 @@ void CFRetainReleaseChecker::checkPreStmt(const CallExpr *CE,
 
   // Get the argument's value.
   const Expr *Arg = CE->getArg(0);
-  SVal ArgVal = state->getSVal(Arg, C.getLocationContext());
+  SVal ArgVal = C.getSVal(Arg);
   Optional<DefinedSVal> DefArgVal = ArgVal.getAs<DefinedSVal>();
   if (!DefArgVal)
     return;
@@ -983,8 +976,7 @@ assumeCollectionNonEmpty(CheckerContext &C, ProgramStateRef State,
   if (!State)
     return nullptr;
 
-  SymbolRef CollectionS =
-    State->getSVal(FCS->getCollection(), C.getLocationContext()).getAsSymbol();
+  SymbolRef CollectionS = C.getSVal(FCS->getCollection()).getAsSymbol();
   return assumeCollectionNonEmpty(C, State, CollectionS, Assumption);
 }
 
@@ -1212,7 +1204,7 @@ ProgramStateRef
 ObjCNonNilReturnValueChecker::assumeExprIsNonNull(const Expr *NonNullExpr,
                                                   ProgramStateRef State,
                                                   CheckerContext &C) const {
-  SVal Val = State->getSVal(NonNullExpr, C.getLocationContext());
+  SVal Val = C.getSVal(NonNullExpr);
   if (Optional<DefinedOrUnknownSVal> DV = Val.getAs<DefinedOrUnknownSVal>())
     return State->assume(*DV, true);
   return State;

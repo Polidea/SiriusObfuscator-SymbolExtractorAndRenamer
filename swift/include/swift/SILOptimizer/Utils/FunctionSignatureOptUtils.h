@@ -77,17 +77,17 @@ struct ArgumentDescriptor {
   /// to the original argument. The reason why we do this is to make sure we
   /// have access to the original argument's state if we modify the argument
   /// when optimizing.
-  ArgumentDescriptor(SILFunctionArgument *A)
-      : Arg(A),
-        PInfo(A->getKnownParameterInfo()),
-        Index(A->getIndex()),
+  ArgumentDescriptor(
+      SILFunctionArgument *A,
+      llvm::SpecificBumpPtrAllocator<ProjectionTreeNode> &Allocator)
+      : Arg(A), PInfo(A->getKnownParameterInfo()), Index(A->getIndex()),
         Decl(A->getDecl()), IsEntirelyDead(false), Explode(false),
         OwnedToGuaranteed(false), IsIndirectResult(A->isIndirectResult()),
         CalleeRelease(), CalleeReleaseInThrowBlock(),
-        ProjTree(A->getModule(), A->getType()) {
-        if (!A->isIndirectResult()) {
-           PInfo = Arg->getKnownParameterInfo();
-        }
+        ProjTree(A->getModule(), A->getType(), Allocator) {
+    if (!A->isIndirectResult()) {
+      PInfo = Arg->getKnownParameterInfo();
+    }
   }
 
   ArgumentDescriptor(const ArgumentDescriptor &) = delete;
@@ -126,6 +126,11 @@ struct ArgumentDescriptor {
     // as a singleton.
     if (ProjTree.isSingleton())
       return false;
+
+    auto Ty = Arg->getType().getObjectType();
+    if (!shouldExpand(Arg->getModule(), Ty)) {
+      return false;
+    }
 
     // If this argument is @owned and we can not find all the releases for it
     // try to explode it, maybe we can find some of the releases and O2G some
@@ -194,9 +199,6 @@ struct ResultDescriptor {
 bool canSpecializeFunction(SILFunction *F,
                            const CallerAnalysis::FunctionInfo *FuncInfo,
                            bool OptForPartialApply);
-
-/// Return true if this argument is used in a non-trivial way.
-bool hasNonTrivialNonDebugUse(SILArgument *Arg);
 
 } // end namespace swift
 

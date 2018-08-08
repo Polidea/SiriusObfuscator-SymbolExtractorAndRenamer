@@ -30,12 +30,13 @@ class LibcxxListDataFormatterTestCase(TestBase):
         self.line4 = line_number('main.cpp',
                                  '// Set fourth break point at this line.')
 
-    @skipIf(compiler="gcc")
-    @skipIfWindows  # libc++ not ported to Windows yet
+    @add_test_categories(["libc++"])
+    @skipIf(debug_info="gmodules",
+            bugnumber="https://bugs.llvm.org/show_bug.cgi?id=36048")
     def test_with_run_command(self):
         """Test that that file and class static variables display correctly."""
         self.build()
-        self.runCmd("file a.out", CURRENT_EXECUTABLE_SET)
+        self.runCmd("file " + self.getBuildArtifact("a.out"), CURRENT_EXECUTABLE_SET)
 
         lldbutil.run_break_set_by_file_and_line(
             self, "main.cpp", self.line, num_expected_locations=-1)

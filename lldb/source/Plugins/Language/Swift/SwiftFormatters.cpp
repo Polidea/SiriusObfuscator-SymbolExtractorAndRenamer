@@ -11,13 +11,15 @@
 //===----------------------------------------------------------------------===//
 
 #include "SwiftFormatters.h"
-#include "lldb/Core/DataBufferHeap.h"
-#include "lldb/Core/Error.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/DataFormatters/StringPrinter.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Target/Process.h"
+#include "lldb/Utility/DataBufferHeap.h"
+#include "lldb/Utility/Status.h"
 #include "lldb/Target/SwiftLanguageRuntime.h"
+#include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringRef.h"
 
 // FIXME: we should not need this
 #include "Plugins/Language/CPlusPlus/CxxStringTypes.h"
@@ -28,6 +30,7 @@ using namespace lldb;
 using namespace lldb_private;
 using namespace lldb_private::formatters;
 using namespace lldb_private::formatters::swift;
+using namespace llvm;
 
 bool lldb_private::formatters::swift::Character_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
@@ -64,7 +67,7 @@ bool lldb_private::formatters::swift::Character_SummaryProvider(
       return false;
 
     buffer_ptr += 2 * process_sp->GetAddressByteSize();
-    Error error;
+    Status error;
     buffer_ptr = process_sp->ReadPointerFromMemory(buffer_ptr, error);
     if (LLDB_INVALID_ADDRESS == buffer_ptr || 0 == buffer_ptr)
       return false;
@@ -131,116 +134,270 @@ bool lldb_private::formatters::swift::UnicodeScalar_SummaryProvider(
   return Char32SummaryProvider(*value_sp.get(), stream, options);
 }
 
-bool lldb_private::formatters::swift::StringCore_SummaryProvider(
+bool lldb_private::formatters::swift::StringGuts_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
-  return StringCore_SummaryProvider(
+  return StringGuts_SummaryProvider(
       valobj, stream, options,
       StringPrinter::ReadStringAndDumpToStreamOptions());
 }
 
-bool lldb_private::formatters::swift::StringCore_SummaryProvider(
+/// Get an Obj-C object's class name, if one is present.
+static Optional<StringRef> getObjC_ClassName(ValueObject &valobj,
+                                             Process &process) {
+  ObjCLanguageRuntime *runtime =
+      (ObjCLanguageRuntime *)process.GetLanguageRuntime(
+          lldb::eLanguageTypeObjC);
+  if (!runtime)
+    return None;
+
+  ObjCLanguageRuntime::ClassDescriptorSP descriptor(
+      runtime->GetClassDescriptor(valobj));
+
+  if (!descriptor.get() || !descriptor->IsValid())
+    return None;
+
+  ConstString class_name_cs = descriptor->GetClassName();
+  return class_name_cs.GetStringRef();
+}
+
+/// If valobj is a _SwiftRawStringStorage instance, retrieve the payload address
+/// of the character data and determine whether the string is in UTF-16.
+static bool GetRawStringStoragePayload(Process &process, ValueObject &valobj,
+                                       uint64_t &payloadAddr, bool &isUTF16) {
+  CompilerType ty = valobj.GetCompilerType();
+
+  auto objCName = getObjC_ClassName(valobj, process);
+  if (!objCName || !objCName->contains("_SwiftStringStorage"))
+    return false;
+
+  isUTF16 = !objCName->endswith("UInt8_");
+  payloadAddr = valobj.GetValueAsUnsigned(0) + 16;
+  return true;
+}
+
+bool lldb_private::formatters::swift::StringGuts_SummaryProvider(
     ValueObject &valobj, Stream &stream,
     const TypeSummaryOptions &summary_options,
     StringPrinter::ReadStringAndDumpToStreamOptions read_options) {
-  static ConstString g_some("some");
-  static ConstString g__baseAddress("_baseAddress");
-  static ConstString g__countAndFlags("_countAndFlags");
+  ProcessSP process(valobj.GetProcessSP());
+  if (!process)
+    return false;
+
+  Status error;
+  static ConstString g_object("_object");
+  static ConstString g_otherBits("_otherBits");
   static ConstString g_value("_value");
-  static ConstString g__rawValue("_rawValue");
 
-  ProcessSP process_sp(valobj.GetProcessSP());
-  if (!process_sp)
-    return false;
-  ValueObjectSP baseAddress_sp(
-      valobj.GetChildAtNamePath({g__baseAddress, g_some, g__rawValue}));
-  ValueObjectSP _countAndFlags_sp(
-      valobj.GetChildAtNamePath({g__countAndFlags, g_value}));
+  ValueObjectSP object, otherBits;
+  bool is64Bit = process->GetAddressByteSize() == 8;
+  if (is64Bit) {
+    object = valobj.GetChildAtNamePath({g_object, g_object});
+    otherBits = valobj.GetChildAtNamePath({g_otherBits, g_value});
+  } else {
+    object = valobj.GetChildAtNamePath({g_object});
+    otherBits = valobj.GetChildAtNamePath({g_otherBits, g_value});
+  }
 
-  if (!_countAndFlags_sp)
-    return false;
-
-  lldb::addr_t baseAddress =
-      baseAddress_sp ? baseAddress_sp->GetValueAsUnsigned(LLDB_INVALID_ADDRESS)
-                     : 0;
-  InferiorSizedWord _countAndFlags = InferiorSizedWord(
-      _countAndFlags_sp->GetValueAsUnsigned(0), *process_sp.get());
-
-  if (baseAddress == LLDB_INVALID_ADDRESS)
+  if (!object || !otherBits)
     return false;
 
-  bool hasCocoaBuffer = (_countAndFlags << 1).IsNegative();
+  // Taken from StringObject.swift:
+  // ## _StringObject bit layout
+  //
+  // x86-64 and arm64: (one 64-bit word)
+  // +---+---+---|---+------+--------------------------------------------------+
+  // + t | v | o | w | uuuu | payload (56 bits) |
+  // +---+---+---|---+------+--------------------------------------------------+
+  //  msb lsb
+  //
+  // i386 and arm: (two 32-bit words)
+  // _variant                               _bits
+  // +------------------------------------+
+  // +------------------------------------+
+  // + .strong(AnyObject)                 | | v | o | w | unused (29 bits) |
+  // +------------------------------------+
+  // +------------------------------------+
+  // + .unmanaged{Single,Double}Byte      | | start address (32 bits) |
+  // +------------------------------------+
+  // +------------------------------------+
+  // + .small{Single,Double}Byte          | | payload (32 bits) |
+  // +------------------------------------+
+  // +------------------------------------+
+  //  msb                              lsb   msb lsb
+  //
+  // where t: is-a-value, i.e. a tag bit that says not to perform ARC
+  //       v: sub-variant bit, i.e. set for isCocoa or isSmall
+  //       o: is-opaque, i.e. opaque vs contiguously stored strings
+  //       w: width indicator bit (0: ASCII, 1: UTF-16)
+  //       u: unused bits
+  //
+  // payload is:
+  //   isNative: the native StringStorage object
+  //   isCocoa: the Cocoa object
+  //   isOpaque & !isCocoa: the _OpaqueString object
+  //   isUnmanaged: the pointer to code units
+  //   isSmall: opaque bits used for inline storage
 
-  if (baseAddress == 0) {
-    if (hasCocoaBuffer) {
-      static ConstString g__owner("_owner");
-      static ConstString g_Some("some");
-      static ConstString g_instance_type("instance_type");
-
-      ValueObjectSP dyn_inst_type0(
-          valobj.GetChildAtNamePath({g__owner, g_Some, g_instance_type}));
-      if (!dyn_inst_type0)
-        return false;
-      lldb::addr_t dyn_inst_type0_ptr =
-          dyn_inst_type0->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
-      if (dyn_inst_type0_ptr == 0 || dyn_inst_type0_ptr == LLDB_INVALID_ADDRESS)
-        return false;
-
-      InferiorSizedWord dataAddress_isw =
-          InferiorSizedWord(dyn_inst_type0_ptr, *process_sp.get());
-
-      DataExtractor id_ptr =
-          dataAddress_isw.GetAsData(process_sp->GetByteOrder());
-      CompilerType id_type =
-          process_sp->GetTarget().GetScratchClangASTContext()->GetBasicType(
-              lldb::eBasicTypeObjCID);
-
-      if (!id_type)
-        return false;
-
-      ValueObjectSP nsstringhere_sp = ValueObject::CreateValueObjectFromData(
-          "nsstringhere", id_ptr, valobj.GetExecutionContextRef(), id_type);
-      if (nsstringhere_sp)
-        return NSStringSummaryProvider(*nsstringhere_sp.get(), stream,
-                                       summary_options);
-      return false;
-    } else {
+  auto readStringFromAddress = [&](uint64_t startAddress, uint64_t length,
+                                   bool isUTF16) {
+    if (length == 0) {
       stream.Printf("\"\"");
       return true;
     }
+
+    read_options.SetLocation(startAddress);
+    read_options.SetProcessSP(process);
+    read_options.SetStream(&stream);
+    read_options.SetSourceSize(length);
+    read_options.SetNeedsZeroTermination(false);
+    read_options.SetIgnoreMaxLength(summary_options.GetCapping() ==
+                                    lldb::eTypeSummaryUncapped);
+    read_options.SetBinaryZeroIsTerminator(false);
+    read_options.SetLanguage(lldb::eLanguageTypeSwift);
+
+    if (!isUTF16)
+      return StringPrinter::ReadStringAndDumpToStream<
+          StringPrinter::StringElementType::UTF8>(read_options);
+    else
+      return StringPrinter::ReadStringAndDumpToStream<
+          StringPrinter::StringElementType::UTF16>(read_options);
+  };
+
+  auto readStringAsNSString = [&](uint64_t startAddress) {
+    CompilerType id_type =
+        process->GetTarget().GetScratchClangASTContext()->GetBasicType(
+            lldb::eBasicTypeObjCID);
+
+    bool success = false;
+    ValueObjectSP nsstring;
+
+    // We may have an NSString pointer inline, so try formatting it directly.
+    DataExtractor DE(&startAddress, process->GetAddressByteSize(),
+                     process->GetByteOrder(), process->GetAddressByteSize());
+    nsstring = ValueObject::CreateValueObjectFromData(
+        "nsstring", DE, valobj.GetExecutionContextRef(), id_type);
+    if (nsstring && !nsstring->GetError().Fail())
+      success =
+          NSStringSummaryProvider(*nsstring.get(), stream, summary_options);
+
+    // Swift sometimes (but not always) wraps the NSString with one level of
+    // pointer indirection. So, first, dereference & format the string.
+    if (!success) {
+      nsstring = ValueObject::CreateValueObjectFromAddress(
+          "nsstring", startAddress, valobj.GetExecutionContextRef(), id_type);
+      if (nsstring && !nsstring->GetError().Fail())
+        success =
+            NSStringSummaryProvider(*nsstring.get(), stream, summary_options);
+    }
+
+    return success;
+  };
+
+  if (is64Bit) {
+    uint64_t objectAddr = object->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+    if (objectAddr == LLDB_INVALID_ADDRESS)
+      return false;
+
+    bool isValue = objectAddr & (1ULL << 63);
+    bool isCocoaOrSmall = objectAddr & (1ULL << 62);
+    bool isOpaque = objectAddr & (1ULL << 61);
+    bool isUTF16 = objectAddr & (1ULL << 60);
+    uint64_t payloadAddr = objectAddr & ((1ULL << 56) - 1);
+
+    if (!isOpaque && !isCocoaOrSmall) {
+      // Handle native Swift strings.
+      uint64_t count = otherBits->GetValueAsUnsigned(0) & ((1ULL << 48) - 1);
+
+      // The character buffer for wrapped strings is offset by 4 words.
+      if (!isValue)
+        payloadAddr += 32;
+
+      return readStringFromAddress(payloadAddr, count, isUTF16);
+    } else if (isCocoaOrSmall && !isValue) {
+      // Handle strings which point to NSStrings.
+      return readStringAsNSString(payloadAddr);
+    } else if (isCocoaOrSmall && isValue && !isOpaque) {
+      // Handle strings which contain an NSString inline.
+      return NSStringSummaryProvider(*otherBits.get(), stream, summary_options);
+    } else if (isCocoaOrSmall && isValue && isOpaque) {
+      // Small UTF-8 strings store their contents directly in register. The
+      // high nibble of the most significant byte of the first word denotes
+      // that the string is small, the low nibble holds the count. The least-
+      // significant byte of the second word is the first UTF-8 code unit.
+      //
+      // {object, otherBits} =
+      //   { isSmallUTF8Nibble << 60 | count << 56 | c_14 << 48 | ... | c_8,
+      //     c_7 << 56 | c_6 << 48 | ... | c_0
+      //   }
+      uint64_t countMask = 0x0F00000000000000;
+      uint64_t count = (objectAddr & countMask) >> 56U;
+      assert(count <= 15 && "malformed small string");
+      uint64_t buffer[2] = {otherBits->GetValueAsUnsigned(0), objectAddr};
+
+      DataExtractor data(buffer, count, process->GetByteOrder(),
+                         process->GetAddressByteSize());
+
+      StringPrinter::ReadBufferAndDumpToStreamOptions options(read_options);
+      options.SetData(data)
+          .SetStream(&stream)
+          .SetSourceSize(count)
+          .SetBinaryZeroIsTerminator(false)
+          .SetLanguage(lldb::eLanguageTypeSwift);
+      return StringPrinter::ReadBufferAndDumpToStream<
+          StringPrinter::StringElementType::UTF8>(options);
+    }
+  } else {
+    static ConstString g_variant("_variant");
+    static ConstString g_bits("_bits");
+    static ConstString g_strong("strong");
+
+    ValueObjectSP variant(valobj.GetChildAtNamePath({g_object, g_variant}));
+    ValueObjectSP bits = valobj.GetChildAtNamePath({g_object, g_bits, g_value});
+
+    if (!variant || !bits)
+      return false;
+
+    llvm::StringRef variant_case = variant->GetValueAsCString();
+    if (variant_case.startswith("unmanaged")) {
+      // Bits points to the string payload, otherBits is the length.
+      uint64_t count = otherBits->GetValueAsUnsigned(0);
+      uint64_t payloadAddr = bits->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+      if (payloadAddr == LLDB_INVALID_ADDRESS)
+        return false;
+      return readStringFromAddress(payloadAddr, count,
+                                   /*isUTF16=*/variant_case ==
+                                       "unmanagedDoubleByte");
+    } else if (variant_case.startswith("small")) {
+      // Small strings aren't emitted yet.
+      return false;
+    } else {
+      // The associated value in the selected enum case is either an NSString,
+      // or a native _SwiftStringStorage.
+      ValueObjectSP assocVal =
+          valobj.GetChildAtNamePath({g_object, g_variant, g_strong});
+      if (!assocVal)
+        return false;
+
+      // We need to decode the value in the enum.
+      ValueObjectSP decodedVal =
+          assocVal->GetDynamicValue(lldb::eDynamicCanRunTarget);
+      if (!decodedVal)
+        return false;
+
+      uint64_t payloadAddr;
+      bool isUTF16;
+      if (GetRawStringStoragePayload(*process.get(), *decodedVal.get(),
+                                     payloadAddr, isUTF16)) {
+        uint64_t count = otherBits->GetValueAsUnsigned(0);
+        return readStringFromAddress(payloadAddr, count, isUTF16);
+      }
+
+      uint64_t nsstringAddr =
+          decodedVal->GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+      return readStringAsNSString(nsstringAddr);
+    }
   }
-
-  const InferiorSizedWord _countMask =
-      InferiorSizedWord::GetMaximum(*process_sp.get()) >> 2;
-
-  uint64_t count = (_countAndFlags & _countMask).GetValue();
-
-  bool isASCII =
-      ((_countAndFlags >> (_countMask.GetBitSize() - 1)).SignExtend() << 8)
-          .IsZero();
-
-  if (count == 0) {
-    stream.Printf("\"\"");
-    return true;
-  }
-
-  read_options.SetLocation(baseAddress);
-  read_options.SetProcessSP(process_sp);
-  read_options.SetStream(&stream);
-  read_options.SetSourceSize(count);
-  read_options.SetNeedsZeroTermination(false);
-  read_options.SetIgnoreMaxLength(summary_options.GetCapping() ==
-                                  lldb::eTypeSummaryUncapped);
-  read_options.SetBinaryZeroIsTerminator(false);
-  read_options.SetLanguage(summary_options.GetLanguage());
-  if (summary_options.GetLanguage() == lldb::eLanguageTypeObjC)
-    read_options.SetPrefixToken("@");
-
-  if (isASCII)
-    return StringPrinter::ReadStringAndDumpToStream<
-        StringPrinter::StringElementType::UTF8>(read_options);
-  else
-    return StringPrinter::ReadStringAndDumpToStream<
-        StringPrinter::StringElementType::UTF16>(read_options);
+  return false;
 }
 
 bool lldb_private::formatters::swift::String_SummaryProvider(
@@ -254,10 +411,10 @@ bool lldb_private::formatters::swift::String_SummaryProvider(
     ValueObject &valobj, Stream &stream,
     const TypeSummaryOptions &summary_options,
     StringPrinter::ReadStringAndDumpToStreamOptions read_options) {
-  static ConstString g_core("_core");
-  ValueObjectSP core_sp = valobj.GetChildMemberWithName(g_core, true);
-  if (core_sp)
-    return StringCore_SummaryProvider(*core_sp, stream, summary_options,
+  static ConstString g_guts("_guts");
+  ValueObjectSP guts_sp = valobj.GetChildMemberWithName(g_guts, true);
+  if (guts_sp)
+    return StringGuts_SummaryProvider(*guts_sp, stream, summary_options,
                                       read_options);
   return false;
 }
@@ -324,49 +481,50 @@ bool lldb_private::formatters::swift::StaticString_SummaryProvider(
 
 bool lldb_private::formatters::swift::NSContiguousString_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
-  static ConstString g_StringCoreType(SwiftLanguageRuntime::GetCurrentMangledName("_TtVs11_StringCore"));
-  lldb::addr_t core_location = valobj.GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
-  if (core_location == LLDB_INVALID_ADDRESS)
+  static ConstString g_guts("_guts");
+  ValueObjectSP guts_sp = valobj.GetChildMemberWithName(g_guts, true);
+  if (guts_sp)
+    return StringGuts_SummaryProvider(*guts_sp, stream, options);
+
+  static ConstString g_StringGutsType(
+      SwiftLanguageRuntime::GetCurrentMangledName("$Ss11_StringGutsVD"));
+  lldb::addr_t guts_location = valobj.GetValueAsUnsigned(LLDB_INVALID_ADDRESS);
+  if (guts_location == LLDB_INVALID_ADDRESS)
     return false;
   ProcessSP process_sp(valobj.GetProcessSP());
   if (!process_sp)
     return false;
   size_t ptr_size = process_sp->GetAddressByteSize();
-  core_location += 2 * ptr_size;
+  guts_location += 2 * ptr_size;
 
-  Error error;
+  Status error;
 
-  InferiorSizedWord isw_1(
-      process_sp->ReadPointerFromMemory(core_location, error), *process_sp);
-  InferiorSizedWord isw_2(
-      process_sp->ReadPointerFromMemory(core_location + ptr_size, error),
-      *process_sp);
-  InferiorSizedWord isw_3(process_sp->ReadPointerFromMemory(
-                              core_location + ptr_size + ptr_size, error),
-                          *process_sp);
-
-  DataBufferSP buffer_sp(new DataBufferHeap(3 * ptr_size, 0));
+  unsigned num_words_in_guts = (ptr_size == 8) ? 2 : 3;
+  DataBufferSP buffer_sp(new DataBufferHeap(num_words_in_guts * ptr_size, 0));
   uint8_t *buffer = buffer_sp->GetBytes();
-
-  buffer = isw_1.CopyToBuffer(buffer);
-  buffer = isw_2.CopyToBuffer(buffer);
-  buffer = isw_3.CopyToBuffer(buffer);
+  for (unsigned I = 0; I < num_words_in_guts; ++I) {
+    InferiorSizedWord isw(process_sp->ReadPointerFromMemory(
+                              guts_location + (ptr_size * I), error),
+                          *process_sp);
+    buffer = isw.CopyToBuffer(buffer);
+  }
 
   DataExtractor data(buffer_sp, process_sp->GetByteOrder(), ptr_size);
 
-  SwiftASTContext *lldb_swift_ast =
-      process_sp->GetTarget().GetScratchSwiftASTContext(error);
+  SwiftASTContext *lldb_swift_ast = llvm::dyn_cast_or_null<SwiftASTContext>(
+      process_sp->GetTarget().GetScratchTypeSystemForLanguage(
+          &error, eLanguageTypeSwift));
   if (!lldb_swift_ast)
     return false;
-  CompilerType string_core_type = lldb_swift_ast->GetTypeFromMangledTypename(
-      g_StringCoreType.GetCString(), error);
-  if (string_core_type.IsValid() == false)
+  CompilerType string_guts_type = lldb_swift_ast->GetTypeFromMangledTypename(
+      g_StringGutsType.GetCString(), error);
+  if (string_guts_type.IsValid() == false)
     return false;
 
-  ValueObjectSP string_core_sp = ValueObject::CreateValueObjectFromData(
-      "stringcore", data, valobj.GetExecutionContextRef(), string_core_type);
-  if (string_core_sp)
-    return StringCore_SummaryProvider(*string_core_sp, stream, options);
+  ValueObjectSP string_guts_sp = ValueObject::CreateValueObjectFromData(
+      "stringguts", data, valobj.GetExecutionContextRef(), string_guts_type);
+  if (string_guts_sp)
+    return StringGuts_SummaryProvider(*string_guts_sp, stream, options);
   return false;
 }
 
@@ -745,7 +903,7 @@ bool lldb_private::formatters::swift::TypePreservingNSNumber_SummaryProvider(
   lldb::addr_t addr_of_payload = ptr_value + ptr_size;
   lldb::addr_t addr_of_tag = addr_of_payload + size_of_payload;
 
-  Error read_error;
+  Status read_error;
   uint64_t tag = process_sp->ReadUnsignedIntegerFromMemory(
       addr_of_tag, size_of_tag, 0, read_error);
   if (read_error.Fail())
@@ -785,6 +943,197 @@ bool lldb_private::formatters::swift::TypePreservingNSNumber_SummaryProvider(
 
 #undef PROCESS_DEPENDENT_TAG
 #undef PROCESS_INDEPENDENT_TAG
+
+  return false;
+}
+
+namespace {
+
+/// Enumerate the kinds of SIMD elements.
+enum class SIMDElementKind {
+  Int32,
+  UInt32,
+  Float32,
+  Float64
+};
+
+/// A helper for formatting a kind of SIMD element.
+class SIMDElementFormatter {
+  SIMDElementKind m_kind;
+
+public:
+  SIMDElementFormatter(SIMDElementKind kind) : m_kind(kind) {}
+
+  /// Create a string representation of a SIMD element given a pointer to it.
+  std::string Format(const uint8_t *data) const {
+    std::string S;
+    llvm::raw_string_ostream OS(S);
+    switch (m_kind) {
+    case SIMDElementKind::Int32: {
+      auto *p = reinterpret_cast<const int32_t *>(data);
+      OS << *p;
+      break;
+    }
+    case SIMDElementKind::UInt32: {
+      auto *p = reinterpret_cast<const uint32_t *>(data);
+      OS << *p;
+      break;
+    }
+    case SIMDElementKind::Float32: {
+      auto *p = reinterpret_cast<const float *>(data);
+      OS << *p;
+      break;
+    }
+    case SIMDElementKind::Float64: {
+      auto *p = reinterpret_cast<const double *>(data);
+      OS << *p;
+      break;
+    }
+    }
+    return S;
+  }
+
+  /// Get the size in bytes of this kind of SIMD element.
+  unsigned getElementSize() const {
+    return (m_kind == SIMDElementKind::Float64) ? 8 : 4;
+  }
+};
+
+/// Read a SIMD vector from the target.
+llvm::Optional<std::vector<std::string>>
+ReadVector(Process &process, ValueObject &valobj,
+           const SIMDElementFormatter &formatter, unsigned num_elements) {
+  Status error;
+  static ConstString g_value("_value");
+  ValueObjectSP value_sp = valobj.GetChildAtNamePath({g_value});
+  if (!value_sp)
+    return llvm::None;
+
+  // The layout of the vector is the same as what you'd expect for a C-style
+  // array. It's a contiguous bag of bytes with no padding.
+  DataExtractor data;
+  uint64_t len = value_sp->GetData(data, error);
+  unsigned elt_size = formatter.getElementSize();
+  if (error.Fail() || (num_elements * elt_size) > len)
+    return llvm::None;
+
+  std::vector<std::string> elements;
+  const uint8_t *buffer = data.GetDataStart();
+  for (unsigned I = 0; I < num_elements; ++I)
+    elements.emplace_back(formatter.Format(buffer + (I * elt_size)));
+  return elements;
+}
+
+/// Print a vector of elements as a row, if possible.
+bool PrintRow(Stream &stream, llvm::Optional<std::vector<std::string>> vec) {
+  if (!vec)
+    return false;
+
+  std::string joined = llvm::join(*vec, ", ");
+  stream.Printf("(%s)", joined.c_str());
+  return true;
+}
+
+} // end anonymous namespace
+
+bool lldb_private::formatters::swift::AccelerateSIMD_SummaryProvider(
+    ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+  Status error;
+  ProcessSP process_sp(valobj.GetProcessSP());
+  if (!process_sp)
+    return false;
+
+  Process &process = *process_sp.get();
+
+  // Get the type name without the "simd.simd_" prefix.
+  ConstString full_type_name = valobj.GetTypeName();
+  llvm::StringRef type_name = full_type_name.GetStringRef();
+  if (type_name.startswith("simd."))
+    type_name = type_name.drop_front(5);
+  if (type_name.startswith("simd_"))
+    type_name = type_name.drop_front(5);
+
+  // Get the type of object this is.
+  bool is_quaternion = type_name.startswith("quat");
+  bool is_matrix = type_name[type_name.size() - 2] == 'x';
+  bool is_vector = !is_matrix && !is_quaternion;
+
+  // Get the kind of SIMD element inside of this object.
+  llvm::Optional<SIMDElementKind> kind = llvm::None;
+  if (type_name.startswith("int"))
+    kind = SIMDElementKind::Int32;
+  else if (type_name.startswith("uint"))
+    kind = SIMDElementKind::UInt32;
+  else if ((is_quaternion && type_name.endswith("f")) ||
+           type_name.startswith("float"))
+    kind = SIMDElementKind::Float32;
+  else if ((is_quaternion && type_name.endswith("d")) ||
+           type_name.startswith("double"))
+    kind = SIMDElementKind::Float64;
+  if (!kind)
+    return false;
+
+  SIMDElementFormatter formatter(*kind);
+
+  if (is_vector) {
+    unsigned num_elements = llvm::hexDigitValue(type_name.back());
+    return PrintRow(stream,
+                    ReadVector(process, valobj, formatter, num_elements));
+  } else if (is_quaternion) {
+    static ConstString g_vector("vector");
+    ValueObjectSP vec_sp = valobj.GetChildAtNamePath({g_vector});
+    if (!vec_sp)
+      return false;
+
+    return PrintRow(stream, ReadVector(process, *vec_sp.get(), formatter, 4));
+  } else if (is_matrix) {
+    static ConstString g_columns("columns");
+    ValueObjectSP columns_sp = valobj.GetChildAtNamePath({g_columns});
+    if (!columns_sp)
+      return false;
+
+    unsigned num_columns = llvm::hexDigitValue(type_name[type_name.size() - 3]);
+    unsigned num_rows = llvm::hexDigitValue(type_name[type_name.size() - 1]);
+
+    // SIMD matrices are stored column-major. Collect each column vector as a
+    // precursor for row-by-row pretty-printing.
+    std::vector<std::vector<std::string>> columns;
+    for (unsigned I = 0; I < num_columns; ++I) {
+      std::string col_num_str = llvm::utostr(I);
+      ConstString col_num_const_str(col_num_str.c_str());
+      ValueObjectSP column_sp =
+          columns_sp->GetChildAtNamePath({col_num_const_str});
+      if (!column_sp)
+        return false;
+
+      auto vec = ReadVector(process, *column_sp.get(), formatter, num_rows);
+      if (!vec)
+        return false;
+
+      columns.emplace_back(std::move(*vec));
+    }
+
+    // Print each row.
+    stream.Printf("\n[ ");
+    for (unsigned J = 0; J < num_rows; ++J) {
+      // Join the J-th row's elements with commas.
+      std::vector<std::string> row;
+      for (unsigned I = 0; I < num_columns; ++I)
+        row.emplace_back(std::move(columns[I][J]));
+      std::string joined = llvm::join(row, ", ");
+
+      // Add spacing and punctuation to 1) make it possible to copy the matrix
+      // into a Python repl and 2) to avoid writing '[[' in FileCheck tests.
+      if (J > 0)
+        stream.Printf("  ");
+      stream.Printf("[%s]", joined.c_str());
+      if (J != (num_rows - 1))
+        stream.Printf(",\n");
+      else
+        stream.Printf(" ]\n");
+    }
+    return true;
+  }
 
   return false;
 }

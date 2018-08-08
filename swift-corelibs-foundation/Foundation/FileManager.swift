@@ -7,7 +7,7 @@
 // See http://swift.org/CONTRIBUTORS.txt for the list of Swift project authors
 //
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
     import Darwin
 #elseif os(Linux) || CYGWIN
     import Glibc
@@ -32,10 +32,66 @@ open class FileManager : NSObject {
         }
     }
     
-    /* Returns an NSArray of NSURLs locating the mounted volumes available on the computer. The property keys that can be requested are available in NSURL.
-     */
+    /// Returns an array of URLs that identify the mounted volumes available on the device.
     open func mountedVolumeURLs(includingResourceValuesForKeys propertyKeys: [URLResourceKey]?, options: VolumeEnumerationOptions = []) -> [URL]? {
-        NSUnimplemented()
+        var urls: [URL]
+
+#if os(Linux)
+        guard let procMounts = try? String(contentsOfFile: "/proc/mounts", encoding: .utf8) else {
+            return nil
+        }
+        urls = []
+        for line in procMounts.components(separatedBy: "\n") {
+            let mountPoint = line.components(separatedBy: " ")
+            if mountPoint.count > 2 {
+                urls.append(URL(fileURLWithPath: mountPoint[1], isDirectory: true))
+            }
+        }
+#elseif canImport(Darwin)
+
+        func mountPoints(_ statBufs: UnsafePointer<statfs>, _ fsCount: Int) -> [URL] {
+            var urls: [URL] = []
+
+            for fsIndex in 0..<fsCount {
+                var fs = statBufs.advanced(by: fsIndex).pointee
+
+                if options.contains(.skipHiddenVolumes) && fs.f_flags & UInt32(MNT_DONTBROWSE) != 0 {
+                    continue
+                }
+
+                let mountPoint = withUnsafePointer(to: &fs.f_mntonname.0) { (ptr: UnsafePointer<Int8>) -> String in
+                    return string(withFileSystemRepresentation: ptr, length: strlen(ptr))
+                }
+                urls.append(URL(fileURLWithPath: mountPoint, isDirectory: true))
+            }
+            return urls
+        }
+
+        if #available(OSX 10.13, *) {
+            var statBufPtr: UnsafeMutablePointer<statfs>?
+            let fsCount = getmntinfo_r_np(&statBufPtr, MNT_WAIT)
+            guard let statBuf = statBufPtr, fsCount > 0 else {
+                return nil
+            }
+            urls = mountPoints(statBuf, Int(fsCount))
+            free(statBufPtr)
+        } else {
+            var fsCount = getfsstat(nil, 0, MNT_WAIT)
+            guard fsCount > 0 else {
+                return nil
+            }
+            let statBuf = UnsafeMutablePointer<statfs>.allocate(capacity: Int(fsCount))
+            defer { statBuf.deallocate() }
+            fsCount = getfsstat(statBuf, fsCount * Int32(MemoryLayout<statfs>.stride), MNT_WAIT)
+            guard fsCount > 0 else {
+                return nil
+            }
+            urls = mountPoints(statBuf, Int(fsCount))
+        }
+#else
+#error("Requires a platform-specific implementation")
+#endif
+        return urls
     }
     
     /* Returns an NSArray of NSURLs identifying the the directory entries. 
@@ -127,7 +183,7 @@ open class FileManager : NSObject {
                 guard let number = attributes[attribute] as? NSNumber else {
                     fatalError("Can't set file permissions to \(attributes[attribute] as Any?)")
                 }
-                #if os(OSX) || os(iOS)
+                #if os(macOS) || os(iOS)
                     let modeT = number.uint16Value
                 #elseif os(Linux) || os(Android) || CYGWIN
                     let modeT = number.uint32Value
@@ -150,7 +206,7 @@ open class FileManager : NSObject {
             var isDir: ObjCBool = false
             if !fileExists(atPath: path, isDirectory: &isDir) {
                 let parent = path._nsObject.deletingLastPathComponent
-                if !fileExists(atPath: parent, isDirectory: &isDir) {
+                if !parent.isEmpty && !fileExists(atPath: parent, isDirectory: &isDir) {
                     try createDirectory(atPath: parent, withIntermediateDirectories: true, attributes: attributes)
                 }
                 if mkdir(path, S_IRWXU | S_IRWXG | S_IRWXO) != 0 {
@@ -158,7 +214,7 @@ open class FileManager : NSObject {
                 } else if let attr = attributes {
                     try self.setAttributes(attr, ofItemAtPath: path)
                 }
-            } else if isDir {
+            } else if isDir.boolValue {
                 return
             } else {
                 throw _NSErrorWithErrno(EEXIST, reading: false, path: path)
@@ -171,7 +227,35 @@ open class FileManager : NSObject {
             }
         }
     }
-    
+
+    private func _contentsOfDir(atPath path: String, _ closure: (String, Int32) throws -> () ) throws {
+        let fsRep = fileSystemRepresentation(withPath: path)
+        defer { fsRep.deallocate() }
+
+        guard let dir = opendir(fsRep) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoSuchFile.rawValue, userInfo: [NSFilePathErrorKey: path])
+        }
+        defer { closedir(dir) }
+
+        var entry = dirent()
+        var result: UnsafeMutablePointer<dirent>? = nil
+
+        while readdir_r(dir, &entry, &result) == 0 {
+            guard result != nil else {
+                return
+            }
+            let length = Int(_direntNameLength(&entry))
+            let entryName = withUnsafePointer(to: &entry.d_name) { (ptr) -> String in
+                let namePtr = UnsafeRawPointer(ptr).assumingMemoryBound(to: CChar.self)
+                return string(withFileSystemRepresentation: namePtr, length: length)
+            }
+            if entryName != "." && entryName != ".." {
+                let entryType = Int32(entry.d_type)
+                try closure(entryName, entryType)
+            }
+        }
+    }
+
     /**
      Performs a shallow search of the specified directory and returns the paths of any contained items.
      
@@ -186,28 +270,11 @@ open class FileManager : NSObject {
      - Returns: An array of String each of which identifies a file, directory, or symbolic link contained in `path`. The order of the files returned is undefined.
      */
     open func contentsOfDirectory(atPath path: String) throws -> [String] {
-        var contents : [String] = [String]()
-        
-        let dir = opendir(path)
-        
-        if dir == nil {
-            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoSuchFile.rawValue, userInfo: [NSFilePathErrorKey: path])
-        }
-        
-        defer {
-            closedir(dir!)
-        }
+        var contents: [String] = []
 
-        while let entry = readdir(dir!) {
-            let entryName = withUnsafePointer(to: &entry.pointee.d_name) {
-                String(cString: UnsafeRawPointer($0).assumingMemoryBound(to: CChar.self))
-            }
-            // TODO: `entryName` should be limited in length to `entry.memory.d_namlen`.
-            if entryName != "." && entryName != ".." {
-                contents.append(entryName)
-            }
-        }
-        
+        try _contentsOfDir(atPath: path, { (entryName, entryType) throws in
+            contents.append(entryName)
+        })
         return contents
     }
     
@@ -225,48 +292,16 @@ open class FileManager : NSObject {
     - Returns: An array of NSString objects, each of which contains the path of an item in the directory specified by path. If path is a symbolic link, this method traverses the link. This method returns nil if it cannot retrieve the device of the linked-to file.
     */
     open func subpathsOfDirectory(atPath path: String) throws -> [String] {
-        var contents : [String] = [String]()
-        
-        let dir = opendir(path)
-        
-        if dir == nil {
-            throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileReadNoSuchFile.rawValue, userInfo: [NSFilePathErrorKey: path])
-        }
-        
-        defer {
-            closedir(dir!)
-        }
-        
-        var entry = readdir(dir!)
-        
-        while entry != nil {
-            let entryName = withUnsafePointer(to: &entry!.pointee.d_name) {
-                String(cString: UnsafeRawPointer($0).assumingMemoryBound(to: CChar.self))
-            }
-            // TODO: `entryName` should be limited in length to `entry.memory.d_namlen`.
-            if entryName != "." && entryName != ".." {
-                contents.append(entryName)
-                    
-                let entryType = withUnsafePointer(to: &entry!.pointee.d_type) { (ptr) -> Int32 in
-                    return Int32(ptr.pointee)
-                }
-                #if os(OSX) || os(iOS)
-                    let tempEntryType = entryType
-                #elseif os(Linux) || os(Android) || CYGWIN
-                    let tempEntryType = Int32(entryType)
-                #endif
+        var contents: [String] = []
 
-                if tempEntryType == Int32(DT_DIR) {
-                    let subPath: String = path + "/" + entryName
-
-                    let entries =  try subpathsOfDirectory(atPath: subPath)
-                    contents.append(contentsOf: entries.map({file in "\(entryName)/\(file)"}))
-                }
+        try _contentsOfDir(atPath: path, { (entryName, entryType) throws in
+            contents.append(entryName)
+            if entryType == Int32(DT_DIR) {
+                let subPath: String = path + "/" + entryName
+                let entries = try subpathsOfDirectory(atPath: subPath)
+                contents.append(contentsOf: entries.map({file in "\(entryName)/\(file)"}))
             }
-            
-            entry = readdir(dir!)
-        }
-        
+        })
         return contents
     }
     
@@ -282,7 +317,7 @@ open class FileManager : NSObject {
         var result = [FileAttributeKey : Any]()
         result[.size] = NSNumber(value: UInt64(s.st_size))
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
         let ti = (TimeInterval(s.st_mtimespec.tv_sec) - kCFAbsoluteTimeIntervalSince1970) + (1.0e-9 * TimeInterval(s.st_mtimespec.tv_nsec))
 #elseif os(Android)
         let ti = (TimeInterval(s.st_mtime) - kCFAbsoluteTimeIntervalSince1970) + (1.0e-9 * TimeInterval(s.st_mtime_nsec))
@@ -296,15 +331,13 @@ open class FileManager : NSObject {
         result[.systemNumber] = NSNumber(value: UInt64(s.st_dev))
         result[.systemFileNumber] = NSNumber(value: UInt64(s.st_ino))
         
-        let pwd = getpwuid(s.st_uid)
-        if pwd != nil && pwd!.pointee.pw_name != nil {
-            let name = String(cString: pwd!.pointee.pw_name)
+        if let pwd = getpwuid(s.st_uid), pwd.pointee.pw_name != nil {
+            let name = String(cString: pwd.pointee.pw_name)
             result[.ownerAccountName] = name
         }
         
-        let grd = getgrgid(s.st_gid)
-        if grd != nil && grd!.pointee.gr_name != nil {
-            let name = String(cString: grd!.pointee.gr_name)
+        if let grd = getgrgid(s.st_gid), grd.pointee.gr_name != nil {
+            let name = String(cString: grd.pointee.gr_name)
             result[.groupOwnerAccountName] = name
         }
 
@@ -324,7 +357,7 @@ open class FileManager : NSObject {
             result[.deviceIdentifier] = NSNumber(value: UInt64(s.st_rdev))
         }
 
-#if os(OSX) || os(iOS)
+#if os(macOS) || os(iOS)
         if (s.st_flags & UInt32(UF_IMMUTABLE | SF_IMMUTABLE)) != 0 {
             result[.immutable] = NSNumber(value: true)
         }
@@ -342,9 +375,43 @@ open class FileManager : NSObject {
      
         This method replaces fileSystemAttributesAtPath:.
      */
+ #if os(Android)
+    @available(*, unavailable, message: "Unsuppported on this platform")
     open func attributesOfFileSystem(forPath path: String) throws -> [FileAttributeKey : Any] {
-        NSUnimplemented()
+        NSUnsupported()
     }
+ #else
+    open func attributesOfFileSystem(forPath path: String) throws -> [FileAttributeKey : Any] {
+        // statvfs(2) doesn't support 64bit inode on Darwin (apfs), fallback to statfs(2)
+        #if os(macOS) || os(iOS)
+            var s = statfs()
+            guard statfs(path, &s) == 0 else {
+                throw _NSErrorWithErrno(errno, reading: true, path: path)
+            }
+        #else
+            var s = statvfs()
+            guard statvfs(path, &s) == 0 else {
+                throw _NSErrorWithErrno(errno, reading: true, path: path)
+            }
+        #endif
+        
+        
+        var result = [FileAttributeKey : Any]()
+        #if os(macOS) || os(iOS)
+            let blockSize = UInt64(s.f_bsize)
+            result[.systemNumber] = NSNumber(value: UInt64(s.f_fsid.val.0))
+        #else
+            let blockSize = UInt64(s.f_frsize)
+            result[.systemNumber] = NSNumber(value: UInt64(s.f_fsid))
+        #endif
+        result[.systemSize] = NSNumber(value: blockSize * UInt64(s.f_blocks))
+        result[.systemFreeSize] = NSNumber(value: blockSize * UInt64(s.f_bavail))
+        result[.systemNodes] = NSNumber(value: UInt64(s.f_files))
+        result[.systemFreeNodes] = NSNumber(value: UInt64(s.f_ffree))
+        
+        return result
+    }
+#endif
     
     /* createSymbolicLinkAtPath:withDestination:error: returns YES if the symbolic link that point at 'destPath' was able to be created at the location specified by 'path'. If this method returns NO, the link was unable to be created and an NSError will be returned by reference in the 'error' parameter. This method does not traverse a terminal symlink.
      
@@ -370,7 +437,81 @@ open class FileManager : NSObject {
         
         return self.string(withFileSystemRepresentation: buf, length: Int(len))
     }
-    
+
+    private func _readFrom(fd: Int32, toBuffer buffer: UnsafeMutablePointer<UInt8>, length bytesToRead: Int, filename: String) throws -> Int {
+        var bytesRead = 0
+
+        repeat {
+            bytesRead = read(fd, buffer, bytesToRead)
+        } while bytesRead < 0 && errno == EINTR
+        guard bytesRead >= 0 else {
+            throw _NSErrorWithErrno(errno, reading: true, path: filename)
+        }
+        return bytesRead
+    }
+
+    private func _writeTo(fd: Int32, fromBuffer buffer : UnsafeMutablePointer<UInt8>, length bytesToWrite: Int, filename: String) throws {
+        var bytesWritten = 0
+        while bytesWritten < bytesToWrite {
+            var written = 0
+            let bytesLeftToWrite = bytesToWrite - bytesWritten
+            repeat {
+                written = write(fd, buffer.advanced(by: bytesWritten), bytesLeftToWrite)
+            } while written < 0 && errno == EINTR
+            guard written >= 0 else {
+                throw _NSErrorWithErrno(errno, reading: false, path: filename)
+            }
+            bytesWritten += written
+        }
+    }
+
+    private func _copyRegularFile(atPath srcPath: String, toPath dstPath: String) throws {
+        let srcRep = fileSystemRepresentation(withPath: srcPath)
+        let dstRep = fileSystemRepresentation(withPath: dstPath)
+        defer {
+            srcRep.deallocate()
+            dstRep.deallocate()
+        }
+
+        var fileInfo = stat()
+        guard stat(srcRep, &fileInfo) >= 0 else {
+            throw _NSErrorWithErrno(errno, reading: true, path: srcPath)
+        }
+
+        let srcfd = open(srcRep, O_RDONLY)
+        guard srcfd >= 0 else {
+            throw _NSErrorWithErrno(errno, reading: true, path: srcPath)
+        }
+        defer { close(srcfd) }
+
+        let dstfd = open(dstRep, O_WRONLY | O_CREAT | O_TRUNC, 0o666)
+        guard dstfd >= 0 else {
+            throw _NSErrorWithErrno(errno, reading: false, path: dstPath)
+        }
+        defer { close(dstfd) }
+
+        if fileInfo.st_size == 0 {
+            // no copying required
+            return
+        }
+
+        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: Int(fileInfo.st_blksize))
+        defer { buffer.deallocate() }
+
+        var bytesRemaining = Int64(fileInfo.st_size)
+        while bytesRemaining > 0 {
+            let bytesToRead = min(bytesRemaining, Int64(fileInfo.st_blksize))
+            let bytesRead = try _readFrom(fd: srcfd, toBuffer: buffer, length: Int(bytesToRead), filename: srcPath)
+            if bytesRead == 0 {
+                // Early EOF
+                return
+            }
+            try _writeTo(fd: dstfd, fromBuffer: buffer, length: bytesRead, filename: dstPath)
+            bytesRemaining -= Int64(bytesRead)
+        }
+    }
+
+
     open func copyItem(atPath srcPath: String, toPath dstPath: String) throws {
         guard
             let attrs = try? attributesOfItem(atPath: srcPath),
@@ -378,16 +519,36 @@ open class FileManager : NSObject {
             else {
                 return
         }
+
+        func copyNonDirectory(srcPath: String, dstPath: String, fileType: FileAttributeType) throws {
+            if fileType == .typeSymbolicLink {
+                let destination = try destinationOfSymbolicLink(atPath: srcPath)
+                try createSymbolicLink(atPath: dstPath, withDestinationPath: destination)
+            } else if fileType == .typeRegular {
+                try _copyRegularFile(atPath: srcPath, toPath: dstPath)
+            }
+        }
+
         if fileType == .typeDirectory {
             try createDirectory(atPath: dstPath, withIntermediateDirectories: false, attributes: nil)
-            let subpaths = try subpathsOfDirectory(atPath: srcPath)
-            for subpath in subpaths {
-                try copyItem(atPath: srcPath + "/" + subpath, toPath: dstPath + "/" + subpath)
+
+            guard let enumerator = enumerator(atPath: srcPath) else {
+                throw _NSErrorWithErrno(ENOENT, reading: true, path: srcPath)
+            }
+
+            while let item = enumerator.nextObject() as? String {
+                let src = srcPath + "/" + item
+                let dst = dstPath + "/" + item
+                if let attrs = try? attributesOfItem(atPath: src), let fileType = attrs[.type] as? FileAttributeType {
+                    if fileType == .typeDirectory {
+                        try createDirectory(atPath: dst, withIntermediateDirectories: false, attributes: nil)
+                    } else {
+                        try copyNonDirectory(srcPath: src, dstPath: dst, fileType: fileType)
+                    }
+                }
             }
         } else {
-            if createFile(atPath: dstPath, contents: contents(atPath: srcPath), attributes: nil) == false {
-                throw NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteUnknown.rawValue, userInfo: [NSFilePathErrorKey : NSString(string: dstPath)])
-            }
+            try copyNonDirectory(srcPath: srcPath, dstPath: dstPath, fileType: fileType)
         }
     }
     
@@ -406,9 +567,9 @@ open class FileManager : NSObject {
     }
     
     open func linkItem(atPath srcPath: String, toPath dstPath: String) throws {
-        var isDir = false
+        var isDir: ObjCBool = false
         if self.fileExists(atPath: srcPath, isDirectory: &isDir) {
-            if !isDir {
+            if !isDir.boolValue {
                 // TODO: Symlinks should be copied instead of hard-linked.
                 if link(srcPath, dstPath) == -1 {
                     throw _NSErrorWithErrno(errno, reading: false, path: srcPath)
@@ -431,7 +592,8 @@ open class FileManager : NSObject {
             ps.advanced(by: 1).initialize(to: nil)
             let stream = fts_open(ps, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nil)
             ps.deinitialize(count: 2)
-            ps.deallocate(capacity: 2)
+            ps.deallocate()
+            fsRep.deallocate()
 
             if stream != nil {
                 defer {
@@ -528,31 +690,26 @@ open class FileManager : NSObject {
     
     open func fileExists(atPath path: String, isDirectory: UnsafeMutablePointer<ObjCBool>?) -> Bool {
         var s = stat()
-        if lstat(path, &s) >= 0 {
-            if let isDirectory = isDirectory {
-                if (s.st_mode & S_IFMT) == S_IFLNK {
-                    if stat(path, &s) >= 0 {
-                        isDirectory.pointee = (s.st_mode & S_IFMT) == S_IFDIR
-                    } else {
-                        return false
-                    }
-                } else {
-                    isDirectory.pointee = (s.st_mode & S_IFMT) == S_IFDIR
-                }
-            }
-
-            // don't chase the link for this magic case -- we might be /Net/foo
-            // which is a symlink to /private/Net/foo which is not yet mounted...
-            if (s.st_mode & S_IFMT) == S_IFLNK {
-                if (s.st_mode & S_ISVTX) == S_ISVTX {
-                    return true
-                }
-                // chase the link; too bad if it is a slink to /Net/foo
-                stat(path, &s)
-            }
-        } else {
+        guard lstat(path, &s) >= 0 else {
             return false
         }
+
+        if (s.st_mode & S_IFMT) == S_IFLNK {
+            // don't chase the link for this magic case -- we might be /Net/foo
+            // which is a symlink to /private/Net/foo which is not yet mounted...
+            if isDirectory == nil && (s.st_mode & S_ISVTX) == S_ISVTX {
+                return true
+            }
+            // chase the link; too bad if it is a slink to /Net/foo
+            guard stat(path, &s) >= 0 else {
+                return false
+            }
+        }
+
+        if let isDirectory = isDirectory {
+            isDirectory.pointee = ObjCBool((s.st_mode & S_IFMT) == S_IFDIR)
+        }
+
         return true
     }
     
@@ -571,11 +728,163 @@ open class FileManager : NSObject {
     open func isDeletableFile(atPath path: String) -> Bool {
         NSUnimplemented()
     }
-    
+
+    private func _compareFiles(withFileSystemRepresentation file1Rep: UnsafePointer<Int8>, andFileSystemRepresentation file2Rep: UnsafePointer<Int8>, size: Int64, bufSize: Int) -> Bool {
+        let fd1 = open(file1Rep, O_RDONLY)
+        guard fd1 >= 0 else {
+            return false
+        }
+        defer { close(fd1) }
+
+        let fd2 = open(file2Rep, O_RDONLY)
+        guard fd2 >= 0 else {
+            return false
+        }
+        defer { close(fd2) }
+
+        let buffer1 = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+        let buffer2 = UnsafeMutablePointer<UInt8>.allocate(capacity: bufSize)
+        defer {
+            buffer1.deallocate()
+            buffer2.deallocate()
+        }
+
+        var bytesLeft = size
+        while bytesLeft > 0 {
+            let bytesToRead = Int(min(Int64(bufSize), bytesLeft))
+            guard read(fd1, buffer1, bytesToRead) == bytesToRead else {
+                return false
+            }
+            guard read(fd2, buffer2, bytesToRead) == bytesToRead else {
+                return false
+            }
+            guard memcmp(buffer1, buffer2, bytesToRead) == 0 else {
+                return false
+            }
+            bytesLeft -= Int64(bytesToRead)
+        }
+        return true
+    }
+
+    private func _compareSymlinks(withFileSystemRepresentation file1Rep: UnsafePointer<Int8>, andFileSystemRepresentation file2Rep: UnsafePointer<Int8>, size: Int64) -> Bool {
+        let bufSize = Int(size)
+        let buffer1 = UnsafeMutablePointer<CChar>.allocate(capacity: Int(bufSize))
+        let buffer2 = UnsafeMutablePointer<CChar>.allocate(capacity: Int(bufSize))
+
+        let size1 = readlink(file1Rep, buffer1, bufSize)
+        let size2 = readlink(file2Rep, buffer2, bufSize)
+
+        let compare: Bool
+        if size1 < 0 || size2 < 0 || size1 != size || size1 != size2 {
+            compare = false
+        } else {
+            compare = memcmp(buffer1, buffer2, size1) == 0
+        }
+
+        buffer1.deallocate()
+        buffer2.deallocate()
+        return compare
+    }
+
+    private func _compareDirectories(atPath path1: String, andPath path2: String) -> Bool {
+        guard let enumerator1 = enumerator(atPath: path1) else {
+            return false
+        }
+
+        guard let enumerator2 = enumerator(atPath: path2) else {
+            return false
+        }
+
+        var path1entries = Set<String>()
+        while let item = enumerator1.nextObject() as? String {
+            path1entries.insert(item)
+        }
+
+        while let item = enumerator2.nextObject() as? String {
+            if path1entries.remove(item) == nil {
+                return false
+            }
+            if contentsEqual(atPath: NSString(string: path1).appendingPathComponent(item), andPath: NSString(string: path2).appendingPathComponent(item)) == false {
+                return false
+            }
+        }
+        return path1entries.isEmpty
+    }
+
+    private func _lstatFile(atPath path: String, withFileSystemRepresentation fsRep: UnsafePointer<Int8>? = nil) throws -> stat {
+        let _fsRep: UnsafePointer<Int8>
+        if fsRep == nil {
+            _fsRep = fileSystemRepresentation(withPath: path)
+            defer { _fsRep.deallocate() }
+        } else {
+            _fsRep = fsRep!
+        }
+        var statInfo = stat()
+        guard lstat(_fsRep, &statInfo) == 0 else {
+            throw _NSErrorWithErrno(errno, reading: true, path: path)
+        }
+        return statInfo
+    }
+
     /* -contentsEqualAtPath:andPath: does not take into account data stored in the resource fork or filesystem extended attributes.
      */
     open func contentsEqual(atPath path1: String, andPath path2: String) -> Bool {
-        NSUnimplemented()
+        let fsRep1 = fileSystemRepresentation(withPath: path1)
+        defer { fsRep1.deallocate() }
+
+        guard let file1 = try? _lstatFile(atPath: path1, withFileSystemRepresentation: fsRep1) else {
+            return false
+        }
+        let file1Type = file1.st_mode & S_IFMT
+
+        // Dont use access() for symlinks as only the contents should be checked even
+        // if the symlink doesnt point to an actual file, but access() will always try
+        // to resolve the link and fail if the destination is not found
+        if path1 == path2 && file1Type != S_IFLNK {
+            return access(fsRep1, R_OK) == 0
+        }
+
+        let fsRep2 = fileSystemRepresentation(withPath: path2)
+        defer { fsRep2.deallocate() }
+        guard let file2 = try? _lstatFile(atPath: path2, withFileSystemRepresentation: fsRep2) else {
+            return false
+        }
+        let file2Type = file2.st_mode & S_IFMT
+
+        // Are paths the same type: file, directory, symbolic link etc.
+        guard file1Type == file2Type else {
+            return false
+        }
+
+        if file1Type == S_IFCHR || file1Type == S_IFBLK {
+            // For character devices, just check the major/minor pair is the same.
+            return _dev_major(file1.st_rdev) == _dev_major(file2.st_rdev)
+                && _dev_minor(file1.st_rdev) == _dev_minor(file2.st_rdev)
+        }
+
+        // If both paths point to the same device/inode or they are both zero length
+        // then they are considered equal so just check readability.
+        if (file1.st_dev == file2.st_dev && file1.st_ino == file2.st_ino)
+            || (file1.st_size == 0 && file2.st_size == 0) {
+            return access(fsRep1, R_OK) == 0 && access(fsRep2, R_OK) == 0
+        }
+
+        if file1Type == S_IFREG {
+            // Regular files and symlinks should at least have the same filesize if contents are equal.
+            guard file1.st_size == file2.st_size else {
+                return false
+            }
+            return _compareFiles(withFileSystemRepresentation: path1, andFileSystemRepresentation: path2, size: Int64(file1.st_size), bufSize: Int(file1.st_blksize))
+        }
+        else if file1Type == S_IFLNK {
+            return _compareSymlinks(withFileSystemRepresentation: fsRep1, andFileSystemRepresentation: fsRep2, size: Int64(file1.st_size))
+        }
+        else if file1Type == S_IFDIR {
+            return _compareDirectories(atPath: path1, andPath: path2)
+        }
+
+        // Dont know how to compare other file types.
+        return false
     }
     
     /* displayNameAtPath: returns an NSString suitable for presentation to the user. For directories which have localization information, this will return the appropriate localized string. This string is not suitable for passing to anything that must interact with the filesystem.
@@ -650,7 +959,7 @@ open class FileManager : NSObject {
         }
         if !path._nsObject.getFileSystemRepresentation(buf, maxLength: len) {
             buf.deinitialize(count: len)
-            buf.deallocate(capacity: len)
+            buf.deallocate()
             fatalError("string could not be converted")
         }
         return UnsafePointer(buf)
@@ -716,9 +1025,13 @@ extension FileManager {
 
 extension FileManager {
     open var homeDirectoryForCurrentUser: URL {
-        return homeDirectory(forUser: CFCopyUserName().takeRetainedValue()._swiftObject)!
+        return homeDirectory(forUser: NSUserName())!
     }
-    open var temporaryDirectory: URL { NSUnimplemented() }
+    
+    open var temporaryDirectory: URL {
+        return URL(fileURLWithPath: NSTemporaryDirectory())
+    }
+    
     open func homeDirectory(forUser userName: String) -> URL? {
         guard !userName.isEmpty else { return nil }
         guard let url = CFCopyHomeDirectoryURLForUser(userName._cfObject) else { return nil }
@@ -856,7 +1169,7 @@ public protocol FileManagerDelegate : NSObjectProtocol {
     func fileManager(_ fileManager: FileManager, shouldCopyItemAtPath srcPath: String, toPath dstPath: String) -> Bool
     func fileManager(_ fileManager: FileManager, shouldCopyItemAt srcURL: URL, to dstURL: URL) -> Bool
     
-    /* fileManager:shouldProceedAfterError:copyingItemAtPath:toPath: gives the delegate an opportunity to recover from or continue copying after an error. If an error occurs, the error object will contain an NSError indicating the problem. The source path and destination paths are also provided. If this method returns YES, the FileManager instance will continue as if the error had not occurred. If this method returns NO, the FileManager instance will stop copying, return NO from copyItemAtPath:toPath:error: and the error will be provied there.
+    /* fileManager:shouldProceedAfterError:copyingItemAtPath:toPath: gives the delegate an opportunity to recover from or continue copying after an error. If an error occurs, the error object will contain an NSError indicating the problem. The source path and destination paths are also provided. If this method returns YES, the FileManager instance will continue as if the error had not occurred. If this method returns NO, the FileManager instance will stop copying, return NO from copyItemAtPath:toPath:error: and the error will be provided there.
      */
     func fileManager(_ fileManager: FileManager, shouldProceedAfterError error: Error, copyingItemAtPath srcPath: String, toPath dstPath: String) -> Bool
     func fileManager(_ fileManager: FileManager, shouldProceedAfterError error: Error, copyingItemAt srcURL: URL, to dstURL: URL) -> Bool
@@ -1002,7 +1315,8 @@ extension FileManager {
                 ps.advanced(by: 1).initialize(to: nil)
                 _stream = fts_open(ps, FTS_PHYSICAL | FTS_XDEV | FTS_NOCHDIR, nil)
                 ps.deinitialize(count: 2)
-                ps.deallocate(capacity: 2)
+                ps.deallocate()
+                fsRep.deallocate()
             } else {
                 _rootError = _NSErrorWithErrno(ENOENT, reading: true, url: url)
             }

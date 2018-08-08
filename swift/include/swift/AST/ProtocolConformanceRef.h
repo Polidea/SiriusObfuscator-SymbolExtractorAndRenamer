@@ -18,6 +18,7 @@
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/PointerUnion.h"
+#include "swift/AST/Requirement.h"
 #include "swift/AST/TypeAlignments.h"
 #include "swift/AST/Type.h"
 
@@ -86,11 +87,6 @@ public:
   /// Return the protocol requirement.
   ProtocolDecl *getRequirement() const;
   
-  /// Get the inherited conformance corresponding to the given protocol.
-  /// Returns `this` if `parent` is already the same as the protocol this
-  /// conformance represents.
-  ProtocolConformanceRef getInherited(ProtocolDecl *parent) const;
-
   /// Apply a substitution to the conforming type.
   ProtocolConformanceRef subst(Type origType,
                                TypeSubstitutionFn subs,
@@ -133,6 +129,19 @@ public:
 
   /// Create a canonical conformance from the current one.
   ProtocolConformanceRef getCanonicalConformanceRef() const;
+
+  /// Get any additional requirements that are required for this conformance to
+  /// be satisfied, if they're possible to compute.
+  Optional<ArrayRef<Requirement>> getConditionalRequirementsIfAvailable() const;
+
+  /// Get any additional requirements that are required for this conformance to
+  /// be satisfied.
+  ArrayRef<Requirement> getConditionalRequirements() const;
+  
+  /// If this is a conformance reference for a protocol that inherits other
+  /// protocols, get a reference to the related conformance for the inherited
+  /// protocol.
+  ProtocolConformanceRef getInheritedConformanceRef(ProtocolDecl *base) const;
 };
 
 } // end namespace swift

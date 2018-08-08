@@ -110,6 +110,38 @@ class PackageBuilderV4Tests: XCTestCase {
         }
     }
 
+    func testLinuxMainSearch() {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/pkg/foo.swift",
+            "/pkg/footests.swift"
+        )
+
+        let package = Package(
+            name: "pkg",
+            targets: [
+                .target(
+                    name: "exe",
+                    path: "./",
+                    sources: ["foo.swift"]
+                ),
+                .testTarget(
+                    name: "tests",
+                    path: "./",
+                    sources: ["footests.swift"]
+                ),
+            ]
+        )
+        PackageBuilderTester(package, path: AbsolutePath("/pkg"), in: fs) { result in
+            result.checkModule("exe") { _ in }
+            result.checkModule("tests") { _ in }
+
+            result.checkProduct("pkgPackageTests") { productResult in
+                productResult.check(type: .test, targets: ["tests"])
+                productResult.check(linuxMainPath: nil)
+            }
+        }
+    }
+
     func testLinuxMainError() {
         let fs = InMemoryFileSystem(emptyFiles:
             "/LinuxMain.swift",
@@ -482,7 +514,7 @@ class PackageBuilderV4Tests: XCTestCase {
                 "/Foo.swift")
             let package = Package(name: "pkg", targets: [.target(name: "Random")])
             PackageBuilderTester(package, in: fs) { result in
-                result.checkDiagnostic("could not find target(s): Random; use the 'path' property in the Swift 4 manifest to set a custom target path")
+                result.checkDiagnostic("could not find source files for target(s): Random; use the 'path' property in the Swift 4 manifest to set a custom target path")
             }
         }
 
@@ -496,7 +528,7 @@ class PackageBuilderV4Tests: XCTestCase {
                     .target(name: "pkg", dependencies: [.target(name: "Foo")]),
                 ])
             PackageBuilderTester(package, in: fs) { result in
-                result.checkDiagnostic("could not find target(s): Foo; use the 'path' property in the Swift 4 manifest to set a custom target path")
+                result.checkDiagnostic("could not find source files for target(s): Foo; use the 'path' property in the Swift 4 manifest to set a custom target path")
             }
         }
 
@@ -516,7 +548,7 @@ class PackageBuilderV4Tests: XCTestCase {
             // Reference invalid target.
             let package = Package(name: "pkg", targets: [.target(name: "foo")])
             PackageBuilderTester(package, in: fs) { result in
-                result.checkDiagnostic("could not find target(s): foo; use the 'path' property in the Swift 4 manifest to set a custom target path")
+                result.checkDiagnostic("could not find source files for target(s): foo; use the 'path' property in the Swift 4 manifest to set a custom target path")
             }
         }
 
@@ -602,6 +634,37 @@ class PackageBuilderV4Tests: XCTestCase {
                 result.checkDiagnostic("target 'Foo' in package 'Foo' is outside the package root")
             }
         }
+        do {
+            let fs = InMemoryFileSystem(emptyFiles:
+                "/pkg/Sources/Foo/Foo.c",
+                "/foo/Bar.c")
+
+            let package = Package(
+                name: "Foo",
+                targets: [
+                    .target(name: "Foo", path: "/foo"),
+                    ])
+
+            PackageBuilderTester(package, path: AbsolutePath("/pkg"), in: fs) { result in
+                result.checkDiagnostic("target path \'/foo\' is not supported; it should be relative to package root")
+            }
+        }
+
+        do {
+            let fs = InMemoryFileSystem(emptyFiles:
+                "/pkg/Sources/Foo/Foo.c",
+                "/foo/Bar.c")
+
+            let package = Package(
+                name: "Foo",
+                targets: [
+                    .target(name: "Foo", path: "~/foo"),
+                    ])
+
+            PackageBuilderTester(package, path: AbsolutePath("/pkg"), in: fs) { result in
+                result.checkDiagnostic("target path \'~/foo\' is not supported; it should be relative to package root")
+            }
+        }
     }
 
     func testExecutableAsADep() {
@@ -675,23 +738,23 @@ class PackageBuilderV4Tests: XCTestCase {
             swiftLanguageVersions: [3, 4])
         PackageBuilderTester(package, in: fs) { result in
             result.checkModule("foo") { moduleResult in
-                moduleResult.check(swiftVersion: 4)
+                moduleResult.check(swiftVersion: "4")
             }
             result.checkProduct("foo") { _ in }
         }
 
-        package.swiftLanguageVersions = [3]
+        package.swiftLanguageVersions = ["3"]
         PackageBuilderTester(package, in: fs) { result in
             result.checkModule("foo") { moduleResult in
-                moduleResult.check(swiftVersion: 3)
+                moduleResult.check(swiftVersion: "3")
             }
             result.checkProduct("foo") { _ in }
         }
 
-        package.swiftLanguageVersions = [4]
+        package.swiftLanguageVersions = ["4"]
         PackageBuilderTester(package, in: fs) { result in
             result.checkModule("foo") { moduleResult in
-                moduleResult.check(swiftVersion: 4)
+                moduleResult.check(swiftVersion: "4")
             }
             result.checkProduct("foo") { _ in }
         }
@@ -699,7 +762,7 @@ class PackageBuilderV4Tests: XCTestCase {
         package.swiftLanguageVersions = nil
         PackageBuilderTester(package, in: fs) { result in
             result.checkModule("foo") { moduleResult in
-                moduleResult.check(swiftVersion: 4)
+                moduleResult.check(swiftVersion: "4")
             }
             result.checkProduct("foo") { _ in }
         }
@@ -709,9 +772,9 @@ class PackageBuilderV4Tests: XCTestCase {
             result.checkDiagnostic("package 'pkg' supported Swift language versions is empty")
         }
 
-        package.swiftLanguageVersions = [500, 600]
+        package.swiftLanguageVersions = ["5", "6"]
         PackageBuilderTester(package, in: fs) { result in
-            result.checkDiagnostic("package \'pkg\' not compatible with current tools version (4); it supports: 500, 600")
+            result.checkDiagnostic("package \'pkg\' not compatible with current tools version (4.2.0); it supports: 5, 6")
         }
     }
 
@@ -732,7 +795,7 @@ class PackageBuilderV4Tests: XCTestCase {
             )
 
             PackageBuilderTester(package, in: fs) { result in
-                result.checkDiagnostic("could not find target(s): Bar; use the 'path' property in the Swift 4 manifest to set a custom target path")
+                result.checkDiagnostic("could not find source files for target(s): Bar; use the 'path' property in the Swift 4 manifest to set a custom target path")
             }
         }
 
@@ -752,7 +815,7 @@ class PackageBuilderV4Tests: XCTestCase {
             )
 
             PackageBuilderTester(package, in: fs) { result in
-                result.checkDiagnostic("could not find target(s): BarTests; use the 'path' property in the Swift 4 manifest to set a custom target path")
+                result.checkDiagnostic("could not find source files for target(s): BarTests; use the 'path' property in the Swift 4 manifest to set a custom target path")
             }
 
             // We should be able to fix this by using custom paths.
@@ -798,12 +861,164 @@ class PackageBuilderV4Tests: XCTestCase {
         }
     }
 
+    func testExcludes() {
+        // The exclude should win if a file is in exclude as well as sources.
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/bar/barExcluded.swift",
+            "/Sources/bar/bar.swift"
+        )
+
+        let package = Package(
+            name: "pkg",
+            targets: [
+                .target(
+                    name: "bar",
+                    exclude: ["barExcluded.swift",],
+                    sources: ["bar.swift", "barExcluded.swift"]
+                ),
+            ]
+        )
+        PackageBuilderTester(package, in: fs) { result in
+            result.checkModule("bar") { moduleResult in
+                moduleResult.check(c99name: "bar", type: .library)
+                moduleResult.checkSources(root: "/Sources/bar", paths: "bar.swift")
+            }
+        }
+    }
+    
+    func testDuplicateProducts() {
+        // Check that declaring executable product doesn't collide with the
+        // inferred products.
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/foo/foo.swift"
+        )
+        
+        let package = Package(
+            name: "pkg",
+            products: [
+                .library(name: "foo", targets: ["foo"]),
+                .library(name: "foo", type: .static, targets: ["foo"]),
+                .library(name: "foo", type: .dynamic, targets: ["foo"]),
+                .library(name: "foo-dy", type: .dynamic, targets: ["foo"]),
+            ],
+            targets: [
+                .target(name: "foo"),
+            ]
+        )
+        PackageBuilderTester(package, in: fs) { result in
+            result.checkModule("foo") { _ in }
+            result.checkProduct("foo") { productResult in
+                productResult.check(type: .library(.automatic), targets: ["foo"])
+            }
+            result.checkProduct("foo-dy") { productResult in
+                productResult.check(type: .library(.dynamic), targets: ["foo"])
+            }
+            result.checkDiagnostic("Ignoring duplicate product 'foo' (static)")
+            result.checkDiagnostic("Ignoring duplicate product 'foo' (dynamic)")
+        }
+    }
+
+    func testSystemPackageDeclaresTargetsDiagnostic() {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/module.modulemap",
+            "/Sources/foo/main.swift",
+            "/Sources/bar/main.swift"
+        )
+
+        let pkg = Package(
+            name: "SystemModulePackage",
+            targets: [
+                .target(name: "foo"),
+                .target(name: "bar"),
+            ]
+        )
+        PackageBuilderTester(pkg, in: fs) { result in
+            result.checkModule("SystemModulePackage") { moduleResult in
+                moduleResult.check(c99name: "SystemModulePackage", type: .systemModule)
+                moduleResult.checkSources(root: "/")
+            }
+            result.checkDiagnostic("Ignoring declared target(s) 'foo, bar' in the system package")
+        }
+    }
+
+    func testSystemLibraryTarget() {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/foo/module.modulemap",
+            "/Sources/bar/bar.swift"
+        )
+
+        let pkg = Package(
+            name: "SystemModulePackage",
+            products: [
+                .library(name: "foo", targets: ["foo"]),
+            ],
+            targets: [
+                .systemLibrary(name: "foo"),
+                .target(name: "bar", dependencies: ["foo"]),
+            ]
+        )
+        PackageBuilderTester(pkg, in: fs) { result in
+            result.checkModule("foo") { moduleResult in
+                moduleResult.check(c99name: "foo", type: .systemModule)
+                moduleResult.checkSources(root: "/Sources/foo")
+            }
+            result.checkModule("bar") { moduleResult in
+                moduleResult.check(c99name: "bar", type: .library)
+                moduleResult.checkSources(root: "/Sources/bar", paths: "bar.swift")
+                moduleResult.check(dependencies: ["foo"])
+            }
+            result.checkProduct("foo") { productResult in
+                productResult.check(type: .library(.automatic), targets: ["foo"])
+            }
+        }
+    }
+
+    func testSystemLibraryTargetDiagnostics() {
+        let fs = InMemoryFileSystem(emptyFiles:
+            "/Sources/foo/module.modulemap",
+            "/Sources/bar/bar.swift"
+        )
+
+        var pkg = Package(
+            name: "SystemModulePackage",
+            products: [
+                .library(name: "foo", targets: ["foo", "bar"]),
+            ],
+            targets: [
+                .systemLibrary(name: "foo"),
+                .target(name: "bar", dependencies: ["foo"]),
+            ]
+        )
+        PackageBuilderTester(pkg, in: fs) { result in
+            result.checkModule("foo") { _ in }
+            result.checkModule("bar") { _ in }
+            result.checkDiagnostic("system library product foo shouldn\'t have a type and contain only one target")
+        }
+
+        pkg = Package(
+            name: "SystemModulePackage",
+            products: [
+                .library(name: "foo", type: .static, targets: ["foo"]),
+            ],
+            targets: [
+                .systemLibrary(name: "foo"),
+                .target(name: "bar", dependencies: ["foo"]),
+            ]
+        )
+        PackageBuilderTester(pkg, in: fs) { result in
+            result.checkModule("foo") { _ in }
+            result.checkModule("bar") { _ in }
+            result.checkDiagnostic("system library product foo shouldn't have a type and contain only one target")
+        }
+    }
+
     static var allTests = [
         ("testCompatibleSwiftVersions", testCompatibleSwiftVersions),
         ("testCustomTargetDependencies", testCustomTargetDependencies),
         ("testCustomTargetPaths", testCustomTargetPaths),
         ("testCustomTargetPathsOverlap", testCustomTargetPathsOverlap),
         ("testDeclaredExecutableProducts", testDeclaredExecutableProducts),
+        ("testDuplicateProducts", testDuplicateProducts),
         ("testExecutableAsADep", testExecutableAsADep),
         ("testInvalidManifestConfigForNonSystemModules", testInvalidManifestConfigForNonSystemModules),
         ("testLinuxMain", testLinuxMain),
@@ -817,5 +1032,10 @@ class PackageBuilderV4Tests: XCTestCase {
         ("testPredefinedTargetSearchError", testPredefinedTargetSearchError),
         ("testSpecialTargetDir", testSpecialTargetDir),
         ("testDuplicateTargets", testDuplicateTargets),
+        ("testExcludes", testExcludes),
+        ("testSystemPackageDeclaresTargetsDiagnostic", testSystemPackageDeclaresTargetsDiagnostic),
+        ("testSystemLibraryTarget", testSystemLibraryTarget),
+        ("testSystemLibraryTargetDiagnostics", testSystemLibraryTargetDiagnostics),
+        ("testLinuxMainSearch", testLinuxMainSearch),
     ]
 }

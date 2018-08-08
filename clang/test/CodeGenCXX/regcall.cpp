@@ -47,8 +47,8 @@ public:
   // CHECK-LIN-DAG: define linkonce_odr x86_regcallcc void @_ZN10test_classD2Ev
   // CHECK-LIN-DAG: define linkonce_odr x86_regcallcc void @_ZN10test_classD1Ev
   // Windows ignores calling convention on constructor/destructors.
-  // CHECK-WIN64-DAG: define linkonce_odr void @"\01??_Dtest_class@@QEAA@XZ"
-  // CHECK-WIN32-DAG: define linkonce_odr x86_thiscallcc void @"\01??_Dtest_class@@QAE@XZ"
+  // CHECK-WIN64-DAG: define linkonce_odr void @"\01??_Dtest_class@@QEAAXXZ"
+  // CHECK-WIN32-DAG: define linkonce_odr x86_thiscallcc void @"\01??_Dtest_class@@QAEXXZ"
   
   test_class& __regcall operator+=(const test_class&){
     return *this;
@@ -73,8 +73,8 @@ bool __regcall operator ==(const test_class&, const test_class&){ --x; return fa
 // CHECK-WIN64-DAG: define x86_regcallcc zeroext i1 @"\01??8@Yw_NAEBVtest_class@@0@Z"
 // CHECK-WIN32-DAG: define x86_regcallcc zeroext i1 @"\01??8@Yw_NABVtest_class@@0@Z"
 
-test_class __regcall operator""_test_class (unsigned long long) { ++x; return test_class{};} 
-// CHECK-LIN64-DAG: define x86_regcallcc %class.test_class @_Zli11_test_classy(i64)
+test_class __regcall operator""_test_class (unsigned long long) { ++x; return test_class{};}
+// CHECK-LIN64-DAG: define x86_regcallcc void @_Zli11_test_classy(%class.test_class* noalias sret %agg.result, i64)
 // CHECK-LIN32-DAG: define x86_regcallcc void @_Zli11_test_classy(%class.test_class* inreg noalias sret %agg.result, i64)
 // CHECK-WIN64-DAG: \01??__K_test_class@@Yw?AVtest_class@@_K@Z"
 // CHECK-WIN32-DAG: \01??__K_test_class@@Yw?AVtest_class@@_K@Z"
@@ -95,3 +95,11 @@ void force_gen() {
   freeTempFunc(1);
   t3.do_thing();
 }
+
+long double _Complex __regcall foo(long double _Complex f) {
+  return f;
+}
+// CHECK-LIN64-DAG: define x86_regcallcc void @_Z15__regcall3__fooCe({ x86_fp80, x86_fp80 }* noalias sret %agg.result, { x86_fp80, x86_fp80 }* byval align 16 %f)
+// CHECK-LIN32-DAG: define x86_regcallcc void @_Z15__regcall3__fooCe({ x86_fp80, x86_fp80 }* inreg noalias sret %agg.result, { x86_fp80, x86_fp80 }* byval align 4 %f)
+// CHECK-WIN64-DAG: define x86_regcallcc { double, double } @"\01?foo@@YwU?$_Complex@O@__clang@@U12@@Z"(double %f.0, double %f.1)
+// CHECK-WIN32-DAG: define x86_regcallcc { double, double } @"\01?foo@@YwU?$_Complex@O@__clang@@U12@@Z"(double %f.0, double %f.1)

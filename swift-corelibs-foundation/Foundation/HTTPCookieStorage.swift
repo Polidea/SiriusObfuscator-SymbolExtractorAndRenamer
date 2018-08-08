@@ -48,13 +48,13 @@ open class HTTPCookieStorage: NSObject {
     private var _allCookies: [String: HTTPCookie]
     private var allCookies: [String: HTTPCookie] {
         get {
-            if #available(OSX 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
+            if #available(macOS 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
                 dispatchPrecondition(condition: DispatchPredicate.onQueue(self.syncQ))
             }
             return self._allCookies
         }
         set {
-            if #available(OSX 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
+            if #available(macOS 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
                 dispatchPrecondition(condition: DispatchPredicate.onQueue(self.syncQ))
             }
             self._allCookies = newValue
@@ -69,7 +69,7 @@ open class HTTPCookieStorage: NSObject {
         let bundlePath = Bundle.main.bundlePath
         var bundleName = bundlePath.components(separatedBy: "/").last!
         if let range = bundleName.range(of: ".", options: String.CompareOptions.backwards, range: nil, locale: nil) {
-            bundleName = bundleName.substring(to: range.lowerBound)
+            bundleName = String(bundleName[..<range.lowerBound])
         }
         let cookieFolderPath = _CFXDGCreateDataHomePath()._swiftObject + "/" + bundleName
         cookieFilePath = filePath(path: cookieFolderPath, fileName: "/.cookies." + cookieStorageName, bundleName: bundleName)
@@ -77,8 +77,9 @@ open class HTTPCookieStorage: NSObject {
     }
 
     private func loadPersistedCookies() {
-        guard let cookies = NSMutableDictionary(contentsOfFile: cookieFilePath) else { return }
-        var cookies0 = _SwiftValue.fetch(cookies) as? [String: [String: Any]] ?? [:]
+        guard let cookiesData = try? Data(contentsOf: URL(fileURLWithPath: cookieFilePath)) else { return }
+        guard let cookies = try? PropertyListSerialization.propertyList(from: cookiesData, format: nil) else { return }
+        var cookies0 = cookies as? [String: [String: Any]] ?? [:]
         self.syncQ.sync {
             for key in cookies0.keys {
                 if let cookie = createCookie(cookies0[key]!) {
@@ -181,6 +182,10 @@ open class HTTPCookieStorage: NSObject {
         }
     }
     
+    open override var description: String {
+        return "<NSHTTPCookieStorage cookies count:\(cookies?.count ?? 0)>"
+    }
+
     private func createCookie(_ properties: [String: Any]) -> HTTPCookie? {
         var cookieProperties: [HTTPCookiePropertyKey: Any] = [:]
         for (key, value) in properties {
@@ -195,7 +200,7 @@ open class HTTPCookieStorage: NSObject {
     }
 
     private func updatePersistentStore() {
-        if #available(OSX 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
+        if #available(macOS 10.12, iOS 10.0, tvOS 10.0, watchOS 3.0, *) {
             dispatchPrecondition(condition: DispatchPredicate.onQueue(self.syncQ))
         }
 
@@ -262,8 +267,8 @@ open class HTTPCookieStorage: NSObject {
         into a set of header fields to add to a request.
     */
     open func cookies(for url: URL) -> [HTTPCookie]? {
-        guard let host = url.host else { return nil }
-        return Array(self.syncQ.sync(execute: {allCookies}).values.filter{ $0.domain == host })
+        guard let host = url.host?.lowercased() else { return nil }
+        return Array(self.syncQ.sync(execute: {allCookies}).values.filter{ $0.validFor(host: host) })
     }
     
     /*!
@@ -288,17 +293,17 @@ open class HTTPCookieStorage: NSObject {
         guard cookieAcceptPolicy != .never else { return }
 
         //if the urls don't have a host, we cannot do anything
-        guard let urlHost = url?.host else { return }
+        guard let urlHost = url?.host?.lowercased() else { return }
 
         if mainDocumentURL != nil && cookieAcceptPolicy == .onlyFromMainDocumentDomain {
-            guard let mainDocumentHost = mainDocumentURL?.host else { return }
+            guard let mainDocumentHost = mainDocumentURL?.host?.lowercased() else { return }
 
             //the url.host must be a suffix of manDocumentURL.host, this is based on Darwin's behaviour
             guard mainDocumentHost.hasSuffix(urlHost) else { return }
         }
 
         //save only those cookies whose domain matches with the url.host
-        let validCookies = cookies.filter { urlHost == $0.domain }
+        let validCookies = cookies.filter { $0.validFor(host: urlHost) }
         for cookie in validCookies {
             setCookie(cookie)
         }
@@ -329,6 +334,28 @@ public extension Notification.Name {
 }
 
 extension HTTPCookie {
+    internal func validFor(host: String) -> Bool {
+        // RFC6265 - HTTP State Management Mechanism
+        // https://tools.ietf.org/html/rfc6265#section-5.1.3
+        //
+        // 5.1.3.  Domain Matching
+        // A string domain-matches a given domain string if at least one of the
+        // following conditions hold:
+        //
+        // 1)  The domain string and the string are identical.  (Note that both
+        //     the domain string and the string will have been canonicalized to
+        //     lower case at this point.)
+        //
+        // 2) All of the following conditions hold:
+        //    * The domain string is a suffix of the string.
+        //    * The last character of the string that is not included in the
+        //      domain string is a %x2E (".") character.
+        //    * The string is a host name (i.e., not an IP address).
+
+        guard domain.hasPrefix(".") else { return host == domain }
+        return host == domain.dropFirst() || host.hasSuffix(domain)
+    }
+
     internal func persistableDictionary() -> [String: Any] {
         var properties: [String: Any] = [:]
         properties[HTTPCookiePropertyKey.name.rawValue] = name

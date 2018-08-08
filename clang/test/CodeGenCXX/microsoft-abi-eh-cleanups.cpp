@@ -259,14 +259,14 @@ void f() {
 // WIN32-LIFETIME-LABEL: define void @"\01?f@lifetime_marker@@YAXXZ"()
 // WIN32-LIFETIME: %[[c:.*]] = alloca %"struct.lifetime_marker::C"
 // WIN32-LIFETIME: %[[bc0:.*]] = bitcast %"struct.lifetime_marker::C"* %c to i8*
-// WIN32-LIFETIME: call void @llvm.lifetime.start(i64 1, i8* %[[bc0]])
+// WIN32-LIFETIME: call void @llvm.lifetime.start.p0i8(i64 1, i8* %[[bc0]])
 // WIN32-LIFETIME: invoke void @"\01?g@lifetime_marker@@YAXXZ"()
 // WIN32-LIFETIME-NEXT: to label %[[cont:[^ ]*]] unwind label %[[lpad0:[^ ]*]]
 //
 // WIN32-LIFETIME: [[cont]]
 // WIN32-LIFETIME: call x86_thiscallcc void @"\01??1C@lifetime_marker@@QAE@XZ"({{.*}})
 // WIN32-LIFETIME: %[[bc1:.*]] = bitcast %"struct.lifetime_marker::C"* %[[c]] to i8*
-// WIN32-LIFETIME: call void @llvm.lifetime.end(i64 1, i8* %[[bc1]])
+// WIN32-LIFETIME: call void @llvm.lifetime.end.p0i8(i64 1, i8* %[[bc1]])
 //
 // WIN32-LIFETIME: [[lpad0]]
 // WIN32-LIFETIME-NEXT: cleanuppad
@@ -276,7 +276,7 @@ void f() {
 // WIN32-LIFETIME: [[lpad1]]
 // WIN32-LIFETIME-NEXT: cleanuppad
 // WIN32-LIFETIME: %[[bc2:.*]] = bitcast %"struct.lifetime_marker::C"* %[[c]] to i8*
-// WIN32-LIFETIME: call void @llvm.lifetime.end(i64 1, i8* %[[bc2]])
+// WIN32-LIFETIME: call void @llvm.lifetime.end.p0i8(i64 1, i8* %[[bc2]])
 }
 
 struct class_2 {
@@ -312,4 +312,28 @@ class_0::class_0() {
   // WIN32-NEXT: call x86_thiscallcc void @"\01??1class_2@@UAE@XZ"
   // WIN32: br label %[[SKIP_VBASE]]
   // WIN32: [[SKIP_VBASE]]
+}
+
+namespace PR37146 {
+// Check that IRGen doesn't emit calls to synthesized destructors for
+// non-trival C structs.
+
+// WIN32: define void @"\01?test@PR37146@@YAXXZ"()
+// WIN32: call void @llvm.memset.p0i8.i32(
+// WIN32: call i32 @"\01?getS@PR37146@@YA?AUS@1@XZ"(
+// WIN32: call void @"\01?func@PR37146@@YAXUS@1@0@Z"(
+// WIN32-NEXT: ret void
+// WIN32-NEXT: {{^}$}}
+
+struct S {
+  int f;
+};
+
+void func(S, S);
+S getS();
+
+void test() {
+  func(getS(), S());
+}
+
 }

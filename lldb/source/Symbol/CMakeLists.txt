@@ -23,7 +23,6 @@ add_lldb_library(lldbSymbol
   ObjectFile.cpp
   OCamlASTContext.cpp
   SwiftASTContext.cpp
-  SwiftMangledNameVisitor.cpp
   Symbol.cpp
   SymbolContext.cpp
   SymbolFile.cpp
@@ -53,7 +52,6 @@ add_lldb_library(lldbSymbol
     clangBasic
     clangFrontend
     lldbCore
-    lldbDataFormatters
     lldbExpression
     lldbHost
     lldbTarget
@@ -66,6 +64,7 @@ add_lldb_library(lldbSymbol
     lldbPluginObjectContainerBSDArchive
     lldbPluginCPlusPlusLanguage
     lldbPluginObjCLanguage
+    lldbPluginPlatformMacOSX
 
   LINK_COMPONENTS
     Support

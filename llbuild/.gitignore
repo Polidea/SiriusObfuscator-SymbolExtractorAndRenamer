@@ -18,12 +18,15 @@
 #==============================================================================#
 # Commonly used name for build products, at the top level.
 /build
+/.build
+/Packages
 
 # Ignore Sphinx build products.
 docs/_build
 
 # Don't check in Xcode user data.
 xcuserdata
+/llbuild.xcodeproj/xcshareddata/xcbaselines
 
 # Visual Studio cache/options directory
 .vs/

@@ -33,7 +33,6 @@ extension TestSuite {
     collectionIsBidirectional: Bool = false
   ) where
     C.SubSequence == C,
-    C.Indices : Collection,
     CollectionWithEquatableElement.SubSequence == CollectionWithEquatableElement,
     CollectionWithEquatableElement.Iterator.Element : Equatable {
 
@@ -165,7 +164,6 @@ extension TestSuite {
     outOfBoundsIndexOffset: Int = 1
   ) where
     C.SubSequence == C,
-    C.Indices : BidirectionalCollection,
     CollectionWithEquatableElement.SubSequence == CollectionWithEquatableElement,
     CollectionWithEquatableElement.Iterator.Element : Equatable {
 
@@ -243,9 +241,9 @@ extension TestSuite {
       _ = c.removeLast() // Should trap.
     }
 
-    //===----------------------------------------------------------------------===//
+    //===------------------------------------------------------------------===//
     // removeLast(n: Int)
-    //===----------------------------------------------------------------------===//
+    //===------------------------------------------------------------------===//
 
     self.test("\(testNamePrefix).removeLast(n: Int)/semantics") {
       for test in removeLastTests {
@@ -310,7 +308,6 @@ extension TestSuite {
     outOfBoundsIndexOffset: Int = 1
   ) where
     C.SubSequence == C,
-    C.Indices : RandomAccessCollection,
     CollectionWithEquatableElement.SubSequence == CollectionWithEquatableElement,
     CollectionWithEquatableElement.Iterator.Element : Equatable {
 

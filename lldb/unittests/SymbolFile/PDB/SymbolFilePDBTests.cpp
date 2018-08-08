@@ -15,20 +15,20 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 
+#include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
+#include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
+#include "Plugins/SymbolFile/PDB/SymbolFilePDB.h"
+#include "TestingSupport/TestUtilities.h"
 #include "lldb/Core/Address.h"
-#include "lldb/Core/ArchSpec.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleSpec.h"
-#include "lldb/Host/FileSpec.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/LineTable.h"
 #include "lldb/Symbol/SymbolVendor.h"
-
-#include "Plugins/ObjectFile/PECOFF/ObjectFilePECOFF.h"
-#include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
-#include "Plugins/SymbolFile/PDB/SymbolFilePDB.h"
+#include "lldb/Utility/ArchSpec.h"
+#include "lldb/Utility/FileSpec.h"
 
 #if defined(_MSC_VER)
 #include "lldb/Host/windows/windows.h"
@@ -36,8 +36,6 @@
 #endif
 
 #include <algorithm>
-
-extern const char *TestMainArgv0;
 
 using namespace lldb_private;
 
@@ -57,14 +55,8 @@ public:
     ClangASTContext::Initialize();
     SymbolFilePDB::Initialize();
 
-    llvm::StringRef exe_folder = llvm::sys::path::parent_path(TestMainArgv0);
-    llvm::SmallString<128> inputs_folder = exe_folder;
-    llvm::sys::path::append(inputs_folder, "Inputs");
-
-    m_pdb_test_exe = inputs_folder;
-    m_types_test_exe = inputs_folder;
-    llvm::sys::path::append(m_pdb_test_exe, "test-pdb.exe");
-    llvm::sys::path::append(m_types_test_exe, "test-pdb-types.exe");
+    m_pdb_test_exe = GetInputFilePath("test-pdb.exe");
+    m_types_test_exe = GetInputFilePath("test-pdb-types.exe");
   }
 
   void TearDown() override {
@@ -80,8 +72,8 @@ public:
   }
 
 protected:
-  llvm::SmallString<128> m_pdb_test_exe;
-  llvm::SmallString<128> m_types_test_exe;
+  std::string m_pdb_test_exe;
+  std::string m_types_test_exe;
 
   bool FileSpecMatchesAsBaseOrFull(const FileSpec &left,
                                    const FileSpec &right) const {
@@ -120,7 +112,7 @@ protected:
     return false;
   }
 
-  uint64_t GetGlobalConstantInteger(const llvm::pdb::IPDBSession &session,
+  uint64_t GetGlobalConstantInteger(llvm::pdb::IPDBSession &session,
                                     llvm::StringRef var) const {
     auto global = session.getGlobalScope();
     auto results =
@@ -162,8 +154,7 @@ TEST_F(SymbolFilePDBTests, TestAbilitiesForPDB) {
   EXPECT_NE(nullptr, symfile);
   EXPECT_EQ(symfile->GetPluginName(), SymbolFilePDB::GetPluginNameStatic());
 
-  uint32_t expected_abilities =
-      SymbolFile::CompileUnits | SymbolFile::LineTables;
+  uint32_t expected_abilities = SymbolFile::kAllAbilities;
   EXPECT_EQ(expected_abilities, symfile->CalculateAbilities());
 }
 
@@ -371,7 +362,7 @@ TEST_F(SymbolFilePDBTests, TestSimpleClassTypes) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  const llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
+  llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
@@ -394,7 +385,7 @@ TEST_F(SymbolFilePDBTests, TestNestedClassTypes) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  const llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
+  llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
@@ -417,7 +408,7 @@ TEST_F(SymbolFilePDBTests, TestClassInNamespace) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  const llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
+  llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
@@ -440,7 +431,7 @@ TEST_F(SymbolFilePDBTests, TestEnumTypes) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  const llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
+  llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   const char *EnumsToCheck[] = {"Enum", "ShortEnum"};
@@ -487,7 +478,7 @@ TEST_F(SymbolFilePDBTests, TestTypedefs) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  const llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
+  llvm::pdb::IPDBSession &session = symfile->GetPDBSession();
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
@@ -521,13 +512,15 @@ TEST_F(SymbolFilePDBTests, TestRegexNameMatch) {
   SymbolVendor *plugin = module->GetSymbolVendor();
   SymbolFilePDB *symfile =
       static_cast<SymbolFilePDB *>(plugin->GetSymbolFile());
-  SymbolContext sc;
-  llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
-  uint32_t num_results = symfile->FindTypes(sc, ConstString(".*"), nullptr,
-                                            false, 0, searched_files, results);
-  EXPECT_GT(num_results, 1u);
-  EXPECT_EQ(num_results, results.GetSize());
+   
+  symfile->FindTypesByRegex(RegularExpression(".*"), 0, results);
+  EXPECT_GT(results.GetSize(), 1u);
+
+  // We expect no exception thrown if the given regex can't be compiled
+  results.Clear();
+  symfile->FindTypesByRegex(RegularExpression("**"), 0, results);
+  EXPECT_EQ(0u, results.GetSize());
 }
 
 TEST_F(SymbolFilePDBTests, TestMaxMatches) {
@@ -541,7 +534,8 @@ TEST_F(SymbolFilePDBTests, TestMaxMatches) {
   SymbolContext sc;
   llvm::DenseSet<SymbolFile *> searched_files;
   TypeMap results;
-  uint32_t num_results = symfile->FindTypes(sc, ConstString(".*"), nullptr,
+  const ConstString name("ClassTypedef");
+  uint32_t num_results = symfile->FindTypes(sc, name, nullptr,
                                             false, 0, searched_files, results);
   // Try to limit ourselves from 1 to 10 results, otherwise we could be doing
   // this thousands of times.
@@ -551,7 +545,7 @@ TEST_F(SymbolFilePDBTests, TestMaxMatches) {
   uint32_t iterations = std::min(num_results, 10u);
   for (uint32_t i = 1; i <= iterations; ++i) {
     uint32_t num_limited_results = symfile->FindTypes(
-        sc, ConstString(".*"), nullptr, false, i, searched_files, results);
+        sc, name, nullptr, false, i, searched_files, results);
     EXPECT_EQ(i, num_limited_results);
     EXPECT_EQ(num_limited_results, results.GetSize());
   }

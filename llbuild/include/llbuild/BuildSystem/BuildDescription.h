@@ -16,6 +16,7 @@
 #include "llbuild/Basic/Compiler.h"
 #include "llbuild/Basic/LLVM.h"
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -180,7 +181,7 @@ public:
   
   /// Get a short description of the command, for use in status reporting.
   virtual void getShortDescription(SmallVectorImpl<char> &result) = 0;
-
+  
   /// Get a verbose description of the command, for use in status reporting.
   virtual void getVerboseDescription(SmallVectorImpl<char> &result) = 0;
   

@@ -9,12 +9,14 @@ set(ADTSources
   ArrayRefTest.cpp
   BitmaskEnumTest.cpp
   BitVectorTest.cpp
+  BreadthFirstIteratorTest.cpp
   BumpPtrListTest.cpp
   DAGDeltaAlgorithmTest.cpp
   DeltaAlgorithmTest.cpp
   DenseMapTest.cpp
   DenseSetTest.cpp
   DepthFirstIteratorTest.cpp
+  EquivalenceClassesTest.cpp
   FoldingSet.cpp
   FunctionRefTest.cpp
   HashingTest.cpp
@@ -31,6 +33,7 @@ set(ADTSources
   IntrusiveRefCntPtrTest.cpp
   IteratorTest.cpp
   MakeUniqueTest.cpp
+  MappedIteratorTest.cpp
   MapVectorTest.cpp
   OptionalTest.cpp
   PackedVectorTest.cpp
@@ -41,7 +44,6 @@ set(ADTSources
   PostOrderIteratorTest.cpp
   PriorityWorklistTest.cpp
   RangeAdapterTest.cpp
-  ReverseIterationTest.cpp
   SCCIteratorTest.cpp
   STLExtrasTest.cpp
   ScopeExitTest.cpp

@@ -97,6 +97,8 @@ SymbolKind index::getSymbolKind(indexstore_symbol_kind_t K) {
     return SymbolKind::ConversionFunction;
   case INDEXSTORE_SYMBOL_KIND_PARAMETER:
     return SymbolKind::Parameter;
+  case INDEXSTORE_SYMBOL_KIND_USING:
+    return SymbolKind::Using;
   case INDEXSTORE_SYMBOL_KIND_COMMENTTAG:
     return SymbolKind::CommentTag;
   }
@@ -115,6 +117,10 @@ SymbolSubKind index::getSymbolSubKind(indexstore_symbol_subkind_t K) {
       return SymbolSubKind::AccessorGetter;
   case INDEXSTORE_SYMBOL_SUBKIND_ACCESSORSETTER:
       return SymbolSubKind::AccessorSetter;
+  case INDEXSTORE_SYMBOL_SUBKIND_USINGTYPENAME:
+      return SymbolSubKind::UsingTypename;
+  case INDEXSTORE_SYMBOL_SUBKIND_USINGVALUE:
+      return SymbolSubKind::UsingValue;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORWILLSET:
     return SymbolSubKind::SwiftAccessorWillSet;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORDIDSET:
@@ -123,6 +129,10 @@ SymbolSubKind index::getSymbolSubKind(indexstore_symbol_subkind_t K) {
     return SymbolSubKind::SwiftAccessorAddressor;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORMUTABLEADDRESSOR:
     return SymbolSubKind::SwiftAccessorMutableAddressor;
+  case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORREAD:
+    return SymbolSubKind::SwiftAccessorRead;
+  case INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORMODIFY:
+    return SymbolSubKind::SwiftAccessorModify;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTEXTENSIONOFSTRUCT:
     return SymbolSubKind::SwiftExtensionOfStruct;
   case INDEXSTORE_SYMBOL_SUBKIND_SWIFTEXTENSIONOFCLASS:
@@ -231,6 +241,8 @@ indexstore_symbol_kind_t index::getIndexStoreKind(SymbolKind K) {
     return INDEXSTORE_SYMBOL_KIND_CONVERSIONFUNCTION;
   case SymbolKind::Parameter:
     return INDEXSTORE_SYMBOL_KIND_PARAMETER;
+  case SymbolKind::Using:
+    return INDEXSTORE_SYMBOL_KIND_USING;
   case SymbolKind::CommentTag:
     return INDEXSTORE_SYMBOL_KIND_COMMENTTAG;
   }
@@ -249,6 +261,10 @@ indexstore_symbol_subkind_t index::getIndexStoreSubKind(SymbolSubKind K) {
     return INDEXSTORE_SYMBOL_SUBKIND_ACCESSORGETTER;
   case SymbolSubKind::AccessorSetter:
     return INDEXSTORE_SYMBOL_SUBKIND_ACCESSORSETTER;
+  case SymbolSubKind::UsingTypename:
+    return INDEXSTORE_SYMBOL_SUBKIND_USINGTYPENAME;
+  case SymbolSubKind::UsingValue:
+    return INDEXSTORE_SYMBOL_SUBKIND_USINGVALUE;
   case SymbolSubKind::SwiftAccessorWillSet:
     return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORWILLSET;
   case SymbolSubKind::SwiftAccessorDidSet:
@@ -257,6 +273,10 @@ indexstore_symbol_subkind_t index::getIndexStoreSubKind(SymbolSubKind K) {
     return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORADDRESSOR;
   case SymbolSubKind::SwiftAccessorMutableAddressor:
     return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORMUTABLEADDRESSOR;
+  case SymbolSubKind::SwiftAccessorRead:
+    return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORREAD;
+  case SymbolSubKind::SwiftAccessorModify:
+    return INDEXSTORE_SYMBOL_SUBKIND_SWIFTACCESSORMODIFY;
   case SymbolSubKind::SwiftExtensionOfStruct:
     return INDEXSTORE_SYMBOL_SUBKIND_SWIFTEXTENSIONOFSTRUCT;
   case SymbolSubKind::SwiftExtensionOfClass:

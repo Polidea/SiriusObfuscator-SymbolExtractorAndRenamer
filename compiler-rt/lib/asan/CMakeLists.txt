@@ -8,9 +8,11 @@ set(ASAN_SOURCES
   asan_errors.cc
   asan_fake_stack.cc
   asan_flags.cc
+  asan_fuchsia.cc
   asan_globals.cc
   asan_globals_win.cc
   asan_interceptors.cc
+  asan_interceptors_memintrinsics.cc
   asan_linux.cc
   asan_mac.cc
   asan_malloc_linux.cc
@@ -19,8 +21,10 @@ set(ASAN_SOURCES
   asan_memory_profile.cc
   asan_poisoning.cc
   asan_posix.cc
+  asan_premap_shadow.cc
   asan_report.cc
   asan_rtl.cc
+  asan_shadow_setup.cc
   asan_stack.cc
   asan_stats.cc
   asan_suppressions.cc
@@ -36,9 +40,11 @@ set(ASAN_PREINIT_SOURCES
 include_directories(..)
 
 set(ASAN_CFLAGS ${SANITIZER_COMMON_CFLAGS})
+set(ASAN_COMMON_DEFINITIONS ${COMPILER_RT_ASAN_SHADOW_SCALE_DEFINITION})
+
 append_rtti_flag(OFF ASAN_CFLAGS)
 
-set(ASAN_DYNAMIC_LINK_FLAGS)
+set(ASAN_DYNAMIC_LINK_FLAGS ${SANITIZER_COMMON_LINK_FLAGS})
 
 if(ANDROID)
 # On Android, -z global does not do what it is documented to do.
@@ -63,12 +69,12 @@ append_list_if(COMPILER_RT_HAS_FTLS_MODEL_INITIAL_EXEC
   -ftls-model=initial-exec ASAN_DYNAMIC_CFLAGS)
 append_list_if(MSVC /DEBUG ASAN_DYNAMIC_LINK_FLAGS)
 
-append_list_if(COMPILER_RT_HAS_LIBC c ASAN_DYNAMIC_LIBS)
+set(ASAN_DYNAMIC_LIBS ${SANITIZER_CXX_ABI_LIBRARY} ${SANITIZER_COMMON_LINK_LIBS})
+
 append_list_if(COMPILER_RT_HAS_LIBDL dl ASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBRT rt ASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBM m ASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBPTHREAD pthread ASAN_DYNAMIC_LIBS)
-append_list_if(COMPILER_RT_HAS_LIBSTDCXX stdc++ ASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBLOG log ASAN_DYNAMIC_LIBS)
 
 # Compile ASan sources into an object library.
@@ -107,6 +113,7 @@ add_compiler_rt_component(asan)
 
 if(APPLE)
   add_weak_symbols("asan" WEAK_SYMBOL_LINK_FLAGS)
+  add_weak_symbols("lsan" WEAK_SYMBOL_LINK_FLAGS)
   add_weak_symbols("ubsan" WEAK_SYMBOL_LINK_FLAGS)
   add_weak_symbols("sanitizer_common" WEAK_SYMBOL_LINK_FLAGS)
 
@@ -162,18 +169,38 @@ else()
     PARENT_TARGET asan)
 
   foreach(arch ${ASAN_SUPPORTED_ARCH})
-    if (UNIX AND NOT ${arch} MATCHES "i386|i686")
+    if (UNIX)
       add_sanitizer_rt_version_list(clang_rt.asan-dynamic-${arch}
                                     LIBS clang_rt.asan-${arch} clang_rt.asan_cxx-${arch}
                                     EXTRA asan.syms.extra)
       set(VERSION_SCRIPT_FLAG
            -Wl,--version-script,${CMAKE_CURRENT_BINARY_DIR}/clang_rt.asan-dynamic-${arch}.vers)
-      set_source_files_properties(
+      # The Solaris 11.4 linker supports a subset of GNU ld version scripts,
+      # but requires a special option to enable it.
+      if (OS_NAME MATCHES "SunOS")
+          list(APPEND VERSION_SCRIPT_FLAG -Wl,-z,gnu-version-script-compat)
+      endif()
+      set_property(SOURCE
         ${CMAKE_CURRENT_BINARY_DIR}/dummy.cc
-        PROPERTIES
+        APPEND PROPERTY
         OBJECT_DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/clang_rt.asan-dynamic-${arch}.vers)
     else()
       set(VERSION_SCRIPT_FLAG)
+    endif()
+
+    set(ASAN_DYNAMIC_WEAK_INTERCEPTION)
+    if (MSVC)
+      add_compiler_rt_object_libraries(AsanWeakInterception
+        ${SANITIZER_COMMON_SUPPORTED_OS}
+        ARCHS ${arch}
+        SOURCES asan_win_weak_interception.cc
+        CFLAGS ${ASAN_CFLAGS} -DSANITIZER_DYNAMIC
+        DEFS ${ASAN_COMMON_DEFINITIONS})
+      set(ASAN_DYNAMIC_WEAK_INTERCEPTION
+          AsanWeakInterception
+          UbsanWeakInterception
+          SancovWeakInterception
+          SanitizerCommonWeakInterception)
     endif()
 
     add_compiler_rt_runtime(clang_rt.asan
@@ -181,12 +208,14 @@ else()
       ARCHS ${arch}
       OBJECT_LIBS ${ASAN_COMMON_RUNTIME_OBJECT_LIBS}
               RTAsan_dynamic
-              # The only purpose of RTAsan_dynamic_version_script_dummy is to carry
-              # a dependency of the shared runtime on the version script. With CMake
-              # 3.1 or later it can be replaced with a straightforward
+              # The only purpose of RTAsan_dynamic_version_script_dummy is to
+              # carry a dependency of the shared runtime on the version script.
+              # Replacing it with a straightforward
               # add_dependencies(clang_rt.asan-dynamic-${arch} clang_rt.asan-dynamic-${arch}-version-list)
+              # generates an order-only dependency in ninja.
               RTAsan_dynamic_version_script_dummy
               RTUbsan_cxx
+              ${ASAN_DYNAMIC_WEAK_INTERCEPTION}
       CFLAGS ${ASAN_DYNAMIC_CFLAGS}
       LINK_FLAGS ${ASAN_DYNAMIC_LINK_FLAGS}
                 ${VERSION_SCRIPT_FLAG}
@@ -194,7 +223,7 @@ else()
       DEFS ${ASAN_DYNAMIC_DEFINITIONS}
       PARENT_TARGET asan)
 
-    if (UNIX AND NOT ${arch} MATCHES "i386|i686")
+    if (UNIX AND NOT ${arch} STREQUAL "i386")
       add_sanitizer_rt_symbols(clang_rt.asan_cxx
         ARCHS ${arch})
       add_dependencies(asan clang_rt.asan_cxx-${arch}-symbols)
@@ -205,28 +234,46 @@ else()
     endif()
 
     if (WIN32)
+      add_compiler_rt_object_libraries(AsanDllThunk
+        ${SANITIZER_COMMON_SUPPORTED_OS}
+        ARCHS ${arch}
+        SOURCES asan_globals_win.cc
+                asan_win_dll_thunk.cc
+        CFLAGS ${ASAN_CFLAGS} -DSANITIZER_DLL_THUNK
+        DEFS ${ASAN_COMMON_DEFINITIONS})
+
       add_compiler_rt_runtime(clang_rt.asan_dll_thunk
         STATIC
         ARCHS ${arch}
-        SOURCES asan_win_dll_thunk.cc
-                asan_globals_win.cc
-                $<TARGET_OBJECTS:RTInterception.${arch}>
-        CFLAGS ${ASAN_CFLAGS} -DASAN_DLL_THUNK
-        DEFS ${ASAN_COMMON_DEFINITIONS}
+        OBJECT_LIBS AsanDllThunk
+                    UbsanDllThunk
+                    SancovDllThunk
+                    SanitizerCommonDllThunk
+        SOURCES $<TARGET_OBJECTS:RTInterception.${arch}>
         PARENT_TARGET asan)
 
-      set(DYNAMIC_RUNTIME_THUNK_CFLAGS "-DASAN_DYNAMIC_RUNTIME_THUNK")
+      set(DYNAMIC_RUNTIME_THUNK_CFLAGS "-DSANITIZER_DYNAMIC_RUNTIME_THUNK")
       if(MSVC)
         list(APPEND DYNAMIC_RUNTIME_THUNK_CFLAGS "-Zl")
       elseif(CMAKE_C_COMPILER_ID MATCHES Clang)
         list(APPEND DYNAMIC_RUNTIME_THUNK_CFLAGS "-nodefaultlibs")
       endif()
 
+      add_compiler_rt_object_libraries(AsanDynamicRuntimeThunk
+        ${SANITIZER_COMMON_SUPPORTED_OS}
+        ARCHS ${arch}
+        SOURCES asan_globals_win.cc
+                asan_win_dynamic_runtime_thunk.cc
+        CFLAGS ${ASAN_CFLAGS} ${DYNAMIC_RUNTIME_THUNK_CFLAGS}
+        DEFS ${ASAN_COMMON_DEFINITIONS})
+
       add_compiler_rt_runtime(clang_rt.asan_dynamic_runtime_thunk
         STATIC
         ARCHS ${arch}
-        SOURCES asan_win_dynamic_runtime_thunk.cc
-                asan_globals_win.cc
+        OBJECT_LIBS AsanDynamicRuntimeThunk
+                    UbsanDynamicRuntimeThunk
+                    SancovDynamicRuntimeThunk
+                    SanitizerCommonDynamicRuntimeThunk
         CFLAGS ${ASAN_CFLAGS} ${DYNAMIC_RUNTIME_THUNK_CFLAGS}
         DEFS ${ASAN_COMMON_DEFINITIONS}
         PARENT_TARGET asan)

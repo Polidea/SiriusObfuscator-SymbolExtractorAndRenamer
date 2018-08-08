@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace llbuild {
 namespace basic {
@@ -38,6 +39,7 @@ class BuildExecutionQueue;
 class BuildKey;
 class BuildValue;
 class Command;
+class Node;
 class Tool;
 
 bool pathIsPrefixedByPath(std::string path, std::string prefixPath);
@@ -94,9 +96,6 @@ public:
 
   /// Called by the build system to get the current client version.
   uint32_t getVersion() const { return version; }
-
-  /// Get the file system to use for access.
-  virtual basic::FileSystem& getFileSystem() = 0;
 
   /// Called by the build file loader to register the current file contents.
   //
@@ -197,6 +196,16 @@ public:
   ///
   /// \param result - The result of command (e.g. success, failure, etc).
   virtual void commandFinished(Command*, CommandResult result) = 0;
+
+  /// Called by the build system to report a command could not build due to
+  /// missing inputs.
+  virtual void commandCannotBuildOutputDueToMissingInputs(Command*,
+               Node* output, SmallPtrSet<Node*, 1> inputs) = 0;
+
+  /// Called by the build system to report a node could not be built
+  /// because multiple commands are producing it.
+  virtual void cannotBuildNodeDueToMultipleProducers(Node* output,
+               std::vector<Command*>) = 0;
 };
 
 /// The BuildSystem class is used to perform builds using the native build
@@ -211,11 +220,14 @@ private:
 
 public:
   /// Create a build system with the given delegate.
-  explicit BuildSystem(BuildSystemDelegate& delegate);
+  BuildSystem(BuildSystemDelegate& delegate, std::unique_ptr<basic::FileSystem> fileSystem);
   ~BuildSystem();
 
   /// Return the delegate the engine was configured with.
   BuildSystemDelegate& getDelegate();
+
+  /// Get the file system to use for access.
+  basic::FileSystem& getFileSystem();
 
   /// @name Client API
   /// @{
@@ -261,6 +273,43 @@ public:
 
   /// @}
 };
+
+// MARK: Quality of Service
+
+enum class QualityOfService {
+  /// A default quality of service (i.e. what the system would use without other
+  /// advisement, generally this would be comparable to what would be done by
+  /// `make`, `ninja`, etc.)
+  Normal,
+
+  /// User-initiated, high priority work.
+  UserInitiated,
+  
+  /// Batch work performed on behalf of the user.
+  Utility,
+
+  /// Background work that is not directly visible to the user.
+  Background
+};
+
+QualityOfService getDefaultQualityOfService();
+void setDefaultQualityOfService(QualityOfService level);
+
+// MARK: Execution Queue Scheduler Control
+
+enum class SchedulerAlgorithm {
+  /// Command name priority queue based scheduling [default]
+  CommandNamePriority = 0,
+
+  /// First in, first out
+  FIFO = 1
+};
+
+SchedulerAlgorithm getSchedulerAlgorithm();
+void setSchedulerAlgorithm(SchedulerAlgorithm algorithm);
+
+uint32_t getSchedulerLaneWidth();
+void setSchedulerLaneWidth(uint32_t width);
 
 }
 }

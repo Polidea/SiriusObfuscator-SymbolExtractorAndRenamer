@@ -14,10 +14,11 @@
 #define liblldb_SwiftASTManipulator_h
 
 #include "lldb/Core/ClangForward.h"
-#include "lldb/Core/Stream.h"
+#include "lldb/Utility/Stream.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Symbol/CompilerType.h"
 
+#include "swift/AST/Decl.h"
 #include "swift/AST/Identifier.h"
 #include "swift/AST/Stmt.h"
 #include "llvm/ADT/SmallVector.h"
@@ -55,15 +56,16 @@ public:
     CompilerType GetType() const { return m_type; }
     swift::Identifier GetName() const { return m_name; }
     swift::VarDecl *GetDecl() const { return m_decl; }
-    bool GetIsLet() const;
+    swift::VarDecl::Specifier GetVarSpecifier() const;
     bool GetIsCaptureList() const;
 
     VariableInfo() : m_type(), m_name(), m_metadata() {}
 
     VariableInfo(CompilerType &type, swift::Identifier name,
-                 VariableMetadataSP metadata, bool is_let = false,
+                 VariableMetadataSP metadata, 
+                 swift::VarDecl::Specifier specifier, 
                  bool is_capture_list = false)
-        : m_type(type), m_name(name), m_is_let(is_let),
+        : m_type(type), m_name(name), m_var_specifier(specifier),
           m_is_capture_list(is_capture_list), m_metadata(metadata) {}
 
     template <class T> bool MetadataIs() const {
@@ -80,7 +82,7 @@ public:
     CompilerType m_type;
     swift::Identifier m_name;
     swift::VarDecl *m_decl = nullptr;
-    bool m_is_let = false;
+    swift::VarDecl::Specifier m_var_specifier = swift::VarDecl::Specifier::Var;
     bool m_is_capture_list = false;
 
   public:
@@ -131,6 +133,7 @@ public:
                              uint32_t language_flags,
                              const EvaluateExpressionOptions &options,
                              const Expression::SwiftGenericInfo &generic_info,
+                             llvm::StringRef os_version,
                              uint32_t &first_body_line);
 
   void FindSpecialNames(llvm::SmallVectorImpl<swift::Identifier> &names,
@@ -164,7 +167,7 @@ public:
   swift::Type FixupResultType(swift::Type &result_type,
                               uint32_t language_flags);
 
-  bool FixupResultAfterTypeChecking(Error &error);
+  bool FixupResultAfterTypeChecking(Status &error);
 
   static const char *GetArgumentName() { return "$__lldb_arg"; }
   static const char *GetResultName() { return "$__lldb_result"; }

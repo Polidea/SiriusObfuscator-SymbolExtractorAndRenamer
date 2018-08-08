@@ -15,6 +15,7 @@
 #include "swift/Strings.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/DiagnosticsSema.h"
+#include "swift/Basic/Defer.h"
 #include "swift/Basic/STLExtras.h"
 #include "swift/Basic/SourceManager.h"
 #include "swift/Basic/Version.h"
@@ -26,9 +27,10 @@
 #include <system_error>
 
 using namespace swift;
+using swift::version::Version;
 
 namespace {
-typedef std::pair<Identifier, SourceLoc> AccessPathElem;
+using AccessPathElem = std::pair<Identifier, SourceLoc>;
 } // end unnamed namespace
 
 // Defined out-of-line so that we can see ~ModuleFile.
@@ -67,7 +69,7 @@ openModuleFiles(StringRef DirName, StringRef ModuleFilename,
   Scratch.clear();
   llvm::sys::path::append(Scratch, DirName, ModuleDocFilename);
   llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> ModuleDocOrErr =
-  llvm::MemoryBuffer::getFile(StringRef(Scratch.data(), Scratch.size()));
+      llvm::MemoryBuffer::getFile(StringRef(Scratch.data(), Scratch.size()));
   if (!ModuleDocOrErr &&
       ModuleDocOrErr.getError() != std::errc::no_such_file_or_directory) {
     return ModuleDocOrErr.getError();
@@ -222,7 +224,14 @@ FileUnit *SerializedModuleLoader::loadAST(
     M.removeFile(*fileUnit);
   }
 
-  // This is the failure path. If we have a location, diagnose the issue.
+  // From here on is the failure path.
+
+  // Even though the module failed to load, it's possible its contents include
+  // a source buffer that need to survive because it's already been used for
+  // diagnostics.
+  if (auto orphanedBuffer = loadedModuleFile->takeBufferForDiagnostics())
+    OrphanedMemoryBuffers.push_back(std::move(orphanedBuffer));
+
   if (!diagLoc)
     return nullptr;
 
@@ -232,7 +241,7 @@ FileUnit *SerializedModuleLoader::loadAST(
 
     SmallString<32> versionBuf;
     llvm::raw_svector_ostream versionString(versionBuf);
-    versionString << Ctx.LangOpts.EffectiveLanguageVersion;
+    versionString << Version::getCurrentLanguageVersion();
     if (versionString.str() == shortVersion)
       return false;
 
@@ -313,6 +322,25 @@ FileUnit *SerializedModuleLoader::loadAST(
       Ctx.Diags.diagnose(SourceLoc(), diag::sema_no_import_no_sdk);
       Ctx.Diags.diagnose(SourceLoc(), diag::sema_no_import_no_sdk_xcrun);
     }
+    break;
+  }
+
+  case serialization::Status::CircularDependency: {
+    auto circularDependencyIter =
+        llvm::find_if(loadedModuleFile->getDependencies(),
+                      [](const ModuleFile::Dependency &next) {
+      return !next.Import.second->hasResolvedImports();
+    });
+    assert(circularDependencyIter != loadedModuleFile->getDependencies().end()
+           && "circular dependency reported, but no module with unresolved "
+              "imports found");
+
+    // FIXME: We should include the path of the circularity as well, but that's
+    // hard because we're discovering this /while/ resolving imports, which
+    // means the problematic modules haven't been recorded yet.
+    Ctx.Diags.diagnose(*diagLoc, diag::serialization_circular_dependency,
+                       circularDependencyIter->getPrettyPrintedPath(),
+                       M.getName());
     break;
   }
 
@@ -434,6 +462,7 @@ ModuleDecl *SerializedModuleLoader::loadModule(SourceLoc importLoc,
 
   auto M = ModuleDecl::create(moduleID.first, Ctx);
   Ctx.LoadedModules[moduleID.first] = M;
+  SWIFT_DEFER { M->setHasResolvedImports(); };
 
   if (!loadAST(*M, moduleID.second, std::move(moduleInputBuffer),
                std::move(moduleDocInputBuffer), isFramework)) {
@@ -497,10 +526,6 @@ void SerializedASTFile::collectLinkLibraries(
   if (isSIB()) {
     collectLinkLibrariesFromImports(callback);
   } else {
-    if (File.getAssociatedModule()->getResilienceStrategy()
-        == ResilienceStrategy::Fragile) {
-      collectLinkLibrariesFromImports(callback);
-    }
     File.collectLinkLibraries(callback);
   }
 }
@@ -614,7 +639,7 @@ StringRef SerializedASTFile::getFilename() const {
   return File.getModuleFilename();
 }
 
-const clang::Module *SerializedASTFile::getUnderlyingClangModule() {
+const clang::Module *SerializedASTFile::getUnderlyingClangModule() const {
   if (auto *ShadowedModule = File.getShadowedModule())
     return ShadowedModule->findUnderlyingClangModule();
   return nullptr;

@@ -717,6 +717,10 @@ public:
   
     bool FindBreakpointsByName(const char *name, SBBreakpointList &bkpt_list);
 
+    void DeleteBreakpointName(const char *name);
+
+    void GetBreakpointNames(SBStringList &names);
+
     bool
     EnableAllBreakpoints ();
 
@@ -916,6 +920,8 @@ public:
 
     void
     SetLaunchInfo (const lldb::SBLaunchInfo &launch_info);
+
+    lldb::SBStructuredData GetStatistics();
 
     bool
     operator == (const lldb::SBTarget &rhs) const;

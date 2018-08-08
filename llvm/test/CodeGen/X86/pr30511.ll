@@ -6,12 +6,12 @@ target triple = "x86_64-pc-linux-gnu"
 
 define i64 @PR30511(<2 x double> %a) {
 ; CHECK-LABEL: PR30511:
-; CHECK:       # BB#0:
+; CHECK:       # %bb.0:
 ; CHECK-NEXT:    addpd {{.*}}(%rip), %xmm0
 ; CHECK-NEXT:    shufps {{.*#+}} xmm0 = xmm0[0,2,2,3]
 ; CHECK-NEXT:    cvtdq2pd %xmm0, %xmm0
 ; CHECK-NEXT:    mulpd {{.*}}(%rip), %xmm0
-; CHECK-NEXT:    movd %xmm0, %rax
+; CHECK-NEXT:    movq %xmm0, %rax
 ; CHECK-NEXT:    retq
   %1 = fadd <2 x double> %a, <double 0x4338000000000000, double 0x4338000000000000>
   %2 = bitcast <2 x double> %1 to <2 x i64>

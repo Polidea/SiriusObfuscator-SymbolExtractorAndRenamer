@@ -205,12 +205,14 @@ public:
     lldb::queue_id_t
     GetQueueID() const;
 
-    %feature("autodoc", "
-    Takes a path string and a SBStream reference as parameters, returns a bool.  
-    Collects the thread's 'info' dictionary from the remote system, uses the path
-    argument to descend into the dictionary to an item of interest, and prints
-    it into the SBStream in a natural format.  Return bool is to indicate if
-    anything was printed into the stream (true) or not (false).
+    %feature("docstring", "
+    //--------------------------------------------------------------------------
+    /// Takes a path string and a SBStream reference as parameters, returns a bool.  
+    /// Collects the thread's 'info' dictionary from the remote system, uses the path
+    /// argument to descend into the dictionary to an item of interest, and prints
+    /// it into the SBStream in a natural format.  Return bool is to indicate if
+    /// anything was printed into the stream (true) or not (false).
+    //--------------------------------------------------------------------------
     ") GetInfoItemByPathAsString;
 
     bool
@@ -350,7 +352,7 @@ public:
     //--------------------------------------------------------------------------
     /// Get the description strings for this thread that match what the 
     /// lldb driver will present, using the thread-format (stop_format==false)
-    /// or thread-stop-format (stop_format = true). 
+    /// or thread-stop-format (stop_format = true).
     //--------------------------------------------------------------------------
     ") GetDescription;
     bool GetDescription(lldb::SBStream &description, bool stop_format) const;

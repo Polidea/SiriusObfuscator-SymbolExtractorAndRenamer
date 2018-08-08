@@ -28,25 +28,24 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llbuild;
 using namespace llbuild::basic;
 using namespace llbuild::buildsystem;
 
-uint64_t ExternalCommand::getSignature() {
-  // FIXME: Use a more appropriate hashing infrastructure.
-  using llvm::hash_combine;
-  llvm::hash_code code = hash_value(getName());
+CommandSignature ExternalCommand::getSignature() {
+  CommandSignature code(getName());
   for (const auto* input: inputs) {
-    code = hash_combine(code, input->getName());
+    code = code.combine(input->getName());
   }
   for (const auto* output: outputs) {
-    code = hash_combine(code, output->getName());
+    code = code.combine(output->getName());
   }
-  code = hash_combine(code, allowMissingInputs);
-  code = hash_combine(code, allowModifiedOutputs);
-  code = hash_combine(code, alwaysOutOfDate);
-  return size_t(code);
+  return code
+      .combine(allowMissingInputs)
+      .combine(allowModifiedOutputs)
+      .combine(alwaysOutOfDate);
 }
 
 void ExternalCommand::configureDescription(const ConfigureContext&,
@@ -191,7 +190,7 @@ bool ExternalCommand::isResultValid(BuildSystem& system,
     // could enforce and error on the missing output if not annotated, and we
     // could enable behavior to remove such output files if annotated prior to
     // running the command.
-    auto info = node->getFileInfo(system.getDelegate().getFileSystem());
+    auto info = node->getFileInfo(system.getFileSystem());
 
     // If this output is mutated by the build, we can't rely on equivalence,
     // only existence.
@@ -213,7 +212,7 @@ void ExternalCommand::start(BuildSystemCommandInterface& bsci,
                             core::Task* task) {
   // Initialize the build state.
   skipValue = llvm::None;
-  hasMissingInput = false;
+  missingInputNodes.clear();
 
   // Request all of the inputs.
   unsigned id = 0;
@@ -242,13 +241,16 @@ void ExternalCommand::provideValue(BuildSystemCommandInterface& bsci,
   assert(value.isExistingInput() || value.isMissingInput() ||
          value.isMissingOutput() || value.isFailedInput() ||
          value.isVirtualInput()  || value.isSkippedCommand() ||
-         value.isDirectoryTreeSignature() || value.isStaleFileRemoval());
+         value.isDirectoryTreeSignature() ||
+         value.isDirectoryTreeStructureSignature() ||
+         value.isStaleFileRemoval());
 
   // If the input should cause this command to skip, how should it skip?
   auto getSkipValueForInput = [&]() -> llvm::Optional<BuildValue> {
     // If the value is an signature, existing, or virtual input, we are always
     // good.
-    if (value.isDirectoryTreeSignature() | value.isExistingInput() ||
+    if (value.isDirectoryTreeSignature() ||
+        value.isDirectoryTreeStructureSignature() || value.isExistingInput() ||
         value.isVirtualInput() || value.isStaleFileRemoval())
       return llvm::None;
 
@@ -285,12 +287,7 @@ void ExternalCommand::provideValue(BuildSystemCommandInterface& bsci,
   if (skipValueForInput.hasValue()) {
     skipValue = std::move(skipValueForInput);
     if (value.isMissingInput()) {
-      hasMissingInput = true;
-
-      // FIXME: Design the logging and status output APIs.
-      bsci.getDelegate().error(
-          "", {}, (Twine("missing input '") + inputs[inputID]->getName() +
-                   "' and no rule to build it"));
+      missingInputNodes.insert(inputs[inputID]);
     }
   } else {
     // If there is a missing input file (from a successful command), we always
@@ -335,7 +332,7 @@ ExternalCommand::computeCommandResult(BuildSystemCommandInterface& bsci) {
       outputInfos.push_back(FileInfo{});
     } else {
       outputInfos.push_back(node->getFileInfo(
-                                bsci.getDelegate().getFileSystem()));
+                                bsci.getFileSystem()));
     }
   }
   return BuildValue::makeSuccessfulCommand(outputInfos, getSignature());
@@ -347,11 +344,9 @@ BuildValue ExternalCommand::execute(BuildSystemCommandInterface& bsci,
   // If this command should be skipped, do nothing.
   if (skipValue.hasValue()) {
     // If this command had a failed input, treat it as having failed.
-    if (hasMissingInput) {
-      // FIXME: Design the logging and status output APIs.
-      bsci.getDelegate().error(
-          "", {}, (Twine("cannot build '") + outputs[0]->getName() +
-                   "' due to missing input"));
+    if (!missingInputNodes.empty()) {
+      bsci.getDelegate().commandCannotBuildOutputDueToMissingInputs(this,
+                         outputs[0], missingInputNodes);
 
       // Report the command failure.
       bsci.getDelegate().hadCommandFailure();
@@ -359,7 +354,7 @@ BuildValue ExternalCommand::execute(BuildSystemCommandInterface& bsci,
 
     return std::move(skipValue.getValue());
   }
-  assert(!hasMissingInput);
+  assert(missingInputNodes.empty());
 
   // If it is legal to simply update the command, then see if we can do so.
   if (canUpdateIfNewer &&
@@ -382,7 +377,7 @@ BuildValue ExternalCommand::execute(BuildSystemCommandInterface& bsci,
       // FIXME: Need to use the filesystem interfaces.
       auto parent = llvm::sys::path::parent_path(node->getName());
       if (!parent.empty()) {
-        (void) bsci.getDelegate().getFileSystem().createDirectories(parent);
+        (void) bsci.getFileSystem().createDirectories(parent);
       }
     }
   }

@@ -21,6 +21,7 @@
 #include "llbuild/BuildSystem/CommandResult.h"
 #include "llbuild/BuildSystem/ExternalCommand.h"
 #include "llbuild/Core/BuildEngine.h"
+#include "llbuild/Core/DependencyInfoParser.h"
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/SmallString.h"
@@ -136,7 +137,6 @@ public:
   
 class CAPIBuildSystemFrontendDelegate : public BuildSystemFrontendDelegate {
   llb_buildsystem_delegate_t cAPIDelegate;
-  CAPIFileSystem fileSystem;
 
   llb_buildsystem_command_result_t get_command_result(CommandResult commandResult) {
     switch (commandResult) {
@@ -160,10 +160,8 @@ public:
                                   BuildSystemInvocation& invocation,
                                   llb_buildsystem_delegate_t delegate)
       : BuildSystemFrontendDelegate(sourceMgr, invocation, "basic", 0),
-        cAPIDelegate(delegate), fileSystem(delegate) { }
+        cAPIDelegate(delegate) { }
 
-  virtual basic::FileSystem& getFileSystem() override { return fileSystem; }
-  
   virtual std::unique_ptr<Tool> lookupTool(StringRef name) override {
     if (!cAPIDelegate.lookup_tool) {
       return nullptr;
@@ -280,6 +278,65 @@ public:
     }
   }
 
+  virtual void commandCannotBuildOutputDueToMissingInputs(Command* command,
+               Node* outputNode, SmallPtrSet<Node*, 1> inputNodes) override {
+    if (cAPIDelegate.command_cannot_build_output_due_to_missing_inputs) {
+      llb_build_key_t output = { llb_build_key_kind_node,
+        strdup(outputNode->getName().str().c_str()) };
+
+      CAPINodesVector inputs(inputNodes);
+
+      cAPIDelegate.command_cannot_build_output_due_to_missing_inputs(
+        cAPIDelegate.context,
+        (llb_buildsystem_command_t*) command,
+        &output,
+        inputs.data(),
+        inputs.count()
+      );
+
+      free((char *)output.key);
+    }
+  }
+
+  class CAPINodesVector {
+  private:
+    std::vector<llb_build_key_t> keys;
+
+  public:
+    CAPINodesVector(const SmallPtrSet<Node*, 1> inputNodes) : keys(inputNodes.size()) {
+      int idx = 0;
+      for (auto inputNode : inputNodes) {
+        auto& buildKey = keys[idx++];
+        buildKey.kind = llb_build_key_kind_node;
+        buildKey.key = strdup(inputNode->getName().str().c_str());
+      }
+    }
+
+    ~CAPINodesVector() {
+      for (auto& key : keys) {
+        free((char *)key.key);
+      }
+    }
+
+    llb_build_key_t* data() { return &keys[0]; }
+    uint64_t count() { return keys.size(); }
+  };
+
+  virtual void cannotBuildNodeDueToMultipleProducers(Node* outputNode,
+               std::vector<Command*> commands) override {
+    if (cAPIDelegate.cannot_build_node_due_to_multiple_producers) {
+      llb_build_key_t output = { llb_build_key_kind_node,
+        strdup(outputNode->getName().str().c_str()) };
+
+      cAPIDelegate.cannot_build_node_due_to_multiple_producers(
+        cAPIDelegate.context,
+        &output,
+        (llb_buildsystem_command_t**)commands.data(),
+        commands.size()
+      );
+    }
+  }
+
   virtual void commandProcessStarted(Command* command,
                                      ProcessHandle handle) override {
     if (cAPIDelegate.command_process_started) {
@@ -317,15 +374,21 @@ public:
   }
   
   virtual void commandProcessFinished(Command* command, ProcessHandle handle,
-                                      CommandResult commandResult,
-                                      int exitStatus) override {
+                                      const CommandExtendedResult& commandResult) override {
     if (cAPIDelegate.command_process_finished) {
+      llb_buildsystem_command_extended_result_t result;
+      result.result = get_command_result(commandResult.result);
+      result.exit_status = commandResult.exitStatus;
+      result.pid = commandResult.pid;
+      result.utime = commandResult.utime;
+      result.stime = commandResult.stime;
+      result.maxrss = commandResult.maxrss;
+
       cAPIDelegate.command_process_finished(
           cAPIDelegate.context,
           (llb_buildsystem_command_t*) command,
           (llb_buildsystem_process_t*) handle.id,
-          get_command_result(commandResult),
-          exitStatus);
+          &result);
     }
   }
 
@@ -334,51 +397,124 @@ public:
     BuildSystemFrontendDelegate::cancel();
   }
 
-  virtual void cycleDetected(const std::vector<core::Rule*>& items) override {
-    std::vector<llb_build_key_t> rules(items.size());
-    int idx = 0;
 
-    for (std::vector<core::Rule*>::const_iterator it = items.begin(); it != items.end(); ++it) {
-      core::Rule* rule = *it;
-      auto key = BuildKey::fromData(rule->key);
-      auto& buildKey = rules[idx++];
+  static llb_build_key_t convertBuildKey(const BuildKey& key) {
+    llb_build_key_t buildKey;
 
-      switch (key.getKind()) {
-        case BuildKey::Kind::Command:
-          buildKey.kind = llb_build_key_kind_command;
-          buildKey.key = strdup(key.getCommandName().str().c_str());
-          break;
-        case BuildKey::Kind::CustomTask:
-          buildKey.kind = llb_build_key_kind_custom_task;
-          buildKey.key = strdup(key.getCustomTaskName().str().c_str());
-          break;
-        case BuildKey::Kind::DirectoryContents:
-          buildKey.kind = llb_build_key_kind_directory_contents;
-          buildKey.key = strdup(key.getDirectoryContentsPath().str().c_str());
-          break;
-        case BuildKey::Kind::DirectoryTreeSignature:
-          buildKey.kind = llb_build_key_kind_directory_tree_signature;
-          buildKey.key = strdup(key.getDirectoryTreeSignaturePath().str().c_str());
-          break;
-        case BuildKey::Kind::Node:
-          buildKey.kind = llb_build_key_kind_node;
-          buildKey.key = strdup(key.getNodeName().str().c_str());
-          break;
-        case BuildKey::Kind::Target:
-          buildKey.kind = llb_build_key_kind_target;
-          buildKey.key = strdup(key.getTargetName().str().c_str());
-          break;
-        case BuildKey::Kind::Unknown:
-          buildKey.kind = llb_build_key_kind_unknown;
-          buildKey.key = strdup("((unknown))");
-          break;
+    switch (key.getKind()) {
+      case BuildKey::Kind::Command:
+        buildKey.kind = llb_build_key_kind_command;
+        buildKey.key = strdup(key.getCommandName().str().c_str());
+        break;
+      case BuildKey::Kind::CustomTask:
+        buildKey.kind = llb_build_key_kind_custom_task;
+        buildKey.key = strdup(key.getCustomTaskName().str().c_str());
+        break;
+      case BuildKey::Kind::DirectoryContents:
+        buildKey.kind = llb_build_key_kind_directory_contents;
+        buildKey.key = strdup(key.getDirectoryPath().str().c_str());
+        break;
+      case BuildKey::Kind::DirectoryTreeSignature:
+        buildKey.kind = llb_build_key_kind_directory_tree_signature;
+        buildKey.key = strdup(
+                              key.getDirectoryPath().str().c_str());
+        break;
+      case BuildKey::Kind::DirectoryTreeStructureSignature:
+        buildKey.kind = llb_build_key_kind_directory_tree_structure_signature;
+        buildKey.key = strdup(
+                              key.getDirectoryPath().str().c_str());
+        break;
+      case BuildKey::Kind::Node:
+        buildKey.kind = llb_build_key_kind_node;
+        buildKey.key = strdup(key.getNodeName().str().c_str());
+        break;
+      case BuildKey::Kind::Target:
+        buildKey.kind = llb_build_key_kind_target;
+        buildKey.key = strdup(key.getTargetName().str().c_str());
+        break;
+      case BuildKey::Kind::Unknown:
+        buildKey.kind = llb_build_key_kind_unknown;
+        buildKey.key = strdup("((unknown))");
+        break;
+    }
+
+    return buildKey;
+  }
+
+  class CAPIRulesVector {
+  private:
+    std::vector<llb_build_key_t> rules;
+
+  public:
+    CAPIRulesVector(const std::vector<core::Rule*>& items) : rules(items.size()) {
+      int idx = 0;
+
+      for (std::vector<core::Rule*>::const_iterator it = items.begin(); it != items.end(); ++it) {
+        core::Rule* rule = *it;
+        auto key = BuildKey::fromData(rule->key);
+        rules[idx++] = convertBuildKey(key);
       }
     }
 
-    cAPIDelegate.cycle_detected(cAPIDelegate.context, &rules[0], rules.size());
+    ~CAPIRulesVector() {
+      for (auto& rule : rules) {
+        free((char *)rule.key);
+      }
+    }
 
-    for (unsigned long i=0;i<rules.size();i++) {
-      free((char *)rules[i].key);
+    llb_build_key_t* data() { return &rules[0]; }
+    uint64_t count() { return rules.size(); }
+  };
+
+
+  virtual void cycleDetected(const std::vector<core::Rule*>& items) override {
+    CAPIRulesVector rules(items);
+    cAPIDelegate.cycle_detected(cAPIDelegate.context, rules.data(), rules.count());
+  }
+
+  static llb_cycle_action_t
+  convertCycleAction(core::Rule::CycleAction action) {
+    switch (action) {
+      case core::Rule::CycleAction::ForceBuild:
+        return llb_cycle_action_force_build;
+      case core::Rule::CycleAction::SupplyPriorValue:
+        return llb_cycle_action_supply_prior_value;
+    }
+    assert(0 && "unknown cycle action");
+    return llb_cycle_action_force_build;
+  }
+
+  virtual bool shouldResolveCycle(const std::vector<core::Rule*>& items,
+                                  core::Rule* candidateRule,
+                                  core::Rule::CycleAction action) override {
+    if (!cAPIDelegate.should_resolve_cycle)
+      return false;
+
+    CAPIRulesVector rules(items);
+    auto key = BuildKey::fromData(candidateRule->key);
+    llb_build_key_t candidate = convertBuildKey(key);
+
+    uint8_t result = cAPIDelegate.should_resolve_cycle(cAPIDelegate.context,
+                                                       rules.data(),
+                                                       rules.count(),
+                                                       candidate,
+                                                       convertCycleAction(action));
+
+    free((char *)candidate.key);
+
+    return (result);
+  }
+
+  virtual void error(StringRef filename, const Token& at, const Twine& message) override {
+    if (cAPIDelegate.handle_diagnostic) {
+      cAPIDelegate.handle_diagnostic(cAPIDelegate.context,
+                                     llb_buildsystem_diagnostic_kind_error,
+                                     filename.str().c_str(),
+                                     -1,
+                                     -1,
+                                     message.str().c_str());
+    } else {
+        BuildSystemFrontendDelegate::error(filename, at, message);
     }
   }
 };
@@ -445,8 +581,12 @@ public:
         // parameters.
         new CAPIBuildSystemFrontendDelegate(sourceMgr, invocation, delegate));
 
+    // Allocate the file system
+    std::unique_ptr<basic::FileSystem> fileSystem(new CAPIFileSystem(delegate));
+
     // Allocate the actual frontend.
-    frontend.reset(new BuildSystemFrontend(*frontendDelegate, invocation));
+    frontend.reset(new BuildSystemFrontend(*frontendDelegate, invocation,
+                                           std::move(fileSystem)));
   }
 
   BuildSystemFrontend& getFrontend() {
@@ -464,6 +604,11 @@ public:
     // FIXME: We probably should return a context to represent the running
     // build, instead of keeping state (like cancellation) in the delegate.
     return getFrontend().build(key);
+  }
+
+  bool buildNode(const core::KeyType& key) {
+    frontendDelegate->resetForBuild();
+    return getFrontend().buildNode(key);
   }
 
   void cancel() {
@@ -517,16 +662,90 @@ class CAPIExternalCommand : public ExternalCommand {
   // FIXME: This is incredibly wasteful to copy everywhere. Rephrase things so
   // that the delegates are const and we just carry the context pointer around.
   llb_buildsystem_external_command_delegate_t cAPIDelegate;
+  
+  /// The path to the dependency output file, if used.
+  std::string depsPath;
+
+  bool processDiscoveredDependencies(BuildSystemCommandInterface& bsci,
+                                     core::Task* task,
+                                     QueueJobContext* context) {
+    // Read the dependencies file.
+    auto input = bsci.getFileSystem().getFileContents(depsPath);
+    if (!input) {
+      bsci.getDelegate().commandHadError(this, "unable to open dependencies file (" + depsPath + ")");
+      return false;
+    }
+    
+    // Parse the output.
+    //
+    // We just ignore the rule, and add any dependency that we encounter in the
+    // file.
+    struct DepsActions : public core::DependencyInfoParser::ParseActions {
+      BuildSystemCommandInterface& bsci;
+      core::Task* task;
+      CAPIExternalCommand* command;
+      StringRef depsPath;
+      unsigned numErrors{0};
+      
+      DepsActions(BuildSystemCommandInterface& bsci, core::Task* task,
+                  CAPIExternalCommand* command, StringRef depsPath)
+      : bsci(bsci), task(task), command(command), depsPath(depsPath) {}
+      
+      virtual void error(const char* message, uint64_t position) override {
+        bsci.getDelegate().commandHadError(command, "error reading dependency file '" + depsPath.str() + "': " + std::string(message));
+        ++numErrors;
+      }
+      
+      // Ignore everything but actual inputs.
+      virtual void actOnVersion(StringRef) override { }
+      virtual void actOnMissing(StringRef) override { }
+      virtual void actOnOutput(StringRef) override { }
+      virtual void actOnInput(StringRef name) override {
+        bsci.taskDiscoveredDependency(task, BuildKey::makeNode(name));
+      }
+    };
+    
+    DepsActions actions(bsci, task, this, depsPath);
+    core::DependencyInfoParser(input->getBuffer(), actions).parse();
+    return actions.numErrors == 0;
+  }
+
+  virtual bool configureAttribute(const ConfigureContext& ctx, StringRef name,
+                                  StringRef value) override {
+    if (name == "deps") {
+      depsPath = value;
+    } else {
+      return ExternalCommand::configureAttribute(ctx, name, value);
+    }
+    return true;
+  }
 
   virtual CommandResult executeExternalCommand(BuildSystemCommandInterface& bsci,
                                                core::Task* task,
                                                QueueJobContext* job_context) override {
-    return cAPIDelegate.execute_command(
+    auto result = cAPIDelegate.execute_command(
         cAPIDelegate.context, (llb_buildsystem_command_t*)this,
         (llb_buildsystem_command_interface_t*)&bsci,
-        (llb_task_t*)task, (llb_buildsystem_queue_job_context_t*)job_context) ? CommandResult::Succeeded : CommandResult::Failed;
-  }
+        (llb_task_t*)task, (llb_buildsystem_queue_job_context_t*)job_context)
+          ? CommandResult::Succeeded : CommandResult::Failed;
 
+    if (result != CommandResult::Succeeded) {
+      // If the command failed, there is no need to gather dependencies.
+      return result;
+    }
+    
+    // Otherwise, collect the discovered dependencies, if used.
+    if (!depsPath.empty()) {
+      if (!processDiscoveredDependencies(bsci, task, job_context)) {
+        // If we were unable to process the dependencies output, report a
+        // failure.
+        return CommandResult::Failed;
+      }
+    }
+    
+    return result;
+  }
+  
 public:
   CAPIExternalCommand(StringRef name,
                       llb_buildsystem_external_command_delegate_t delegate)
@@ -543,22 +762,20 @@ public:
     llvm::raw_svector_ostream(result) << getName();
   }
 
-  virtual uint64_t getSignature() override {
-    // FIXME: Use a more appropriate hashing infrastructure.
-    using llvm::hash_combine;
-    llvm::hash_code code = ExternalCommand::getSignature();
+  virtual llbuild::basic::CommandSignature getSignature() override {
+    auto sig = ExternalCommand::getSignature();
     if (cAPIDelegate.get_signature) {
       llb_data_t data;
       cAPIDelegate.get_signature(cAPIDelegate.context, (llb_buildsystem_command_t*)this,
                                  &data);
-      code = hash_combine(code, StringRef((const char*)data.data, data.length));
+      sig = sig.combine(StringRef((const char*)data.data, data.length));
 
       // Release the client memory.
       //
       // FIXME: This is gross, come up with a general purpose solution.
       free((char*)data.data);
     }
-    return size_t(code);
+    return sig;
   }
 };
 
@@ -616,6 +833,11 @@ bool llb_buildsystem_build(llb_buildsystem_t* system_p, const llb_data_t* key) {
   return system->build(core::KeyType((const char*)key->data, key->length));
 }
 
+bool llb_buildsystem_build_node(llb_buildsystem_t* system_p, const llb_data_t* key) {
+  CAPIBuildSystem* system = (CAPIBuildSystem*) system_p;
+  return system->buildNode(core::KeyType((const char*)key->data, key->length));
+}
+
 void llb_buildsystem_cancel(llb_buildsystem_t* system_p) {
   CAPIBuildSystem* system = (CAPIBuildSystem*) system_p;
   system->cancel();
@@ -641,6 +863,12 @@ void llb_buildsystem_command_get_name(llb_buildsystem_command_t* command_p,
   key_out->data = (const uint8_t*) name.data();
 }
 
+bool llb_buildsystem_command_should_show_status(
+    llb_buildsystem_command_t* command_p) {
+  auto command = (Command*) command_p;
+  return command->shouldShowStatus();
+}
+
 char* llb_buildsystem_command_get_description(
     llb_buildsystem_command_t* command_p) {
   auto command = (Command*) command_p;
@@ -657,4 +885,81 @@ char* llb_buildsystem_command_get_verbose_description(
   SmallString<256> result;
   command->getVerboseDescription(result);
   return strdup(result.c_str());
+}
+
+llb_quality_of_service_t llb_get_quality_of_service() {
+  switch (llbuild::buildsystem::getDefaultQualityOfService()) {
+  case llbuild::buildsystem::QualityOfService::Normal:
+    return llb_quality_of_service_default;
+  case llbuild::buildsystem::QualityOfService::UserInitiated:
+    return llb_quality_of_service_user_initiated;
+  case llbuild::buildsystem::QualityOfService::Utility:
+    return llb_quality_of_service_utility;
+  case llbuild::buildsystem::QualityOfService::Background:
+    return llb_quality_of_service_background;
+  default:
+    assert(0 && "unknown quality service level");
+    return llb_quality_of_service_default;
+  }
+}
+
+void llb_set_quality_of_service(llb_quality_of_service_t level) {
+  switch (level) {
+  case llb_quality_of_service_default:
+    llbuild::buildsystem::setDefaultQualityOfService(
+        llbuild::buildsystem::QualityOfService::Normal);
+    break;
+  case llb_quality_of_service_user_initiated:
+    llbuild::buildsystem::setDefaultQualityOfService(
+        llbuild::buildsystem::QualityOfService::UserInitiated);
+    break;
+  case llb_quality_of_service_utility:
+    llbuild::buildsystem::setDefaultQualityOfService(
+        llbuild::buildsystem::QualityOfService::Utility);
+    break;
+  case llb_quality_of_service_background:
+    llbuild::buildsystem::setDefaultQualityOfService(
+        llbuild::buildsystem::QualityOfService::Background);
+    break;
+  default:
+    assert(0 && "unknown quality service level");
+    break;
+  }
+}
+
+
+llb_scheduler_algorithm_t llb_get_scheduler_algorithm() {
+  switch (llbuild::buildsystem::getSchedulerAlgorithm()) {
+    case llbuild::buildsystem::SchedulerAlgorithm::CommandNamePriority:
+      return llb_scheduler_algorithm_command_name_priority;
+    case llbuild::buildsystem::SchedulerAlgorithm::FIFO:
+      return llb_scheduler_algorithm_fifo;
+    default:
+      assert(0 && "unknown scheduler algorithm");
+      return llb_scheduler_algorithm_command_name_priority;
+  }
+}
+
+void llb_set_scheduler_algorithm(llb_scheduler_algorithm_t algorithm) {
+  switch (algorithm) {
+    case llb_scheduler_algorithm_command_name_priority:
+      llbuild::buildsystem::setSchedulerAlgorithm(
+          llbuild::buildsystem::SchedulerAlgorithm::CommandNamePriority);
+      break;
+    case llb_scheduler_algorithm_fifo:
+      llbuild::buildsystem::setSchedulerAlgorithm(
+          llbuild::buildsystem::SchedulerAlgorithm::FIFO);
+      break;
+    default:
+      assert(0 && "unknown scheduler algorithm");
+      break;
+  }
+}
+
+uint32_t llb_get_scheduler_lane_width() {
+  return llbuild::buildsystem::getSchedulerLaneWidth();
+}
+
+void llb_set_scheduler_lane_width(uint32_t width) {
+  llbuild::buildsystem::setSchedulerLaneWidth(width);
 }

@@ -19,6 +19,8 @@
  * @APPLE_APACHE_LICENSE_HEADER_END@
  */
 
+#include <errno.h>
+
 #ifndef __DISPATCH_SHIMS_GETPROGNAME__
 #define __DISPATCH_SHIMS_GETPROGNAME__
 

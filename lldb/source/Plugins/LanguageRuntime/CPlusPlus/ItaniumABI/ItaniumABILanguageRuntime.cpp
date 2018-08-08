@@ -11,9 +11,6 @@
 #include "ItaniumABILanguageRuntime.h"
 
 #include "lldb/Breakpoint/BreakpointLocation.h"
-#include "lldb/Core/ConstString.h"
-#include "lldb/Core/Error.h"
-#include "lldb/Core/Log.h"
 #include "lldb/Core/Mangled.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/PluginManager.h"
@@ -33,6 +30,9 @@
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
+#include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/Log.h"
+#include "lldb/Utility/Status.h"
 
 #include <vector>
 
@@ -84,6 +84,11 @@ TypeAndOrName ItaniumABILanguageRuntime::GetTypeInfoFromVTableAddress(
             // We are a C++ class, that's good.  Get the class name and look it
             // up:
             const char *class_name = name + strlen(vtable_demangled_prefix);
+            // We know the class name is absolute, so tell FindTypes that by
+            // prefixing it with the root namespace:
+            std::string lookup_name("::");
+            lookup_name.append(class_name);
+            
             type_info.SetName(class_name);
             const bool exact_match = true;
             TypeList class_types;
@@ -94,7 +99,7 @@ TypeAndOrName ItaniumABILanguageRuntime::GetTypeInfoFromVTableAddress(
             llvm::DenseSet<SymbolFile *> searched_symbol_files;
             if (sc.module_sp) {
               num_matches = sc.module_sp->FindTypes(
-                  sc, ConstString(class_name), exact_match, 1,
+                  sc, ConstString(lookup_name), exact_match, 1,
                   searched_symbol_files, class_types);
             }
 
@@ -103,7 +108,7 @@ TypeAndOrName ItaniumABILanguageRuntime::GetTypeInfoFromVTableAddress(
             // as possible
             if (num_matches == 0) {
               num_matches = target.GetImages().FindTypes(
-                  sc, ConstString(class_name), exact_match, UINT32_MAX,
+                  sc, ConstString(lookup_name), exact_match, UINT32_MAX,
                   searched_symbol_files, class_types);
             }
 
@@ -218,7 +223,7 @@ bool ItaniumABILanguageRuntime::GetDynamicTypeAndAddress(
     if (process == nullptr)
       return false;
 
-    Error error;
+    Status error;
     const lldb::addr_t vtable_address_point =
         process->ReadPointerFromMemory(original_ptr, error);
 

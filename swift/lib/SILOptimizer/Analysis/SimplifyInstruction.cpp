@@ -12,10 +12,11 @@
 
 #define DEBUG_TYPE "sil-simplify"
 #include "swift/SILOptimizer/Analysis/SimplifyInstruction.h"
-#include "swift/SILOptimizer/Analysis/ValueTracking.h"
-#include "swift/SILOptimizer/Utils/Local.h"
+#include "swift/SIL/InstructionUtils.h"
 #include "swift/SIL/PatternMatch.h"
 #include "swift/SIL/SILVisitor.h"
+#include "swift/SILOptimizer/Analysis/ValueTracking.h"
+#include "swift/SILOptimizer/Utils/Local.h"
 
 using namespace swift;
 using namespace swift::PatternMatch;
@@ -54,6 +55,7 @@ namespace {
     visitUncheckedTrivialBitCastInst(UncheckedTrivialBitCastInst *UTBCI);
     SILValue visitThinFunctionToPointerInst(ThinFunctionToPointerInst *TFTPI);
     SILValue visitPointerToThinFunctionInst(PointerToThinFunctionInst *PTTFI);
+    SILValue visitBeginAccessInst(BeginAccessInst *BAI);
 
     SILValue simplifyOverflowBuiltin(BuiltinInst *BI);
   };
@@ -167,9 +169,9 @@ visitUncheckedEnumDataInst(UncheckedEnumDataInst *UEDI) {
   return SILValue();
 }
 
-// Simplify
-//   %1 = unchecked_enum_data %0 : $Optional<C>, #Optional.Some!enumelt.1 // user: %27
-//   %2 = enum $Optional<C>, #Optional.Some!enumelt.1, %1 : $C // user: %28
+// Simplify:
+//   %1 = unchecked_enum_data %0 : $Optional<C>, #Optional.Some!enumelt.1
+//   %2 = enum $Optional<C>, #Optional.Some!enumelt.1, %1 : $C
 // to %0 since we are building the same enum.
 static SILValue simplifyEnumFromUncheckedEnumData(EnumInst *EI) {
   assert(EI->hasOperand() && "Expected an enum with an operand!");
@@ -451,6 +453,16 @@ SILValue InstSimplifier::visitPointerToThinFunctionInst(PointerToThinFunctionIns
   return SILValue();
 }
 
+SILValue InstSimplifier::visitBeginAccessInst(BeginAccessInst *BAI) {
+  // Remove "dead" begin_access.
+  if (llvm::all_of(BAI->getUses(), [](Operand *operand) -> bool {
+        return isIncidentalUse(operand->getUser());
+      })) {
+    return BAI->getOperand();
+  }
+  return SILValue();
+}
+
 static SILValue simplifyBuiltin(BuiltinInst *BI) {
   const IntrinsicInfo &Intrinsic = BI->getIntrinsicInfo();
 
@@ -696,6 +708,34 @@ case BuiltinValueKind::id:
 ///
 SILValue swift::simplifyInstruction(SILInstruction *I) {
   return InstSimplifier().visit(I);
+}
+
+/// Replace an instruction with a simplified result, including any debug uses,
+/// and erase the instruction. If the instruction initiates a scope, do not
+/// replace the end of its scope; it will be deleted along with its parent.
+void swift::replaceAllSimplifiedUsesAndErase(
+    SILInstruction *I, SILValue result,
+    std::function<void(SILInstruction *)> eraseNotify) {
+
+  auto *SVI = cast<SingleValueInstruction>(I);
+  assert(SVI != result && "Cannot RAUW a value with itself");
+
+  // Only SingleValueInstructions are currently simplified.
+  while (!SVI->use_empty()) {
+    Operand *use = *SVI->use_begin();
+    SILInstruction *user = use->getUser();
+    // Erase the end of scope marker.
+    if (isEndOfScopeMarker(user)) {
+      if (eraseNotify)
+        eraseNotify(user);
+      user->eraseFromParent();
+      continue;
+    }
+    use->set(result);
+  }
+  I->eraseFromParent();
+  if (eraseNotify)
+    eraseNotify(I);
 }
 
 /// Simplify invocations of builtin operations that may overflow.
