@@ -2,6 +2,7 @@
 #define SourceFileWalker_h
 
 #include "swift/Frontend/Frontend.h"
+#include "swift/IDE/SourceEntityWalker.h"
 #include "swift/Obfuscation/DataStructures.h"
 #include "swift/Obfuscation/Collector.h"
 #include "swift/Obfuscation/Excluder.h"

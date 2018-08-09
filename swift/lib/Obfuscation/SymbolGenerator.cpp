@@ -87,28 +87,31 @@ DeclsWithSymbolsWithRangesOrErrors
 FunctionNameSymbolGenerator::generateFor(DeclWithRange &DeclAndRange) {
 
   if (auto *Declaration = dyn_cast<FuncDecl>(DeclAndRange.Declaration)) {
-
-    // function name should be renamed only if it's not a setter
-    if(!Declaration->isSetter()) {
-
-      // Create the symbol for function
-      if (Declaration->getOverriddenDecl() != nullptr) {
-        // Overriden declaration must be treated separately because we mustn't
-        // rename function that overrides function from different module
-        auto SymbolOrError =
-          parseOverridenDeclaration(Declaration,
-                                    Extractor.moduleName(Declaration),
-                                    DeclAndRange.Range);
-        if (auto Error = SymbolOrError.takeError()) {
-          return wrapInVector<DeclWithSymbolWithRange>(std::move(Error));
-        }
-        auto FunctionNameSymbol = SymbolOrError.get();
-        return wrapInVector(DeclWithSymbolWithRange(Declaration,
-                                                    FunctionNameSymbol));
-      } else {
-        auto Symbol = getFunctionSymbol(Declaration, DeclAndRange.Range);
-        return wrapInVector(DeclWithSymbolWithRange(Declaration, Symbol));
+    
+    // function name should be renamed only if it's not a setter not getter
+    if (auto *Accessor = dyn_cast<AccessorDecl>(Declaration)) {
+      auto Error = stringError("FunctionNameSymbolGenerator cannot generate symbol "
+                               "for accessor declaration");
+      return wrapInVector<DeclWithSymbolWithRange>(std::move(Error));
+    }
+      
+    // Create the symbol for function
+    if (Declaration->getOverriddenDecl() != nullptr) {
+      // Overriden declaration must be treated separately because we mustn't
+      // rename function that overrides function from different module
+      auto SymbolOrError =
+        parseOverridenDeclaration(Declaration,
+                                  Extractor.moduleName(Declaration),
+                                  DeclAndRange.Range);
+      if (auto Error = SymbolOrError.takeError()) {
+        return wrapInVector<DeclWithSymbolWithRange>(std::move(Error));
       }
+      auto FunctionNameSymbol = SymbolOrError.get();
+      return wrapInVector(DeclWithSymbolWithRange(Declaration,
+                                                  FunctionNameSymbol));
+    } else {
+      auto Symbol = getFunctionSymbol(Declaration, DeclAndRange.Range);
+      return wrapInVector(DeclWithSymbolWithRange(Declaration, Symbol));
     }
   }
 

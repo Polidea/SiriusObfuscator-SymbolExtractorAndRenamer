@@ -377,21 +377,21 @@ void MappingTraits<ConformanceExclusion>::
     Io.mapRequired("protocol", Object.Protocol);
 }
 
-template <typename U>
-size_t SequenceTraits<std::vector<U>>::size(IO &Io, std::vector<U> &Vec) {
-  return Vec.size();
-}
+//template <typename U>
+//size_t SequenceTraits<std::vector<U>>::size(IO &Io, std::vector<U> &Vec) {
+//  return Vec.size();
+//}
 
-template <typename U>
-U& SequenceTraits<std::vector<U>>::element(IO &Io,
-                                           std::vector<U> &Vec,
-                                           size_t Index) {
-  if (Vec.size() <= Index) {
-    Vec.resize(Index + 1);
-  }
-  return Vec[Index];
-}
-  
+//template <typename U>
+//U& SequenceTraits<std::vector<U>>::element(IO &Io,
+//                                           std::vector<U> &Vec,
+//                                           size_t Index) {
+//  if (Vec.size() <= Index) {
+//    Vec.resize(Index + 1);
+//  }
+//  return Vec[Index];
+//}
+
 template<class T>
 Expected<T> deserialize(StringRef Json) {
   Input Input(Json);

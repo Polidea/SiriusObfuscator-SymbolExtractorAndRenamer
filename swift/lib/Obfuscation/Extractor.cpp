@@ -60,7 +60,7 @@ Extractor::getBaseOverridenDeclarationWithModules(const T *Declaration) {
 //getBaseOverridenDeclarationWithModules(const AbstractFunctionDecl *Declaration);
 
 std::string Extractor::declarationName(const ValueDecl* Declaration) {
-  return Declaration->getName().str().str();
+  return Declaration->getBaseName().userFacingName().str();
 }
 
 std::string Extractor::typeName(const NominalTypeDecl* Declaration) {
@@ -267,7 +267,7 @@ std::string FunctionExtractor::extractSignature(const AbstractFunctionDecl *Decl
 
 std::string
 FunctionExtractor::functionName(const AbstractFunctionDecl *Declaration) {
-  return Declaration->getName().str().str();
+  return Declaration->getBaseName().userFacingName().str();
 }
 
 std::string FunctionExtractor::functionSignature(const AbstractFunctionDecl *Declaration) {
@@ -576,7 +576,7 @@ void TypeRepresentationExtractor::
   }
 
   if (auto *Compound = dyn_cast<CompoundIdentTypeRepr>(TypeRepresentation)) {
-    for (auto *Component : Compound->Components) {
+    for (auto *Component : Compound->getComponents()) {
       Declarations.push_back(handleComponent(Component));
     }
   }
@@ -650,10 +650,10 @@ void TypeRepresentationExtractor::
   }
 
   if (auto *Tuple = dyn_cast<TupleTypeRepr>(TypeRepresentation)) {
-    for (auto *TupleElement : Tuple->getElements()) {
+    for (auto TupleElement : Tuple->getElements()) {
       handleTypeRepresentationRecursively(Declarations,
                                           Tuple,
-                                          TupleElement);
+                                          TupleElement.Type);
     }
   }
 

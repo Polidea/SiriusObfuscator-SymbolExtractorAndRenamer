@@ -19,17 +19,17 @@ NominalTypeIncluder::include(DeclWithRange &DeclAndRange) {
 DeclsWithRangesOrErrors
 FunctionNameIncluder::include(DeclWithRange &DeclAndRange) {
   if (auto Function = dyn_cast_or_null<FuncDecl>(DeclAndRange.Declaration)) {
-    if (DeclAndRange.Range.isValid()
-        && !Function->isOperator()
-        && !Function->isGetter()
-        && (Function->isSetter()
-            || (!Function->isAccessor() && !Function->isObservingAccessor()))) {
+    if (auto Accessor = dyn_cast<AccessorDecl>(Function)) {
+      return wrapInVector<DeclWithRange>(stringError("FunctionNameIncluder doesn't support "
+                                                     "accessors"));
+    } else if (DeclAndRange.Range.isValid()
+        && !Function->isOperator()) {
       return wrapInVector(DeclAndRange);
     }
   }
 
-  return wrapInVector<DeclWithRange>(stringError("FunctionNameIncluder doesn't support this "
-                                  "DeclWithRange"));
+  return wrapInVector<DeclWithRange>(stringError("FunctionNameIncluder doesn't support "
+                                                 "this DeclWithRange"));
 }
 
 OperatorIncluder::OperatorIncluder(OperatorExtractor &Extractor)

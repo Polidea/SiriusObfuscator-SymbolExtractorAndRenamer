@@ -8,5 +8,6 @@ add_swift_unittest(SwiftObfuscationTests
 )
 
 target_link_libraries(SwiftObfuscationTests
+    PRIVATE
     swiftObfuscation
 )

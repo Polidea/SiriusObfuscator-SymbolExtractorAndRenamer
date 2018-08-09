@@ -50,7 +50,9 @@ Verbose("verbose",
 
 int main(int argc, char *argv[]) {
   // Required by LLVM to properly parse command-line options
-  INITIALIZE_LLVM(argc, argv);
+  PROGRAM_START(argc, argv);
+  INITIALIZE_LLVM();
+  
   llvm::cl::HideUnrelatedOptions(options::ObfuscatorNameMapper);
 
   // Defines the handler for flow-aborting errors, which lets you choose

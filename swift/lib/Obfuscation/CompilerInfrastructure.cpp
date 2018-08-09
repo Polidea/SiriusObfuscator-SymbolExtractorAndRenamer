@@ -48,7 +48,7 @@ createInvocation(const CompilerInvocationConfiguration &Configuration) {
   Invocation.setModuleName(Configuration.ModuleName);
   Invocation.setMainExecutablePath(Configuration.MainExecutablePath);
   for (const auto &InputFilename : Configuration.InputFilenames) {
-    Invocation.addInputFilename(InputFilename);
+    Invocation.getFrontendOptions().InputsAndOutputs.addInputFile(InputFilename);
   }
   auto ExtraArgs = Invocation.getExtraClangArgs().vec();
   for (auto HeaderPath : Configuration.HeaderPaths) {
@@ -73,7 +73,6 @@ createCompilerInstance(const FilesJson &FilesJson,
                        llvm::raw_ostream &LogStream) {
 
   auto CompilerInstance = llvm::make_unique<class CompilerInstance>();
-
   CompilerInvocationConfiguration Configuration(FilesJson, MainExecutablePath);
   auto Invocation = createInvocation(Configuration);
   PrintingDiagnosticConsumer Printer(LogStream);
